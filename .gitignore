@@ -1,7 +1,22 @@
+# dependencies
 node_modules/
-dist/
-.DS_Store
-*.log
-.env
-.env.local
 
+# build output
+dist/
+
+# logs
+*.log
+
+# secrets & environment
+.env
+*.env
+.env.local
+.git-credentials
+
+# databases
+*.sqlite
+*.sqlite3
+*.db
+
+# OS cruft
+.DS_Store
