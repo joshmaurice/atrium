@@ -107,10 +107,39 @@ recorded decision, not an oversight.
 
 `<...>`
 
+## Live verification (protocol-touching work only)
+
+> Keep this section for any task that changes the live protocol, the
+> connect/hello/add sequence, avatar/node handling, movement, or anything
+> exercised only when real clients talk to a real server. Delete it for pure
+> mechanical refactors with no runtime multiplayer surface.
+
+A green unit suite is **not** sufficient evidence that this works. The
+regression this project has already hit (avatar movement broke while every
+unit test passed, because the tests exercised handlers in isolation and never
+ran the full "client resolves its own avatar node and starts sending view
+updates" path) must not recur.
+
+Therefore, for protocol-touching work, "done" requires either:
+
+- an **integration test** that stands up a real server, connects one or more
+  real clients through the full connect sequence, and asserts the actual
+  end-to-end behavior (not just that a handler returns the right value in
+  isolation); and/or
+- a note in the report that the change needs a **live two-client smoke-test in
+  the dev environment** before merge — the reviewer will run it (two browser
+  tabs, confirm avatars move and see each other) as a merge gate.
+
+State explicitly in the report which of these covers the change, and what the
+untested residual risk is. Do not claim the task is verified on unit tests
+alone if it touches live multiplayer behavior.
+
 ## When done
 
 Report: the branch name, the commit messages (one per checklist item), and the
 test output showing each affected package green — **including the
 disagreement/authority tests**, which should fail against the pre-change code
-and pass after. Do not merge; the diff will be reviewed before anything reaches
-`main`.
+and pass after. For protocol-touching work, also report how the live
+verification above is satisfied. Do not merge; the diff will be reviewed, and
+protocol-touching changes will be live-smoke-tested in dev, before anything
+reaches `main`.
