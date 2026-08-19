@@ -93,7 +93,6 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
           const clientInterval = msg.capabilities?.tick?.interval ?? DEFAULT_TICK_INTERVAL
           const negotiated = Math.max(clientInterval, MIN_TICK_INTERVAL)
 
-          // Use the client-provided UUID as session ID so avatar node name = session ID
           session = {
             ws,
             id: msg.id ?? randomUUID(),
@@ -101,7 +100,7 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
             seq: nextSeq(),
             alive: true,
             tickStop: null,
-            avatarNodeName: null,
+            avatarNodeName: `avatar-${(msg.id ?? randomUUID()).slice(0, 8)}`,
           }
           sessions.set(session.id, session)
 
@@ -110,6 +109,7 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
             id: session.id,
             seq: session.seq,
             serverTime: Date.now(),
+            avatarNodeName: session.avatarNodeName,
             capabilities: {
               tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
             },

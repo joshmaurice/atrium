@@ -10,6 +10,7 @@
     "seq": { "type": "integer", "minimum": 0 },
     "serverTime": { "type": "integer", "minimum": 0 },
     "worldStartTime": { "type": "integer", "minimum": 0 },
+    "avatarNodeName": { "type": "string", "description": "Server-assigned avatar node name for this session" },
     "capabilities": {
       "type": "object",
       "properties": {

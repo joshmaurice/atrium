@@ -79,6 +79,18 @@ async function handshake(ws, opts = {}) {
   return waitForMessage(ws)
 }
 
+test('server hello returns assigned avatarNodeName', async () => {
+  const ws = connect()
+  const reply = await handshake(ws)
+
+  assert.equal(reply.type, 'hello')
+  assert.ok(typeof reply.avatarNodeName === 'string', 'avatarNodeName should be a string')
+  assert.ok(reply.avatarNodeName.startsWith('avatar-'), `avatarNodeName should start with "avatar-", got "${reply.avatarNodeName}"`)
+
+  ws.close()
+  await waitForClose(ws)
+})
+
 test('completes hello handshake', async () => {
   const ws = connect()
   const reply = await handshake(ws)

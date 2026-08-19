@@ -350,7 +350,14 @@ export class AtriumClient extends EventEmitter {
   // Incoming message handlers
   // ---------------------------------------------------------------------------
 
-  async _onServerHello(_msg) {
+  async _onServerHello(msg) {
+    // Adopt server-assigned avatar node name
+    if (msg.avatarNodeName) {
+      this._avatarNodeName = msg.avatarNodeName
+      if (this._avatarDescriptor) {
+        this._avatarDescriptor.name = msg.avatarNodeName
+      }
+    }
     this._connected = true
     console.log(`[AtriumClient] Session ${this._sessionId} (${this._displayName})`)
     this.emit('session:ready', {

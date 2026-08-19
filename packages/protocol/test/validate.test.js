@@ -49,6 +49,18 @@ describe('hello (server)', () => {
     assert.equal(valid, true)
   })
 
+  it('validates a server hello with avatarNodeName', () => {
+    const { valid } = validate('server', {
+      type: 'hello',
+      id: 'server-01',
+      seq: 0,
+      serverTime: Date.now(),
+      avatarNodeName: 'avatar-a3f2c1d8',
+      capabilities: { tick: { interval: 1000, minInterval: 50 } }
+    })
+    assert.equal(valid, true)
+  })
+
   it('rejects server hello missing seq', () => {
     const { valid } = validate('server', {
       type: 'hello', id: 'server-01', serverTime: Date.now()
