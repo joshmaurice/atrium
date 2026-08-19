@@ -432,12 +432,20 @@ test('avatar add with correct name succeeds', async () => {
       id: sessionId,
       node: { name: assignedName, translation: [0, 0, 0] },
     }))
-    // Consume the join broadcast (from the server's hello broadcast),
-    // then expect a tick or something — the add should succeed without error
-    // Wait a short time and verify no error was sent
+
+    // No error should arrive for a correct add — wait briefly and check
     await new Promise(r => setTimeout(r, 100))
-    // If the add succeeded, the server should have sent at least a tick
-    // No error means success
+    // The only messages should be hello reply (already consumed) and ticks
+    // If an error arrived, fail the test
+    let errorCount = 0
+    const handler = (raw) => {
+      const msg = JSON.parse(raw)
+      if (msg.type === 'error') errorCount++
+    }
+    ws.on('message', handler)
+    await new Promise(r => setTimeout(r, 50))
+    ws.off('message', handler)
+    assert.equal(errorCount, 0, 'no error should be sent for a correct avatar add')
 
     ws.close()
     await waitForClose(ws)
