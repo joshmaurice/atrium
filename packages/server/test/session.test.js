@@ -321,3 +321,99 @@ test('remove message broadcasts remove to all clients', async () => {
     await new Promise((done) => s.wss.close(done))
   }
 })
+
+test('avatar add with mismatched msg.id is rejected', async () => {
+  const world = await createWorld(FIXTURE_PATH)
+  const s = createSessionServer({ port: 3009, maxUsers: 10, world })
+
+  try {
+    const ws = new WebSocket('ws://localhost:3009')
+    await waitForOpen(ws)
+    ws.send(JSON.stringify({ type: 'hello', id: 'mismatch-id-test', capabilities: { tick: { interval: 5000 } } }))
+    await waitForMessage(ws) // consume hello reply
+
+    ws.send(JSON.stringify({
+      type: 'add', seq: 1,
+      id: 'some-other-session-id',
+      node: { name: 'avatar-unknown', translation: [0, 0, 0] },
+    }))
+    const err = await waitForMessage(ws)
+
+    assert.equal(err.type, 'error')
+    assert.equal(err.code, 'PERMISSION_DENIED')
+
+    ws.close()
+    await waitForClose(ws)
+  } finally {
+    await new Promise((done) => s.wss.close(done))
+  }
+})
+
+test('avatar add with mismatched node.name is rejected', async () => {
+  const world = await createWorld(FIXTURE_PATH)
+  const s = createSessionServer({ port: 3010, maxUsers: 10, world })
+
+  try {
+    const ws = new WebSocket('ws://localhost:3010')
+    await waitForOpen(ws)
+    ws.send(JSON.stringify({ type: 'hello', id: 'name-reject-test', capabilities: { tick: { interval: 5000 } } }))
+    const hello = await waitForMessage(ws)
+    const sessionId = hello.id
+
+    ws.send(JSON.stringify({
+      type: 'add', seq: 1,
+      id: sessionId,
+      node: { name: 'wrong-name', translation: [0, 0, 0] },
+    }))
+    const err = await waitForMessage(ws)
+
+    assert.equal(err.type, 'error')
+    assert.equal(err.code, 'PERMISSION_DENIED')
+
+    ws.close()
+    await waitForClose(ws)
+  } finally {
+    await new Promise((done) => s.wss.close(done))
+  }
+})
+
+test('avatar add rebroadcast includes server session id', async () => {
+  const world = await createWorld(FIXTURE_PATH)
+  const s = createSessionServer({ port: 3011, maxUsers: 10, world })
+
+  try {
+    const ws1 = new WebSocket('ws://localhost:3011')
+    const q1 = makeMessageQueue(ws1)
+    await waitForOpen(ws1)
+    ws1.send(JSON.stringify({ type: 'hello', id: 'rebroadcast-ws1', capabilities: { tick: { interval: 5000 } } }))
+    const hello1 = await q1.waitForType('hello', 1000)
+    const sessionId1 = hello1.id
+    const avatarName1 = hello1.avatarNodeName
+
+    const ws2 = new WebSocket('ws://localhost:3011')
+    const q2 = makeMessageQueue(ws2)
+    await waitForOpen(ws2)
+    ws2.send(JSON.stringify({ type: 'hello', id: 'rebroadcast-ws2', capabilities: { tick: { interval: 5000 } } }))
+    await q2.waitForType('hello', 1000)
+
+    // ws1 sends an avatar add with correct name
+    ws1.send(JSON.stringify({
+      type: 'add', seq: 1,
+      id: sessionId1,
+      node: { name: avatarName1, translation: [0, 1, 0] },
+    }))
+
+    // ws2 should receive the add with id: sessionId1
+    const addMsg = await q2.waitForType('add', 1000)
+    assert.ok(addMsg !== null, 'ws2 should receive add message')
+    assert.equal(addMsg.type, 'add')
+    assert.equal(addMsg.id, sessionId1, 'rebroadcast id should be server session id')
+    assert.equal(addMsg.node.name, avatarName1, 'rebroadcast node name should be assigned name')
+
+    ws1.close()
+    ws2.close()
+    await Promise.all([waitForClose(ws1), waitForClose(ws2)])
+  } finally {
+    await new Promise((done) => s.wss.close(done))
+  }
+})

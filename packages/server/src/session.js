@@ -219,6 +219,22 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
             sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
             break
           }
+
+          // If msg.id is provided, validate it matches the sender's session
+          // (prevents impersonation — another client cannot add an avatar
+          // claiming to be a different session)
+          if (msg.id && msg.id !== session.id) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', `msg.id "${msg.id}" does not match session "${session.id}"`)
+            break
+          }
+
+          // If this is an avatar add (has msg.id), validate the node name
+          // matches the server-assigned avatarNodeName
+          if (msg.id && msg.node.name !== session.avatarNodeName) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', `node.name "${msg.node.name}" does not match assigned avatarNodeName "${session.avatarNodeName}"`)
+            break
+          }
+
           const result = world.addNode(msg.node, msg.parent)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.parent}`)
@@ -226,7 +242,7 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
           }
           // Track avatar node name for this session
           if (msg.id) session.avatarNodeName = msg.node.name
-          // For avatar adds, stamp server-assigned node name onto rebroadcast
+          // For avatar adds, stamp server-assigned node name and session id onto rebroadcast
           const broadcastNode = (msg.id && sessions.has(msg.id))
             ? { ...msg.node, name: sessions.get(msg.id).avatarNodeName }
             : msg.node
@@ -234,6 +250,7 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
             type: 'add',
             seq: nextSeq(),
             format: msg.format ?? 'gltf',
+            ...(msg.id ? { id: session.id } : {}),
             ...(msg.parent != null ? { parent: msg.parent } : {}),
             node: broadcastNode,
           })

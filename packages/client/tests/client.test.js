@@ -222,7 +222,7 @@ test('add (peer avatar, join tracked) → SOM updated → som:add fires', async 
     await new Promise(r => setTimeout(r, 100))
 
     const somAdd = waitForEvent(client, 'som:add', 3000)
-    const expectedNodeName = `avatar-peer-av` // 'avatar-' + first 8 of 'peer-avatar-test-001'
+    const expectedNodeName = `avatar-peer-ava` // 'avatar-' + first 8 of 'peer-avatar-test-001'
     peer.send(JSON.stringify({
       type: 'add',
       id:   'peer-avatar-test-001',
@@ -293,7 +293,7 @@ test('remove (avatar disconnect) → SOM updated → peer:leave + som:remove fir
     await rawHandshake(peer, 'peer-leave-test-001')
     await q.waitForType('som-dump', 3000)
 
-    const expectedNodeName = `avatar-peer-le` // 'avatar-' + first 8 of 'peer-leave-test-001'
+    const expectedNodeName = `avatar-peer-lea` // 'avatar-' + first 8 of 'peer-leave-test-001'
     peer.send(JSON.stringify({
       type: 'add',
       id:   'peer-leave-test-001',
