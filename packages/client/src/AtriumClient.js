@@ -424,9 +424,15 @@ export class AtriumClient extends EventEmitter {
     // World-object removes: server sends { type: 'remove', node: 'name' }
     const isPeerRemove = msg.id != null && msg.node == null
     const peerMeta = isPeerRemove ? this._peerSessions.get(msg.id) : null
-    const nodeName = isPeerRemove
-      ? (peerMeta ? peerMeta.nodeName : `User-${msg.id.slice(0, 4)}`)
-      : msg.node
+
+    if (isPeerRemove && !peerMeta) {
+      if (this._debug) this._log(`peer:remove — no peer metadata for session ${msg.id}; skipping`)
+      // Still emit peer:leave so downstream listeners clean up
+      this.emit('peer:leave', { sessionId: msg.id, displayName: `User-${msg.id.slice(0, 4)}` })
+      return
+    }
+
+    const nodeName = isPeerRemove ? peerMeta.nodeName : msg.node
 
     if (nodeName && this._som) {
       const node = this._som.getNodeByName(nodeName)
@@ -496,10 +502,13 @@ export class AtriumClient extends EventEmitter {
 
   _onJoin(msg) {
     // Track the peer session so _onAdd can match it up and emit peer:join
-    const nodeName = msg.avatar?.nodeName ?? `User-${msg.id.slice(0, 4)}`
-    const displayName = msg.avatar?.displayName ?? nodeName
-    this._peerSessions.set(msg.id, { nodeName, displayName })
-    if (this._debug) this._log(`join: ${displayName} (${msg.id}, node: ${nodeName})`)
+    const avatar = msg.avatar
+    if (!avatar || !avatar.nodeName) {
+      if (this._debug) this._log(`join: missing avatar.nodeName for session ${msg.id} — dropping`)
+      return
+    }
+    this._peerSessions.set(msg.id, { nodeName: avatar.nodeName, displayName: avatar.displayName ?? avatar.nodeName })
+    if (this._debug) this._log(`join: ${avatar.displayName ?? avatar.nodeName} (${msg.id}, node: ${avatar.nodeName})`)
   }
 
   _onLeave(msg) {

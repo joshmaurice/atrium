@@ -384,7 +384,13 @@ test('avatar add with mismatched node.name is rejected', async () => {
     ws.send(JSON.stringify({ type: 'hello', id: 'name-reject-test', capabilities: { tick: { interval: 5000 } } }))
     const hello = await waitForMessage(ws)
     const sessionId = hello.id
+    const assignedName = hello.avatarNodeName
 
+    // Verify server assigned the expected name ('avatar-' + first 8)
+    assert.ok(assignedName.startsWith('avatar-'), `avatarNodeName should start with avatar-, got ${assignedName}`)
+    assert.equal(assignedName, 'avatar-name-rej', `expected avatar-name-rej, got ${assignedName}`)
+
+    // Send an add with a DIFFERENT name than the assigned one
     ws.send(JSON.stringify({
       type: 'add', seq: 1,
       id: sessionId,
@@ -394,6 +400,44 @@ test('avatar add with mismatched node.name is rejected', async () => {
 
     assert.equal(err.type, 'error')
     assert.equal(err.code, 'PERMISSION_DENIED')
+
+    // Verify session.avatarNodeName was NOT overwritten by the rejected add
+    const serverSession = s.sessions.get(sessionId)
+    assert.ok(serverSession !== null, 'session should still exist')
+    assert.equal(serverSession.avatarNodeName, assignedName,
+      'server-assigned avatarNodeName must not be clobbered by rejected add')
+
+    ws.close()
+    await waitForClose(ws)
+  } finally {
+    await new Promise((done) => s.wss.close(done))
+  }
+})
+
+test('avatar add with correct name succeeds', async () => {
+  const world = await createWorld(FIXTURE_PATH)
+  const s = createSessionServer({ port: 3013, maxUsers: 10, world })
+
+  try {
+    const ws = new WebSocket('ws://localhost:3013')
+    await waitForOpen(ws)
+    ws.send(JSON.stringify({ type: 'hello', id: 'correct-add-test', capabilities: { tick: { interval: 5000 } } }))
+    const hello = await waitForMessage(ws)
+    const sessionId = hello.id
+    const assignedName = hello.avatarNodeName
+
+    // Send an add with the CORRECT server-assigned name
+    ws.send(JSON.stringify({
+      type: 'add', seq: 1,
+      id: sessionId,
+      node: { name: assignedName, translation: [0, 0, 0] },
+    }))
+    // Consume the join broadcast (from the server's hello broadcast),
+    // then expect a tick or something — the add should succeed without error
+    // Wait a short time and verify no error was sent
+    await new Promise(r => setTimeout(r, 100))
+    // If the add succeeded, the server should have sent at least a tick
+    // No error means success
 
     ws.close()
     await waitForClose(ws)

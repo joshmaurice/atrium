@@ -248,19 +248,15 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.parent}`)
             break
           }
-          // Track avatar node name for this session
-          if (msg.id) session.avatarNodeName = msg.node.name
-          // For avatar adds, stamp server-assigned node name and session id onto rebroadcast
-          const broadcastNode = (msg.id && sessions.has(msg.id))
-            ? { ...msg.node, name: sessions.get(msg.id).avatarNodeName }
-            : msg.node
+          // avatar node name is already assigned at hello — never clobber from client input
+          // For avatar adds, stamp server session id onto rebroadcast
           broadcastExcept(session, {
             type: 'add',
             seq: nextSeq(),
             format: msg.format ?? 'gltf',
             ...(msg.id ? { id: session.id } : {}),
             ...(msg.parent != null ? { parent: msg.parent } : {}),
-            node: broadcastNode,
+            node: msg.node,
           })
           break
         }
@@ -328,18 +324,19 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
         session = null
 
         if (removed) {
+          // Remove avatar node from SOM and notify all clients first,
+          // THEN broadcast leave so clients can look up peer metadata before cleanup
+          if (world && avatarNodeName) {
+            world.removeNode(avatarNodeName)
+            broadcast({ type: 'remove', seq: nextSeq(), id: departedId })
+          }
+
           const leaveMsg = { type: 'leave', seq: nextSeq(), id: departedId }
           const { valid } = validate('server', leaveMsg)
           if (valid) {
             broadcast(leaveMsg)
           } else {
             console.error('leave validation failed')
-          }
-
-          // Remove avatar node from SOM and notify all clients
-          if (world && avatarNodeName) {
-            world.removeNode(avatarNodeName)
-            broadcast({ type: 'remove', seq: nextSeq(), id: departedId })
           }
         }
       }
