@@ -322,6 +322,31 @@ test('remove message broadcasts remove to all clients', async () => {
   }
 })
 
+test('rejects duplicate live sessionId at hello', async () => {
+  const s = createSessionServer({ port: 3012, maxUsers: 20 })
+
+  try {
+    const ws1 = new WebSocket('ws://localhost:3012')
+    await waitForOpen(ws1)
+    ws1.send(JSON.stringify({ type: 'hello', id: 'dup-session-id', capabilities: { tick: { interval: 5000 } } }))
+    await waitForMessage(ws1) // consume hello reply
+
+    const ws2 = new WebSocket('ws://localhost:3012')
+    await waitForOpen(ws2)
+    ws2.send(JSON.stringify({ type: 'hello', id: 'dup-session-id', capabilities: { tick: { interval: 5000 } } }))
+    const reply = await waitForMessage(ws2)
+
+    assert.equal(reply.type, 'error')
+    assert.equal(reply.code, 'SESSION_CONFLICT')
+
+    ws1.close()
+    ws2.close()
+    await Promise.all([waitForClose(ws1), waitForClose(ws2)])
+  } finally {
+    await new Promise((done) => s.wss.close(done))
+  }
+})
+
 test('avatar add with mismatched msg.id is rejected', async () => {
   const world = await createWorld(FIXTURE_PATH)
   const s = createSessionServer({ port: 3009, maxUsers: 10, world })

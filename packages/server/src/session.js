@@ -93,6 +93,14 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
           const clientInterval = msg.capabilities?.tick?.interval ?? DEFAULT_TICK_INTERVAL
           const negotiated = Math.max(clientInterval, MIN_TICK_INTERVAL)
           const sessionId = msg.id ?? randomUUID()
+
+          // Reject duplicate live sessionId — two connections must not share one
+          if (sessions.has(sessionId)) {
+            sendError(ws, null, 'SESSION_CONFLICT', `Session ${sessionId} is already connected`)
+            ws.close()
+            return
+          }
+
           const userDisplayName = `User-${sessionId.slice(0, 4)}`
 
           session = {
