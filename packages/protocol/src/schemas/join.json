@@ -17,6 +17,7 @@
     "avatar": {
       "type": "object",
       "properties": {
+        "nodeName": { "type": "string", "description": "Server-assigned avatar node name for this peer" },
         "displayName": { "type": "string" },
         "avatarURL": { "type": "string" },
         "position": {

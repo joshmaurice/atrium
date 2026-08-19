@@ -274,6 +274,17 @@ describe('join', () => {
     assert.equal(valid, true)
   })
 
+  it('validates a join with avatar nodeName', () => {
+    const { valid } = validate('server', {
+      type: 'join', seq: 1, id: 'client-01',
+      avatar: {
+        nodeName: 'avatar-a3f2c1d8',
+        displayName: 'User-a3f2',
+      }
+    })
+    assert.equal(valid, true)
+  })
+
   it('rejects join missing id', () => {
     const { valid } = validate('server', { type: 'join', seq: 1 })
     assert.equal(valid, false)

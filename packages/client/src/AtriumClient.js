@@ -407,14 +407,15 @@ export class AtriumClient extends EventEmitter {
 
     // Check if this add corresponds to a pending peer join
     let peerSessionId = null
-    for (const [sid, dname] of this._peerSessions) {
-      if (dname === nodeName) { peerSessionId = sid; break }
+    let peerDisplayName = null
+    for (const [sid, meta] of this._peerSessions) {
+      if (meta.nodeName === nodeName) { peerSessionId = sid; peerDisplayName = meta.displayName; break }
     }
 
     this.emit('som:add', { nodeName })
 
     if (peerSessionId !== null) {
-      this.emit('peer:join', { sessionId: peerSessionId, displayName: nodeName })
+      this.emit('peer:join', { sessionId: peerSessionId, displayName: peerDisplayName })
     }
   }
 
@@ -422,8 +423,9 @@ export class AtriumClient extends EventEmitter {
     // Avatar disconnects: server sends { type: 'remove', id: departedSessionId }
     // World-object removes: server sends { type: 'remove', node: 'name' }
     const isPeerRemove = msg.id != null && msg.node == null
+    const peerMeta = isPeerRemove ? this._peerSessions.get(msg.id) : null
     const nodeName = isPeerRemove
-      ? `User-${msg.id.slice(0, 4)}`
+      ? (peerMeta ? peerMeta.nodeName : `User-${msg.id.slice(0, 4)}`)
       : msg.node
 
     if (nodeName && this._som) {
@@ -435,7 +437,7 @@ export class AtriumClient extends EventEmitter {
     this.emit('som:remove', { nodeName })
 
     if (isPeerRemove) {
-      const displayName = nodeName
+      const displayName = peerMeta ? peerMeta.displayName : nodeName
       this.emit('peer:leave', { sessionId: msg.id, displayName })
     }
   }
@@ -461,9 +463,15 @@ export class AtriumClient extends EventEmitter {
   _onView(msg) {
     if (!this._som) return
 
+    // Look up peer from session map — drop silently if unknown
+    const peerMeta = this._peerSessions.get(msg.id)
+    if (!peerMeta) {
+      if (this._debug) this._log(`view from unknown session ${msg.id} — dropped`)
+      return
+    }
+
     // Update peer avatar position/orientation in SOM — guard against re-broadcast
-    const displayName = `User-${msg.id.slice(0, 4)}`
-    const peerNode    = this._som.getNodeByName(displayName)
+    const peerNode = this._som.getNodeByName(peerMeta.nodeName)
     if (peerNode) {
       this._applyingRemote = true
       try {
@@ -474,22 +482,24 @@ export class AtriumClient extends EventEmitter {
       }
     }
 
-    if (this._debug) this._log(`peer:view from ${displayName}`)
+    if (this._debug) this._log(`peer:view from ${peerMeta.displayName}`)
     this.emit('peer:view', {
-      displayName,
-      position: msg.position,
-      look:     msg.look,
-      move:     msg.move,
-      velocity: msg.velocity,
-      up:       msg.up,
+      displayName: peerMeta.displayName,
+      nodeName:    peerMeta.nodeName,
+      position:    msg.position,
+      look:        msg.look,
+      move:        msg.move,
+      velocity:    msg.velocity,
+      up:          msg.up,
     })
   }
 
   _onJoin(msg) {
     // Track the peer session so _onAdd can match it up and emit peer:join
-    const displayName = `User-${msg.id.slice(0, 4)}`
-    this._peerSessions.set(msg.id, displayName)
-    if (this._debug) this._log(`join: ${displayName} (${msg.id})`)
+    const nodeName = msg.avatar?.nodeName ?? `User-${msg.id.slice(0, 4)}`
+    const displayName = msg.avatar?.displayName ?? nodeName
+    this._peerSessions.set(msg.id, { nodeName, displayName })
+    if (this._debug) this._log(`join: ${displayName} (${msg.id}, node: ${nodeName})`)
   }
 
   _onLeave(msg) {

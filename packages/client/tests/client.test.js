@@ -222,15 +222,16 @@ test('add (peer avatar, join tracked) → SOM updated → som:add fires', async 
     await new Promise(r => setTimeout(r, 100))
 
     const somAdd = waitForEvent(client, 'som:add', 3000)
+    const expectedNodeName = `avatar-peer-av` // 'avatar-' + first 8 of 'peer-avatar-test-001'
     peer.send(JSON.stringify({
       type: 'add',
       id:   'peer-avatar-test-001',
       seq:  1,
-      node: { name: 'User-peer', translation: [0, 0, 0] },
+      node: { name: expectedNodeName, translation: [0, 0, 0] },
     }))
 
     const addData = await somAdd
-    assert.equal(addData.nodeName, 'User-peer', 'som:add has correct nodeName')
+    assert.equal(addData.nodeName, expectedNodeName, 'som:add has correct nodeName')
   } finally {
     peer.terminate()
     client.disconnect()
@@ -292,11 +293,12 @@ test('remove (avatar disconnect) → SOM updated → peer:leave + som:remove fir
     await rawHandshake(peer, 'peer-leave-test-001')
     await q.waitForType('som-dump', 3000)
 
+    const expectedNodeName = `avatar-peer-le` // 'avatar-' + first 8 of 'peer-leave-test-001'
     peer.send(JSON.stringify({
       type: 'add',
       id:   'peer-leave-test-001',
       seq:  1,
-      node: { name: 'User-peer', translation: [0, 0, 0] },
+      node: { name: expectedNodeName, translation: [0, 0, 0] },
     }))
     await waitForEvent(client, 'som:add', 3000)
 
@@ -365,15 +367,17 @@ test('view → peer avatar SOM translation updated → peer:view fires with corr
 
     // Must be a valid UUID so view messages pass server schema validation
     const peerId = 'aaaa0000-0000-4000-8000-000000000001'
-    const peerShortId = peerId.slice(0, 4)       // 'aaaa'
-    const peerDisplayName = `User-${peerShortId}` // 'User-aaaa'
 
     await rawHandshake(peer, peerId)
     await q.waitForType('som-dump', 3000)
 
+    // Extract the server-assigned avatarNodeName from the handshake
+    // The server assigns it as `avatar-` + first 8 chars of the session ID
+    const peerNodeName = `avatar-${peerId.slice(0, 8)}` // 'avatar-aaaa0000'
+
     peer.send(JSON.stringify({
       type: 'add', id: peerId, seq: 1,
-      node: { name: peerDisplayName, translation: [0, 0, 0] },
+      node: { name: peerNodeName, translation: [0, 0, 0] },
     }))
     await waitForEvent(client, 'som:add', 3000)
 
@@ -385,14 +389,15 @@ test('view → peer avatar SOM translation updated → peer:view fires with corr
 
     const viewData = await viewEvt
     assert.ok(typeof viewData.displayName === 'string', 'displayName present')
+    assert.ok(typeof viewData.nodeName === 'string', 'nodeName present')
     assert.deepEqual(viewData.position, [1, 0, 2],   'position relayed')
     assert.deepEqual(viewData.look,     [0, 0, -1],  'look relayed')
     assert.deepEqual(viewData.move,     [0, 0, -1],  'move relayed')
     assert.equal(viewData.velocity,     1.4,         'velocity relayed')
 
     // SOM node translation was updated by _onView
-    const peerNode = client.som.getNodeByName(peerDisplayName)
-    assert.ok(peerNode !== null, 'peer avatar node exists in SOM')
+    const peerNode = client.som.getNodeByName(peerNodeName)
+    assert.ok(peerNode !== null, `peer avatar node "${peerNodeName}" exists in SOM`)
     assert.deepEqual([...peerNode.translation], [1, 0, 2], 'SOM translation updated')
   } finally {
     peer.terminate()

@@ -92,15 +92,18 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
 
           const clientInterval = msg.capabilities?.tick?.interval ?? DEFAULT_TICK_INTERVAL
           const negotiated = Math.max(clientInterval, MIN_TICK_INTERVAL)
+          const sessionId = msg.id ?? randomUUID()
+          const userDisplayName = `User-${sessionId.slice(0, 4)}`
 
           session = {
             ws,
-            id: msg.id ?? randomUUID(),
+            id: sessionId,
             capabilities: msg.capabilities ?? {},
             seq: nextSeq(),
             alive: true,
             tickStop: null,
-            avatarNodeName: `avatar-${(msg.id ?? randomUUID()).slice(0, 8)}`,
+            avatarNodeName: `avatar-${sessionId.slice(0, 8)}`,
+            displayName: userDisplayName,
           }
           sessions.set(session.id, session)
 
@@ -130,7 +133,16 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
           }
 
           // Step 1: notify existing clients of the newcomer (default position)
-          const joinNewcomer = { type: 'join', seq: nextSeq(), id: session.id, position: [0, 0, 0] }
+          const joinNewcomer = {
+            type: 'join',
+            seq: nextSeq(),
+            id: session.id,
+            position: [0, 0, 0],
+            avatar: {
+              nodeName: session.avatarNodeName,
+              displayName: session.displayName,
+            },
+          }
           const { valid: jv1 } = validate('server', joinNewcomer)
           if (jv1) {
             const rawJoin = JSON.stringify(joinNewcomer)
@@ -145,7 +157,19 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
 
           // Step 2: bootstrap the newcomer with each existing client's current position
           for (const entry of presence.list()) {
-            const joinExisting = { type: 'join', seq: nextSeq(), id: entry.id, position: entry.position }
+            const existingSession = sessions.get(entry.id)
+            const joinExisting = {
+              type: 'join',
+              seq: nextSeq(),
+              id: entry.id,
+              position: entry.position,
+              ...(existingSession ? {
+                avatar: {
+                  nodeName: existingSession.avatarNodeName,
+                  displayName: existingSession.displayName,
+                },
+              } : {}),
+            }
             const { valid: jv2 } = validate('server', joinExisting)
             if (jv2) {
               session.ws.send(JSON.stringify(joinExisting))
@@ -202,12 +226,16 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
           }
           // Track avatar node name for this session
           if (msg.id) session.avatarNodeName = msg.node.name
+          // For avatar adds, stamp server-assigned node name onto rebroadcast
+          const broadcastNode = (msg.id && sessions.has(msg.id))
+            ? { ...msg.node, name: sessions.get(msg.id).avatarNodeName }
+            : msg.node
           broadcastExcept(session, {
             type: 'add',
             seq: nextSeq(),
             format: msg.format ?? 'gltf',
             ...(msg.parent != null ? { parent: msg.parent } : {}),
-            node: msg.node,
+            node: broadcastNode,
           })
           break
         }
