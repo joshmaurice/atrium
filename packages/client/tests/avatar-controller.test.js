@@ -18,16 +18,17 @@ class EventEmitter {
   emit(event, ...args) { for (const fn of this._l[event] ?? []) fn(...args) }
 }
 
-function makeMockClient({ connected = false, displayName = 'User-test', som = null } = {}) {
+function makeMockClient({ connected = false, displayName = 'User-test', avatarNodeName = 'User-test', som = null } = {}) {
   const ee = new EventEmitter()
   const client = {
-    get connected()    { return connected },
-    get displayName()  { return displayName },
-    get som()          { return som },
+    get connected()         { return connected },
+    get displayName()       { return displayName },
+    get _avatarNodeName()   { return avatarNodeName },
+    get som()               { return som },
     viewCalls: [],
-    setView(v)         { this.viewCalls.push(v) },
-    on(event, fn)      { ee.on(event, fn); return client },
-    emit(event, ...args) { ee.emit(event, ...args) },
+    setView(v)              { this.viewCalls.push(v) },
+    on(event, fn)           { ee.on(event, fn); return client },
+    emit(event, ...args)    { ee.emit(event, ...args) },
   }
   return client
 }
@@ -105,7 +106,7 @@ test('AvatarController — peer tracked from peer:join', () => {
   const client = makeMockClient({ connected: true, displayName: 'User-test', som })
   const avatar = new AvatarController(client)
   client.emit('world:loaded')
-  client.emit('peer:join', { displayName: 'User-peer' })
+  client.emit('peer:join', { displayName: 'User-peer', nodeName: 'User-peer' })
   assert.strictEqual(avatar.peerCount, 1)
   assert.notStrictEqual(avatar.getPeerNode('User-peer'), null)
 })
@@ -126,9 +127,9 @@ test('AvatarController — peer removed on peer:leave', () => {
   const client = makeMockClient({ connected: true, displayName: 'User-test', som })
   const avatar = new AvatarController(client)
   client.emit('world:loaded')
-  client.emit('peer:join', { displayName: 'User-peer' })
+  client.emit('peer:join', { displayName: 'User-peer', nodeName: 'User-peer' })
   assert.strictEqual(avatar.peerCount, 1)
-  client.emit('peer:leave', { displayName: 'User-peer' })
+  client.emit('peer:leave', { displayName: 'User-peer', nodeName: 'User-peer' })
   assert.strictEqual(avatar.peerCount, 0)
 })
 
@@ -176,7 +177,7 @@ test('AvatarController — avatar:peer-added fires for live join', () => {
   client.emit('world:loaded')
   let firedName = null
   avatar.on('avatar:peer-added', ({ displayName }) => { firedName = displayName })
-  client.emit('peer:join', { displayName: 'User-peer' })
+  client.emit('peer:join', { displayName: 'User-peer', nodeName: 'User-peer' })
   assert.strictEqual(firedName, 'User-peer')
 })
 
@@ -196,10 +197,10 @@ test('AvatarController — avatar:peer-removed fires on peer:leave', () => {
   const client = makeMockClient({ connected: true, displayName: 'User-test', som })
   const avatar = new AvatarController(client)
   client.emit('world:loaded')
-  client.emit('peer:join', { displayName: 'User-peer' })
+  client.emit('peer:join', { displayName: 'User-peer', nodeName: 'User-peer' })
   let removedName = null
   avatar.on('avatar:peer-removed', ({ displayName }) => { removedName = displayName })
-  client.emit('peer:leave', { displayName: 'User-peer' })
+  client.emit('peer:leave', { displayName: 'User-peer', nodeName: 'User-peer' })
   assert.strictEqual(removedName, 'User-peer')
 })
 
@@ -236,7 +237,7 @@ test('AvatarController — disconnected clears state', () => {
   const client = makeMockClient({ connected: true, displayName: 'User-test', som })
   const avatar = new AvatarController(client)
   client.emit('world:loaded')
-  client.emit('peer:join', { displayName: 'User-peer' })
+  client.emit('peer:join', { displayName: 'User-peer', nodeName: 'User-peer' })
   assert.notStrictEqual(avatar.localNode, null)
   assert.strictEqual(avatar.peerCount, 1)
   client.emit('disconnected')

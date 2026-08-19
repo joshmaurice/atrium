@@ -74,10 +74,10 @@ export class AvatarController extends EventEmitter {
   }
 
   _bindClientEvents() {
-    this._client.on('world:loaded',  ()                  => this._onWorldLoaded())
-    this._client.on('disconnected',  ()                  => this._onDisconnected())
-    this._client.on('peer:join',     ({ displayName })   => this._onPeerJoin(displayName))
-    this._client.on('peer:leave',    ({ displayName })   => this._onPeerLeave(displayName))
+    this._client.on('world:loaded',  ()                              => this._onWorldLoaded())
+    this._client.on('disconnected',  ()                              => this._onDisconnected())
+    this._client.on('peer:join',     ({ displayName, nodeName })     => this._onPeerJoin(displayName, nodeName))
+    this._client.on('peer:leave',    ({ displayName, nodeName })     => this._onPeerLeave(displayName, nodeName))
   }
 
   _onWorldLoaded() {
@@ -85,11 +85,12 @@ export class AvatarController extends EventEmitter {
     if (!som) return
 
     if (this._client.connected) {
-      const displayName = this._client.displayName
-      const localNode   = som.getNodeByName(displayName)
+      const localNodeName = this._client._avatarNodeName
+      if (!localNodeName) return
+      const localNode = som.getNodeByName(localNodeName)
       if (localNode) {
         const camNode = som.createNode({
-          name:        `${displayName}-camera`,
+          name:        `${localNodeName}-camera`,
           translation: [0, this._cameraOffsetY, this._cameraOffsetZ],
         })
         localNode.addChild(camNode)
@@ -115,12 +116,12 @@ export class AvatarController extends EventEmitter {
     }
 
     // Scan for pre-existing peers (late-joiner / som-dump scenario)
-    const localDisplayName = this._client.displayName
+    const localNodeName = this._client._avatarNodeName
     for (const node of som.nodes) {
       const extras = node.extras
-      if (!extras?.displayName)                        continue
-      if (extras.displayName === localDisplayName)     continue
-      if (this._peers.has(extras.displayName))         continue
+      if (!extras?.displayName)                    continue
+      if (node.name === localNodeName)             continue
+      if (this._peers.has(node.name))              continue
       this._addPeer(extras.displayName, node)
     }
   }
@@ -132,15 +133,15 @@ export class AvatarController extends EventEmitter {
     this._lastSentView = null
   }
 
-  _onPeerJoin(displayName) {
-    const node = this._client.som?.getNodeByName(displayName)
+  _onPeerJoin(displayName, nodeName) {
+    const node = this._client.som?.getNodeByName(nodeName)
     if (!node) return
     this._addPeer(displayName, node)
   }
 
-  _onPeerLeave(displayName) {
-    this._peers.delete(displayName)
-    this.emit('avatar:peer-removed', { displayName })
+  _onPeerLeave(displayName, nodeName) {
+    this._peers.delete(nodeName)
+    this.emit('avatar:peer-removed', { displayName, nodeName })
   }
 
   _addPeer(displayName, node) {
@@ -156,7 +157,7 @@ export class AvatarController extends EventEmitter {
         }
       }
     } catch {}
-    this._peers.set(displayName, node)
-    this.emit('avatar:peer-added', { displayName, node })
+    this._peers.set(node.name, node)
+    this.emit('avatar:peer-added', { displayName, node, nodeName: node.name })
   }
 }

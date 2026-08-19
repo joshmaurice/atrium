@@ -415,7 +415,7 @@ export class AtriumClient extends EventEmitter {
     this.emit('som:add', { nodeName })
 
     if (peerSessionId !== null) {
-      this.emit('peer:join', { sessionId: peerSessionId, displayName: peerDisplayName })
+      this.emit('peer:join', { sessionId: peerSessionId, displayName: peerDisplayName, nodeName })
     }
   }
 
@@ -428,7 +428,7 @@ export class AtriumClient extends EventEmitter {
     if (isPeerRemove && !peerMeta) {
       if (this._debug) this._log(`peer:remove — no peer metadata for session ${msg.id}; skipping`)
       // Still emit peer:leave so downstream listeners clean up
-      this.emit('peer:leave', { sessionId: msg.id, displayName: `User-${msg.id.slice(0, 4)}` })
+      this.emit('peer:leave', { sessionId: msg.id, displayName: `User-${msg.id.slice(0, 4)}`, nodeName: null })
       return
     }
 
@@ -444,7 +444,7 @@ export class AtriumClient extends EventEmitter {
 
     if (isPeerRemove) {
       const displayName = peerMeta ? peerMeta.displayName : nodeName
-      this.emit('peer:leave', { sessionId: msg.id, displayName })
+      this.emit('peer:leave', { sessionId: msg.id, displayName, nodeName: peerMeta ? peerMeta.nodeName : null })
     }
   }
 
