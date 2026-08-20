@@ -11,6 +11,7 @@ import { dirname, resolve } from 'path'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
 import { createWorld } from '../src/world.js'
+import { createRequestHandler } from '../src/http-routes.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE_PATH = resolve(__dirname, '../../../tests/fixtures/space.gltf')
@@ -84,16 +85,7 @@ function makeMessageQueue(ws) {
 // Server setup with real HTTP routing and WS upgrade on shared port
 // ---------------------------------------------------------------------------
 
-const httpServer = createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
-  if (req.method === 'GET' && url.pathname === '/api/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ status: 'ok' }))
-    return
-  }
-  res.writeHead(404, { 'Content-Type': 'text/plain' })
-  res.end('Not Found')
-})
+const httpServer = createServer(createRequestHandler())
 
 const world = await createWorld(FIXTURE_PATH)
 const server = createSessionServer({ httpServer, maxUsers: 20, world })
