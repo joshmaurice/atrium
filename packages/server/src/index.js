@@ -6,6 +6,7 @@ import { resolve as resolvePath, dirname } from 'node:path'
 import { createServer } from 'node:http'
 import { createWorld } from './world.js'
 import { createSessionServer } from './session.js'
+import { createRequestHandler } from './http-routes.js'
 
 // ---------------------------------------------------------------------------
 // Port extraction from a WebSocket URL
@@ -65,20 +66,7 @@ console.log(`Atrium world loaded: ${world.meta.name ?? 'unnamed'} (${nodeCount} 
 // HTTP server with route dispatch (plain Node http — no Express)
 // ---------------------------------------------------------------------------
 
-const httpServer = createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
-  const method = req.method
-
-  if (method === 'GET' && url.pathname === '/api/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ status: 'ok' }))
-    return
-  }
-
-  // Catch-all: unknown paths
-  res.writeHead(404, { 'Content-Type': 'text/plain' })
-  res.end('Not Found')
-})
+const httpServer = createServer(createRequestHandler())
 
 // ---------------------------------------------------------------------------
 // Session server (WebSocket upgrade on the same port)
