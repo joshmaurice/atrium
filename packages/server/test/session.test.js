@@ -5,6 +5,7 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import { createServer } from 'node:http'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
 import { createWorld } from '../src/world.js'
@@ -15,13 +16,16 @@ const FIXTURE_PATH = resolve(__dirname, '../../../tests/fixtures/space.gltf')
 const PORT = 3001
 
 let server
+let httpServer
 
 before(() => {
-  server = createSessionServer({ port: PORT, maxUsers: 20 })
+  httpServer = createServer()
+  httpServer.listen(PORT)
+  server = createSessionServer({ httpServer, maxUsers: 20 })
 })
 
 after(() => {
-  return new Promise((resolve) => server.wss.close(resolve))
+  server.close()
 })
 
 function connect() {
@@ -174,23 +178,28 @@ test('sends tick messages after handshake', async () => {
 })
 
 test('rejects connection when world full', async () => {
-  const fullServer = createSessionServer({ port: PORT + 1, maxUsers: 1 })
+  const fullHttpServer = createServer()
+  fullHttpServer.listen(PORT + 1)
+  const fullServer = createSessionServer({ httpServer: fullHttpServer, maxUsers: 1 })
 
-  const ws1 = new WebSocket(`ws://localhost:${PORT + 1}`)
-  await handshake(ws1)
+  try {
+    const ws1 = new WebSocket(`ws://localhost:${PORT + 1}`)
+    await handshake(ws1)
 
-  const ws2 = new WebSocket(`ws://localhost:${PORT + 1}`)
-  await waitForOpen(ws2)
-  ws2.send(JSON.stringify({ type: 'hello', id: 'second-client' }))
-  const reply = await waitForMessage(ws2)
+    const ws2 = new WebSocket(`ws://localhost:${PORT + 1}`)
+    await waitForOpen(ws2)
+    ws2.send(JSON.stringify({ type: 'hello', id: 'second-client' }))
+    const reply = await waitForMessage(ws2)
 
-  assert.equal(reply.type, 'error')
-  assert.equal(reply.code, 'WORLD_FULL')
+    assert.equal(reply.type, 'error')
+    assert.equal(reply.code, 'WORLD_FULL')
 
-  ws1.close()
-  ws2.close()
-  await Promise.all([waitForClose(ws1), waitForClose(ws2)])
-  await new Promise((resolve) => fullServer.wss.close(resolve))
+    ws1.close()
+    ws2.close()
+    await Promise.all([waitForClose(ws1), waitForClose(ws2)])
+  } finally {
+    fullServer.close()
+  }
 })
 
 test('handles client disconnect cleanly', async () => {
@@ -213,7 +222,9 @@ test('handles client disconnect cleanly', async () => {
 
 test('send message mutates world and broadcasts set', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3003, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3003)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws = new WebSocket('ws://localhost:3003')
@@ -230,13 +241,15 @@ test('send message mutates world and broadcasts set', async () => {
     ws.close()
     await waitForClose(ws)
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('send to unknown node returns NODE_NOT_FOUND error', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3004, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3004)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws = new WebSocket('ws://localhost:3004')
@@ -251,13 +264,15 @@ test('send to unknown node returns NODE_NOT_FOUND error', async () => {
     ws.close()
     await waitForClose(ws)
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('add message broadcasts add to all clients', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3005, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3005)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws1 = new WebSocket('ws://localhost:3005')
@@ -284,13 +299,15 @@ test('add message broadcasts add to all clients', async () => {
     ws2.close()
     await Promise.all([waitForClose(ws1), waitForClose(ws2)])
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('remove message broadcasts remove to all clients', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3006, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3006)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws1 = new WebSocket('ws://localhost:3006')
@@ -318,12 +335,14 @@ test('remove message broadcasts remove to all clients', async () => {
     ws2.close()
     await Promise.all([waitForClose(ws1), waitForClose(ws2)])
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('rejects duplicate live sessionId at hello', async () => {
-  const s = createSessionServer({ port: 3012, maxUsers: 20 })
+  const sHttp = createServer()
+  sHttp.listen(3012)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 20 })
 
   try {
     const ws1 = new WebSocket('ws://localhost:3012')
@@ -343,13 +362,15 @@ test('rejects duplicate live sessionId at hello', async () => {
     ws2.close()
     await Promise.all([waitForClose(ws1), waitForClose(ws2)])
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('avatar add with mismatched msg.id is rejected', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3009, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3009)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws = new WebSocket('ws://localhost:3009')
@@ -370,13 +391,15 @@ test('avatar add with mismatched msg.id is rejected', async () => {
     ws.close()
     await waitForClose(ws)
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('avatar add with mismatched node.name is rejected', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3010, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3010)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws = new WebSocket('ws://localhost:3010')
@@ -410,13 +433,15 @@ test('avatar add with mismatched node.name is rejected', async () => {
     ws.close()
     await waitForClose(ws)
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('avatar add with correct name succeeds', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3013, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3013)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws = new WebSocket('ws://localhost:3013')
@@ -450,13 +475,15 @@ test('avatar add with correct name succeeds', async () => {
     ws.close()
     await waitForClose(ws)
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
 
 test('avatar add rebroadcast includes server session id', async () => {
   const world = await createWorld(FIXTURE_PATH)
-  const s = createSessionServer({ port: 3011, maxUsers: 10, world })
+  const sHttp = createServer()
+  sHttp.listen(3011)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, world })
 
   try {
     const ws1 = new WebSocket('ws://localhost:3011')
@@ -491,6 +518,6 @@ test('avatar add rebroadcast includes server session id', async () => {
     ws2.close()
     await Promise.all([waitForClose(ws1), waitForClose(ws2)])
   } finally {
-    await new Promise((done) => s.wss.close(done))
+    s.close()
   }
 })
