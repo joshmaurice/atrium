@@ -5,6 +5,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { request } from 'node:http'
+import { connect } from 'node:net'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import WebSocket from 'ws'
@@ -114,7 +115,7 @@ test('GET /api/health returns 200 with status ok', async () => {
   assert.deepEqual(res.body, { status: 'ok' })
 })
 
-test('GET /api/health returns 404 for unknown path', async () => {
+test('GET unknown path returns 404', async () => {
   const res = await httpGet('/api/unknown')
   assert.equal(res.statusCode, 404)
 })
@@ -209,11 +210,39 @@ test('two clients: view sent by one is received by the other', async () => {
   await Promise.all([waitForClose(wsA), waitForClose(wsB)])
 })
 
-test('non-WebSocket upgrade request is rejected', async () => {
-  // Send a raw HTTP request (not an upgrade) to the shared port
-  const res = await httpGet('/api/health')
-  assert.equal(res.statusCode, 200)
+test('non-WebSocket upgrade request is rejected (socket destroyed)', async () => {
+  // Open a raw TCP connection and send HTTP headers with Connection: Upgrade
+  // and Upgrade: h2c (not 'websocket'). The server's upgrade handler should
+  // call socket.destroy(), closing the connection without a 101 response.
+  const socket = connect(PORT, 'localhost')
+  
+  // Track whether we saw any data before close
+  let receivedData = false
+  let closed = false
 
-  // The HTTP server should still work (the upgrade handler didn't
-  // interfere with normal HTTP requests)
+  socket.on('data', () => { receivedData = true })
+  socket.on('close', () => { closed = true })
+
+  // Wait for socket to be writable
+  await new Promise((resolve, reject) => {
+    socket.on('connect', resolve)
+    socket.on('error', reject)
+  })
+
+  // Send HTTP request with non-websocket Upgrade
+  socket.write(
+    'GET / HTTP/1.1\r\n' +
+    'Host: localhost\r\n' +
+    'Connection: Upgrade\r\n' +
+    'Upgrade: h2c\r\n' +
+    '\r\n'
+  )
+
+  // Give server time to process and close
+  await new Promise(r => setTimeout(r, 300))
+
+  assert.ok(closed, 'connection should be destroyed (closed) by server')
+  assert.ok(!receivedData, 'server should not send any data before destroying the socket')
+
+  socket.destroy()
 })
