@@ -36,32 +36,30 @@ function lookToQuaternion(look) {
   return [cx/len, cy/len, cz/len, qw/len]
 }
 
-export function createSessionServer({ port = 3000, maxUsers = 100, world = null, httpServer = null } = {}) {
+export function createSessionServer({ httpServer, maxUsers = 100, world = null } = {}) {
+  if (!httpServer) {
+    throw new Error('createSessionServer requires httpServer option')
+  }
+
   const sessions = new Map()
   const presence = createPresence()
 
-  // Set up the WebSocket server
-  let wss
-  if (httpServer) {
-    // When an HTTP server is provided, use noServer: true and handle upgrade explicitly.
-    // This establishes the seam for later cookie and Origin validation at upgrade time.
-    wss = new WebSocketServer({ noServer: true })
+  // Attach the WebSocket server to the provided HTTP server using noServer: true
+  // and an explicit upgrade handler. This establishes the seam for later cookie
+  // and Origin validation at upgrade time.
+  const wss = new WebSocketServer({ noServer: true })
 
-    httpServer.on('upgrade', (request, socket, head) => {
-      // Only handle WebSocket upgrade requests
-      const upgrade = request.headers['upgrade']
-      if (!upgrade || upgrade.toLowerCase() !== 'websocket') {
-        socket.destroy()
-        return
-      }
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request)
-      })
+  httpServer.on('upgrade', (request, socket, head) => {
+    // Only handle WebSocket upgrade requests
+    const upgrade = request.headers['upgrade']
+    if (!upgrade || upgrade.toLowerCase() !== 'websocket') {
+      socket.destroy()
+      return
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request)
     })
-  } else {
-    // Backward compat: bare WebSocketServer binding its own port
-    wss = new WebSocketServer({ port })
-  }
+  })
 
   function broadcast(message) {
     const raw = JSON.stringify(message)
