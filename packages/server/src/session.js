@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import { WebSocketServer } from 'ws'
+import { createServer } from 'node:http'
 import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
@@ -35,10 +36,32 @@ function lookToQuaternion(look) {
   return [cx/len, cy/len, cz/len, qw/len]
 }
 
-export function createSessionServer({ port = 3000, maxUsers = 100, world = null } = {}) {
+export function createSessionServer({ port = 3000, maxUsers = 100, world = null, httpServer = null } = {}) {
   const sessions = new Map()
   const presence = createPresence()
-  const wss = new WebSocketServer({ port })
+
+  // Set up the WebSocket server
+  let wss
+  if (httpServer) {
+    // When an HTTP server is provided, use noServer: true and handle upgrade explicitly.
+    // This establishes the seam for later cookie and Origin validation at upgrade time.
+    wss = new WebSocketServer({ noServer: true })
+
+    httpServer.on('upgrade', (request, socket, head) => {
+      // Only handle WebSocket upgrade requests
+      const upgrade = request.headers['upgrade']
+      if (!upgrade || upgrade.toLowerCase() !== 'websocket') {
+        socket.destroy()
+        return
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request)
+      })
+    })
+  } else {
+    // Backward compat: bare WebSocketServer binding its own port
+    wss = new WebSocketServer({ port })
+  }
 
   function broadcast(message) {
     const raw = JSON.stringify(message)
@@ -363,5 +386,26 @@ export function createSessionServer({ port = 3000, maxUsers = 100, world = null 
     clearInterval(keepaliveTimer)
   })
 
-  return { wss, sessions, presence }
+  function close() {
+    // Terminate all live WebSocket connections first, so the HTTP server
+    // does not hang waiting for them.
+    for (const [, s] of sessions) {
+      s.ws.terminate()
+      s.tickStop?.()
+    }
+    sessions.clear()
+
+    // Stop the keepalive interval (it references sessions, now cleared)
+    clearInterval(keepaliveTimer)
+
+    // Close the WebSocket server (stops accepting upgrades)
+    wss.close()
+
+    // Close the HTTP server if we own one (or one was provided)
+    if (httpServer) {
+      httpServer.close()
+    }
+  }
+
+  return { wss, sessions, presence, httpServer, close }
 }
