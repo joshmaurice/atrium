@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import { WebSocketServer } from 'ws'
-import { createServer } from 'node:http'
 import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
