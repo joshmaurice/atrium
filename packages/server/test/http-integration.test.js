@@ -16,7 +16,7 @@ import { createRequestHandler } from '../src/http-routes.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE_PATH = resolve(__dirname, '../../../tests/fixtures/space.gltf')
 
-const PORT = 3007
+const PORT = 3014
 
 // Helper: HTTP GET and return parsed JSON body
 function httpGet(path) {

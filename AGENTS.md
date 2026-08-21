@@ -71,7 +71,10 @@ open apps/playground/index.html        # pointer-event test bench
 - 3001: `session.test.js` main server
 - 3002: world-full sub-server (port + 1)
 - 3003–3006: `session.test.js` integration tests
+- 3007: `presence.test.js`
 - 3008: `avatar.test.js`
+- 3009–3013: `session.test.js` additional integration tests
+- 3014: `http-integration.test.js`
 
 ## Key Files
 

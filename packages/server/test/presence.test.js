@@ -3,19 +3,23 @@
 
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
 
 const PORT = 3007
 
 let server
+let httpServer
 
 before(() => {
-  server = createSessionServer({ port: PORT, maxUsers: 20 })
+  httpServer = createServer()
+  httpServer.listen(PORT)
+  server = createSessionServer({ httpServer, maxUsers: 20 })
 })
 
 after(() => {
-  return new Promise((resolve) => server.wss.close(resolve))
+  server.close()
 })
 
 function connect() {
