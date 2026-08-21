@@ -114,7 +114,9 @@ export function createDb(dbPath) {
       ).run(migration.version, migration.description, new Date().toISOString())
     })
 
-    for (const migration of MIGRATIONS) {
+    const ordered = [...MIGRATIONS].sort((a, b) => a.version - b.version)
+
+    for (const migration of ordered) {
       if (!applied.has(migration.version)) {
         apply(migration)
       }
