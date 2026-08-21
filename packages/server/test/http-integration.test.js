@@ -85,6 +85,39 @@ function httpPost(path, payload) {
   })
 }
 
+function httpPostWithCookie(path, payload, cookie) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload)
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+          'Cookie': cookie,
+        },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // WS helpers
 // ---------------------------------------------------------------------------
@@ -255,6 +288,105 @@ test('POST /api/auth/register normalizes username', async () => {
 
   assert.equal(res.statusCode, 201)
   assert.equal(res.body.username, 'Eve')
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/login tests
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/login succeeds with valid credentials', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.username, 'alice')
+  assert.ok(res.body.id, 'response includes user id')
+  assert.ok(res.body.createdAt, 'response includes created_at')
+
+  // Cookie should be set
+  const setCookie = res.headers['set-cookie']
+  assert.ok(setCookie, 'Set-Cookie header present')
+  const cookieStr = Array.isArray(setCookie) ? setCookie.join(', ') : setCookie
+  assert.ok(cookieStr.includes('atrium_auth_session='))
+})
+
+test('POST /api/auth/login returns 401 for wrong password', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'wrong password that is long enough',
+  })
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Invalid credentials')
+})
+
+test('POST /api/auth/login returns 401 for non-existent user', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'nonexistent_user',
+    password: 'some sufficiently long password',
+  })
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Invalid credentials')
+})
+
+test('POST /api/auth/login returns 401 for case-insensitive matched user with wrong password', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'ALICE', // matches 'alice' via COLLATE NOCASE
+    password: 'wrong password that is long enough',
+  })
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Invalid credentials')
+})
+
+test('POST /api/auth/login returns 400 for missing fields', async () => {
+  const noUser = await httpPost('/api/auth/login', { password: 'some sufficiently long password' })
+  assert.equal(noUser.statusCode, 400)
+  assert.ok(noUser.body.error)
+
+  const noPass = await httpPost('/api/auth/login', { username: 'alice' })
+  assert.equal(noPass.statusCode, 400)
+  assert.ok(noPass.body.error)
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/logout tests
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/logout clears cookie and returns 200', async () => {
+  // First, login to get a valid session cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  // Now logout with the cookie
+  const res = await httpPostWithCookie('/api/auth/logout', {}, cookieStr)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.message, 'Logged out')
+
+  // Cookie should be cleared (Max-Age=0)
+  const logoutCookie = Array.isArray(res.headers['set-cookie'])
+    ? res.headers['set-cookie'].join('; ')
+    : res.headers['set-cookie']
+  assert.ok(logoutCookie, 'Set-Cookie header present on logout')
+  assert.ok(logoutCookie.includes('Max-Age=0'))
+})
+
+test('POST /api/auth/logout works without a cookie (idempotent)', async () => {
+  const res = await httpPost('/api/auth/logout', {})
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.message, 'Logged out')
 })
 
 // ---------------------------------------------------------------------------

@@ -125,6 +125,117 @@ export function createRequestHandler(opts = {}) {
       return
     }
 
+    // -----------------------------------------------------------------------
+    // POST /api/auth/login
+    // -----------------------------------------------------------------------
+    if (method === 'POST' && url.pathname === '/api/auth/login') {
+      if (!db || !auth) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Auth subsystem not available' }))
+        return
+      }
+
+      let body
+      try {
+        body = await parseJSONBody(req)
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid request body' }))
+        return
+      }
+
+      const { username, password } = body || {}
+
+      if (!username || typeof username !== 'string' || username.trim().length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Username is required' }))
+        return
+      }
+
+      if (!password || typeof password !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Password is required' }))
+        return
+      }
+
+      // Generic timing: look up user first, verify password second.
+      // Always respond with the same message to avoid leaking which field was wrong.
+      const normalized = auth.normalizeUsername(username)
+      const user = db.database.prepare(
+        'SELECT id, password_hash, display_name, created_at FROM users WHERE username = ? COLLATE NOCASE'
+      ).get(normalized)
+
+      if (!user) {
+        // Artificial delay to match password verification timing
+        await auth.verifyPassword('$argon2id$v=19$m=19456,t=2,p=1$dummy', 'dummy')
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid credentials' }))
+        return
+      }
+
+      const valid = await auth.verifyPassword(user.password_hash, password)
+      if (!valid) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid credentials' }))
+        return
+      }
+
+      // Create auth session
+      const authSessionId = randomUUID()
+      const now = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+      try {
+        db.database.prepare(
+          'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+        ).run(authSessionId, user.id, now, expiresAt)
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal server error' }))
+        return
+      }
+
+      setAuthCookie(res, authSessionId)
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        id: user.id,
+        username: normalized,
+        displayName: user.display_name,
+        createdAt: user.created_at,
+      }))
+      return
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /api/auth/logout
+    // -----------------------------------------------------------------------
+    if (method === 'POST' && url.pathname === '/api/auth/logout') {
+      if (!db) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Auth subsystem not available' }))
+        return
+      }
+
+      const authSessionId = parseAuthSessionCookie(req)
+
+      if (authSessionId) {
+        // Best-effort deletion: even if the session doesn't exist or DB fails,
+        // we still clear the cookie so the client can logout
+        try {
+          db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
+        } catch {
+          // Swallow — cookie clearing is the important part
+        }
+      }
+
+      clearAuthCookie(res)
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ message: 'Logged out' }))
+      return
+    }
+
     // Catch-all: unknown paths
     res.writeHead(404, { 'Content-Type': 'text/plain' })
     res.end('Not Found')
