@@ -52,6 +52,64 @@ export function isOriginAllowed(req) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiter — per-IP sliding window
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a per-IP rate limiter.
+ *
+ * @param {object} options
+ * @param {number} options.maxRequests  - Max requests allowed in the window
+ * @param {number} options.windowMs     - Window duration in milliseconds
+ * @returns {{ check: (ip: string) => boolean, reset: () => void }}
+ */
+export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) {
+  /** @type {Map<string, { count: number, resetAt: number }>} */
+  const buckets = new Map()
+
+  // Periodic cleanup of stale entries (every 5 minutes)
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now()
+    for (const [ip, bucket] of buckets) {
+      if (now >= bucket.resetAt) {
+        buckets.delete(ip)
+      }
+    }
+  }, 5 * 60_000)
+
+  // Allow the timer to not block process exit
+  if (cleanupInterval.unref) cleanupInterval.unref()
+
+  return {
+    /**
+     * Check whether a request from the given IP is allowed.
+     * Returns true if within the rate limit, false if exceeded.
+     * @param {string} ip
+     * @returns {boolean}
+     */
+    check(ip) {
+      const now = Date.now()
+      let bucket = buckets.get(ip)
+
+      if (!bucket || now >= bucket.resetAt) {
+        // First request or window expired — start a new window
+        bucket = { count: 1, resetAt: now + windowMs }
+        buckets.set(ip, bucket)
+        return true
+      }
+
+      bucket.count++
+      return bucket.count <= maxRequests
+    },
+
+    /** Clear all rate limit buckets (for tests). */
+    reset() {
+      buckets.clear()
+    },
+  }
+}
+
 /**
  * Create the HTTP request handler for the Atrium server.
  *
@@ -61,6 +119,17 @@ export function isOriginAllowed(req) {
  */
 export function createRequestHandler(opts = {}) {
   const { db, auth } = opts
+
+  // Create a per-IP rate limiter for auth endpoints:
+  // 20 requests per minute per IP on register/login
+  const rateLimiter = createRateLimiter({ maxRequests: 20, windowMs: 60_000 })
+
+  function getClientIP(req) {
+    // When behind the Caddy reverse proxy, trust x-forwarded-for
+    const forwarded = req.headers['x-forwarded-for']
+    if (forwarded) return forwarded.split(',')[0].trim()
+    return req.socket.remoteAddress || '127.0.0.1'
+  }
 
   return async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
@@ -126,6 +195,14 @@ export function createRequestHandler(opts = {}) {
       if (!isOriginAllowed(req)) {
         res.writeHead(403, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
+        return
+      }
+
+      // Per-IP rate limit
+      const ip = getClientIP(req)
+      if (!rateLimiter.check(ip)) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Too many requests — try again later' }))
         return
       }
 
@@ -231,6 +308,14 @@ export function createRequestHandler(opts = {}) {
       if (!isOriginAllowed(req)) {
         res.writeHead(403, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
+        return
+      }
+
+      // Per-IP rate limit
+      const ip = getClientIP(req)
+      if (!rateLimiter.check(ip)) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Too many requests — try again later' }))
         return
       }
 
