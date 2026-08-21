@@ -7,6 +7,7 @@ import { createServer } from 'node:http'
 import { createWorld } from './world.js'
 import { createSessionServer } from './session.js'
 import { createRequestHandler } from './http-routes.js'
+import { createDb } from './db.js'
 
 // ---------------------------------------------------------------------------
 // Port extraction from a WebSocket URL
@@ -63,6 +64,14 @@ const nodeCount = world.listNodeNames().length
 console.log(`Atrium world loaded: ${world.meta.name ?? 'unnamed'} (${nodeCount} nodes)`)
 
 // ---------------------------------------------------------------------------
+// Database (migrations run before the server accepts connections)
+// ---------------------------------------------------------------------------
+
+const dbPath = process.env.ATRIUM_DB_PATH
+const db = createDb(dbPath)
+console.log(`Atrium database: ${dbPath || '(default)'}`)
+
+// ---------------------------------------------------------------------------
 // HTTP server with route dispatch (plain Node http — no Express)
 // ---------------------------------------------------------------------------
 
@@ -75,4 +84,3 @@ const httpServer = createServer(createRequestHandler())
 createSessionServer({ httpServer, world })
 httpServer.listen(port)
 console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket)`)
-
