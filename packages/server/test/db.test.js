@@ -60,14 +60,15 @@ describe('migrations', () => {
     // Re-open the same file (second migration run)
     const db2 = createDb(path)
 
-    // Verify only one migration version recorded
+    // Verify only one migration version recorded (second open is idempotent)
     const versions = db2.database.prepare(
       'SELECT version, description FROM schema_migrations ORDER BY version'
     ).all()
 
-    assert.equal(versions.length, 1)
+    assert.equal(versions.length, 2)
     assert.equal(versions[0].version, 1)
-    assert.equal(versions[0].description, 'Create users, auth_sessions, worlds, preferences tables')
+    assert.equal(versions[1].version, 2)
+    assert.equal(versions[1].description, 'Make password_hash NOT NULL in users table')
 
     // No error = idempotent
     db2.close()
