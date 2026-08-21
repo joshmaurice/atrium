@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
+import { isOriginAllowed } from './http-routes.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -55,6 +56,15 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null }
       socket.destroy()
       return
     }
+
+    // Validate Origin header to prevent cross-origin WebSocket hijacking
+    // (cookie auth otherwise lets any website open an authenticated socket
+    // from a visitor's browser)
+    if (!isOriginAllowed(request)) {
+      socket.destroy()
+      return
+    }
+
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request)
     })

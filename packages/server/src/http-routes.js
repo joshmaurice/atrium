@@ -4,6 +4,55 @@
 import { randomUUID } from 'node:crypto'
 
 /**
+ * Validate the Origin header for CSRF / cross-origin protection.
+ *
+ * Policy (explicit CSRF decision — see note below):
+ * - No Origin header: allowed (non-browser clients, curl, test scripts).
+ *   On a same-origin deployment, any real browser request to a
+ *   state-changing endpoint will include an Origin header.
+ * - Origin matches the request's Host (same scheme, host, and port): allowed.
+ * - Anything else: rejected.
+ *
+ * This is applied to WebSocket upgrades AND state-changing HTTP routes
+ * (POST register/login/logout). GET /api/health and GET /api/auth/me
+ * are exempt — they read no session state and change nothing.
+ *
+ * CSRF custom-header decision (per TASK-auth.md optionality note):
+ *   SameSite=Lax + Origin validation on state-changing routes is judged
+ *   sufficient for Phase 1 (same-origin deployment model, no federated
+ *   auth). An Atrium-specific custom header is NOT required; if a future
+ *   cross-origin deployment is needed, the custom header approach should
+ *   be adopted then.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {boolean}
+ */
+export function isOriginAllowed(req) {
+  const origin = req.headers['origin']
+  if (!origin) return true // No origin = non-browser client, allow
+
+  const host = req.headers['host']
+  if (!host) return false // Host header required for origin comparison
+
+  try {
+    const parsedOrigin = new URL(origin)
+    // Compare scheme + host + port against the Host header
+    // Accept http://host:port or https://host:port
+    const hostParts = host.split(':')
+    const hostname = hostParts[0]
+    const port = hostParts[1] || (parsedOrigin.protocol === 'https:' ? '443' : '80')
+
+    if (parsedOrigin.hostname !== hostname) return false
+    if (parsedOrigin.port !== '' && parsedOrigin.port !== port) return false
+    if (parsedOrigin.protocol !== 'http:' && parsedOrigin.protocol !== 'https:') return false
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Create the HTTP request handler for the Atrium server.
  *
  * Returns a function suitable for passing to http.createServer().
@@ -71,6 +120,12 @@ export function createRequestHandler(opts = {}) {
       if (!db || !auth) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Auth subsystem not available' }))
+        return
+      }
+
+      if (!isOriginAllowed(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
         return
       }
 
@@ -173,6 +228,12 @@ export function createRequestHandler(opts = {}) {
         return
       }
 
+      if (!isOriginAllowed(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
+        return
+      }
+
       let body
       try {
         body = await parseJSONBody(req)
@@ -252,6 +313,12 @@ export function createRequestHandler(opts = {}) {
       if (!db) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Auth subsystem not available' }))
+        return
+      }
+
+      if (!isOriginAllowed(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
         return
       }
 

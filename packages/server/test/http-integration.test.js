@@ -145,6 +145,66 @@ function httpGetWithCookie(path, cookie) {
   })
 }
 
+function httpPostWithOrigin(path, payload, origin) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload)
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+          'Origin': origin,
+        },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+function httpGetWithOrigin(path, origin) {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'GET',
+        headers: { 'Origin': origin },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // WS helpers
 // ---------------------------------------------------------------------------
@@ -452,6 +512,84 @@ test('GET /api/auth/me returns 401 with expired/unknown cookie', async () => {
   const res = await httpGetWithCookie('/api/auth/me', 'atrium_auth_session=nonexistent-session-id')
   assert.equal(res.statusCode, 401)
   assert.equal(res.body.error, 'Not authenticated')
+})
+
+// ---------------------------------------------------------------------------
+// Origin validation tests (CSRF)
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/register with cross-origin header is rejected (403)', async () => {
+  const res = await httpPostWithOrigin('/api/auth/register', {
+    username: 'cross-origin-user',
+    password: 'a sufficiently long password ok',
+  }, 'https://evil-website.com')
+
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('POST /api/auth/login with cross-origin header is rejected (403)', async () => {
+  const res = await httpPostWithOrigin('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  }, 'https://evil-website.com')
+
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('POST /api/auth/logout with cross-origin header is rejected (403)', async () => {
+  const res = await httpPostWithOrigin('/api/auth/logout', {}, 'https://evil-website.com')
+
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('GET /api/auth/me is exempt from origin validation', async () => {
+  const res = await httpGetWithOrigin('/api/auth/me', 'https://evil-website.com')
+  // Exempt routes don't validate origin — just returns 401 because no cookie
+  assert.equal(res.statusCode, 401)
+})
+
+test('GET /api/health is exempt from origin validation', async () => {
+  const res = await httpGetWithOrigin('/api/health', 'https://evil-website.com')
+  // Exempt routes don't validate origin — returns 200
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { status: 'ok' })
+})
+
+test('WebSocket upgrade with cross-origin header is rejected (socket destroyed)', async () => {
+  const socket = connect(PORT, 'localhost')
+
+  let receivedData = false
+  let closed = false
+
+  socket.on('data', () => { receivedData = true })
+  socket.on('close', () => { closed = true })
+
+  await new Promise((resolve, reject) => {
+    socket.on('connect', resolve)
+    socket.on('error', reject)
+  })
+
+  // Send a WebSocket upgrade request with a cross-origin Origin header
+  socket.write(
+    'GET / HTTP/1.1\r\n' +
+    'Host: localhost\r\n' +
+    'Connection: Upgrade\r\n' +
+    'Upgrade: websocket\r\n' +
+    'Origin: https://evil-website.com\r\n' +
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+    'Sec-WebSocket-Version: 13\r\n' +
+    '\r\n'
+  )
+
+  await new Promise(r => setTimeout(r, 300))
+
+  assert.ok(closed, 'cross-origin WS upgrade should be destroyed')
+  assert.ok(!receivedData, 'no data should be sent to cross-origin upgrade')
+
+  socket.destroy()
 })
 
 // ---------------------------------------------------------------------------
