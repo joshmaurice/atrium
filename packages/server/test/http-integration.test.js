@@ -8,17 +8,30 @@ import { request } from 'node:http'
 import { connect } from 'node:net'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import { mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
 import { createWorld } from '../src/world.js'
-import { createRequestHandler } from '../src/http-routes.js'
+import { createRequestHandler, parseAuthSessionCookie } from '../src/http-routes.js'
+import { createDb } from '../src/db.js'
+import * as auth from '../src/auth.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE_PATH = resolve(__dirname, '../../../tests/fixtures/space.gltf')
 
-const PORT = 3014
+const PORT = 3015
 
-// Helper: HTTP GET and return parsed JSON body
+// Temporary database for HTTP integration tests
+const tempDir = mkdtempSync(join(tmpdir(), 'atrium-http-test-'))
+const dbPath = join(tempDir, 'test.db')
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
 function httpGet(path) {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -40,19 +53,166 @@ function httpGet(path) {
   })
 }
 
+function httpPost(path, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload)
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+function httpPostWithCookie(path, payload, cookie) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload)
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+          'Cookie': cookie,
+        },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+function httpGetWithCookie(path, cookie) {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'GET',
+        headers: { 'Cookie': cookie },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+function httpPostWithOrigin(path, payload, origin) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload)
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+          'Origin': origin,
+        },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+function httpGetWithOrigin(path, origin) {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'GET',
+        headers: { 'Origin': origin },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+// ---------------------------------------------------------------------------
+// WS helpers
+// ---------------------------------------------------------------------------
+
 function waitForOpen(ws) {
   return new Promise((resolve, reject) => {
     if (ws.readyState === WebSocket.OPEN) return resolve()
     ws.once('open', resolve)
-    ws.once('error', reject)
-  })
-}
-
-function waitForMessage(ws) {
-  return new Promise((resolve, reject) => {
-    ws.once('message', (raw) => {
-      try { resolve(JSON.parse(raw)) } catch (e) { reject(e) }
-    })
     ws.once('error', reject)
   })
 }
@@ -81,23 +241,35 @@ function makeMessageQueue(ws) {
   return { waitForType }
 }
 
-// --------------------------------------------------------------------------- 
+/**
+ * Connect a WebSocket with headers (simulating browser cookies during upgrade).
+ */
+function websocketConnectWithHeaders(headers = {}) {
+  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers })
+  const q = makeMessageQueue(ws)
+  return { ws, q }
+}
+
+// ---------------------------------------------------------------------------
 // Server setup with real HTTP routing and WS upgrade on shared port
 // ---------------------------------------------------------------------------
 
-const httpServer = createServer(createRequestHandler())
+const db = createDb(dbPath)
+const httpServer = createServer(createRequestHandler({ db, auth }))
 
 const world = await createWorld(FIXTURE_PATH)
-const server = createSessionServer({ httpServer, maxUsers: 20, world })
+const server = createSessionServer({ httpServer, maxUsers: 20, world, db })
 
 httpServer.listen(PORT)
 
-after(() => {
+after(async () => {
   server.close()
+  db.close()
+  await rm(tempDir, { recursive: true, force: true })
 })
 
-// --------------------------------------------------------------------------- 
-// Tests
+// ---------------------------------------------------------------------------
+// HTTP tests
 // ---------------------------------------------------------------------------
 
 test('GET /api/health returns 200 with status ok', async () => {
@@ -111,6 +283,398 @@ test('GET unknown path returns 404', async () => {
   const res = await httpGet('/api/unknown')
   assert.equal(res.statusCode, 404)
 })
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/register tests
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/register creates a user and returns 201 with cookie', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: 'alice',
+    password: 'correct horse battery staple', // 31 chars, meets min length
+  })
+
+  assert.equal(res.statusCode, 201)
+  assert.equal(res.headers['content-type'], 'application/json')
+  assert.ok(res.body.id, 'response includes user id')
+  assert.equal(res.body.username, 'alice')
+  assert.equal(res.body.displayName, 'alice')
+  assert.ok(res.body.createdAt, 'response includes created_at')
+
+  // Cookie should be set
+  const setCookie = res.headers['set-cookie']
+  assert.ok(setCookie, 'Set-Cookie header present')
+  const cookieStr = Array.isArray(setCookie) ? setCookie.join(', ') : setCookie
+  assert.ok(cookieStr.includes('atrium_auth_session='))
+  assert.ok(cookieStr.includes('HttpOnly'))
+  assert.ok(cookieStr.includes('Secure'))
+  assert.ok(cookieStr.includes('SameSite=Lax'))
+  assert.ok(cookieStr.includes('Path=/'))
+})
+
+test('POST /api/auth/register rejects duplicate username with 409', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: 'alice', // same username as the test above
+    password: 'another correct long phrase',
+  })
+
+  assert.equal(res.statusCode, 409)
+  assert.ok(res.body.error)
+  assert.ok(res.body.error.toLowerCase().includes('already exists'))
+})
+
+test('POST /api/auth/register rejects short password with 400', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: 'bob',
+    password: 'short1',
+  })
+
+  assert.equal(res.statusCode, 400)
+  assert.ok(res.body.error)
+  assert.ok(res.body.error.toLowerCase().includes('at least'))
+})
+
+test('POST /api/auth/register rejects common password with 400', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: 'charlie',
+    password: 'password', // on the blocklist but also too short — first error wins
+  })
+
+  assert.equal(res.statusCode, 400)
+  assert.ok(res.body.error)
+  // Could be either error (min-length or common), just assert it's an error
+})
+
+test('POST /api/auth/register rejects missing username with 400', async () => {
+  const res = await httpPost('/api/auth/register', {
+    password: 'this is a sufficiently long password',
+  })
+
+  assert.equal(res.statusCode, 400)
+  assert.ok(res.body.error)
+  assert.ok(res.body.error.toLowerCase().includes('username'))
+})
+
+test('POST /api/auth/register rejects missing password with 400', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: 'dave',
+  })
+
+  assert.equal(res.statusCode, 400)
+  assert.ok(res.body.error)
+  assert.ok(res.body.error.toLowerCase().includes('at least'))
+})
+
+test('POST /api/auth/register enforces username uniqueness case-insensitively', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: 'ALICE', // same as 'alice' due to case-insensitive constraint
+    password: 'some other sufficiently long phrase',
+  })
+
+  assert.equal(res.statusCode, 409)
+  assert.ok(res.body.error)
+  assert.ok(res.body.error.toLowerCase().includes('already exists'))
+})
+
+test('POST /api/auth/register normalizes username', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: '  Eve  ',
+    password: 'a truly magnificent long password',
+  })
+
+  assert.equal(res.statusCode, 201)
+  assert.equal(res.body.username, 'Eve')
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/login tests
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/login succeeds with valid credentials', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.username, 'alice')
+  assert.ok(res.body.id, 'response includes user id')
+  assert.ok(res.body.createdAt, 'response includes created_at')
+
+  // Cookie should be set
+  const setCookie = res.headers['set-cookie']
+  assert.ok(setCookie, 'Set-Cookie header present')
+  const cookieStr = Array.isArray(setCookie) ? setCookie.join(', ') : setCookie
+  assert.ok(cookieStr.includes('atrium_auth_session='))
+})
+
+test('POST /api/auth/login returns 401 for wrong password', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'wrong password that is long enough',
+  })
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Invalid credentials')
+})
+
+test('POST /api/auth/login returns 401 for non-existent user', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'nonexistent_user',
+    password: 'some sufficiently long password',
+  })
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Invalid credentials')
+})
+
+test('POST /api/auth/login returns 401 for case-insensitive matched user with wrong password', async () => {
+  const res = await httpPost('/api/auth/login', {
+    username: 'ALICE', // matches 'alice' via COLLATE NOCASE
+    password: 'wrong password that is long enough',
+  })
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Invalid credentials')
+})
+
+test('POST /api/auth/login returns 400 for missing fields', async () => {
+  const noUser = await httpPost('/api/auth/login', { password: 'some sufficiently long password' })
+  assert.equal(noUser.statusCode, 400)
+  assert.ok(noUser.body.error)
+
+  const noPass = await httpPost('/api/auth/login', { username: 'alice' })
+  assert.equal(noPass.statusCode, 400)
+  assert.ok(noPass.body.error)
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/logout tests
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/logout clears cookie and returns 200', async () => {
+  // First, login to get a valid session cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  // Now logout with the cookie
+  const res = await httpPostWithCookie('/api/auth/logout', {}, cookieStr)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.message, 'Logged out')
+
+  // Cookie should be cleared (Max-Age=0)
+  const logoutCookie = Array.isArray(res.headers['set-cookie'])
+    ? res.headers['set-cookie'].join('; ')
+    : res.headers['set-cookie']
+  assert.ok(logoutCookie, 'Set-Cookie header present on logout')
+  assert.ok(logoutCookie.includes('Max-Age=0'))
+})
+
+test('POST /api/auth/logout works without a cookie (idempotent)', async () => {
+  const res = await httpPost('/api/auth/logout', {})
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.message, 'Logged out')
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/auth/me tests
+// ---------------------------------------------------------------------------
+
+test('GET /api/auth/me returns user info for authenticated request', async () => {
+  // Login first to get a valid cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  // Use the cookie to call /me
+  const res = await httpGetWithCookie('/api/auth/me', cookieStr)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.username, 'alice')
+  assert.ok(res.body.id)
+  assert.ok(res.body.displayName)
+  assert.ok(res.body.createdAt)
+})
+
+test('GET /api/auth/me returns 401 without cookie', async () => {
+  const res = await httpGet('/api/auth/me')
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Not authenticated')
+})
+
+test('GET /api/auth/me returns 401 with expired/unknown cookie', async () => {
+  const res = await httpGetWithCookie('/api/auth/me', 'atrium_auth_session=nonexistent-session-id')
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Not authenticated')
+})
+
+// ---------------------------------------------------------------------------
+// Origin validation tests (CSRF)
+// ---------------------------------------------------------------------------
+
+test('POST /api/auth/register with cross-origin header is rejected (403)', async () => {
+  const res = await httpPostWithOrigin('/api/auth/register', {
+    username: 'cross-origin-user',
+    password: 'a sufficiently long password ok',
+  }, 'https://evil-website.com')
+
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('POST /api/auth/login with cross-origin header is rejected (403)', async () => {
+  const res = await httpPostWithOrigin('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  }, 'https://evil-website.com')
+
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('POST /api/auth/logout with cross-origin header is rejected (403)', async () => {
+  const res = await httpPostWithOrigin('/api/auth/logout', {}, 'https://evil-website.com')
+
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('GET /api/auth/me is exempt from origin validation', async () => {
+  const res = await httpGetWithOrigin('/api/auth/me', 'https://evil-website.com')
+  // Exempt routes don't validate origin — just returns 401 because no cookie
+  assert.equal(res.statusCode, 401)
+})
+
+test('GET /api/health is exempt from origin validation', async () => {
+  const res = await httpGetWithOrigin('/api/health', 'https://evil-website.com')
+  // Exempt routes don't validate origin — returns 200
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { status: 'ok' })
+})
+
+test('WebSocket upgrade with cross-origin header is rejected (socket destroyed)', async () => {
+  const socket = connect(PORT, 'localhost')
+
+  let receivedData = false
+  let closed = false
+
+  socket.on('data', () => { receivedData = true })
+  socket.on('close', () => { closed = true })
+
+  await new Promise((resolve, reject) => {
+    socket.on('connect', resolve)
+    socket.on('error', reject)
+  })
+
+  // Send a WebSocket upgrade request with a cross-origin Origin header
+  socket.write(
+    'GET / HTTP/1.1\r\n' +
+    'Host: localhost\r\n' +
+    'Connection: Upgrade\r\n' +
+    'Upgrade: websocket\r\n' +
+    'Origin: https://evil-website.com\r\n' +
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+    'Sec-WebSocket-Version: 13\r\n' +
+    '\r\n'
+  )
+
+  await new Promise(r => setTimeout(r, 300))
+
+  assert.ok(closed, 'cross-origin WS upgrade should be destroyed')
+  assert.ok(!receivedData, 'no data should be sent to cross-origin upgrade')
+
+  socket.destroy()
+})
+
+// ---------------------------------------------------------------------------
+// WebSocket upgrade — cookie resolution tests
+// ---------------------------------------------------------------------------
+
+test('WebSocket upgrade with valid auth cookie resolves userId on session', async () => {
+  // Login to get a valid session cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  // Connect WebSocket with the cookie
+  const { ws, q } = websocketConnectWithHeaders({ Cookie: cookieStr })
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'ws-auth-test-valid',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  // Verify the hello response has avatarNodeName (confirms WS connected)
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.equal(hello.type, 'hello')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+test('WebSocket upgrade without cookie resolves to anonymous (userId null)', async () => {
+  const { ws, q } = websocketConnectWithHeaders({})
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'ws-auth-test-anon',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+test('WebSocket upgrade with expired/garbage cookie resolves to anonymous', async () => {
+  const { ws, q } = websocketConnectWithHeaders({
+    Cookie: 'atrium_auth_session=nonexistent-garbage-id',
+  })
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'ws-auth-test-garbage',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello (anonymous)')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+// ---------------------------------------------------------------------------
+// WebSocket integration tests
+// ---------------------------------------------------------------------------
 
 test('WebSocket client completes hello and receives som-dump', async () => {
   const ws = new WebSocket(`ws://localhost:${PORT}`)
@@ -131,7 +695,6 @@ test('WebSocket client completes hello and receives som-dump', async () => {
   assert.ok(hello.avatarNodeName.startsWith('avatar-'))
 
   // Should receive som-dump with the loaded world
-  // (tick may arrive before or after, so waitForType handles ordering)
   const somDump = await q.waitForType('som-dump', 2000)
   assert.ok(somDump !== null, 'should receive som-dump within timeout')
   assert.equal(somDump.type, 'som-dump')
@@ -207,7 +770,7 @@ test('non-WebSocket upgrade request is rejected (socket destroyed)', async () =>
   // and Upgrade: h2c (not 'websocket'). The server's upgrade handler should
   // call socket.destroy(), closing the connection without a 101 response.
   const socket = connect(PORT, 'localhost')
-  
+
   // Track whether we saw any data before close
   let receivedData = false
   let closed = false

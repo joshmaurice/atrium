@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
+import { isOriginAllowed } from './http-routes.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -35,7 +36,7 @@ function lookToQuaternion(look) {
   return [cx/len, cy/len, cz/len, qw/len]
 }
 
-export function createSessionServer({ httpServer, maxUsers = 100, world = null } = {}) {
+export function createSessionServer({ httpServer, maxUsers = 100, world = null, db = null } = {}) {
   if (!httpServer) {
     throw new Error('createSessionServer requires httpServer option')
   }
@@ -55,8 +56,32 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null }
       socket.destroy()
       return
     }
+
+    // Validate Origin header to prevent cross-origin WebSocket hijacking
+    // (cookie auth otherwise lets any website open an authenticated socket
+    // from a visitor's browser)
+    if (!isOriginAllowed(request)) {
+      socket.destroy()
+      return
+    }
+
+    // Resolve userId from auth session cookie before the WebSocket handshake.
+    // This is the seam built in step 2a — cookie parsing and
+    // authSessionId -> userId resolution happen here, before wss.handleUpgrade.
+    // The resolved userId (or null for anonymous) is attached to the
+    // server-side session object when the connection is established.
+    let upgradeUserId = null
+    if (db) {
+      try {
+        upgradeUserId = resolveWsUserId(request, db)
+      } catch {
+        // If resolution fails for any reason, treat as anonymous
+        upgradeUserId = null
+      }
+    }
+
     wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request)
+      wss.emit('connection', ws, request, upgradeUserId)
     })
   })
 
@@ -78,7 +103,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null }
     }
   }
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req, upgradeUserId = null) => {
     let session = null
 
     ws.on('message', async (raw) => {
@@ -126,12 +151,19 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null }
           session = {
             ws,
             id: sessionId,
+            userId: null, // populated at upgrade time via cookie resolution
             capabilities: msg.capabilities ?? {},
             seq: nextSeq(),
             alive: true,
             tickStop: null,
             avatarNodeName: `avatar-${sessionId.slice(0, 8)}`,
             displayName: userDisplayName,
+          }
+          // If the upgrade handler resolved a userId from the auth cookie,
+          // attach it now (before the connection is fully established,
+          // so auth state is available throughout the session lifecycle)
+          if (upgradeUserId) {
+            session.userId = upgradeUserId
           }
           sessions.set(session.id, session)
 
@@ -405,4 +437,54 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null }
   }
 
   return { wss, sessions, presence, httpServer, close }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket upgrade cookie resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the atrium_auth_session cookie from a raw request and resolve it
+ * to a userId. Returns null if the cookie is missing, expired, or unknown.
+ * This is a standalone copy of the logic in http-routes.js to avoid
+ * circular dependencies.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {string|null}
+ */
+function resolveWsUserId(req, db) {
+  const raw = req.headers['cookie']
+  if (!raw) return null
+
+  // Parse cookie
+  let authSessionId = null
+  const cookies = raw.split(';').map(c => c.trim())
+  for (const cookie of cookies) {
+    const [name, ...rest] = cookie.split('=')
+    if (name.trim() === 'atrium_auth_session' && rest.length > 0) {
+      authSessionId = rest.join('=').trim()
+      break
+    }
+  }
+  if (!authSessionId) return null
+
+  // Look up session in DB
+  const row = db.database.prepare(
+    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
+  ).get(authSessionId)
+
+  if (!row) return null
+
+  // Check expiry
+  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+    try {
+      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
+    } catch {
+      // Swallow cleanup errors
+    }
+    return null
+  }
+
+  return row.user_id
 }

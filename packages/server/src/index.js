@@ -8,6 +8,7 @@ import { createWorld } from './world.js'
 import { createSessionServer } from './session.js'
 import { createRequestHandler } from './http-routes.js'
 import { createDb } from './db.js'
+import * as auth from './auth.js'
 
 // ---------------------------------------------------------------------------
 // Port extraction from a WebSocket URL
@@ -75,12 +76,12 @@ console.log(`Atrium database: ${dbPath || '(default)'}`)
 // HTTP server with route dispatch (plain Node http — no Express)
 // ---------------------------------------------------------------------------
 
-const httpServer = createServer(createRequestHandler())
+const httpServer = createServer(createRequestHandler({ db, auth }))
 
 // ---------------------------------------------------------------------------
 // Session server (WebSocket upgrade on the same port)
 // ---------------------------------------------------------------------------
 
-createSessionServer({ httpServer, world })
+createSessionServer({ httpServer, world, db })
 httpServer.listen(port)
 console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket)`)

@@ -60,14 +60,15 @@ describe('migrations', () => {
     // Re-open the same file (second migration run)
     const db2 = createDb(path)
 
-    // Verify only one migration version recorded
+    // Verify only one migration version recorded (second open is idempotent)
     const versions = db2.database.prepare(
       'SELECT version, description FROM schema_migrations ORDER BY version'
     ).all()
 
-    assert.equal(versions.length, 1)
+    assert.equal(versions.length, 2)
     assert.equal(versions[0].version, 1)
-    assert.equal(versions[0].description, 'Create users, auth_sessions, worlds, preferences tables')
+    assert.equal(versions[1].version, 2)
+    assert.equal(versions[1].description, 'Make password_hash NOT NULL in users table')
 
     // No error = idempotent
     db2.close()
@@ -228,6 +229,19 @@ describe('schema constraints', () => {
       db.database.prepare(
         'INSERT INTO auth_sessions (id, user_id, created_at) VALUES (?, ?, ?)'
       ).run('s-null-001', 'u-00000000-0000-0000-0000-000000000001', new Date().toISOString())
+    }, /NOT NULL constraint failed/)
+  })
+
+  test('users.password_hash is NOT NULL', () => {
+    const db = freshDb('pw-not-null.db')
+
+    // password_hash has DEFAULT '', so omitting it from the INSERT would
+    // fill '' and succeed. We must explicitly pass NULL to trigger the
+    // NOT NULL constraint.
+    assert.throws(() => {
+      db.database.prepare(
+        'INSERT INTO users (id, username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)'
+      ).run('u-null-pw', 'pw-test', null, 'PW Test', new Date().toISOString())
     }, /NOT NULL constraint failed/)
   })
 

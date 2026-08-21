@@ -68,6 +68,31 @@ const MIGRATIONS = [
         FOREIGN KEY (user_id) REFERENCES users(id)
       );
     `
+  },
+  {
+    version: 2,
+    description: 'Make password_hash NOT NULL in users table',
+    sql: `
+      -- SQLite does not support ALTER COLUMN, so we rebuild the table.
+      CREATE TABLE IF NOT EXISTS users_new (
+        id            TEXT PRIMARY KEY,
+        username      TEXT NOT NULL,
+        password_hash TEXT NOT NULL DEFAULT '',
+        display_name  TEXT NOT NULL DEFAULT '',
+        created_at    TEXT NOT NULL
+      );
+
+      INSERT INTO users_new (id, username, password_hash, display_name, created_at)
+        SELECT id, username, COALESCE(password_hash, ''), display_name, created_at
+        FROM users;
+
+      DROP TABLE users;
+
+      ALTER TABLE users_new RENAME TO users;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_ci
+        ON users (username COLLATE NOCASE);
+    `
   }
 ]
 

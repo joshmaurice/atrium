@@ -75,6 +75,7 @@ open apps/playground/index.html        # pointer-event test bench
 - 3008: `avatar.test.js`
 - 3009–3013: `session.test.js` additional integration tests
 - 3014: `http-integration.test.js`
+- 3016: `rate-limit.test.js`
 
 ## Key Files
 
