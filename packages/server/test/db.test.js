@@ -232,6 +232,19 @@ describe('schema constraints', () => {
     }, /NOT NULL constraint failed/)
   })
 
+  test('users.password_hash is NOT NULL', () => {
+    const db = freshDb('pw-not-null.db')
+
+    // password_hash has DEFAULT '', so omitting it from the INSERT would
+    // fill '' and succeed. We must explicitly pass NULL to trigger the
+    // NOT NULL constraint.
+    assert.throws(() => {
+      db.database.prepare(
+        'INSERT INTO users (id, username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)'
+      ).run('u-null-pw', 'pw-test', null, 'PW Test', new Date().toISOString())
+    }, /NOT NULL constraint failed/)
+  })
+
   test('preferences table exists and has correct primary key', () => {
     const db = freshDb('preferences-exists.db')
 
