@@ -82,6 +82,6 @@ const httpServer = createServer(createRequestHandler({ db, auth }))
 // Session server (WebSocket upgrade on the same port)
 // ---------------------------------------------------------------------------
 
-createSessionServer({ httpServer, world })
+createSessionServer({ httpServer, world, db })
 httpServer.listen(port)
 console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket)`)

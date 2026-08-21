@@ -241,6 +241,15 @@ function makeMessageQueue(ws) {
   return { waitForType }
 }
 
+/**
+ * Connect a WebSocket with headers (simulating browser cookies during upgrade).
+ */
+function websocketConnectWithHeaders(headers = {}) {
+  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers })
+  const q = makeMessageQueue(ws)
+  return { ws, q }
+}
+
 // ---------------------------------------------------------------------------
 // Server setup with real HTTP routing and WS upgrade on shared port
 // ---------------------------------------------------------------------------
@@ -249,7 +258,7 @@ const db = createDb(dbPath)
 const httpServer = createServer(createRequestHandler({ db, auth }))
 
 const world = await createWorld(FIXTURE_PATH)
-const server = createSessionServer({ httpServer, maxUsers: 20, world })
+const server = createSessionServer({ httpServer, maxUsers: 20, world, db })
 
 httpServer.listen(PORT)
 
@@ -590,6 +599,77 @@ test('WebSocket upgrade with cross-origin header is rejected (socket destroyed)'
   assert.ok(!receivedData, 'no data should be sent to cross-origin upgrade')
 
   socket.destroy()
+})
+
+// ---------------------------------------------------------------------------
+// WebSocket upgrade — cookie resolution tests
+// ---------------------------------------------------------------------------
+
+test('WebSocket upgrade with valid auth cookie resolves userId on session', async () => {
+  // Login to get a valid session cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  // Connect WebSocket with the cookie
+  const { ws, q } = websocketConnectWithHeaders({ Cookie: cookieStr })
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'ws-auth-test-valid',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  // Verify the hello response has avatarNodeName (confirms WS connected)
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.equal(hello.type, 'hello')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+test('WebSocket upgrade without cookie resolves to anonymous (userId null)', async () => {
+  const { ws, q } = websocketConnectWithHeaders({})
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'ws-auth-test-anon',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+test('WebSocket upgrade with expired/garbage cookie resolves to anonymous', async () => {
+  const { ws, q } = websocketConnectWithHeaders({
+    Cookie: 'atrium_auth_session=nonexistent-garbage-id',
+  })
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'ws-auth-test-garbage',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello (anonymous)')
+
+  ws.close()
+  await waitForClose(ws)
 })
 
 // ---------------------------------------------------------------------------
