@@ -118,6 +118,33 @@ function httpPostWithCookie(path, payload, cookie) {
   })
 }
 
+function httpGetWithCookie(path, cookie) {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname: 'localhost',
+        port: PORT,
+        path,
+        method: 'GET',
+        headers: { 'Cookie': cookie },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (chunk) => { body += chunk })
+        res.on('end', () => {
+          try {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(body) })
+          } catch {
+            resolve({ statusCode: res.statusCode, headers: res.headers, body })
+          }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // WS helpers
 // ---------------------------------------------------------------------------
@@ -387,6 +414,44 @@ test('POST /api/auth/logout works without a cookie (idempotent)', async () => {
 
   assert.equal(res.statusCode, 200)
   assert.equal(res.body.message, 'Logged out')
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/auth/me tests
+// ---------------------------------------------------------------------------
+
+test('GET /api/auth/me returns user info for authenticated request', async () => {
+  // Login first to get a valid cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  // Use the cookie to call /me
+  const res = await httpGetWithCookie('/api/auth/me', cookieStr)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.username, 'alice')
+  assert.ok(res.body.id)
+  assert.ok(res.body.displayName)
+  assert.ok(res.body.createdAt)
+})
+
+test('GET /api/auth/me returns 401 without cookie', async () => {
+  const res = await httpGet('/api/auth/me')
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Not authenticated')
+})
+
+test('GET /api/auth/me returns 401 with expired/unknown cookie', async () => {
+  const res = await httpGetWithCookie('/api/auth/me', 'atrium_auth_session=nonexistent-session-id')
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body.error, 'Not authenticated')
 })
 
 // ---------------------------------------------------------------------------

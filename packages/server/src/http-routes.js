@@ -27,6 +27,44 @@ export function createRequestHandler(opts = {}) {
     }
 
     // -----------------------------------------------------------------------
+    // GET /api/auth/me
+    // -----------------------------------------------------------------------
+    if (method === 'GET' && url.pathname === '/api/auth/me') {
+      if (!db) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Auth subsystem not available' }))
+        return
+      }
+
+      const userId = resolveUserIdFromCookie(req, db)
+
+      if (!userId) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Not authenticated' }))
+        return
+      }
+
+      const user = db.database.prepare(
+        'SELECT id, username, display_name, created_at FROM users WHERE id = ?'
+      ).get(userId)
+
+      if (!user) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Not authenticated' }))
+        return
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        id: user.id,
+        username: user.username,
+        displayName: user.display_name,
+        createdAt: user.created_at,
+      }))
+      return
+    }
+
+    // -----------------------------------------------------------------------
     // POST /api/auth/register
     // -----------------------------------------------------------------------
     if (method === 'POST' && url.pathname === '/api/auth/register') {
@@ -317,4 +355,36 @@ export function parseAuthSessionCookie(req) {
     }
   }
   return null
+}
+
+/**
+ * Resolve a userId from the request's auth session cookie.
+ * Returns null if the cookie is missing, expired, or the session row
+ * doesn't exist (anonymous / unauthenticated).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {string|null}
+ */
+export function resolveUserIdFromCookie(req, db) {
+  const authSessionId = parseAuthSessionCookie(req)
+  if (!authSessionId) return null
+
+  const row = db.database.prepare(
+    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
+  ).get(authSessionId)
+
+  if (!row) return null
+
+  // Check expiry
+  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+    // Session expired — clean up the row
+    try {
+      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
+    } catch {
+      // Swallow cleanup errors
+    }
+    return null
+  }
+
+  return row.user_id
 }
