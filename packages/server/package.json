@@ -11,11 +11,12 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.0.0",
-    "@gltf-transform/extensions": "^4.3.0",
+    "@atrium/gltf-extension": "workspace:*",
     "@atrium/protocol": "workspace:*",
     "@atrium/som": "workspace:*",
-    "@atrium/gltf-extension": "workspace:*",
+    "@gltf-transform/core": "^4.0.0",
+    "@gltf-transform/extensions": "^4.3.0",
+    "better-sqlite3": "^11.10.0",
     "ws": "^8.0.0"
   }
 }
