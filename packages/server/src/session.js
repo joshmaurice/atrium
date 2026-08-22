@@ -146,7 +146,23 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
             return
           }
 
-          const userDisplayName = `User-${sessionId.slice(0, 4)}`
+          let userDisplayName = `User-${sessionId.slice(0, 4)}`
+
+          // When the user is authenticated, use their real display_name
+          // (from the users table) instead of the anonymous fallback.
+          // This makes the real name visible to peers and the HUD.
+          if (upgradeUserId && db) {
+            try {
+              const userRow = db.database.prepare(
+                'SELECT display_name FROM users WHERE id = ?'
+              ).get(upgradeUserId)
+              if (userRow && userRow.display_name) {
+                userDisplayName = userRow.display_name
+              }
+            } catch {
+              // If the lookup fails, stick with the anonymous fallback
+            }
+          }
 
           session = {
             ws,

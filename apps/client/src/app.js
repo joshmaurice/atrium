@@ -574,7 +574,9 @@ connectBtn.addEventListener('click', () => {
     client.worldBaseUrl = new URL(worldUrl, window.location.href).href
   }
   const avatarDesc = buildAvatarDescriptor()
-  client.connect(wsUrl, { avatar: avatarDesc })
+  const connectOpts = { avatar: avatarDesc }
+  if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
+  client.connect(wsUrl, connectOpts)
 })
 
 // ---------------------------------------------------------------------------
