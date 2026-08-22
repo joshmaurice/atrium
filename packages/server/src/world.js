@@ -113,7 +113,7 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
     return { ok: true, node }
   }
 
-  async function serialize() {
+  async function serialize({ excludeNodes } = {}) {
     const { json, resources } = await io.writeJSON(som._document)
     for (const buf of json.buffers ?? []) {
       if (buf.uri && !buf.uri.startsWith('data:')) {
@@ -124,16 +124,24 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
       }
     }
 
-    // Filter externally-ingested nodes from the dump so every client always
-    // resolves external references locally from scratch.
-    if (externalNodeNames.size > 0 && json.nodes) {
+    // Build the full exclusion set: external refs (always filtered) plus any
+    // caller-supplied node names (e.g. avatar names for persistence saves).
+    const allExcluded = new Set(externalNodeNames)
+    if (excludeNodes) {
+      for (const name of excludeNodes) {
+        allExcluded.add(name)
+      }
+    }
+
+    // Filter excluded nodes from the serialized glTF
+    if (allExcluded.size > 0 && json.nodes) {
       // Build index: glTF node index → node name
       const nameByIndex = new Map(json.nodes.map((n, i) => [i, n.name]))
 
       // Collect set of indices to remove
       const removeIndices = new Set(
         json.nodes
-          .map((n, i) => (externalNodeNames.has(n.name) ? i : -1))
+          .map((n, i) => (allExcluded.has(n.name) ? i : -1))
           .filter(i => i >= 0)
       )
 
