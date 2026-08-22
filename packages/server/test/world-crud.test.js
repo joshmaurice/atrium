@@ -172,14 +172,15 @@ function makeMessageQueue(ws) {
 
 const db = createDb(dbPath)
 const sessionsRef = { current: null }
-const worldRef = { current: null }
 
-// Wire worldRef + sessionsRef for save handlers
-const httpServer = createServer(createRequestHandler({ db, auth, worldRef, sessionsRef }))
-
+// Create world first — it exists synchronously before the handler, same as index.js
 const world = await createWorld(FIXTURE_PATH)
+
+// Pass world directly (not worldRef); only sessions needs ref indirection
+// since the sessions Map doesn't exist until createSessionServer runs.
+const httpServer = createServer(createRequestHandler({ db, auth, world, sessionsRef }))
+
 const server = createSessionServer({ httpServer, maxUsers: 20, world, db })
-worldRef.current = world
 sessionsRef.current = server.sessions
 
 httpServer.listen(PORT)
