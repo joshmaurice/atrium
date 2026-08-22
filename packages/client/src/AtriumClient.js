@@ -213,13 +213,13 @@ export class AtriumClient extends EventEmitter {
    * @param {object} opts
    * @param {object} [opts.avatar] - Opaque glTF node descriptor for the local avatar
    */
-  connect(wsUrl, { avatar } = {}) {
+  connect(wsUrl, { avatar, displayName } = {}) {
     if (this._ws) this.disconnect()
 
     const sessionId      = globalThis.crypto.randomUUID()
     const shortId        = sessionId.slice(0, 4)
     this._sessionId      = sessionId
-    this._displayName    = `User-${shortId}`
+    this._displayName    = displayName || `User-${shortId}`
     this._avatarNodeName = this._displayName
     this._avatarDescriptor = avatar ?? null
     if (this._avatarDescriptor) {
