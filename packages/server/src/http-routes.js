@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import { randomUUID } from 'node:crypto'
+import * as worldStore from './world-store.js'
 
 /**
  * Validate the Origin header for CSRF / cross-origin protection.
@@ -118,7 +119,7 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
-  const { db, auth } = opts
+  const { db, auth, world, sessionsRef } = opts
 
   // Create a per-IP rate limiter for auth endpoints:
   // 20 requests per minute per IP on register/login
@@ -426,6 +427,243 @@ export function createRequestHandler(opts = {}) {
       return
     }
 
+    // -----------------------------------------------------------------------
+    // GET /api/worlds — list own worlds
+    // -----------------------------------------------------------------------
+    if (method === 'GET' && url.pathname === '/api/worlds') {
+      if (!db) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Database not available' }))
+        return
+      }
+
+      const userId = resolveUserIdFromCookie(req, db)
+      if (!userId) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Not authenticated' }))
+        return
+      }
+
+      const worlds = worldStore.listWorlds(db.database, userId)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(worlds))
+      return
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /api/worlds — create a new world
+    // -----------------------------------------------------------------------
+    if (method === 'POST' && url.pathname === '/api/worlds') {
+      if (!db) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Database not available' }))
+        return
+      }
+
+      if (!isOriginAllowed(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
+        return
+      }
+
+      const userId = resolveUserIdFromCookie(req, db)
+      if (!userId) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Not authenticated' }))
+        return
+      }
+
+      let body
+      try {
+        body = await parseJSONBody(req)
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid request body' }))
+        return
+      }
+
+      if (!body || !body.slug || typeof body.slug !== 'string' || body.slug.trim().length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Slug is required' }))
+        return
+      }
+
+      // Serialize the current live world as the initial document
+      // so a created world is always valid glTF from the moment it exists.
+      let initialDocument = ''
+      if (world) {
+        try {
+          const excludeNodes = getLiveAvatarNodeNames()
+          initialDocument = JSON.stringify(await world.serialize({ excludeNodes }))
+        } catch (err) {
+          console.error('Initial world serialize failed for create:', err.message)
+          // If serialization fails, create with empty document — still
+          // loadable, just empty
+        }
+      }
+
+      try {
+        const result = worldStore.createWorld(db.database, {
+          slug: body.slug.trim(),
+          name: body.name || '',
+          document: initialDocument,
+        }, userId)
+
+        res.writeHead(201, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(result))
+      } catch (err) {
+        if (err.message && err.message.includes('UNIQUE constraint failed')) {
+          res.writeHead(409, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'A world with that slug already exists' }))
+          return
+        }
+        console.error('World create failed:', err.message)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal server error' }))
+      }
+      return
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/worlds/:id — fetch a world by id (full document)
+    // -----------------------------------------------------------------------
+    const worldsIdMatch = url.pathname.match(/^\/api\/worlds\/([^/]+)$/)
+    if (worldsIdMatch) {
+      const worldId = worldsIdMatch[1]
+
+      if (method === 'GET') {
+        if (!db) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Database not available' }))
+          return
+        }
+
+        const userId = resolveUserIdFromCookie(req, db)
+        if (!userId) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Not authenticated' }))
+          return
+        }
+
+        const worldRow = worldStore.getWorld(db.database, worldId, userId)
+        if (!worldRow) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'World not found' }))
+          return
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Content-Disposition': `inline; filename="${worldRow.slug}.gltf"`,
+        })
+        res.end(worldRow.document || '{}')
+        return
+      }
+
+      if (method === 'PUT') {
+        if (!db || !world) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Save subsystem not available' }))
+          return
+        }
+
+        if (!isOriginAllowed(req)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
+          return
+        }
+
+        const userId = resolveUserIdFromCookie(req, db)
+        if (!userId) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Not authenticated' }))
+          return
+        }
+
+        // Server-authoritative save: serialize the live SOM, excluding avatars.
+        // The request body is read for optional metadata fields (slug, name)
+        // but the document is ALWAYS server-generated.
+        let body
+        try {
+          body = await parseJSONBody(req)
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid request body' }))
+          return
+        }
+
+        // Serialize the live world, excluding avatar nodes
+        let document
+        try {
+          const excludeNodes = getLiveAvatarNodeNames()
+          document = JSON.stringify(await world.serialize({ excludeNodes }))
+        } catch (err) {
+          console.error('World serialize failed for save:', err.message)
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Failed to serialize world' }))
+          return
+        }
+
+        // Only accept slug and name from the client; document is always
+        // server-authoritative. Never accept visibility, owner_user_id, or id.
+        const result = worldStore.updateWorld(db.database, worldId, userId, {
+          slug: body?.slug || undefined,
+          name: body?.name || undefined,
+          document,
+        })
+
+        if (!result.ok) {
+          if (result.code === 'NOT_FOUND') {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'World not found' }))
+          } else if (result.code === 'SLUG_CONFLICT') {
+            res.writeHead(409, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'A world with that slug already exists' }))
+          } else {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Internal server error' }))
+          }
+          return
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(result.world))
+        return
+      }
+
+      if (method === 'DELETE') {
+        if (!db) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Database not available' }))
+          return
+        }
+
+        if (!isOriginAllowed(req)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
+          return
+        }
+
+        const userId = resolveUserIdFromCookie(req, db)
+        if (!userId) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Not authenticated' }))
+          return
+        }
+
+        const result = worldStore.deleteWorld(db.database, worldId, userId)
+        if (!result.ok) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'World not found' }))
+          return
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ message: 'World deleted' }))
+        return
+      }
+    }
+
     // Catch-all: unknown paths
     res.writeHead(404, { 'Content-Type': 'text/plain' })
     res.end('Not Found')
@@ -539,4 +777,25 @@ export function resolveUserIdFromCookie(req, db) {
   }
 
   return row.user_id
+}
+
+/**
+ * Get the set of avatar node names currently live on the server.
+ *
+ * Reads from the sessionsRef passed to createRequestHandler, which is a
+ * mutable reference { current: Map | null } wired up in index.js.
+ * The sessions Map is populated/cleared dynamically as WebSocket sessions
+ * are established and torn down — we read it at request time.
+ *
+ * @returns {string[]} Array of avatar node names (empty if no sessions)
+ */
+function getLiveAvatarNodeNames() {
+  if (!sessionsRef || !sessionsRef.current) return []
+  const names = []
+  for (const [, session] of sessionsRef.current) {
+    if (session.avatarNodeName) {
+      names.push(session.avatarNodeName)
+    }
+  }
+  return names
 }

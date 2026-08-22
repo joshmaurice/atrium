@@ -76,12 +76,20 @@ console.log(`Atrium database: ${dbPath || '(default)'}`)
 // HTTP server with route dispatch (plain Node http — no Express)
 // ---------------------------------------------------------------------------
 
-const httpServer = createServer(createRequestHandler({ db, auth }))
+// Mutable reference for live session state. The sessions Map is populated
+// after the HTTP server is created (see below), so we thread a container
+// through and populate it after createSessionServer runs.
+const sessionsRef = { current: null }
+
+const httpServer = createServer(createRequestHandler({ db, auth, world, sessionsRef }))
 
 // ---------------------------------------------------------------------------
 // Session server (WebSocket upgrade on the same port)
 // ---------------------------------------------------------------------------
 
-createSessionServer({ httpServer, world, db })
+const { sessions } = createSessionServer({ httpServer, world, db })
+// Wire up the live session Map after it exists so save handlers
+// can read avatar node names at request time
+sessionsRef.current = sessions
 httpServer.listen(port)
 console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket)`)
