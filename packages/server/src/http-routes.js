@@ -216,7 +216,23 @@ export function createRequestHandler(opts = {}) {
         return
       }
 
-      const { username, password } = body || {}
+      const { username, password, website } = body || {}
+
+      // -- Honeypot check: if the optional website field is present and
+      //    non-empty, silently accept without creating an account.
+      //    Designed to catch automated registration bots that fill every
+      //    visible form field. Respond as if registration succeeded so
+      //    the bot gets no signal that it was caught.
+      if (website && typeof website === 'string' && website.trim().length > 0) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          id: '00000000-0000-0000-0000-000000000000',
+          username: username || 'honeypot',
+          displayName: username || 'honeypot',
+          createdAt: new Date().toISOString(),
+        }))
+        return
+      }
 
       // -- Validate username presence --
       if (!username || typeof username !== 'string' || username.trim().length === 0) {
