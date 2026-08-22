@@ -104,10 +104,16 @@ test('register sends website field — honeypot path returns fake success', asyn
   // Should get the fake 200 success (not 201, not an error)
   assert.ok(data.id, 'response includes a fake id')
 
-  // Verify no account was actually created by checking me() returns null
-  // (honest users can't login after honeypot, so me() with no cookie is null)
-  const afterMe = await me({ baseUrl: BASE_URL })
-  assert.equal(afterMe, null, 'no session was created (honeypot worked)')
+  // Verify no account was actually created by attempting to log in with it —
+  // sidesteps the no-cookie-persistence limitation entirely, since a fresh
+  // login() attempt doesn't depend on any prior session state. Same pattern
+  // already used in packages/server/test/world-crud.test.js's honeypot test.
+  try {
+    await login('honeypot-bot', 'a valid password', { baseUrl: BASE_URL })
+    assert.fail('expected login to fail — no account should have been created')
+  } catch (err) {
+    assert.equal(err.status, 401, 'honeypot worked: no account exists to log into')
+  }
 })
 
 test('login throws 401 on wrong password', async () => {
