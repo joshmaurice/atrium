@@ -184,6 +184,17 @@ export function createDb(dbPath) {
     /** The underlying better-sqlite3 Database instance. */
     database,
 
+    /**
+     * Delete expired auth_sessions rows.
+     * Runs on a periodic timer in index.js to complement the lazy expiry
+     * checks in resolveUserIdFromCookie and resolveWsUserId.
+     */
+    pruneExpiredAuthSessions() {
+      database.prepare(
+        'DELETE FROM auth_sessions WHERE expires_at <= ?'
+      ).run(new Date().toISOString())
+    },
+
     /** Close the database connection (for test teardown / graceful shutdown). */
     close() {
       database.close()

@@ -93,3 +93,13 @@ const { sessions } = createSessionServer({ httpServer, world, db })
 sessionsRef.current = sessions
 httpServer.listen(port)
 console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket)`)
+
+// ---------------------------------------------------------------------------
+// Periodic sweep of expired auth sessions (every hour)
+// ---------------------------------------------------------------------------
+// Complementary to the lazy expiry checks on lookup; removes rows that
+// nobody ever looks up again. Uses unref() so it doesn't hold the process open.
+const sweepInterval = setInterval(() => {
+  db.pruneExpiredAuthSessions()
+}, 60 * 60 * 1000)
+sweepInterval.unref()
