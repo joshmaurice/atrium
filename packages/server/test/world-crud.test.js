@@ -741,23 +741,37 @@ test('node with avatar-like extras is saved normally (not treated as avatar)', a
   assert.equal(createRes.statusCode, 201)
   const worldId = createRes.body.id
 
-  // The fixture space.gltf may have nodes; save should include all non-avatar nodes
+  // Add a node with avatar-like extras but NO live WS session claiming it.
+  // The exclusion logic runs off sessionsRef.current's avatarNodeName values,
+  // not anything inspectable in the node. Since no WS session has this node
+  // name, it should survive the save.
+  const avatarNameResult = world.addNode({
+    name: 'User-fake',
+    extras: { isAvatar: true, displayName: 'Fake Avatar' },
+  })
+  assert.ok(avatarNameResult.ok, 'avatar-like-named node added to live world')
+
+  const extrasResult = world.addNode({
+    name: 'ExtrasAvatar',
+    extras: { isAvatar: true, role: 'avatar' },
+  })
+  assert.ok(extrasResult.ok, 'extras-marked node added to live world')
+
+  // Save — should include both nodes since no session claims them
   const putRes = await httpPut(`/api/worlds/${worldId}`, {}, userA.cookie)
   assert.equal(putRes.statusCode, 200)
 
   const getRes = await httpGet(`/api/worlds/${worldId}`, userA.cookie)
   assert.ok(getRes.body, 'document exists')
 
-  // The point: no node is excluded based on extras alone — exclusion runs off
-  // session state. Since no WS session with avatar exists at this point in
-  // this isolated test, all nodes from the fixture should be present.
-  // (This test is structural: it asserts the save path doesn't query extras.)
+  if (getRes.body.nodes) {
+    const hasFakeAvatar = getRes.body.nodes.some(n => n.name === 'User-fake')
+    assert.equal(hasFakeAvatar, true,
+      'node named like avatar but with no live session IS saved (exclusion is session-driven)')
 
-  // Check that nodes from the fixture are present
-  if (getRes.body.nodes && getRes.body.nodes.length > 0) {
-    // The fixture has nodes; they should all be here since no sessions are live
-    // (previous tests closed their WS connections)
-    assert.ok(getRes.body.nodes.length > 0, 'fixture nodes are present')
+    const hasExtrasAvatar = getRes.body.nodes.some(n => n.name === 'ExtrasAvatar')
+    assert.equal(hasExtrasAvatar, true,
+      'node with avatar extras but no live session IS saved (exclusion is session-driven)')
   }
 })
 
