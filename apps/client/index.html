@@ -80,6 +80,8 @@
   button.primary:hover:not(:disabled) { background: #6d28d9; }
   button.text-btn { background: none; border: none; color: #a78bfa; font-size: 11px; padding: 5px; }
   button.text-btn:hover { color: #c4b5fd; }
+  button.danger { border-color: #dc2626; color: #fca5a5; }
+  button.danger:hover:not(:disabled) { background: #450a0a; }
 
   .toolbar select {
     background: #2d2d2d;
@@ -127,6 +129,85 @@
   .status-dot.connected    { background: #5cb85c; }
   .status-dot.connecting   { background: #f0ad4e; }
   .status-dot.error        { background: #d9534f; }
+
+  /* ── World browser ────────────────────────────────── */
+  #world-browser {
+    background: #161616;
+    border-bottom: 1px solid #333;
+    padding: 8px 12px;
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  #world-browser:empty { display: none; }
+
+  .wb-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #a78bfa;
+    margin-bottom: 6px;
+  }
+
+  .wb-create {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .wb-create input {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #e2e8f0;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  .wb-create input:focus { outline: none; border-color: #a78bfa; }
+  .wb-create input#wb-slug { width: 120px; }
+  .wb-create input#wb-name { width: 160px; }
+
+  #wb-error {
+    color: #f87171;
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+  #wb-error:empty { display: none; }
+
+  .wb-list {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .wb-list:empty::after {
+    content: 'No worlds saved yet.';
+    color: #64748b;
+    font-style: italic;
+    font-size: 11px;
+  }
+
+  .wb-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid #222;
+  }
+  .wb-item:last-child { border-bottom: none; }
+
+  .wb-item .wb-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .wb-item .wb-info .wb-name {
+    color: #e2e8f0;
+    font-size: 12px;
+  }
+  .wb-item .wb-info .wb-meta {
+    color: #64748b;
+    font-size: 10px;
+  }
+  .wb-item button {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
 
   /* ── Viewport (fills remaining space) ─────────────── */
   #viewport {
@@ -258,6 +339,18 @@
     <span id="auth-user-label"></span>
     <button id="auth-logout-btn">Logout</button>
   </div>
+</div>
+
+<!-- World Browser (shown when logged in) -->
+<div id="world-browser" style="display:none">
+  <div class="wb-header">My Worlds</div>
+  <div class="wb-create">
+    <input id="wb-slug" type="text" placeholder="slug" />
+    <input id="wb-name" type="text" placeholder="World name" />
+    <button id="wb-create-btn" class="primary">Create</button>
+  </div>
+  <div id="wb-error"></div>
+  <div class="wb-list" id="wb-list"></div>
 </div>
 
 <!-- Viewport -->

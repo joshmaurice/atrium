@@ -34,6 +34,14 @@ const authLogoutBtn = document.getElementById('auth-logout-btn')
 const authUserLabel = document.getElementById('auth-user-label')
 const authError     = document.getElementById('auth-error')
 
+// World browser DOM refs
+const worldBrowser  = document.getElementById('world-browser')
+const wbSlug        = document.getElementById('wb-slug')
+const wbName        = document.getElementById('wb-name')
+const wbCreateBtn   = document.getElementById('wb-create-btn')
+const wbError       = document.getElementById('wb-error')
+const wbList        = document.getElementById('wb-list')
+
 // ---------------------------------------------------------------------------
 // Auth state
 // ---------------------------------------------------------------------------
@@ -47,6 +55,9 @@ function setAuthState(user) {
     authLoggedIn.style.display  = ''
     authUserLabel.textContent   = user.displayName || user.username
     authError.textContent       = ''
+    // Show world browser and refresh list
+    worldBrowser.style.display = ''
+    refreshWorldList()
   } else {
     authLoggedOut.style.display = ''
     authLoggedIn.style.display  = 'none'
@@ -55,6 +66,9 @@ function setAuthState(user) {
     authUsername.value          = ''
     authPassword.value          = ''
     authError.textContent       = ''
+    // Hide world browser and clear list
+    worldBrowser.style.display = 'none'
+    wbList.innerHTML = ''
   }
 }
 
@@ -88,6 +102,115 @@ function toggleAuthMode() {
   authSubmitBtn.textContent = isRegister ? 'Login' : 'Register'
   authToggleBtn.textContent = isRegister ? 'Register' : 'Login'
   authError.textContent = ''
+}
+
+// ---------------------------------------------------------------------------
+// World browser
+// ---------------------------------------------------------------------------
+
+async function refreshWorldList() {
+  try {
+    const res = await fetch('/api/worlds')
+    if (res.status === 401) {
+      // Session expired — hide browser and update auth state
+      worldBrowser.style.display = 'none'
+      setAuthState(null)
+      return
+    }
+    if (!res.ok) return
+    const worlds = await res.json()
+    renderWorldList(worlds)
+  } catch {
+    // Network error — leave current list visible
+  }
+}
+
+function renderWorldList(worlds) {
+  if (worlds.length === 0) {
+    wbList.innerHTML = ''
+    return
+  }
+  wbList.innerHTML = ''
+  for (const w of worlds) {
+    const item = document.createElement('div')
+    item.className = 'wb-item'
+
+    const info = document.createElement('div')
+    info.className = 'wb-info'
+    info.innerHTML = `<div class="wb-name">${escHtml(w.name || w.slug)}</div>` +
+      `<div class="wb-meta">${escHtml(w.slug)} · ${formatTime(w.updated_at)}</div>`
+    item.appendChild(info)
+
+    const loadBtn = document.createElement('button')
+    loadBtn.textContent = 'Load'
+    loadBtn.disabled = client.connected
+    loadBtn.title = client.connected ? 'Disconnect before loading a saved world' : 'Load this world'
+    loadBtn.addEventListener('click', async () => {
+      loadBtn.disabled = true
+      try {
+        const res = await fetch(`/api/worlds/${w.id}`)
+        if (!res.ok) {
+          if (res.status === 404) {
+            wbError.textContent = 'World not found (may have been deleted)'
+          } else {
+            wbError.textContent = 'Failed to load world'
+          }
+          refreshWorldList()
+          return
+        }
+        const text = await res.text()
+        await client.loadWorldFromData(text, w.name || w.slug)
+        overlayEl.textContent = `Loaded: ${w.name || w.slug}`
+      } catch (err) {
+        wbError.textContent = 'Load failed: ' + err.message
+      } finally {
+        loadBtn.disabled = false
+      }
+    })
+    item.appendChild(loadBtn)
+
+    const delBtn = document.createElement('button')
+    delBtn.textContent = 'Delete'
+    delBtn.className = 'danger'
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`Delete "${w.name || w.slug}"?`)) return
+      delBtn.disabled = true
+      try {
+        const res = await fetch(`/api/worlds/${w.id}`, { method: 'DELETE' })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          wbError.textContent = data.error || 'Delete failed'
+        }
+        refreshWorldList()
+      } catch (err) {
+        wbError.textContent = 'Delete failed: ' + err.message
+      } finally {
+        delBtn.disabled = false
+      }
+    })
+    item.appendChild(delBtn)
+
+    wbList.appendChild(item)
+  }
+}
+
+function escHtml(str) {
+  const div = document.createElement('div')
+  div.textContent = str || ''
+  return div.innerHTML
+}
+
+function formatTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now - d
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  return d.toLocaleDateString()
 }
 
 // ---------------------------------------------------------------------------
@@ -189,13 +312,30 @@ function setConnectionState(state) {
   } else if (state === 'connected') {
     connectBtn.textContent = 'Disconnect'
     connectBtn.disabled    = false
+    // Disable all world-browser Load buttons while connected
+    document.querySelectorAll('.wb-item button:first-of-type').forEach(b => {
+      b.disabled = true
+      b.title = 'Disconnect before loading a saved world'
+    })
   } else {
     // disconnected or error
     connectBtn.textContent = 'Connect'
     connectBtn.disabled    = false
+    // Re-enable world-browser Load buttons since we're no longer connected
+    enableWbLoadButtons()
   }
 
   updateHud()
+}
+
+function enableWbLoadButtons() {
+  // Re-enable any disabled Load buttons when disconnected
+  for (const btn of wbList.querySelectorAll('button')) {
+    if (btn.textContent === 'Load') {
+      btn.disabled = false
+      btn.title = 'Load this world'
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +600,47 @@ authLogoutBtn.addEventListener('click', async () => {
   } finally {
     authLogoutBtn.disabled = false
   }
+})
+
+// ---------------------------------------------------------------------------
+// World browser actions
+// ---------------------------------------------------------------------------
+
+wbCreateBtn.addEventListener('click', async () => {
+  const slug = wbSlug.value.trim()
+  const name = wbName.value.trim()
+  if (!slug) {
+    wbError.textContent = 'Slug is required'
+    return
+  }
+  wbCreateBtn.disabled = true
+  wbError.textContent = ''
+  try {
+    const res = await fetch('/api/worlds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, name }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      wbError.textContent = data.error || `Create failed (${res.status})`
+      return
+    }
+    wbSlug.value = ''
+    wbName.value = ''
+    refreshWorldList()
+  } catch (err) {
+    wbError.textContent = 'Create failed: ' + err.message
+  } finally {
+    wbCreateBtn.disabled = false
+  }
+})
+
+wbSlug.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') wbCreateBtn.click()
+})
+wbName.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') wbCreateBtn.click()
 })
 
 // ---------------------------------------------------------------------------
