@@ -119,17 +119,7 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
-  const { db, auth, world, sessionsRef, worldRef } = opts
-
-  // Resolve the effective world object. Direct `world` parameter wins for
-  // backward compatibility; if absent, fall through to `worldRef.current`
-  // (the mutable-reference pattern used in tests where world is created
-  // after the handler factory is called).
-  function resolveWorld() {
-    if (world) return world
-    if (worldRef && worldRef.current) return worldRef.current
-    return null
-  }
+  const { db, auth, world, sessionsRef } = opts
 
   // Create a per-IP rate limiter for auth endpoints:
   // 20 requests per minute per IP on register/login
@@ -534,7 +524,7 @@ export function createRequestHandler(opts = {}) {
       // Serialize the current live world as the initial document
       // so a created world is always valid glTF from the moment it exists.
       let initialDocument = ''
-      const liveWorld = resolveWorld()
+      const liveWorld = world
       if (liveWorld) {
         try {
           const excludeNodes = getLiveAvatarNodeNames()
@@ -611,7 +601,7 @@ export function createRequestHandler(opts = {}) {
           return
         }
 
-        const liveWorld = resolveWorld()
+        const liveWorld = world
         if (!liveWorld) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Save subsystem not available' }))
