@@ -65,10 +65,12 @@ describe('migrations', () => {
       'SELECT version, description FROM schema_migrations ORDER BY version'
     ).all()
 
-    assert.equal(versions.length, 2)
+    assert.equal(versions.length, 3)
     assert.equal(versions[0].version, 1)
     assert.equal(versions[1].version, 2)
     assert.equal(versions[1].description, 'Make password_hash NOT NULL in users table')
+    assert.equal(versions[2].version, 3)
+    assert.equal(versions[2].description, 'Add CHECK constraint to worlds.visibility for Phase-1 private-only')
 
     // No error = idempotent
     db2.close()
