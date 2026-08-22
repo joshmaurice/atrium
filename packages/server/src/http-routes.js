@@ -253,7 +253,7 @@ export function createRequestHandler(opts = {}) {
       if (website && typeof website === 'string' && website.trim().length > 0) {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
-          id: '00000000-0000-0000-0000-000000000000',
+          id: randomUUID(),
           username: username || 'honeypot',
           displayName: username || 'honeypot',
           createdAt: new Date().toISOString(),

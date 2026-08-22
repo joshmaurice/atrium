@@ -788,8 +788,11 @@ test('honeypot: website field populated returns 200 but no user created', async 
 
   assert.equal(res.statusCode, 200)
   assert.ok(res.body.id)
-  // id should be the fake UUID
-  assert.equal(res.body.id, '00000000-0000-0000-0000-000000000000')
+  // id should be a well-formed UUID (randomized per call for anti-fingerprinting)
+  assert.match(res.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    'honeypot id is a valid UUID, not a constant sentinel')
+  assert.notEqual(res.body.id, '00000000-0000-0000-0000-000000000000',
+    'honeypot id is not the old sentinel')
 
   // Verify no user was actually created by trying to login
   const loginRes = await httpPost('/api/auth/login', {
