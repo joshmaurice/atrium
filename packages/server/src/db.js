@@ -93,6 +93,36 @@ const MIGRATIONS = [
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_ci
         ON users (username COLLATE NOCASE);
     `
+  },
+  {
+    version: 3,
+    description: 'Add CHECK constraint to worlds.visibility for Phase-1 private-only',
+    sql: `
+      -- SQLite does not support ALTER TABLE ADD CHECK, so rebuild.
+      -- Per ADDENDUM item 4: all Phase-1 persisted worlds are private.
+      CREATE TABLE IF NOT EXISTS worlds_new (
+        id            TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL,
+        slug          TEXT NOT NULL,
+        name          TEXT NOT NULL DEFAULT '',
+        document      TEXT NOT NULL DEFAULT '',
+        visibility    TEXT NOT NULL DEFAULT 'private'
+                      CHECK (visibility = 'private'),
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        FOREIGN KEY (owner_user_id) REFERENCES users(id),
+        UNIQUE (owner_user_id, slug)
+      );
+
+      INSERT INTO worlds_new
+        SELECT id, owner_user_id, slug, name, document, visibility,
+               created_at, updated_at
+        FROM worlds;
+
+      DROP TABLE worlds;
+
+      ALTER TABLE worlds_new RENAME TO worlds;
+    `
   }
 ]
 
@@ -153,6 +183,17 @@ export function createDb(dbPath) {
   return {
     /** The underlying better-sqlite3 Database instance. */
     database,
+
+    /**
+     * Delete expired auth_sessions rows.
+     * Runs on a periodic timer in index.js to complement the lazy expiry
+     * checks in resolveUserIdFromCookie and resolveWsUserId.
+     */
+    pruneExpiredAuthSessions() {
+      database.prepare(
+        'DELETE FROM auth_sessions WHERE expires_at <= ?'
+      ).run(new Date().toISOString())
+    },
 
     /** Close the database connection (for test teardown / graceful shutdown). */
     close() {
