@@ -33,6 +33,7 @@ const authToggleBtn = document.getElementById('auth-toggle-btn')
 const authLogoutBtn = document.getElementById('auth-logout-btn')
 const authUserLabel = document.getElementById('auth-user-label')
 const authError     = document.getElementById('auth-error')
+const authWebsite   = document.getElementById('auth-website')
 
 // World browser DOM refs
 const worldBrowser  = document.getElementById('world-browser')
@@ -85,7 +86,7 @@ async function handleAuthSubmit() {
   try {
     let result
     if (isRegister) {
-      result = await register(username, password)
+      result = await register(username, password, authWebsite.value.trim())
     } else {
       result = await login(username, password)
     }

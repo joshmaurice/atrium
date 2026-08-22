@@ -330,6 +330,9 @@
   <div id="auth-logged-out">
     <input id="auth-username" type="text" placeholder="Username" style="width:110px" />
     <input id="auth-password" type="password" placeholder="Password" style="width:110px" />
+    <!-- Honeypot: positioned off-screen, bots fill it, humans don't see it -->
+    <input id="auth-website" type="text" name="website" tabindex="-1" autocomplete="off"
+      style="position:absolute;left:-9999px;top:0;width:1px;height:1px" />
     <button id="auth-submit-btn" class="primary">Login</button>
     <button id="auth-toggle-btn" class="text-btn">Register</button>
     <span id="auth-error"></span>
