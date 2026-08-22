@@ -119,7 +119,17 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
-  const { db, auth, world, sessionsRef } = opts
+  const { db, auth, world, sessionsRef, worldRef } = opts
+
+  // Resolve the effective world object. Direct `world` parameter wins for
+  // backward compatibility; if absent, fall through to `worldRef.current`
+  // (the mutable-reference pattern used in tests where world is created
+  // after the handler factory is called).
+  function resolveWorld() {
+    if (world) return world
+    if (worldRef && worldRef.current) return worldRef.current
+    return null
+  }
 
   // Create a per-IP rate limiter for auth endpoints:
   // 20 requests per minute per IP on register/login
@@ -130,6 +140,23 @@ export function createRequestHandler(opts = {}) {
     const forwarded = req.headers['x-forwarded-for']
     if (forwarded) return forwarded.split(',')[0].trim()
     return req.socket.remoteAddress || '127.0.0.1'
+  }
+
+  /**
+   * Get the set of avatar node names currently live on the server.
+   * Reads from the sessionsRef closure, populated/cleared dynamically
+   * as WebSocket sessions are established and torn down.
+   * @returns {string[]}
+   */
+  function getLiveAvatarNodeNames() {
+    if (!sessionsRef || !sessionsRef.current) return []
+    const names = []
+    for (const [, session] of sessionsRef.current) {
+      if (session.avatarNodeName) {
+        names.push(session.avatarNodeName)
+      }
+    }
+    return names
   }
 
   return async (req, res) => {
@@ -507,10 +534,11 @@ export function createRequestHandler(opts = {}) {
       // Serialize the current live world as the initial document
       // so a created world is always valid glTF from the moment it exists.
       let initialDocument = ''
-      if (world) {
+      const liveWorld = resolveWorld()
+      if (liveWorld) {
         try {
           const excludeNodes = getLiveAvatarNodeNames()
-          initialDocument = JSON.stringify(await world.serialize({ excludeNodes }))
+          initialDocument = JSON.stringify(await liveWorld.serialize({ excludeNodes }))
         } catch (err) {
           console.error('Initial world serialize failed for create:', err.message)
           // If serialization fails, create with empty document — still
@@ -577,7 +605,14 @@ export function createRequestHandler(opts = {}) {
       }
 
       if (method === 'PUT') {
-        if (!db || !world) {
+        if (!db) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Save subsystem not available' }))
+          return
+        }
+
+        const liveWorld = resolveWorld()
+        if (!liveWorld) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Save subsystem not available' }))
           return
@@ -612,7 +647,7 @@ export function createRequestHandler(opts = {}) {
         let document
         try {
           const excludeNodes = getLiveAvatarNodeNames()
-          document = JSON.stringify(await world.serialize({ excludeNodes }))
+          document = JSON.stringify(await liveWorld.serialize({ excludeNodes }))
         } catch (err) {
           console.error('World serialize failed for save:', err.message)
           res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -793,25 +828,4 @@ export function resolveUserIdFromCookie(req, db) {
   }
 
   return row.user_id
-}
-
-/**
- * Get the set of avatar node names currently live on the server.
- *
- * Reads from the sessionsRef passed to createRequestHandler, which is a
- * mutable reference { current: Map | null } wired up in index.js.
- * The sessions Map is populated/cleared dynamically as WebSocket sessions
- * are established and torn down — we read it at request time.
- *
- * @returns {string[]} Array of avatar node names (empty if no sessions)
- */
-function getLiveAvatarNodeNames() {
-  if (!sessionsRef || !sessionsRef.current) return []
-  const names = []
-  for (const [, session] of sessionsRef.current) {
-    if (session.avatarNodeName) {
-      names.push(session.avatarNodeName)
-    }
-  }
-  return names
 }
