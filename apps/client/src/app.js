@@ -4,6 +4,7 @@
 import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
+import { register, login, logout, me } from './auth.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -21,6 +22,73 @@ const hudYouEl      = document.getElementById('hud-you')
 const hudPeersEl    = document.getElementById('hud-peers')
 const hudHintEl     = document.getElementById('hud-hint')
 const modeSwitcher  = document.getElementById('mode-switcher')
+
+// Auth DOM refs
+const authLoggedOut = document.getElementById('auth-logged-out')
+const authLoggedIn  = document.getElementById('auth-logged-in')
+const authUsername  = document.getElementById('auth-username')
+const authPassword  = document.getElementById('auth-password')
+const authSubmitBtn = document.getElementById('auth-submit-btn')
+const authToggleBtn = document.getElementById('auth-toggle-btn')
+const authLogoutBtn = document.getElementById('auth-logout-btn')
+const authUserLabel = document.getElementById('auth-user-label')
+const authError     = document.getElementById('auth-error')
+
+// ---------------------------------------------------------------------------
+// Auth state
+// ---------------------------------------------------------------------------
+
+let currentUser = null   // { id, username, displayName } or null
+
+function setAuthState(user) {
+  currentUser = user
+  if (user) {
+    authLoggedOut.style.display = 'none'
+    authLoggedIn.style.display  = ''
+    authUserLabel.textContent   = user.displayName || user.username
+    authError.textContent       = ''
+  } else {
+    authLoggedOut.style.display = ''
+    authLoggedIn.style.display  = 'none'
+    authSubmitBtn.textContent   = 'Login'
+    authToggleBtn.textContent   = 'Register'
+    authUsername.value          = ''
+    authPassword.value          = ''
+    authError.textContent       = ''
+  }
+}
+
+async function handleAuthSubmit() {
+  const username = authUsername.value.trim()
+  const password = authPassword.value
+  if (!username || !password) {
+    authError.textContent = 'Username and password required'
+    return
+  }
+  const isRegister = authSubmitBtn.textContent === 'Register'
+  authSubmitBtn.disabled = true
+  authError.textContent = ''
+  try {
+    let result
+    if (isRegister) {
+      result = await register(username, password)
+    } else {
+      result = await login(username, password)
+    }
+    setAuthState(result)
+  } catch (err) {
+    authError.textContent = err.message || 'Authentication failed'
+  } finally {
+    authSubmitBtn.disabled = false
+  }
+}
+
+function toggleAuthMode() {
+  const isRegister = authSubmitBtn.textContent === 'Register'
+  authSubmitBtn.textContent = isRegister ? 'Login' : 'Register'
+  authToggleBtn.textContent = isRegister ? 'Register' : 'Login'
+  authError.textContent = ''
+}
 
 // ---------------------------------------------------------------------------
 // Third-person camera constants (passed to Stage and used for V-key toggle)
@@ -369,6 +437,32 @@ connectBtn.addEventListener('click', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Auth UI actions
+// ---------------------------------------------------------------------------
+
+authSubmitBtn.addEventListener('click', handleAuthSubmit)
+
+authPassword.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleAuthSubmit()
+})
+
+authToggleBtn.addEventListener('click', toggleAuthMode)
+
+authLogoutBtn.addEventListener('click', async () => {
+  authLogoutBtn.disabled = true
+  try {
+    await logout()
+    setAuthState(null)
+  } catch (err) {
+    // Even if the server request fails, clear local state — the session
+    // may still be invalidated on the next request.
+    setAuthState(null)
+  } finally {
+    authLogoutBtn.disabled = false
+  }
+})
+
+// ---------------------------------------------------------------------------
 // Navigation — delegate input to NavigationController
 // Both paths are wired at startup; the active path is gated by usePointerLock.
 // ---------------------------------------------------------------------------
@@ -472,3 +566,11 @@ requestAnimationFrame(tick)
 
 // Initial hint text
 updateHintText()
+
+// ---------------------------------------------------------------------------
+// Page load: determine auth state from the server, not from local cache
+// ---------------------------------------------------------------------------
+
+me().then(user => {
+  if (user) setAuthState(user)
+})
