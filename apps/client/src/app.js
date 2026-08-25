@@ -5,6 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
+import { computeWsUrl }          from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -12,6 +13,7 @@ import { register, login, logout, me } from './auth.js'
 
 const worldUrlInput = document.getElementById('worldUrl')
 const wsUrlInput    = document.getElementById('wsUrl')
+wsUrlInput.value    = computeWsUrl(window.location)
 const loadBtn       = document.getElementById('loadBtn')
 const connectBtn    = document.getElementById('connectBtn')
 const statusDot     = document.getElementById('statusDot')
