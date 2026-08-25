@@ -74,10 +74,11 @@ open apps/playground/index.html        # pointer-event test bench
 - 3007: `presence.test.js`
 - 3008: `avatar.test.js`
 - 3009–3013: `session.test.js` additional integration tests
-- 3014: (unused — previously misattributed to http-integration.test.js which actually uses 3015)
+- 3014: `session.test.js` keepalive grace counter test (missed-pong case)
 - 3015: `http-integration.test.js`
 - 3016: `rate-limit.test.js`
 - 3017: `world-crud.test.js`
+- 3018: `session.test.js` keepalive grace counter test (normal-pong case)
 
 ## Key Files
 
