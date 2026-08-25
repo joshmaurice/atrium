@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { test, before, after } from 'node:test'
+import { test, before, after, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
@@ -518,6 +518,234 @@ test('avatar add rebroadcast includes server session id', async () => {
     ws2.close()
     await Promise.all([waitForClose(ws1), waitForClose(ws2)])
   } finally {
+    s.close()
+  }
+})
+
+// --- Keepalive grace counter tests ---
+
+const KEEPALIVE_INTERVAL = 30_000
+import net from 'node:net'
+
+/**
+ * Send a WebSocket masked text frame over a raw socket.
+ * Client frames MUST be masked per the WebSocket spec.
+ */
+function sendMaskedFrame(socket, payload) {
+  const buf = Buffer.from(payload, 'utf-8')
+  const maskKey = Buffer.alloc(4)
+  for (let i = 0; i < 4; i++) maskKey[i] = (Math.random() * 256) | 0
+
+  const masked = Buffer.alloc(buf.length)
+  for (let i = 0; i < buf.length; i++) masked[i] = buf[i] ^ maskKey[i % 4]
+
+  // Frame: FIN + text opcode (0x81), masked length, mask key, masked payload
+  const header = buf.length < 126
+    ? Buffer.from([0x81, 0x80 | buf.length])
+    : Buffer.from([0x81, 0x80 | 126, (buf.length >> 8) & 0xff, buf.length & 0xff])
+
+  return new Promise((resolve) => {
+    socket.write(Buffer.concat([header, maskKey, masked]), resolve)
+  })
+}
+
+/**
+ * Read a WebSocket unmasked frame from a raw socket.
+ * Server frames are never masked.
+ * Returns null if the socket closes before a frame arrives.
+ */
+function readFrame(socket, timeoutMs = 1000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs)
+    let buf = Buffer.alloc(0)
+
+    const onData = (chunk) => {
+      buf = Buffer.concat([buf, chunk])
+      // Try to parse a complete frame
+      if (buf.length >= 2) {
+        const lenByte = buf[1] & 0x7f
+        let payloadLen
+        let headerLen
+        if (lenByte < 126) {
+          payloadLen = lenByte
+          headerLen = 2
+        } else if (lenByte === 126) {
+          if (buf.length < 4) return
+          payloadLen = buf.readUInt16BE(2)
+          headerLen = 4
+        } else {
+          // lenByte === 127 — extended 64-bit, skip for simplicity
+          if (buf.length < 10) return
+          payloadLen = Number(buf.readBigUInt64BE(2))
+          headerLen = 10
+        }
+
+        if (buf.length >= headerLen + payloadLen) {
+          const opcode = buf[0] & 0x0f
+          const payload = buf.subarray(headerLen, headerLen + payloadLen)
+          clearTimeout(timer)
+          socket.off('data', onData)
+          socket.off('close', onClose)
+          resolve({ opcode, payload: payload.toString('utf-8'), raw: payload })
+        }
+      }
+    }
+
+    const onClose = () => {
+      clearTimeout(timer)
+      socket.off('data', onData)
+      resolve(null)
+    }
+
+    socket.on('data', onData)
+    socket.on('close', onClose)
+  })
+}
+
+/**
+ * Perform a raw WebSocket upgrade on an already-connected net.Socket.
+ * Returns after the upgrade response is received.
+ */
+function performUpgrade(socket, host, port) {
+  const key = 'dGhlIHNhbXBsZSBub25jZQ=='
+  const request = [
+    `GET / HTTP/1.1`,
+    `Host: ${host}:${port}`,
+    `Upgrade: websocket`,
+    `Connection: Upgrade`,
+    `Sec-WebSocket-Key: ${key}`,
+    `Sec-WebSocket-Version: 13`,
+    '',
+    '',
+  ].join('\r\n')
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('upgrade timeout')), 1000)
+    let response = ''
+
+    const onData = (chunk) => {
+      response += chunk.toString()
+      if (response.includes('\r\n\r\n')) {
+        clearTimeout(timer)
+        socket.off('data', onData)
+        if (response.includes('101 Switching Protocols')) {
+          resolve()
+        } else {
+          reject(new Error(`upgrade failed: ${response.slice(0, 100)}`))
+        }
+      }
+    }
+
+    socket.on('data', onData)
+    socket.write(request)
+  })
+}
+
+test('keepalive grace counter — survives one missed pong, terminates after two', async () => {
+  // Enable mock timers BEFORE creating the server, so the keepalive
+  // setInterval uses the mocked timer, not the real one.
+  mock.timers.enable({ apis: ['setInterval'] })
+
+  const sHttp = createServer()
+  const TEST_PORT = 3014
+  sHttp.listen(TEST_PORT)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10 })
+
+  try {
+    // Step 1: Connect a raw TCP socket, perform WebSocket upgrade,
+    // and send a hello message to register a session. The raw socket
+    // will NOT auto-respond to ping frames, allowing us to test missed pongs.
+    const client = new net.Socket()
+    await new Promise((resolve, reject) => {
+      client.connect(TEST_PORT, '127.0.0.1', resolve)
+      client.on('error', reject)
+    })
+
+    await performUpgrade(client, '127.0.0.1', TEST_PORT)
+
+    // Send a hello message as a masked WebSocket text frame
+    const helloMsg = JSON.stringify({
+      type: 'hello',
+      id: 'keepalive-test-client',
+      capabilities: { tick: { interval: 5000 } },
+    })
+    await sendMaskedFrame(client, helloMsg)
+
+    // Read the hello reply frame from the server
+    const reply = await readFrame(client)
+    assert.ok(reply !== null, 'should receive hello reply')
+    assert.equal(reply.opcode, 0x01, 'reply should be a text frame')
+    const parsed = JSON.parse(reply.payload)
+    assert.equal(parsed.type, 'hello')
+    const sessionId = parsed.id
+
+    // Verify the session is in the server's sessions map
+    assert.ok(s.sessions.has(sessionId), 'session must be registered after handshake')
+
+    // Step 2: Advance past one full keepalive interval
+    // Tick 1: missedPings 0 → 1, ws.ping() sent. No pong expected (raw socket).
+    mock.timers.tick(KEEPALIVE_INTERVAL)
+    await new Promise(r => setImmediate(r))
+
+    // Connection should still be alive after 1 missed ping
+    assert.ok(s.sessions.has(sessionId), 'connection should survive 1 missed pong (after tick 1)')
+
+    // Step 3: Advance past a second interval
+    // Tick 2: missedPings 1 → 2. Still below threshold.
+    // With the OLD code (boolean alive), this tick would terminate the connection.
+    // With the NEW code (counter), it survives.
+    mock.timers.tick(KEEPALIVE_INTERVAL)
+    await new Promise(r => setImmediate(r))
+
+    assert.ok(s.sessions.has(sessionId), 'connection should survive 2 missed pongs (after tick 2) — THIS FAILS against old boolean-alive code')
+
+    // Step 4: Advance past a third interval
+    // Tick 3: missedPings = 2, now 2 >= 2 → terminate!
+    mock.timers.tick(KEEPALIVE_INTERVAL)
+    await new Promise(r => setImmediate(r))
+
+    assert.ok(!s.sessions.has(sessionId), 'connection must be terminated after 3 consecutive missed pongs (after tick 3)')
+
+    client.destroy()
+  } finally {
+    mock.timers.reset()
+    s.close()
+  }
+})
+
+test('keepalive grace counter — connection stays alive when pongs arrive normally', async () => {
+  // Enable mock timers BEFORE creating the server
+  mock.timers.enable({ apis: ['setInterval'] })
+
+  const sHttp = createServer()
+  const TEST_PORT = 3018
+  sHttp.listen(TEST_PORT)
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10 })
+
+  try {
+    // Connect a real ws.WebSocket (auto-responds to pings)
+    const ws = new WebSocket(`ws://127.0.0.1:${TEST_PORT}`)
+    await handshake(ws)
+
+    // Advance through several keepalive cycles
+    // Since the real WebSocket auto-responds to pings, missedPings stays at 0
+    for (let i = 0; i < 5; i++) {
+      mock.timers.tick(KEEPALIVE_INTERVAL)
+      await new Promise(r => setImmediate(r))
+    }
+
+    // Connection should still be alive after 5 intervals
+    ws.send(JSON.stringify({ type: 'ping', clientTime: Date.now() }))
+    const pong = await new Promise((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw)))
+      setTimeout(() => resolve(null), 200)
+    })
+    assert.ok(pong !== null, 'should receive pong after 5 keepalive ticks — connection is alive')
+
+    ws.close()
+    await waitForClose(ws)
+  } finally {
+    mock.timers.reset()
     s.close()
   }
 })
