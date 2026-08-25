@@ -170,7 +170,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
             userId: null, // populated at upgrade time via cookie resolution
             capabilities: msg.capabilities ?? {},
             seq: nextSeq(),
-            alive: true,
+            missedPings: 0,
             tickStop: null,
             avatarNodeName: `avatar-${sessionId.slice(0, 8)}`,
             displayName: userDisplayName,
@@ -411,17 +411,17 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     })
 
     ws.on('pong', () => {
-      if (session) session.alive = true
+      if (session) session.missedPings = 0
     })
   })
 
   const keepaliveTimer = setInterval(() => {
     for (const [id, s] of sessions) {
-      if (!s.alive) {
+      if (s.missedPings >= 2) {
         s.ws.terminate()
         sessions.delete(id)
       } else {
-        s.alive = false
+        s.missedPings = (s.missedPings ?? 0) + 1
         s.ws.ping()
       }
     }
