@@ -21,13 +21,14 @@ export function computeWsUrl(location) {
   }
 
   const protocol = location.protocol || ''
+  const path = location.pathname || ''
 
   if (protocol === 'https:') {
-    return 'wss://' + location.host
+    return 'wss://' + location.host + path
   }
 
   if (protocol === 'http:') {
-    return 'ws://' + location.host
+    return 'ws://' + location.host + path
   }
 
   // file:, blob:, data:, about:, or any other non-http protocol

@@ -59,4 +59,21 @@ describe('computeWsUrl', () => {
     const loc = { protocol: 'blob:', host: 'some-uuid' }
     assert.equal(computeWsUrl(loc), 'ws://localhost:3000')
   })
+
+  // ── pathname variants ──────────────────────────────────────
+
+  test('wss:// with pathname', () => {
+    const loc = { protocol: 'https:', host: 'dev.5-78-232-73.sslip.io', pathname: '/apps/client/' }
+    assert.equal(computeWsUrl(loc), 'wss://dev.5-78-232-73.sslip.io/apps/client/')
+  })
+
+  test('ws:// with pathname', () => {
+    const loc = { protocol: 'http:', host: 'localhost:3000', pathname: '/apps/client/' }
+    assert.equal(computeWsUrl(loc), 'ws://localhost:3000/apps/client/')
+  })
+
+  test('fallback still works with pathname on non-http protocol', () => {
+    const loc = { protocol: 'file:', host: '', pathname: '/index.html' }
+    assert.equal(computeWsUrl(loc), 'ws://localhost:3000')
+  })
 })
