@@ -10,10 +10,10 @@ export class LabelOverlay {
     this._container  = container
     // Accept a getter function so callers can pass () => stage.camera for a live read
     this._getCamera  = typeof camera === 'function' ? camera : () => camera
-    this._labels     = new Map()   // displayName → { div, somNode }
+    this._labels     = new Map()   // nodeName → { div, somNode }
   }
 
-  addLabel(displayName, somNode) {
+  addLabel(nodeName, displayName, somNode) {
     const div = document.createElement('div')
     div.textContent = displayName
     Object.assign(div.style, {
@@ -29,14 +29,14 @@ export class LabelOverlay {
       whiteSpace:    'nowrap',
     })
     this._container.appendChild(div)
-    this._labels.set(displayName, { div, somNode })
+    this._labels.set(nodeName, { div, somNode })
   }
 
-  removeLabel(displayName) {
-    const entry = this._labels.get(displayName)
+  removeLabel(nodeName) {
+    const entry = this._labels.get(nodeName)
     if (!entry) return
     entry.div.remove()
-    this._labels.delete(displayName)
+    this._labels.delete(nodeName)
   }
 
   update() {

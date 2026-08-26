@@ -424,15 +424,15 @@ avatar.on('avatar:local-ready', () => {
   updateHintText()
 })
 
-avatar.on('avatar:peer-added', ({ displayName, node }) => {
+avatar.on('avatar:peer-added', ({ displayName, nodeName, node }) => {
   console.log(`[app] Peer joined: ${displayName} (${avatar.peerCount} peer${avatar.peerCount === 1 ? '' : 's'})`)
-  labels.addLabel(displayName, node)
+  labels.addLabel(nodeName, displayName, node)
   updateHud()
 })
 
-avatar.on('avatar:peer-removed', ({ displayName }) => {
+avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
   console.log(`[app] Peer left: ${displayName} (${avatar.peerCount} peer${avatar.peerCount === 1 ? '' : 's'})`)
-  labels.removeLabel(displayName)
+  labels.removeLabel(nodeName)
   updateHud()
 })
 
