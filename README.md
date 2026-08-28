@@ -1,5 +1,6 @@
-See [tparisi/atrium](https://github.com/tparisi/atrium) for original Atrium README.
+Based on [tparisi/atrium](https://github.com/tparisi/atrium)
 
-The current plan for this fork is in [docs/DESIGN-user-accounts.md](https://github.com/joshmaurice/atrium/blob/main/docs/DESIGN-user-accounts.md). We're currently (8/27/2026) starting Phase 2.
+[The current plan for this fork](https://github.com/joshmaurice/atrium/blob/main/docs/DESIGN-user-accounts.md) (currently starting Phase 2)
+One of the logical next steps for Atrium seems to be enabling user data to persist across sessions. With help from Deepseek Flash (via Hermes) and other bots, we’ve now added a user account option to this client/server system, a step toward creating metaverse experiences with unlimited personalization – maximum contextuality.
 
-Most of the rest of this fork's docs are in [devtasks/](https://github.com/joshmaurice/atrium/tree/main/devtasks).
+[Atrium thread on Mastodon](https://fosstodon.org/@joshmaurice/117159551090611342)
