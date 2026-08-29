@@ -269,6 +269,11 @@ test('anonymous session must not be evicted by another anonymous connection', as
 })
 
 test('client cannot trigger eviction of unrelated session via crafted hello', async () => {
+  // The eviction loop keys on upgradeUserId, which is resolved server-side
+  // from the auth cookie. No client-controlled field feeds it. This test
+  // confirms: attacker connects with their own cookie (legitimate auth),
+  // their hello does NOT reach the eviction loop's trigger condition because
+  // upgradeUserId is attacker's, not the target's.
   const target = await registerUser('target')
   const attacker = await registerUser('attacker')
 
@@ -277,11 +282,15 @@ test('client cannot trigger eviction of unrelated session via crafted hello', as
   const hello = await handshake(wsTarget, { clientId: 'target-main' })
   const sessionIdTarget = hello.id
 
+  // Attacker connects with their own cookie — different upgradeUserId.
+  // Use a unique clientId so hello passes the duplicate-sessionId check
+  // and reaches the eviction loop.
   const { ws: wsAttacker } = websocketConnectWithHeaders({ Cookie: attacker.cookieStr })
   await waitForOpen(wsAttacker)
-  await handshake(wsAttacker, { clientId: sessionIdTarget })
+  await handshake(wsAttacker, { clientId: 'attacker-own-id-1' })
 
   await new Promise(r => setTimeout(r, 100))
+  // Target's session must survive — attacker has a different userId
   assert.ok(server.sessions.has(sessionIdTarget), 'target session must survive attacker connect')
   assert.equal(wsTarget.readyState, WebSocket.OPEN, 'target WS must remain open')
 
@@ -332,4 +341,124 @@ test('bystander observes exactly one remove+leave after eviction (no double broa
   wsB.close()
   wsX2.close()
   await Promise.all([waitForClose(wsB), waitForClose(wsX2)])
+})
+
+// ---------------------------------------------------------------------------
+// Item 2 regression: hello handler race
+// ---------------------------------------------------------------------------
+
+function createSlowWorld(baseWorld, delayMs) {
+  // Proxy that delays only serialize() — all other methods pass through.
+  // Used to force the hello handler's async serialize() call to be slow,
+  // so concurrent hellos reliably interleave.
+  return new Proxy(baseWorld, {
+    get(target, prop) {
+      if (prop === 'serialize') {
+        return async () => {
+          await new Promise(r => setTimeout(r, delayMs))
+          return target.serialize()
+        }
+      }
+      return target[prop]
+    },
+  })
+}
+
+function registerOnPort(port, tag, password = 'correct horse battery staple') {
+  const username = `${tag}-${freshUserTag()}`
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({ username, password })
+    const req = request(
+      { hostname: 'localhost', port, path: '/api/auth/register', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },
+      (res) => {
+        let body = ''
+        res.on('data', (c) => { body += c })
+        res.on('end', () => {
+          if (res.statusCode !== 201) return reject(new Error(`register failed: ${res.statusCode}`))
+          const cookieStr = Array.isArray(res.headers['set-cookie'])
+            ? res.headers['set-cookie'].join('; ') : res.headers['set-cookie']
+          resolve({ userId: JSON.parse(body).id, cookieStr })
+        })
+      })
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+test('concurrent hellos with delayed serialize — all peers complete bootstrap', async () => {
+  const RACE_PORT = 3184
+  // Connect 3 clients with staggered but overlapping hello timing while
+  // world.serialize() is delayed by 300ms. The delay forces the async
+  // serialize() to be in-flight when subsequent hellos arrive, testing
+  // that the reordered handler (presence + joins before som-dump) prevents
+  // any session from being observed as half-registered.
+  const originalWorld = await createWorld(FIXTURE_PATH)
+  const slowWorld = createSlowWorld(originalWorld, 300)
+  const raceDb = createDb(join(tempDir, 'race.db'))
+  const raceHttp = createServer(createRequestHandler({ db: raceDb, auth }))
+  const slowServer = createSessionServer({ httpServer: raceHttp, maxUsers: 20, world: slowWorld, db: raceDb })
+  raceHttp.listen(RACE_PORT)
+
+  const userA = await registerOnPort(RACE_PORT, 'race-a')
+  const userB = await registerOnPort(RACE_PORT, 'race-b')
+  const userC = await registerOnPort(RACE_PORT, 'race-c')
+
+  function wsConnect(port, headers) {
+    const w = new WebSocket(`ws://localhost:${port}`, { headers })
+    const q = makeMessageQueue(w)
+    return { ws: w, q }
+  }
+
+  const { ws: wsA, q: qA } = wsConnect(RACE_PORT, { Cookie: userA.cookieStr })
+  await waitForOpen(wsA)
+  const helloA = await handshake(wsA, { clientId: 'race-a-1' })
+  const idA = helloA.id
+
+  // Send B's hello while A's serialize is still in-flight
+  await new Promise(r => setTimeout(r, 50))
+  const { ws: wsB, q: qB } = wsConnect(RACE_PORT, { Cookie: userB.cookieStr })
+  await waitForOpen(wsB)
+  const helloB = await handshake(wsB, { clientId: 'race-b-1' })
+
+  // Send C's hello while both A and B are still awaiting serialize
+  await new Promise(r => setTimeout(r, 50))
+  const { ws: wsC, q: qC } = wsConnect(RACE_PORT, { Cookie: userC.cookieStr })
+  await waitForOpen(wsC)
+  const helloC = await handshake(wsC, { clientId: 'race-c-1' })
+
+  // Wait for all serialize delays to resolve and broadcast data to land
+  await new Promise(r => setTimeout(r, 800))
+
+  // A should have received bootstrap joins for B and C
+  const joinBfromA = qA.waitForType('join', 500)
+  const joinCfromA = qA.waitForType('join', 500)
+
+  // B should have received A's join and C's join
+  const joinAfromB = qB.waitForType('join', 500)
+  const joinCfromB = qB.waitForType('join', 500)
+
+  // C should have received bootstrap joins for A and B
+  const joinAfromC = qC.waitForType('join', 500)
+  const joinBfromC = qC.waitForType('join', 500)
+
+  const results = await Promise.all([
+    joinBfromA, joinCfromA,
+    joinAfromB, joinCfromB,
+    joinAfromC, joinBfromC,
+  ])
+  for (let i = 0; i < results.length; i++) {
+    assert.ok(results[i] !== null, `all peers should receive joins — result ${i} was null`)
+  }
+
+  // All sessions must be in presence
+  assert.ok(slowServer.presence.has(idA), 'A should be present')
+  assert.ok(slowServer.presence.has(helloB.id), 'B should be present')
+  assert.ok(slowServer.presence.has(helloC.id), 'C should be present')
+
+  wsA.close()
+  wsB.close()
+  wsC.close()
+  await Promise.all([waitForClose(wsA), waitForClose(wsB), waitForClose(wsC)])
 })
