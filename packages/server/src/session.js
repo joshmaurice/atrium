@@ -58,18 +58,12 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     }
 
     // Validate Origin header to prevent cross-origin WebSocket hijacking
-    // (cookie auth otherwise lets any website open an authenticated socket
-    // from a visitor's browser)
     if (!isOriginAllowed(request)) {
       socket.destroy()
       return
     }
 
     // Resolve userId from auth session cookie before the WebSocket handshake.
-    // This is the seam built in step 2a — cookie parsing and
-    // authSessionId -> userId resolution happen here, before wss.handleUpgrade.
-    // The resolved userId (or null for anonymous) is attached to the
-    // server-side session object when the connection is established.
     let upgradeUserId = null
     if (db) {
       try {
@@ -99,6 +93,38 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     for (const [, s] of sessions) {
       if (s !== excludeSession && s.ws.readyState === 1 /* OPEN */) {
         s.ws.send(raw)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // cleanupSession — stop tick loop, drop from sessions/presence, remove
+  // avatar node from SOM, broadcast remove + leave. Idempotent: a second
+  // call on an already-cleaned session is a no-op (presence.remove returns
+  // null when the session is already gone). Called from both the close
+  // handler (natural disconnect) and the hello-path eviction code.
+  // ---------------------------------------------------------------------------
+  function cleanupSession(s) {
+    const departedId = s.id
+    const avatarNodeName = s.avatarNodeName
+    s.tickStop?.()
+    sessions.delete(departedId)
+    const removed = presence.remove(departedId)
+
+    if (removed) {
+      // Remove avatar node from SOM and notify all clients first,
+      // THEN broadcast leave so clients can look up peer metadata before cleanup
+      if (world && avatarNodeName) {
+        world.removeNode(avatarNodeName)
+        broadcast({ type: 'remove', seq: nextSeq(), id: departedId })
+      }
+
+      const leaveMsg = { type: 'leave', seq: nextSeq(), id: departedId }
+      const { valid } = validate('server', leaveMsg)
+      if (valid) {
+        broadcast(leaveMsg)
+      } else {
+        console.error('leave validation failed')
       }
     }
   }
@@ -161,6 +187,19 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
               }
             } catch {
               // If the lookup fails, stick with the anonymous fallback
+            }
+          }
+
+          // Evict any stale session for the same authenticated user.
+          // Only fires when upgradeUserId is non-null — anonymous sessions
+          // have no persistent identity to dedupe against.
+          if (upgradeUserId) {
+            for (const [oldId, oldSession] of sessions) {
+              if (oldSession.userId === upgradeUserId) {
+                cleanupSession(oldSession)
+                oldSession.ws.close()
+                break
+              }
             }
           }
 
@@ -384,29 +423,8 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
 
     ws.on('close', () => {
       if (session) {
-        const departedId = session.id
-        const avatarNodeName = session.avatarNodeName
-        session.tickStop?.()
-        sessions.delete(departedId)
-        const removed = presence.remove(departedId)
+        cleanupSession(session)
         session = null
-
-        if (removed) {
-          // Remove avatar node from SOM and notify all clients first,
-          // THEN broadcast leave so clients can look up peer metadata before cleanup
-          if (world && avatarNodeName) {
-            world.removeNode(avatarNodeName)
-            broadcast({ type: 'remove', seq: nextSeq(), id: departedId })
-          }
-
-          const leaveMsg = { type: 'leave', seq: nextSeq(), id: departedId }
-          const { valid } = validate('server', leaveMsg)
-          if (valid) {
-            broadcast(leaveMsg)
-          } else {
-            console.error('leave validation failed')
-          }
-        }
       }
     })
 
