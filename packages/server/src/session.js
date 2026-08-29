@@ -235,18 +235,6 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
 
           session.tickStop = createTickLoop(session, negotiated).stop
 
-          // Send full SOM dump to the joining client
-          if (world) {
-            try {
-              const gltf = await world.serialize()
-              if (session && session.ws.readyState === 1 /* OPEN */) {
-                session.ws.send(JSON.stringify({ type: 'som-dump', seq: nextSeq(), gltf }))
-              }
-            } catch (err) {
-              console.error('som-dump serialize failed:', err)
-            }
-          }
-
           // Step 1: notify existing clients of the newcomer (default position)
           const joinNewcomer = {
             type: 'join',
@@ -295,6 +283,22 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
 
           // Step 3: add newcomer to presence
           presence.add(session.id)
+
+          // Send full SOM dump to the joining client
+          // Placed at end so all synchronous bookkeeping (join broadcasts,
+          // presence registration) completes before the await — prevents a
+          // concurrent hello from observing this session as "half-registered"
+          // while serialize() is in flight.
+          if (world) {
+            try {
+              const gltf = await world.serialize()
+              if (session && session.ws.readyState === 1 /* OPEN */) {
+                session.ws.send(JSON.stringify({ type: 'som-dump', seq: nextSeq(), gltf }))
+              }
+            } catch (err) {
+              console.error('som-dump serialize failed:', err)
+            }
+          }
           break
         }
 
