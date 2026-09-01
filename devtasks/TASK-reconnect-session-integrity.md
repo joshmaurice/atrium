@@ -223,3 +223,30 @@ pass after. State explicitly which parts satisfy the live-verification bar
 and which still need a live multi-tab smoke test before merge. Do not merge;
 the diff will be reviewed, and the live smoke test run, before anything
 reaches `main`.
+
+## Resolution (2026-09-01)
+
+Both fixes above were reviewed, tested, and deployed to dev and prod — real
+fixes for two independently confirmed defects (ghost duplicate sessions on
+silent reconnect, and a bootstrap race under concurrent hellos). Neither
+fix addresses the originally reported symptom (a live peer's avatar showing
+another user's name), because that symptom was never a server defect.
+
+Root cause: both the original prod report and a later dev repro used
+multiple accounts logged into separate tabs of the *same* browser window to
+simulate multiple users. Browsers share one cookie jar per origin across
+all tabs in a window by default, so logging into a second account
+overwrites the shared session cookie for every other tab at that origin.
+On reconnect, a tab sends whatever cookie the browser currently holds
+rather than the one it originally authenticated with — so a reconnecting
+tab can resolve to a different account entirely, with the server behaving
+correctly given what it was actually sent. Confirmed by comparing the
+`atrium_auth_session` cookie value across tabs live, and by the fact that
+the extensive server-side reproduction effort (dozens of trials against
+the real server/client code) never once produced a wrong-name result —
+only the two genuinely separate defects fixed above.
+
+**If this symptom is reported again:** first confirm whether the users
+were on genuinely separate browsers/devices, or multiple accounts in tabs
+of one browser. Only the former would indicate a real, unresolved
+server-side bug.
