@@ -3,6 +3,7 @@
 
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { createServer } from 'http'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import WebSocket from 'ws'
@@ -34,11 +35,26 @@ function waitForEvent(emitter, event, timeoutMs = 3000) {
   })
 }
 
-// Terminate all open WebSocket connections then close the server.
-// This ensures wss.close() resolves immediately rather than hanging.
+// Terminate all open WebSocket connections then close both the WebSocket
+// server and the underlying HTTP server so tests exit cleanly.
 function closeServer(server) {
   for (const ws of server.wss.clients) ws.terminate()
-  return new Promise(resolve => server.wss.close(resolve))
+  return new Promise(resolve => {
+    server.wss.close()
+    server.httpServer.close(resolve)
+  })
+}
+
+// Create an HTTP server, attach a session server to it, and start listening.
+// Returns the session server object (which carries .wss, .httpServer, .close).
+async function startSessionServer({ port, maxUsers, world }) {
+  const httpServer = createServer()
+  const server = createSessionServer({ httpServer, maxUsers, world })
+  await new Promise((resolve, reject) => {
+    httpServer.once('error', reject)
+    httpServer.listen(port, resolve)
+  })
+  return server
 }
 
 function waitForWsMessage(ws) {
@@ -99,11 +115,9 @@ async function connectClient(port, opts = {}) {
 
 let sharedServer
 
-before(() => new Promise((resolve, reject) => {
-  sharedServer = createSessionServer({ port: BASE_PORT, maxUsers: 20 })
-  sharedServer.wss.on('listening', resolve)
-  sharedServer.wss.on('error',    reject)
-}))
+before(async () => {
+  sharedServer = await startSessionServer({ port: BASE_PORT, maxUsers: 20 })
+})
 
 after(() => closeServer(sharedServer))
 
@@ -167,7 +181,7 @@ test('setView() while disconnected → dropped silently, no error fired', async 
 
 test('som-dump received → SOM initialized → world:loaded fires', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 1, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 1, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   try {
     const ready  = waitForEvent(client, 'session:ready')
@@ -184,7 +198,7 @@ test('som-dump received → SOM initialized → world:loaded fires', async () =>
 
 test('world:loaded payload includes world metadata (name, description, author)', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 2, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 2, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   try {
     const ready  = waitForEvent(client, 'session:ready')
@@ -204,7 +218,7 @@ test('world:loaded payload includes world metadata (name, description, author)',
 
 test('add (peer avatar, join tracked) → SOM updated → som:add fires', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 3, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 3, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   const peer   = new WebSocket(`ws://localhost:${BASE_PORT + 3}`)
   const q      = makeWsQueue(peer)
@@ -241,7 +255,7 @@ test('add (peer avatar, join tracked) → SOM updated → som:add fires', async 
 
 test('add (non-avatar, no id) → som:add fires, peer:join does not', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 4, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 4, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   const peer   = new WebSocket(`ws://localhost:${BASE_PORT + 4}`)
   const q      = makeWsQueue(peer)
@@ -279,7 +293,7 @@ test('add (non-avatar, no id) → som:add fires, peer:join does not', async () =
 
 test('remove (avatar disconnect) → SOM updated → peer:leave + som:remove fire', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 5, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 5, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   const peer   = new WebSocket(`ws://localhost:${BASE_PORT + 5}`)
   const q      = makeWsQueue(peer)
@@ -321,7 +335,7 @@ test('remove (avatar disconnect) → SOM updated → peer:leave + som:remove fir
 
 test('set → SOM updated → som:set fires with nodeName, path, value', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 6, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 6, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   const peer   = new WebSocket(`ws://localhost:${BASE_PORT + 6}`)
   const q      = makeWsQueue(peer)
@@ -354,7 +368,7 @@ test('set → SOM updated → som:set fires with nodeName, path, value', async (
 
 test('view → peer avatar SOM translation updated → peer:view fires with correct shape', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 7, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 7, maxUsers: 10, world })
   const client = new AtriumClient({ WebSocket })
   const peer   = new WebSocket(`ws://localhost:${BASE_PORT + 7}`)
   const q      = makeWsQueue(peer)
@@ -408,7 +422,7 @@ test('view → peer avatar SOM translation updated → peer:view fires with corr
 
 test('two clients connect → one disconnects → other receives peer:leave and som:remove', async () => {
   const world  = await createWorld(FIXTURE_PATH)
-  const server = createSessionServer({ port: BASE_PORT + 8, maxUsers: 10, world })
+  const server = await startSessionServer({ port: BASE_PORT + 8, maxUsers: 10, world })
   const client1 = new AtriumClient({ WebSocket })
   const client2 = new AtriumClient({ WebSocket })
   try {
