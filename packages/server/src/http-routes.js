@@ -119,7 +119,15 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
-  const { db, auth, world, sessionsRef } = opts
+  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef } = opts
+
+  // Resolve the live world reference: prefer the default host's world when
+  // running in registry mode (index.js), fall back to legacy direct world
+  // for backward compatibility with tests.
+  function getLiveWorld() {
+    if (defaultHostRef?.current?.world) return defaultHostRef.current.world
+    return legacyWorld
+  }
 
   // Create a per-IP rate limiter for auth endpoints:
   // 20 requests per minute per IP on register/login
@@ -139,9 +147,12 @@ export function createRequestHandler(opts = {}) {
    * @returns {string[]}
    */
   function getLiveAvatarNodeNames() {
-    if (!sessionsRef || !sessionsRef.current) return []
+    // In registry mode (multi-world), sessions live in the default host.
+    // Fall back to the legacy sessionsRef for backward compat with tests.
+    const sessions = defaultHostRef?.current?.sessions || sessionsRef?.current
+    if (!sessions) return []
     const names = []
-    for (const [, session] of sessionsRef.current) {
+    for (const [, session] of sessions) {
       if (session.avatarNodeName) {
         names.push(session.avatarNodeName)
       }
@@ -524,7 +535,7 @@ export function createRequestHandler(opts = {}) {
       // Serialize the current live world as the initial document
       // so a created world is always valid glTF from the moment it exists.
       let initialDocument = ''
-      const liveWorld = world
+      const liveWorld = getLiveWorld()
       if (liveWorld) {
         try {
           const excludeNodes = getLiveAvatarNodeNames()
@@ -601,7 +612,7 @@ export function createRequestHandler(opts = {}) {
           return
         }
 
-        const liveWorld = world
+        const liveWorld = getLiveWorld()
         if (!liveWorld) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Save subsystem not available' }))

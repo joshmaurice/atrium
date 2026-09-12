@@ -26,7 +26,7 @@ function sendError(ws, seq, code, message) {
 function lookToQuaternion(look) {
   const [lx, ly, lz] = look
   const dot = -lz  // dot([0,0,-1], look) = -lz
-  if (dot < -0.9999) return [0, 1, 0, 0]   // 180° around Y
+  if (dot < -0.9999) return [0, 1, 0, 0]   // 180 around Y
   // cross([0,0,-1], look)
   const cx =  ly
   const cy = -lx
@@ -35,6 +35,12 @@ function lookToQuaternion(look) {
   const len = Math.sqrt(cx*cx + cy*cy + cz*cz + qw*qw)
   return [cx/len, cy/len, cz/len, qw/len]
 }
+
+// ---------------------------------------------------------------------------
+// createSessionServer — full lifecycle for a single world (existing API,
+// backward compatible). Creates wss, registers upgrade handler on httpServer,
+// sets up connection handlers, keepalive timer.
+// ---------------------------------------------------------------------------
 
 export function createSessionServer({ httpServer, maxUsers = 100, world = null, db = null } = {}) {
   if (!httpServer) {
@@ -78,6 +84,66 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
       wss.emit('connection', ws, request, upgradeUserId)
     })
   })
+
+  // Wire up connection handlers
+  const closeKeepalive = attachSessionHandlers({
+    wss,
+    world,
+    db,
+    sessions,
+    presence,
+    maxUsers,
+    worldOwnerUserId: null,
+  })
+
+  function close() {
+    // Terminate all live WebSocket connections first, so the HTTP server
+    // does not hang waiting for them.
+    for (const [, s] of sessions) {
+      s.ws.terminate()
+      s.tickStop?.()
+    }
+    sessions.clear()
+
+    // Stop the keepalive interval (it references sessions, now cleared)
+    closeKeepalive()
+
+    // Close the WebSocket server (stops accepting upgrades)
+    wss.close()
+
+    // Close the HTTP server if we own one (or one was provided)
+    if (httpServer) {
+      httpServer.close()
+    }
+  }
+
+  return { wss, sessions, presence, httpServer, close }
+}
+
+// ---------------------------------------------------------------------------
+// attachSessionHandlers — wire up wss.on('connection'), keepalive timer, and
+// returns a closeKeepalive function. This is what WorldHost calls instead of
+// createSessionServer (which also registers an httpServer upgrade handler).
+//
+// worldOwnerUserId: the userId that owns the world for mutation gate purposes.
+//   null means "no owner for the default world" — backward compat mode where
+//   ALL mutations (not just avatar adds) are permitted.
+// ---------------------------------------------------------------------------
+
+export function attachSessionHandlers({
+  wss,
+  world = null,
+  db = null,
+  sessions = new Map(),
+  presence = createPresence(),
+  maxUsers = 100,
+  worldOwnerUserId = null,
+  onSessionRemoved = null,
+} = {}) {
+
+  // ---------------------------------------------------------------------------
+  // broadcast
+  // ---------------------------------------------------------------------------
 
   function broadcast(message) {
     const raw = JSON.stringify(message)
@@ -126,7 +192,25 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
       } else {
         console.error('leave validation failed')
       }
+
+      // Notify the world registry for teardown refcounting
+      if (typeof onSessionRemoved === 'function') {
+        onSessionRemoved(departedId)
+      }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mutation gate — returns true if the session may mutate the world.
+  // Avatar adds are always allowed (session-owned, ephemeral, session-coupled).
+  // When worldOwnerUserId is null (default world, backward compat), all
+  // mutations are permitted — no gate.
+  // Otherwise, the session.userId must match the world's owner.
+  // ---------------------------------------------------------------------------
+  function isMutator(session, isAvatar) {
+    if (isAvatar) return true
+    if (worldOwnerUserId === null) return true
+    return session.userId === worldOwnerUserId
   }
 
   wss.on('connection', (ws, req, upgradeUserId = null) => {
@@ -190,7 +274,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
             }
           }
 
-          // Evict any stale session for the same authenticated user.
+          // Eviction: any stale session for the same authenticated user.
           // Only fires when upgradeUserId is non-null — anonymous sessions
           // have no persistent identity to dedupe against.
           if (upgradeUserId) {
@@ -206,7 +290,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
           session = {
             ws,
             id: sessionId,
-            userId: null, // populated at upgrade time via cookie resolution
+            userId: null,
             capabilities: msg.capabilities ?? {},
             seq: nextSeq(),
             missedPings: 0,
@@ -316,6 +400,11 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
             sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
             break
           }
+          // --- MUTATION GATE: only world owner may set fields ---
+          if (!isMutator(session, false)) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate this message')
+            break
+          }
           const result = world.setField(msg.node, msg.field, msg.value)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
@@ -354,13 +443,19 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
             break
           }
 
+          // --- MUTATION GATE: avatar adds (has msg.id) are always allowed;
+          // non-avatar adds require owner permission ---
+          const isAvatar = !!msg.id
+          if (!isMutator(session, isAvatar)) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may add nodes to this world')
+            break
+          }
+
           const result = world.addNode(msg.node, msg.parent)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.parent}`)
             break
           }
-          // avatar node name is already assigned at hello — never clobber from client input
-          // For avatar adds, stamp server session id onto rebroadcast
           broadcastExcept(session, {
             type: 'add',
             seq: nextSeq(),
@@ -407,6 +502,11 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
             sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
             break
           }
+          // --- MUTATION GATE: only owner may remove nodes ---
+          if (!isMutator(session, false)) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate nodes in this world')
+            break
+          }
           const result = world.removeNode(msg.node)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
@@ -441,7 +541,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     for (const [id, s] of sessions) {
       if (s.missedPings >= 2) {
         s.ws.terminate()
-        sessions.delete(id)
+        cleanupSession(s)
       } else {
         s.missedPings = (s.missedPings ?? 0) + 1
         s.ws.ping()
@@ -449,32 +549,9 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     }
   }, KEEPALIVE_INTERVAL)
 
-  wss.on('close', () => {
+  return function closeKeepalive() {
     clearInterval(keepaliveTimer)
-  })
-
-  function close() {
-    // Terminate all live WebSocket connections first, so the HTTP server
-    // does not hang waiting for them.
-    for (const [, s] of sessions) {
-      s.ws.terminate()
-      s.tickStop?.()
-    }
-    sessions.clear()
-
-    // Stop the keepalive interval (it references sessions, now cleared)
-    clearInterval(keepaliveTimer)
-
-    // Close the WebSocket server (stops accepting upgrades)
-    wss.close()
-
-    // Close the HTTP server if we own one (or one was provided)
-    if (httpServer) {
-      httpServer.close()
-    }
   }
-
-  return { wss, sessions, presence, httpServer, close }
 }
 
 // ---------------------------------------------------------------------------
@@ -484,8 +561,8 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
 /**
  * Parse the atrium_auth_session cookie from a raw request and resolve it
  * to a userId. Returns null if the cookie is missing, expired, or unknown.
- * This is a standalone copy of the logic in http-routes.js to avoid
- * circular dependencies.
+ * This is a standalone copy of the logic in world-registry.js to avoid
+ * circular dependencies (world-registry → world-host → session.js).
  *
  * @param {import('node:http').IncomingMessage} req
  * @param {{ database: import('better-sqlite3').Database }} db
