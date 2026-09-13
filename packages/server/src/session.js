@@ -42,7 +42,7 @@ function lookToQuaternion(look) {
 // sets up connection handlers, keepalive timer.
 // ---------------------------------------------------------------------------
 
-export function createSessionServer({ httpServer, maxUsers = 100, world = null, db = null } = {}) {
+export function createSessionServer({ httpServer, maxUsers = 100, world = null, db = null, keepaliveInterval = KEEPALIVE_INTERVAL } = {}) {
   if (!httpServer) {
     throw new Error('createSessionServer requires httpServer option')
   }
@@ -94,6 +94,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     presence,
     maxUsers,
     worldOwnerUserId: null,
+    keepaliveInterval,
   })
 
   function close() {
@@ -139,6 +140,7 @@ export function attachSessionHandlers({
   maxUsers = 100,
   worldOwnerUserId = null,
   onSessionRemoved = null,
+  keepaliveInterval = KEEPALIVE_INTERVAL,
 } = {}) {
 
   // ---------------------------------------------------------------------------
@@ -547,7 +549,7 @@ export function attachSessionHandlers({
         s.ws.ping()
       }
     }
-  }, KEEPALIVE_INTERVAL)
+  }, keepaliveInterval)
 
   return function closeKeepalive() {
     clearInterval(keepaliveTimer)

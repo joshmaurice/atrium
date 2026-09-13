@@ -714,25 +714,28 @@ test('keepalive grace counter — survives one missed pong, terminates after two
 })
 
 test('keepalive grace counter — connection stays alive when pongs arrive normally', async () => {
-  // Enable mock timers BEFORE creating the server
-  mock.timers.enable({ apis: ['setInterval'] })
+  // Use a short keepalive interval with real timers so the I/O event loop
+  // processes WebSocket ping/pong frames between cycles. Mock timers only
+  // advance setInterval, not the I/O event loop, so the pong handler
+  // (which resets missedPings to 0) would never run under mock timers.
+  const KEEPALIVE_TICK = 100
 
   const sHttp = createServer()
   const TEST_PORT = 3018
   sHttp.listen(TEST_PORT)
-  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10 })
+  const s = createSessionServer({ httpServer: sHttp, maxUsers: 10, keepaliveInterval: KEEPALIVE_TICK })
 
   try {
     // Connect a real ws.WebSocket (auto-responds to pings)
     const ws = new WebSocket(`ws://127.0.0.1:${TEST_PORT}`)
     await handshake(ws)
 
-    // Advance through several keepalive cycles
-    // Since the real WebSocket auto-responds to pings, missedPings stays at 0
-    for (let i = 0; i < 5; i++) {
-      mock.timers.tick(KEEPALIVE_INTERVAL)
-      await new Promise(r => setImmediate(r))
-    }
+    // Advance through several keepalive cycles using real time.
+    // Since the real WebSocket auto-responds to pings, missedPings stays at 0.
+    // With real timers, the I/O event loop processes the pong frames
+    // between each cycle, so the pong handler resets missedPings.
+    const CYCLES = 5
+    await new Promise(r => setTimeout(r, CYCLES * KEEPALIVE_TICK * 1.5))
 
     // Connection should still be alive after 5 intervals
     ws.send(JSON.stringify({ type: 'ping', clientTime: Date.now() }))
@@ -745,7 +748,6 @@ test('keepalive grace counter — connection stays alive when pongs arrive norma
     ws.close()
     await waitForClose(ws)
   } finally {
-    mock.timers.reset()
     s.close()
   }
 })
