@@ -38,6 +38,12 @@ export function createWorldRegistry(opts = {}) {
     // Root path → default world
     if (cleaned === '/' || cleaned === '') return 'default'
 
+    // Client is served under /apps/client/ — Caddy redirects bare `/`
+    // before a WS upgrade can reach it (directive reordering; see
+    // devtasks/DEPLOY-and-handoff-notes-2026-08-25.md, "Round 2").
+    // Treat this path as root.
+    if (cleaned === '/apps/client') return 'default'
+
     // Future routes — not yet implemented (intentional placeholders for
     // Step 2: home world auto-load, Step 4: public world routing)
     if (cleaned.startsWith('/home/'))   return null

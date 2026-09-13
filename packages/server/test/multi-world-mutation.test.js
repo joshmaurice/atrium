@@ -257,6 +257,44 @@ test('createWorldRegistry creates register/getDefaultHost/close', async () => {
   httpServer.close()
 })
 
+// ── resolveWorldId: /apps/client maps to default world
+test('registry upgrades WebSocket on /apps/client path', async () => {
+  const httpServer = createServer()
+  httpServer.listen(9030)
+  const reg = createWorldRegistry({ httpServer, db })
+  await reg.registerWorld('default', FIXTURE_PATH, null)
+
+  // Connect to the registry via /apps/client path
+  const ws = new WebSocket('ws://localhost:9030/apps/client')
+  const hello = await doHandshake(ws, 'appclient-test')
+  assert.equal(hello?.type, 'hello')
+
+  ws.close()
+  await waitForClose(ws)
+  reg.close()
+  httpServer.close()
+})
+
+test('registry rejects unknown path with 404', async () => {
+  const httpServer = createServer()
+  httpServer.listen(9031)
+  const reg = createWorldRegistry({ httpServer, db })
+  await reg.registerWorld('default', FIXTURE_PATH, null)
+
+  // Connecting to an unknown path should fail immediately
+  let upgraded = false
+  const ws = new WebSocket('ws://localhost:9031/some/garbage/path')
+  ws.on('open', () => { upgraded = true })
+  ws.on('error', () => {})
+
+  // WebSocket should close/error since server sends 404 before upgrade
+  await new Promise(r => setTimeout(r, 300))
+  assert.equal(upgraded, false, 'unknown path should not upgrade')
+
+  reg.close()
+  httpServer.close()
+})
+
 // ── mutation gate via createSessionServer (backward compat)
 test('backward compat: createSessionServer sends succeed', async () => {
   const http = createServer()
