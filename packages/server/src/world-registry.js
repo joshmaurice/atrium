@@ -3,7 +3,13 @@
 
 import { isOriginAllowed } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
-import { createWorld } from './world.js'
+import { createWorld, createWorldFromDocument } from './world.js'
+
+/**
+ * UUID regex for hygiene check on /home/<userId>/home path segments.
+ * Simple check: hex chars with hyphens in 8-4-4-4-12 pattern.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * WorldRegistry manages the lifetime cycle of per-world hosts and routes
@@ -11,7 +17,7 @@ import { createWorld } from './world.js'
  *
  * Path resolution:
  *   - `/` or ``      → 'default' (the common, boot-loaded)
- *   - `/home/...`    → not yet implemented (future Step 2)
+ *   - `/home/<uid>/home`  → { kind: 'home', homeUserId, slug }
  *   - `/public/...`  → not yet implemented (future Step 4)
  *   - `/ws/<id>`     → world with that id (reserved for future multi-world routing)
  *   - anything else  → 404 at upgrade
@@ -26,8 +32,12 @@ export function createWorldRegistry(opts = {}) {
   /** @type {Map<string, object>} worldId → WorldHost */
   const hosts = new Map()
 
+  // In-flight promise map for lazy register-while-first-join races
+  /** @type {Map<string, Promise<object>>} */
+  const pendingCreations = new Map()
+
   // ---------------------------------------------------------------------------
-  // URL path → worldId resolution
+  // URL path → resolution descriptor
   // ---------------------------------------------------------------------------
   function resolveWorldId(pathname) {
     // Strip trailing slash (keep bare `/` which maps to default)
@@ -36,33 +46,56 @@ export function createWorldRegistry(opts = {}) {
       cleaned = cleaned.slice(0, -1)
     }
     // Root path → default world
-    if (cleaned === '/' || cleaned === '') return 'default'
+    if (cleaned === '/' || cleaned === '') return { kind: 'default' }
 
     // Client is served under /apps/client/ — Caddy redirects bare `/`
-    // before a WS upgrade can reach it (directive reordering; see
-    // devtasks/DEPLOY-and-handoff-notes-2026-08-25.md, "Round 2").
-    // Treat this path as root.
-    if (cleaned === '/apps/client') return 'default'
+    if (cleaned === '/apps/client') return { kind: 'default' }
 
-    // Future routes — not yet implemented (intentional placeholders for
-    // Step 2: home world auto-load, Step 4: public world routing)
-    if (cleaned.startsWith('/home/'))   return null
-    if (cleaned.startsWith('/public/')) return null
-
-    // `/ws/<worldId>` — reserved for world-by-id routing
+    // `/ws/<worldId>` — world-by-id routing
     if (cleaned.startsWith('/ws/')) {
-      return cleaned.slice(4) // e.g., /ws/myworld → myworld
+      const worldRowId = cleaned.slice(4)
+      if (!worldRowId) return null
+      return { kind: 'byWorldRowId', worldRowId }
     }
+
+    // `/home/<userId>/home` — home world auto-load (Step 2)
+    if (cleaned.startsWith('/home/')) {
+      const segments = cleaned.slice(6).split('/')
+      // Must be exactly /home/<userId>/home (two segments beyond /home/)
+      if (segments.length !== 2) return null
+      if (segments[0] !== '' && segments[1] !== 'home') return null
+      const userId = segments[0]
+      // Hygiene: userId must be valid UUID
+      if (!UUID_RE.test(userId)) return null
+      return { kind: 'home', homeUserId: userId, slug: 'home' }
+    }
+
+    // `/public/...` — not yet implemented (future Step 4)
+    if (cleaned.startsWith('/public/')) return null
 
     // Everything else is unknown
     return null
   }
 
   // ---------------------------------------------------------------------------
+  // Guard helpers for sendHttpResponse (same as before)
+  // ---------------------------------------------------------------------------
+  function sendHttpResponse(socket, status, body) {
+      const buf = Buffer.from(body, 'utf-8')
+      const reason = status === 404 ? 'Not Found' : 'Bad Request'
+      socket.write([
+        `HTTP/1.1 ${status} ${reason}`,
+        'Content-Type: text/plain',
+        `Content-Length: ${buf.length}`,
+        'Connection: close',
+        '',
+        body,
+      ].join('\r\n'))
+      socket.destroy()
+    }
+
+  // ---------------------------------------------------------------------------
   // Single upgrade handler — routes to the correct WorldHost
-  // Note: upgradeUserId is resolved here and passed as the 3rd argument
-  // to the 'connection' event (see world-host.js handleUpgrade). This
-  // allows attachSessionHandlers to authenticate the user at hello time.
   // ---------------------------------------------------------------------------
   httpServer.on('upgrade', (request, socket, head) => {
     // Only handle WebSocket upgrade requests
@@ -87,40 +120,136 @@ export function createWorldRegistry(opts = {}) {
       return
     }
 
-    const worldId = resolveWorldId(pathname)
-    if (!worldId) {
+    const descriptor = resolveWorldId(pathname)
+    if (!descriptor) {
       sendHttpResponse(socket, 404, 'Not Found')
       return
     }
 
-    // Look up the world host
-    const host = hosts.get(worldId)
-    if (!host) {
-      sendHttpResponse(socket, 404, 'World Not Found')
+    // ── Default world (root path, /apps/client) ──
+    if (descriptor.kind === 'default') {
+      const host = hosts.get('default')
+      if (!host) {
+        sendHttpResponse(socket, 404, 'World Not Found')
+        return
+      }
+      // Resolve userId from cookie (for backward compat with existing hello auth)
+      let upgradeUserId = null
+      if (db) {
+        try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+      }
+      host.handleUpgrade(request, socket, head, upgradeUserId)
       return
     }
 
-    // Resolve user identity from session cookie
-    let upgradeUserId = null
-    if (db) {
-      try {
-        upgradeUserId = resolveWsUserId(request, db)
-      } catch {
-        upgradeUserId = null
+    // ── By world row id (/ws/<id>) ──
+    if (descriptor.kind === 'byWorldRowId') {
+      const host = hosts.get(descriptor.worldRowId)
+      if (!host) {
+        sendHttpResponse(socket, 404, 'World Not Found')
+        return
       }
+      let upgradeUserId = null
+      if (db) {
+        try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+      }
+      host.handleUpgrade(request, socket, head, upgradeUserId)
+      return
     }
 
-    // Upgrade into the target world's WebSocket server
-    host.handleUpgrade(request, socket, head, upgradeUserId)
+    // ── Home world (/home/<userId>/home) ──
+    if (descriptor.kind === 'home') {
+      // 1. Resolve user identity from session cookie
+      let upgradeUserId = null
+      if (db) {
+        try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+      }
+
+      // 2. Admission: anonymous → 404 (no leak)
+      if (!upgradeUserId) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 3. Admission: path userId must match cookie identity
+      if (upgradeUserId !== descriptor.homeUserId) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 4. DB lookup for the home world row
+      let row
+      try {
+        row = db.database.prepare(
+          "SELECT id, owner_user_id, document FROM worlds WHERE owner_user_id = ? AND slug = 'home'"
+        ).get(upgradeUserId)
+      } catch {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 5. No row → 404 (auto-create happens at login HTTP route, not upgrade)
+      if (!row) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 6. Verify owner matches (redundant with WHERE clause but explicit for clarity)
+      if (row.owner_user_id !== upgradeUserId) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 7. Host key is row UUID, same /ws/<id> space
+      const hostId = row.id
+
+      // 8. Lazy create host on first join (with concurrency guard)
+      const doUpgrade = () => {
+        const host = hosts.get(hostId)
+        if (!host) {
+          sendHttpResponse(socket, 404, 'World Not Found')
+          return
+        }
+        host.handleUpgrade(request, socket, head, upgradeUserId)
+      }
+
+      if (hosts.has(hostId)) {
+        doUpgrade()
+        return
+      }
+
+      // First join — register from document, with in-flight guard for races
+      if (pendingCreations.has(hostId)) {
+        // Another upgrade is already creating this host — await it
+        pendingCreations.get(hostId).then(doUpgrade, doUpgrade)
+        return
+      }
+
+      const createPromise = (async () => {
+        try {
+          const host = await registerWorldFromDocument(row)
+          return host
+        } catch (err) {
+          console.error(`[world-registry] Failed to register home world ${hostId}:`, err.message)
+          pendingCreations.delete(hostId)
+          throw err
+        }
+      })()
+
+      pendingCreations.set(hostId, createPromise)
+      createPromise.then(
+        () => { pendingCreations.delete(hostId); doUpgrade() },
+        () => { pendingCreations.delete(hostId); sendHttpResponse(socket, 404, 'Not Found') }
+      )
+      return
+    }
+
+    // Fallback: unknown descriptor
+    sendHttpResponse(socket, 404, 'Not Found')
   })
 
   // ---------------------------------------------------------------------------
   // Parse cookie userId helper (matches session.js token)
-  // Note: This is intentionally duplicated from session.js (same function
-  // name) to avoid circular imports — the registry imports world-host,
-  // which imports attachSessionHandlers from session.js. If they shared
-  // the function, world-registry → world-host → session.js → world-registry
-  // would form a cycle. Both copies must be kept in sync.
   // ---------------------------------------------------------------------------
   function resolveWsUserId(req, dbRef) {
     const raw = req.headers['cookie']
@@ -154,23 +283,6 @@ export function createWorldRegistry(opts = {}) {
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-  function sendHttpResponse(socket, status, body) {
-      const buf = Buffer.from(body, 'utf-8')
-      const reason = status === 404 ? 'Not Found' : 'Bad Request'
-      socket.write([
-        `HTTP/1.1 ${status} ${reason}`,
-        'Content-Type: text/plain',
-        `Content-Length: ${buf.length}`,
-        'Connection: close',
-        '',
-        body,
-      ].join('\r\n'))
-      socket.destroy()
-    }
-
-  // ---------------------------------------------------------------------------
   // Session lifecycle — called from WorldHost when a session is removed
   // ---------------------------------------------------------------------------
   function onSessionRemoved(worldId, session) {
@@ -183,7 +295,7 @@ export function createWorldRegistry(opts = {}) {
   }
 
   // ---------------------------------------------------------------------------
-  // Teardown scheduling (debounced, reverible on reconnect)
+  // Teardown scheduling (debounced, revertible on reconnect)
   // ---------------------------------------------------------------------------
   const TEARDOWN_DELAY = 3000
   const teardownTimers = new Map()
@@ -209,7 +321,6 @@ export function createWorldRegistry(opts = {}) {
   }
 
   async function performTeardown(worldId) {
-    // The boot 'default' world is never torn down (see ADDENDUM-user-accounts-phase2.md §6).
     if (worldId === 'default') return
     const host = hosts.get(worldId)
     if (!host) return
@@ -225,7 +336,7 @@ export function createWorldRegistry(opts = {}) {
   }
 
   // ---------------------------------------------------------------------------
-  // Registration — create a new world and its host
+  // Registration — create a new world and its host from a file path
   // ---------------------------------------------------------------------------
   async function registerWorld(worldId = 'default', gltfPath, ownerUserId = null) {
     if (hosts.has(worldId)) {
@@ -243,6 +354,39 @@ export function createWorldRegistry(opts = {}) {
       world,
       db,
       ownerUserId,
+      onSessionRemoved: (session) => onSessionRemoved(worldId, session),
+    })
+
+    hosts.set(worldId, host)
+    return host
+  }
+
+  // ---------------------------------------------------------------------------
+  // Registration from DB document — create a new world host from a row's
+  // serialized glTF document column. Used for home worlds and other
+  // document-stored worlds whose live instance is created on first join.
+  // ---------------------------------------------------------------------------
+  async function registerWorldFromDocument(worldRow) {
+    const worldId = worldRow.id
+
+    if (hosts.has(worldId)) {
+      throw new Error(`World "${worldId}" is already registered`)
+    }
+
+    const documentJson = worldRow.document || '{"asset":{"version":"2.0","generator":"Atrium"}}'
+    const world = await createWorldFromDocument(documentJson)
+
+    // Home worlds typically have no external refs, but resolve if present
+    await world.resolveExternalReferences()
+
+    const nodeCount = world.listNodeNames().length
+    console.log(`[world-registry] Home world loaded: "${worldId}" — ${nodeCount} nodes`)
+
+    const host = createWorldHost({
+      id: worldId,
+      world,
+      db,
+      ownerUserId: worldRow.owner_user_id,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
     })
 
@@ -274,11 +418,13 @@ export function createWorldRegistry(opts = {}) {
       host.close()
     }
     hosts.clear()
+    pendingCreations.clear()
   }
 
   return {
     hosts,
     registerWorld,
+    registerWorldFromDocument,
     getWorldHost,
     getDefaultHost,
     onSessionRemoved,

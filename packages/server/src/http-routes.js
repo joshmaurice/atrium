@@ -3,6 +3,7 @@
 
 import { randomUUID } from 'node:crypto'
 import * as worldStore from './world-store.js'
+import { ensureHomeWorld } from './home-world.js'
 
 /**
  * Validate the Origin header for CSRF / cross-origin protection.
@@ -330,6 +331,13 @@ export function createRequestHandler(opts = {}) {
       // -- Set cookie --
       setAuthCookie(res, authSessionId)
 
+      // -- Auto-create home world (idempotent; errors don't block auth) --
+      try {
+        ensureHomeWorld(db.database, userId)
+      } catch (err) {
+        console.error('Failed to auto-create home world during register:', err.message)
+      }
+
       res.writeHead(201, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         id: userId,
@@ -425,6 +433,13 @@ export function createRequestHandler(opts = {}) {
       }
 
       setAuthCookie(res, authSessionId)
+
+      // -- Auto-create home world (idempotent; errors don't block auth) --
+      try {
+        ensureHomeWorld(db.database, user.id)
+      } catch (err) {
+        console.error('Failed to auto-create home world during login:', err.message)
+      }
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
@@ -529,6 +544,13 @@ export function createRequestHandler(opts = {}) {
       if (!body || !body.slug || typeof body.slug !== 'string' || body.slug.trim().length === 0) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Slug is required' }))
+        return
+      }
+
+      // Reserved slug: 'home' is per-user and auto-created
+      if (body.slug.trim() === 'home') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Slug "home" is reserved' }))
         return
       }
 
@@ -658,6 +680,11 @@ export function createRequestHandler(opts = {}) {
 
         // Only accept slug and name from the client; document is always
         // server-authoritative. Never accept visibility, owner_user_id, or id.
+        if (body?.slug?.trim() === 'home') {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Slug "home" is reserved' }))
+          return
+        }
         const result = worldStore.updateWorld(db.database, worldId, userId, {
           slug: body?.slug || undefined,
           name: body?.name || undefined,

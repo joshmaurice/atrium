@@ -199,3 +199,142 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
 
   return { meta, som, externalNodeNames, getNode, setField, addNode, removeNode, getNodeTranslation, listNodeNames, serialize, resolveExternalReferences }
 }
+
+/**
+ * Create a world from an in-memory glTF document (JSON string or parsed object).
+ * Used for loading home worlds and other document-stored worlds from the DB.
+ * Supports the same world API as createWorld() (in-memory vs file-based).
+ *
+ * @param {string|object} documentJson - serialized glTF JSON
+ * @returns {Promise<object>} world object with same API as createWorld
+ */
+export async function createWorldFromDocument(documentJson) {
+  const io = new NodeIO().registerExtensions([KHRLightsPunctual])
+  const parsed = typeof documentJson === 'string' ? JSON.parse(documentJson) : documentJson
+  const document = await io.readJSON({ json: parsed, resources: {} })
+  const som = new SOMDocument(document)
+
+  const rootExtras = document.getRoot().getExtras()
+  const meta = rootExtras?.atrium ?? {}
+
+  // Names of nodes created by ingestExternalScene — filtered from som-dump
+  const externalNodeNames = new Set()
+
+  // Base URL for resolving external refs — document worlds typically have none
+  const worldBaseUrl = 'file:///'
+
+  async function resolveExternalReferences() {
+    const tasks = som.nodes
+      .filter(n => n.extras?.atrium?.source)
+      .map(n => _loadExternalRef(n.name, n.extras.atrium.source))
+    await Promise.all(tasks)
+  }
+
+  async function _loadExternalRef(containerName, source) {
+    const resolvedUrl = new URL(source, worldBaseUrl).href
+    try {
+      let doc
+      if (resolvedUrl.endsWith('.glb')) {
+        const resp = await fetch(resolvedUrl)
+        const buffer = await resp.arrayBuffer()
+        doc = await io.readBinary(new Uint8Array(buffer))
+      } else {
+        const resp = await fetch(resolvedUrl)
+        const text = await resp.text()
+        doc = await io.readJSON({ json: JSON.parse(text), resources: {} })
+      }
+      const newNodes = som.ingestExternalScene(containerName, doc)
+      _registerExternal(newNodes)
+      console.log(`[world] External ref loaded: "${containerName}" ← ${resolvedUrl} (${newNodes.length} top-level node(s))`)
+    } catch (err) {
+      console.warn(`[world] Failed to load external ref "${resolvedUrl}" for container "${containerName}":`, err.message)
+    }
+  }
+
+  function _registerExternal(somNodes) {
+    for (const node of somNodes) {
+      externalNodeNames.add(node.name)
+      _registerExternal(node.children)
+    }
+  }
+
+  function getNode(name) { return som.getNodeByName(name) }
+
+  function setField(nodeName, field, value) {
+    const target = som.getObjectByName(nodeName)
+    if (!target) return { ok: false, code: 'NODE_NOT_FOUND' }
+    try { som.setPath(target, field, value) } catch { return { ok: false, code: 'INVALID_FIELD' } }
+    return { ok: true }
+  }
+
+  function addNode(nodeDescriptor, parentName) {
+    const node = som.ingestNode(nodeDescriptor)
+    if (parentName) {
+      const parent = som.getNodeByName(parentName)
+      if (!parent) return { ok: false, code: 'NODE_NOT_FOUND' }
+      parent.addChild(node)
+    } else {
+      som.scene.addChild(node)
+    }
+    return { ok: true, node }
+  }
+
+  async function serialize({ excludeNodes } = {}) {
+    const { json, resources } = await io.writeJSON(som._document)
+    for (const buf of json.buffers ?? []) {
+      if (buf.uri && !buf.uri.startsWith('data:')) {
+        const data = resources[buf.uri]
+        if (data) {
+          buf.uri = 'data:application/octet-stream;base64,' + Buffer.from(data).toString('base64')
+        }
+      }
+    }
+
+    const allExcluded = new Set(externalNodeNames)
+    if (excludeNodes) {
+      for (const name of excludeNodes) allExcluded.add(name)
+    }
+
+    if (allExcluded.size > 0 && json.nodes) {
+      const nameByIndex = new Map(json.nodes.map((n, i) => [i, n.name]))
+      const removeIndices = new Set(
+        json.nodes.map((n, i) => (allExcluded.has(n.name) ? i : -1)).filter(i => i >= 0)
+      )
+      if (removeIndices.size > 0) {
+        const remap = []
+        let next = 0
+        for (let i = 0; i < json.nodes.length; i++) remap[i] = removeIndices.has(i) ? -1 : next++
+        json.nodes = json.nodes.filter((_, i) => !removeIndices.has(i))
+        for (const node of json.nodes) {
+          if (node.children) {
+            node.children = node.children.map(c => remap[c]).filter(c => c >= 0)
+            if (node.children.length === 0) delete node.children
+          }
+        }
+        for (const scene of json.scenes ?? []) {
+          if (scene.nodes) {
+            scene.nodes = scene.nodes.map(c => remap[c]).filter(c => c >= 0)
+          }
+        }
+      }
+    }
+    return json
+  }
+
+  function removeNode(nodeName) {
+    const node = som.getNodeByName(nodeName)
+    if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
+    node.dispose()
+    return { ok: true }
+  }
+
+  function getNodeTranslation(name) {
+    const node = som.getNodeByName(name)
+    if (!node) return null
+    return [...node.translation]
+  }
+
+  function listNodeNames() { return som.nodes.map(n => n.name) }
+
+  return { meta, som, externalNodeNames, getNode, setField, addNode, removeNode, getNodeTranslation, listNodeNames, serialize, resolveExternalReferences }
+}
