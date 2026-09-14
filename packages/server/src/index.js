@@ -4,10 +4,9 @@
 import { readFile } from 'node:fs/promises'
 import { resolve as resolvePath, dirname } from 'node:path'
 import { createServer } from 'node:http'
-import { createWorld } from './world.js'
-import { createSessionServer } from './session.js'
 import { createRequestHandler } from './http-routes.js'
 import { createDb } from './db.js'
+import { createWorldRegistry } from './world-registry.js'
 import * as auth from './auth.js'
 
 // ---------------------------------------------------------------------------
@@ -24,12 +23,12 @@ function extractPort(wsUrl) {
 }
 
 // ---------------------------------------------------------------------------
-// Startup: parse WORLD_PATH (may be a .atrium.json config or a direct glTF)
+// Startup: parse WORLD_PATH
 // ---------------------------------------------------------------------------
 
 let worldPath  = process.env.WORLD_PATH ?? './space.gltf'
 let port       = process.env.PORT ? parseInt(process.env.PORT, 10) : null
-let worldBaseUrl = undefined  // only set when .atrium.json provides world.baseUrl
+let worldBaseUrl = undefined
 
 if (worldPath.endsWith('.json')) {
   const absConfigPath = resolvePath(worldPath)
@@ -40,7 +39,6 @@ if (worldPath.endsWith('.json')) {
     worldPath = resolvePath(dirname(absConfigPath), config.world.gltf)
   }
 
-  // PORT env var wins; only fall back to world.server when PORT is not set
   if (port === null && config.world?.server) {
     port = extractPort(config.world.server)
   }
@@ -50,56 +48,51 @@ if (worldPath.endsWith('.json')) {
   }
 }
 
-// Final port fallback to default
 port ??= 3000
 
 // ---------------------------------------------------------------------------
-// World
+// Database
 // ---------------------------------------------------------------------------
 
-const world = await createWorld(worldPath, { baseUrl: worldBaseUrl })
-
-await world.resolveExternalReferences()
-
-const nodeCount = world.listNodeNames().length
-console.log(`Atrium world loaded: ${world.meta.name ?? 'unnamed'} (${nodeCount} nodes)`)
+const db = createDb(process.env.ATRIUM_DB_PATH)
+console.log(`Atrium database: ${process.env.ATRIUM_DB_PATH || '(default)'}`)
 
 // ---------------------------------------------------------------------------
-// Database (migrations run before the server accepts connections)
+// HTTP server with route dispatch
 // ---------------------------------------------------------------------------
 
-const dbPath = process.env.ATRIUM_DB_PATH
-const db = createDb(dbPath)
-console.log(`Atrium database: ${dbPath || '(default)'}`)
+const defaultHostRef = { current: null }
+
+const httpServer = createServer(createRequestHandler({
+  db,
+  auth,
+  defaultHostRef,
+}))
 
 // ---------------------------------------------------------------------------
-// HTTP server with route dispatch (plain Node http — no Express)
+// World registry — manages multi-world WebSocket routing and lifecycle
 // ---------------------------------------------------------------------------
 
-// Mutable reference for live session state. The sessions Map is populated
-// after the HTTP server is created (see below), so we thread a container
-// through and populate it after createSessionServer runs.
-const sessionsRef = { current: null }
+const registry = createWorldRegistry({ httpServer, db })
 
-const httpServer = createServer(createRequestHandler({ db, auth, world, sessionsRef }))
+// Register the default world from the boot glTF file
+const resolvedWorldPath = resolvePath(worldPath)
+const defaultHost = await registry.registerWorld('default', resolvedWorldPath)
+defaultHostRef.current = defaultHost
 
-// ---------------------------------------------------------------------------
-// Session server (WebSocket upgrade on the same port)
-// ---------------------------------------------------------------------------
+const nodeCount = defaultHost.world.listNodeNames().length
+const worldName = defaultHost.world.meta?.name ?? 'unnamed'
+console.log(`Atrium world loaded: ${worldName} (${nodeCount} nodes)`)
+console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket, multi-world ready)`)
 
-const { sessions } = createSessionServer({ httpServer, world, db })
-// Wire up the live session Map after it exists so save handlers
-// can read avatar node names at request time
-sessionsRef.current = sessions
 httpServer.listen(port)
-console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket)`)
 
 // ---------------------------------------------------------------------------
 // Periodic sweep of expired auth sessions (every hour)
 // ---------------------------------------------------------------------------
-// Complementary to the lazy expiry checks on lookup; removes rows that
-// nobody ever looks up again. Uses unref() so it doesn't hold the process open.
 const sweepInterval = setInterval(() => {
   db.pruneExpiredAuthSessions()
 }, 60 * 60 * 1000)
 sweepInterval.unref()
+
+export { httpServer, registry, defaultHost }
