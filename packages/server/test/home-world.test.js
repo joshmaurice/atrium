@@ -563,6 +563,42 @@ test('POST /api/worlds with slug "home" returns 400', async () => {
 
 // ── Existing regression tests: /apps/client routing ──
 
+test('concurrent login race — both succeed, exactly one home world created', async () => {
+  // Register a fresh user
+  const regRes = await httpPost('/api/auth/register', {
+    username: 'homeworld-race-user-' + Date.now(),
+    password: 'correct horse battery staple',
+  })
+  assert.equal(regRes.statusCode, 201)
+  const userId = regRes.body.id
+
+  // Delete the home world so the race is meaningful (both logins will try
+  // to create it via ensureHomeWorld)
+  db.database.prepare("DELETE FROM worlds WHERE owner_user_id = ? AND slug = 'home'").run(userId)
+  const before = db.database.prepare(
+    "SELECT COUNT(*) as cnt FROM worlds WHERE owner_user_id = ? AND slug = 'home'"
+  ).get(userId)
+  assert.equal(before.cnt, 0, 'no home world before login race')
+
+  // Fire two parallel login requests
+  const [res1, res2] = await Promise.all([
+    httpPost('/api/auth/login', { username: regRes.body.username, password: 'correct horse battery staple' }),
+    httpPost('/api/auth/login', { username: regRes.body.username, password: 'correct horse battery staple' }),
+  ])
+
+  // Both logins succeed
+  assert.equal(res1.statusCode, 200, 'first race participant login succeeds')
+  assert.equal(res2.statusCode, 200, 'second race participant login succeeds')
+  assert.equal(res1.body.id, userId, 'first login returns same userId')
+  assert.equal(res2.body.id, userId, 'second login returns same userId')
+
+  // Exactly one home world row
+  const after = db.database.prepare(
+    "SELECT COUNT(*) as cnt FROM worlds WHERE owner_user_id = ? AND slug = 'home'"
+  ).get(userId)
+  assert.equal(after.cnt, 1, 'exactly one home world created by race')
+})
+
 test('existing /apps/client still routes to default world', async () => {
   const ws = new WebSocket(`ws://localhost:${PORT}/apps/client`)
   const hello = await doHandshake(ws, 'apps-client-test')

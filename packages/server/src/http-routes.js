@@ -332,10 +332,12 @@ export function createRequestHandler(opts = {}) {
       setAuthCookie(res, authSessionId)
 
       // -- Auto-create home world (idempotent; errors don't block auth) --
+      let homeWorldWarning = null
       try {
         ensureHomeWorld(db.database, userId)
       } catch (err) {
         console.error('Failed to auto-create home world during register:', err.message)
+        homeWorldWarning = 'home_world_creation_failed'
       }
 
       res.writeHead(201, { 'Content-Type': 'application/json' })
@@ -344,6 +346,7 @@ export function createRequestHandler(opts = {}) {
         username: normalized,
         displayName,
         createdAt: now,
+        ...(homeWorldWarning ? { warning: homeWorldWarning } : {}),
       }))
       return
     }
@@ -435,10 +438,12 @@ export function createRequestHandler(opts = {}) {
       setAuthCookie(res, authSessionId)
 
       // -- Auto-create home world (idempotent; errors don't block auth) --
+      let homeWorldWarning = null
       try {
         ensureHomeWorld(db.database, user.id)
       } catch (err) {
         console.error('Failed to auto-create home world during login:', err.message)
+        homeWorldWarning = 'home_world_creation_failed'
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -447,6 +452,7 @@ export function createRequestHandler(opts = {}) {
         username: normalized,
         displayName: user.display_name,
         createdAt: user.created_at,
+        ...(homeWorldWarning ? { warning: homeWorldWarning } : {}),
       }))
       return
     }
@@ -684,6 +690,19 @@ export function createRequestHandler(opts = {}) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Slug "home" is reserved' }))
           return
+        }
+        // Forbid changing the slug of a world whose current slug is 'home'
+        // (the user's home world). Renaming it would orphan the home
+        // relationship — next login would create a fresh default home.
+        if (body?.slug !== undefined) {
+          const current = db.database.prepare(
+            "SELECT slug FROM worlds WHERE id = ? AND owner_user_id = ?"
+          ).get(worldId, userId)
+          if (current && current.slug === 'home') {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Cannot rename home world' }))
+            return
+          }
         }
         const result = worldStore.updateWorld(db.database, worldId, userId, {
           slug: body?.slug || undefined,

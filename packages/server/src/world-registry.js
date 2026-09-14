@@ -63,7 +63,8 @@ export function createWorldRegistry(opts = {}) {
       const segments = cleaned.slice(6).split('/')
       // Must be exactly /home/<userId>/home (two segments beyond /home/)
       if (segments.length !== 2) return null
-      if (segments[0] !== '' && segments[1] !== 'home') return null
+      // Reject if the second segment is not 'home'
+      if (segments[1] !== 'home') return null
       const userId = segments[0]
       // Hygiene: userId must be valid UUID
       if (!UUID_RE.test(userId)) return null
@@ -153,6 +154,16 @@ export function createWorldRegistry(opts = {}) {
       if (db) {
         try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
       }
+      // Admission: owned worlds (those with an ownerUserId) require the
+      // connecting user to be the owner — anonymous and mismatched users
+      // get 404. This prevents the /ws/<homeWorldRowId> path from
+      // bypassing the identity check enforced in the /home/<userId>/home path.
+      if (host.ownerUserId && upgradeUserId !== host.ownerUserId) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+      // Cancel any pending teardown — a new connection arrived
+      cancelTeardown(descriptor.worldRowId)
       host.handleUpgrade(request, socket, head, upgradeUserId)
       return
     }
@@ -214,6 +225,7 @@ export function createWorldRegistry(opts = {}) {
       }
 
       if (hosts.has(hostId)) {
+        cancelTeardown(hostId)
         doUpgrade()
         return
       }
@@ -238,7 +250,7 @@ export function createWorldRegistry(opts = {}) {
 
       pendingCreations.set(hostId, createPromise)
       createPromise.then(
-        () => { pendingCreations.delete(hostId); doUpgrade() },
+        () => { pendingCreations.delete(hostId); cancelTeardown(hostId); doUpgrade() },
         () => { pendingCreations.delete(hostId); sendHttpResponse(socket, 404, 'Not Found') }
       )
       return
@@ -295,7 +307,7 @@ export function createWorldRegistry(opts = {}) {
   }
 
   // ---------------------------------------------------------------------------
-  // Teardown scheduling (debounced, revertible on reconnect)
+  // Teardown scheduling (debounced, reversible on reconnect)
   // ---------------------------------------------------------------------------
   const TEARDOWN_DELAY = 3000
   const teardownTimers = new Map()
