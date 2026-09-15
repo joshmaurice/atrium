@@ -1,9 +1,9 @@
 Based on [tparisi/atrium](https://github.com/tparisi/atrium)
 
-One of the logical next steps for Atrium seems to be enabling user data to persist across sessions. With Deepseek Flash (via Hermes) writing code, & help from other bots (Sonnet writing most of the docs), we've added a user account option.
+One of the logical next steps for Atrium seems to be enabling user data to persist across sessions. Phase 1 of this fork added a user account option; phase 2 is adding user home worlds & connections between them.
 
 [Latest plan for phase 2](https://github.com/joshmaurice/atrium/blob/main/devtasks/ADDENDUM-user-accounts-phase2.md)
-2026-9-14: Phase 2, step 1 is deployed to 5.78.232.73/sslip.io.
+2026-9-14: Phase 2, step 1 is deployed to prod server.
 
 [Initial plan for this fork](https://github.com/joshmaurice/atrium/blob/main/docs/DESIGN-user-accounts.md)
 Phase 1 deployed as of 2026-8-25.
