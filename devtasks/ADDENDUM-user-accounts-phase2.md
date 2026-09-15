@@ -6,7 +6,7 @@ This addendum resolves the architectural and product decisions Phase 2 of
 `DESIGN-user-accounts.md` left open. It exists so that implementation work
 (brief-writing, review, and coding) has firm ground to build on instead of
 having to originate these decisions per step. Read alongside
-`DESIGN-user-accounts.md` and `ADDENDUM-user-accounts-final.md`.
+`docs/DESIGN-user-accounts.md` and `docs/ADDENDUM-user-accounts-final.md`.
 
 ## Why this matters more than the Phase 2 bullet list suggests
 
