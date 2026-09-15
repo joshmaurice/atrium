@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeWsUrl } from '../src/wsUrl.js'
+import { computeWsUrl, buildHomeWorldWsUrl } from '../src/wsUrl.js'
 
 describe('computeWsUrl', () => {
 
@@ -75,5 +75,58 @@ describe('computeWsUrl', () => {
   test('fallback still works with pathname on non-http protocol', () => {
     const loc = { protocol: 'file:', host: '', pathname: '/index.html' }
     assert.equal(computeWsUrl(loc), 'ws://localhost:3000')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildHomeWorldWsUrl — home world WS URL construction
+// ---------------------------------------------------------------------------
+
+describe('buildHomeWorldWsUrl', () => {
+
+  test('constructs correct URL from bare origin', () => {
+    const result = buildHomeWorldWsUrl('wss://atrium.example.com', '550e8400-e29b-41d4-a716-446655440000')
+    assert.equal(result, 'wss://atrium.example.com/home/550e8400-e29b-41d4-a716-446655440000/home')
+  })
+
+  test('strips pathname from base URL with deployment subpath', () => {
+    // This is the critical case from Finding 2: computeWsUrl includes pathname
+    const result = buildHomeWorldWsUrl('wss://atrium.example.com/apps/client/', '550e8400-e29b-41d4-a716-446655440000')
+    assert.equal(result, 'wss://atrium.example.com/home/550e8400-e29b-41d4-a716-446655440000/home')
+  })
+
+  test('ws:// protocol works', () => {
+    const result = buildHomeWorldWsUrl('ws://localhost:3000', '550e8400-e29b-41d4-a716-446655440000')
+    assert.equal(result, 'ws://localhost:3000/home/550e8400-e29b-41d4-a716-446655440000/home')
+  })
+
+  test('ws:// with port and pathname', () => {
+    const result = buildHomeWorldWsUrl('ws://localhost:3000/apps/client/', '550e8400-e29b-41d4-a716-446655440000')
+    assert.equal(result, 'ws://localhost:3000/home/550e8400-e29b-41d4-a716-446655440000/home')
+  })
+
+  test('wss:// with non-default port', () => {
+    const result = buildHomeWorldWsUrl('wss://atrium.example.com:8443', '550e8400-e29b-41d4-a716-446655440000')
+    assert.equal(result, 'wss://atrium.example.com:8443/home/550e8400-e29b-41d4-a716-446655440000/home')
+  })
+
+  test('returns null for empty base', () => {
+    assert.equal(buildHomeWorldWsUrl('', '550e8400-e29b-41d4-a716-446655440000'), null)
+  })
+
+  test('returns null for null base', () => {
+    assert.equal(buildHomeWorldWsUrl(null, '550e8400-e29b-41d4-a716-446655440000'), null)
+  })
+
+  test('returns null for undefined user id', () => {
+    assert.equal(buildHomeWorldWsUrl('wss://atrium.example.com', undefined), null)
+  })
+
+  test('returns null for null user id', () => {
+    assert.equal(buildHomeWorldWsUrl('wss://atrium.example.com', null), null)
+  })
+
+  test('returns null for invalid URL', () => {
+    assert.equal(buildHomeWorldWsUrl('not-a-url', '550e8400-e29b-41d4-a716-446655440000'), null)
   })
 })

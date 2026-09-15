@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl }          from './wsUrl.js'
+import { computeWsUrl, buildHomeWorldWsUrl } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -85,6 +85,15 @@ async function handleAuthSubmit() {
   const isRegister = authSubmitBtn.textContent === 'Register'
   authSubmitBtn.disabled = true
   authError.textContent = ''
+
+  // ── Pre-auth honeypot guard ──────────────────────────────────────
+  // If Register mode and the hidden website field is non-empty, the
+  // request IS a honeypot trigger. Call register() so bots that read
+  // HTTP responses see a fake 200 (server returns fake success), but
+  // do NOT set auth state, persist the session, or auto-connect — the
+  // client stays logged out silently.
+  const isHoneypot = isRegister && authWebsite.value.trim().length > 0
+
   try {
     let result
     if (isRegister) {
@@ -92,7 +101,29 @@ async function handleAuthSubmit() {
     } else {
       result = await login(username, password)
     }
+
+    if (isHoneypot) {
+      // Silent swallow — don't setAuthState, don't persist session,
+      // don't show logged-in UI. Reset form to login mode.
+      authSubmitBtn.textContent = 'Login'
+      authToggleBtn.textContent = 'Register'
+      authUsername.value = ''
+      authPassword.value = ''
+      authError.textContent = ''
+      return
+    }
+
     setAuthState(result)
+
+    // Auto-connect to home world after successful auth.
+    if (result && result.id) {
+      autoConnectToHomeWorld(result)
+    }
+
+    // Surface home_world_creation_failed warning if present
+    if (result && result.warning === 'home_world_creation_failed') {
+      authError.textContent = 'Home world creation encountered an issue — continuing with limited functionality'
+    }
   } catch (err) {
     authError.textContent = err.message || 'Authentication failed'
   } finally {
@@ -339,6 +370,33 @@ function enableWbLoadButtons() {
       btn.title = 'Load this world'
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Home world auto-connect helpers
+// ---------------------------------------------------------------------------
+
+function homeWorldWsUrl(userId) {
+  return buildHomeWorldWsUrl(wsUrlInput.value.trim(), userId)
+}
+
+function autoConnectToHomeWorld(user) {
+  // Always constructs a /home/<uuid>/home path on the origin extracted
+  // from wsUrlInput, regardless of any pathname in the field. This may
+  // differ from Manual Connect, which uses wsUrlInput's raw value — the
+  // divergence is by design (auto-connect targets the home world endpoint,
+  // manual connect targets whatever URL the user entered).
+  if (!user || !user.id) return
+  if (client.connected) return
+
+  const homeWsUrl = homeWorldWsUrl(user.id)
+  if (!homeWsUrl) return
+
+  setConnectionState('connecting')
+  const avatarDesc = buildAvatarDescriptor()
+  const connectOpts = { avatar: avatarDesc }
+  connectOpts.displayName = user.displayName || user.username
+  client.connect(homeWsUrl, connectOpts)
 }
 
 // ---------------------------------------------------------------------------
@@ -758,5 +816,12 @@ updateHintText()
 // ---------------------------------------------------------------------------
 
 me().then(user => {
-  if (user) setAuthState(user)
+  if (user) {
+    setAuthState(user)
+    // Auto-connect to home world on page load if a valid session exists
+    // and we're not already connected.
+    if (!client.connected) {
+      autoConnectToHomeWorld(user)
+    }
+  }
 })
