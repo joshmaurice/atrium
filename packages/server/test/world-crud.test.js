@@ -742,9 +742,12 @@ test('node with avatar-like extras is saved normally (not treated as avatar)', a
   const worldId = createRes.body.id
 
   // Add a node with avatar-like extras but NO live WS session claiming it.
-  // The exclusion logic runs off sessionsRef.current's avatarNodeName values,
-  // not anything inspectable in the node. Since no WS session has this node
-  // name, it should survive the save.
+  // With the D4 fix, PUT to a world that has NO live host skips document
+  // serialization entirely. To test avatar exclusion, we need to PUT to a
+  // world that IS live. The default world is always live, but doesn't have
+  // a DB row — so instead we operate on the live default world's content
+  // and verify the avatar-like node survives serialization when no session
+  // claims it.
   const avatarNameResult = world.addNode({
     name: 'User-fake',
     extras: { isAvatar: true, displayName: 'Fake Avatar' },
@@ -757,19 +760,17 @@ test('node with avatar-like extras is saved normally (not treated as avatar)', a
   })
   assert.ok(extrasResult.ok, 'extras-marked node added to live world')
 
-  // Save — should include both nodes since no session claims them
-  const putRes = await httpPut(`/api/worlds/${worldId}`, {}, userA.cookie)
-  assert.equal(putRes.statusCode, 200)
+  // Serialize the live default world directly — verify exclusion is session-driven.
+  // No sessions exist for the default world in this test, so both nodes survive.
+  const json = JSON.stringify(await world.serialize())
+  const parsed = JSON.parse(json)
 
-  const getRes = await httpGet(`/api/worlds/${worldId}`, userA.cookie)
-  assert.ok(getRes.body, 'document exists')
-
-  if (getRes.body.nodes) {
-    const hasFakeAvatar = getRes.body.nodes.some(n => n.name === 'User-fake')
+  if (parsed.nodes) {
+    const hasFakeAvatar = parsed.nodes.some(n => n.name === 'User-fake')
     assert.equal(hasFakeAvatar, true,
       'node named like avatar but with no live session IS saved (exclusion is session-driven)')
 
-    const hasExtrasAvatar = getRes.body.nodes.some(n => n.name === 'ExtrasAvatar')
+    const hasExtrasAvatar = parsed.nodes.some(n => n.name === 'ExtrasAvatar')
     assert.equal(hasExtrasAvatar, true,
       'node with avatar extras but no live session IS saved (exclusion is session-driven)')
   }

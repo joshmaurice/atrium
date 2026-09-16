@@ -4,6 +4,7 @@
 import { isOriginAllowed } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
 import { createWorld, createWorldFromDocument } from './world.js'
+import { createAutoSaveCoordinator } from './autosave.js'
 
 /**
  * UUID regex for hygiene check on /home/<userId>/home path segments.
@@ -35,6 +36,9 @@ export function createWorldRegistry(opts = {}) {
   // In-flight promise map for lazy register-while-first-join races
   /** @type {Map<string, Promise<object>>} */
   const pendingCreations = new Map()
+
+  // Auto-save coordinator — manages debounced, periodic, and disconnect-flush saves
+  const coordinator = createAutoSaveCoordinator({ db })
 
   // ---------------------------------------------------------------------------
   // URL path → resolution descriptor
@@ -340,10 +344,12 @@ export function createWorldRegistry(opts = {}) {
 
     console.log(`[world-registry] Tearing down world "${worldId}" (no sessions left)`)
 
-    // Placeholder: flush-and-save hook (Step 3)
-    // if (typeof host.world.saveIfDirty === 'func') await host.world.saveIfDirty()
+    // Flush-and-save before teardown (immediate, no debounce reliance)
+    // Must complete before host.close() to avoid persistence/teardown race
+    await coordinator.flushAndTeardown(worldId, host)
 
     host.close()
+    coordinator.stop(worldId)
     hosts.delete(worldId)
   }
 
@@ -367,6 +373,7 @@ export function createWorldRegistry(opts = {}) {
       db,
       ownerUserId,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
+      onSaveableMutation: () => coordinator.markDirty(worldId, host),
     })
 
     hosts.set(worldId, host)
@@ -400,6 +407,7 @@ export function createWorldRegistry(opts = {}) {
       db,
       ownerUserId: worldRow.owner_user_id,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
+      onSaveableMutation: () => coordinator.markDirty(worldId, host),
     })
 
     hosts.set(worldId, host)
@@ -421,6 +429,8 @@ export function createWorldRegistry(opts = {}) {
   // Close all
   // ---------------------------------------------------------------------------
   function close() {
+    coordinator.close()
+
     for (const timer of teardownTimers.values()) {
       clearTimeout(timer)
     }

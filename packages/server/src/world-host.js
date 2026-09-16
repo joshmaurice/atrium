@@ -19,6 +19,8 @@ import { attachSessionHandlers } from './session.js'
  *                                                     default world (no-owner, backward compat behavior)
  * @param {function|null}   opts.onSessionRemoved   - Called with the session object when a session is
  *                                                     cleaned up. Used by the registry for refcounting.
+ * @param {function|null}   opts.onSaveableMutation - Called when a saveable mutation occurs on this
+ *                                                     world. Used by the autosave coordinator.
  * @returns {{ id, world, wss, sessions, presence, ownerUserId, handleUpgrade, close }}
  */
 export function createWorldHost(opts = {}) {
@@ -32,6 +34,7 @@ export function createWorldHost(opts = {}) {
     db = null,
     ownerUserId = null,
     onSessionRemoved = null,
+    onSaveableMutation = null,
   } = opts
 
   const sessions = new Map()
@@ -48,6 +51,7 @@ export function createWorldHost(opts = {}) {
     maxUsers: 100,
     worldOwnerUserId: ownerUserId,
     onSessionRemoved,
+    onSaveableMutation,
   })
 
   /**
