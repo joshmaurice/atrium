@@ -4,7 +4,7 @@ One of the logical next steps for Atrium seems to be enabling user data to persi
 _____________________________
 [Latest plan for phase 2](https://github.com/joshmaurice/atrium/blob/main/devtasks/ADDENDUM-user-accounts-phase2.md)
 
-Phase 2, step 2 deployed as of 2026-9-16.
+Phase 2, step 3 deployed as of 2026-9-16.
 _____________________________
 [Initial plan for this fork](https://github.com/joshmaurice/atrium/blob/main/docs/DESIGN-user-accounts.md)
 
