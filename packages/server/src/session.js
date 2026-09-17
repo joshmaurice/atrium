@@ -140,6 +140,7 @@ export function attachSessionHandlers({
   maxUsers = 100,
   worldOwnerUserId = null,
   onSessionRemoved = null,
+  onSaveableMutation = null,
   keepaliveInterval = KEEPALIVE_INTERVAL,
 } = {}) {
 
@@ -421,6 +422,11 @@ export function attachSessionHandlers({
             serverTime: Date.now(),
             session: session.id,
           })
+
+          // Notify autosave coordinator of a saveable mutation
+          if (typeof onSaveableMutation === 'function' && worldOwnerUserId !== null) {
+            onSaveableMutation()
+          }
           break
         }
 
@@ -466,6 +472,11 @@ export function attachSessionHandlers({
             ...(msg.parent != null ? { parent: msg.parent } : {}),
             node: msg.node,
           })
+
+          // Notify autosave coordinator for non-avatar adds (saveable mutations)
+          if (typeof onSaveableMutation === 'function' && !isAvatar && worldOwnerUserId !== null) {
+            onSaveableMutation()
+          }
           break
         }
 
@@ -519,6 +530,11 @@ export function attachSessionHandlers({
             seq: nextSeq(),
             node: msg.node,
           })
+
+          // Notify autosave coordinator of a saveable mutation
+          if (typeof onSaveableMutation === 'function' && worldOwnerUserId !== null) {
+            onSaveableMutation()
+          }
           break
         }
 

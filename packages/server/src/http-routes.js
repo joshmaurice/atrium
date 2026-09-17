@@ -120,7 +120,7 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
-  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef } = opts
+  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef, getWorldHost } = opts
 
   // Resolve the live world reference: prefer the default host's world when
   // running in registry mode (index.js), fall back to legacy direct world
@@ -128,6 +128,20 @@ export function createRequestHandler(opts = {}) {
   function getLiveWorld() {
     if (defaultHostRef?.current?.world) return defaultHostRef.current.world
     return legacyWorld
+  }
+
+  /**
+   * Get the correct live world for a specific worldId (D4 fix).
+   * When a world has a live host (loaded into the registry), serialize
+   * THAT world instead of the default world. When no live host exists,
+   * return null — the caller should leave the document untouched.
+   */
+  function getWorldForId(worldId) {
+    if (typeof getWorldHost === 'function') {
+      const host = getWorldHost(worldId)
+      if (host) return host
+    }
+    return null
   }
 
   // Create a per-IP rate limiter for auth endpoints:
@@ -640,13 +654,6 @@ export function createRequestHandler(opts = {}) {
           return
         }
 
-        const liveWorld = getLiveWorld()
-        if (!liveWorld) {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Save subsystem not available' }))
-          return
-        }
-
         if (!isOriginAllowed(req)) {
           res.writeHead(403, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Cross-origin request denied' }))
@@ -672,16 +679,30 @@ export function createRequestHandler(opts = {}) {
           return
         }
 
-        // Serialize the live world, excluding avatar nodes
-        let document
-        try {
-          const excludeNodes = getLiveAvatarNodeNames()
-          document = JSON.stringify(await liveWorld.serialize({ excludeNodes }))
-        } catch (err) {
-          console.error('World serialize failed for save:', err.message)
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Failed to serialize world' }))
-          return
+        // Determine which live world to serialize: the requested world's host
+        // (D4 fix — was always serializing the default world).
+        // If the requested world has no live host, skip document serialization
+        // but still accept slug/name updates (leave existing document untouched).
+        let document, skipDocument
+        const worldHost = getWorldForId(worldId)
+        if (worldHost) {
+          skipDocument = false
+          try {
+            // Collect avatar node names from this host's sessions specifically
+            // (not from the default host — fixes avatar-exclusion for multi-world)
+            const avatarNames = []
+            for (const [, s] of worldHost.sessions) {
+              if (s.avatarNodeName) avatarNames.push(s.avatarNodeName)
+            }
+            document = JSON.stringify(await worldHost.world.serialize({ excludeNodes: avatarNames }))
+          } catch (err) {
+            console.error('World serialize failed for save:', err.message)
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Failed to serialize world' }))
+            return
+          }
+        } else {
+          skipDocument = true
         }
 
         // Only accept slug and name from the client; document is always
@@ -704,11 +725,15 @@ export function createRequestHandler(opts = {}) {
             return
           }
         }
-        const result = worldStore.updateWorld(db.database, worldId, userId, {
+
+        const updateParams = {
           slug: body?.slug || undefined,
           name: body?.name || undefined,
-          document,
-        })
+        }
+        if (!skipDocument) {
+          updateParams.document = document
+        }
+        const result = worldStore.updateWorld(db.database, worldId, userId, updateParams)
 
         if (!result.ok) {
           if (result.code === 'NOT_FOUND') {

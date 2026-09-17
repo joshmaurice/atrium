@@ -67,6 +67,7 @@ const httpServer = createServer(createRequestHandler({
   db,
   auth,
   defaultHostRef,
+  getWorldHost: (id) => registry.getWorldHost(id),
 }))
 
 // ---------------------------------------------------------------------------
