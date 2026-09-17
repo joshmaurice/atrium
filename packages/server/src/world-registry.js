@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { isOriginAllowed } from './http-routes.js'
+import { isOriginAllowed, resolveWsUserId } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
 import { createWorld, createWorldFromDocument } from './world.js'
 import { createAutoSaveCoordinator } from './autosave.js'
@@ -19,7 +19,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * Path resolution:
  *   - `/` or ``      → 'default' (the common, boot-loaded)
  *   - `/home/<uid>/home`  → { kind: 'home', homeUserId, slug }
- *   - `/public/...`  → not yet implemented (future Step 4)
+ *   - `/public/<user>/<slug>` → { kind: 'public', username, slug }
  *   - `/ws/<id>`     → world with that id (reserved for future multi-world routing)
  *   - anything else  → 404 at upgrade
  */
@@ -75,8 +75,15 @@ export function createWorldRegistry(opts = {}) {
       return { kind: 'home', homeUserId: userId, slug: 'home' }
     }
 
-    // `/public/...` — not yet implemented (future Step 4)
-    if (cleaned.startsWith('/public/')) return null
+    // `/public/<username>/<slug>` — public world routing (Step 4)
+    if (cleaned.startsWith('/public/')) {
+      const segments = cleaned.slice(8).split('/')
+      if (segments.length !== 2) return null
+      const [username, slug] = segments
+      if (!username || !slug) return null
+      // 'home' slug IS allowed — home worlds can be public too
+      return { kind: 'public', username, slug }
+    }
 
     // Everything else is unknown
     return null
@@ -158,13 +165,25 @@ export function createWorldRegistry(opts = {}) {
       if (db) {
         try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
       }
-      // Admission: owned worlds (those with an ownerUserId) require the
-      // connecting user to be the owner — anonymous and mismatched users
-      // get 404. This prevents the /ws/<homeWorldRowId> path from
-      // bypassing the identity check enforced in the /home/<userId>/home path.
-      if (host.ownerUserId && upgradeUserId !== host.ownerUserId) {
-        sendHttpResponse(socket, 404, 'Not Found')
-        return
+      // Admission: check DB visibility to allow public worlds for non-owners.
+      // Public worlds reachable via /ws/<id> by anyone; private worlds require
+      // ownership (prevents /ws/<homeWorldRowId> bypassing /home/<userId>/home auth).
+      if (db) {
+        const worldRow = db.database.prepare(
+          'SELECT visibility FROM worlds WHERE id = ?'
+        ).get(descriptor.worldRowId)
+        if (worldRow && worldRow.visibility === 'public') {
+          // Public world: admit anyone (including anonymous)
+        } else if (host.ownerUserId && upgradeUserId !== host.ownerUserId) {
+          sendHttpResponse(socket, 404, 'Not Found')
+          return
+        }
+      } else {
+        // No DB — fall back to owner-only check (legacy behavior)
+        if (host.ownerUserId && upgradeUserId !== host.ownerUserId) {
+          sendHttpResponse(socket, 404, 'Not Found')
+          return
+        }
       }
       // Cancel any pending teardown — a new connection arrived
       cancelTeardown(descriptor.worldRowId)
@@ -260,43 +279,119 @@ export function createWorldRegistry(opts = {}) {
       return
     }
 
+    // ── Public world (/public/<username>/<slug>) ──
+    if (descriptor.kind === 'public') {
+      // 1. Resolve username → userId (case-insensitive, COLLATE NOCASE)
+      let userRow
+      try {
+        userRow = db.database.prepare(
+          'SELECT id FROM users WHERE username = ? COLLATE NOCASE'
+        ).get(descriptor.username)
+      } catch {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      if (!userRow) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 2. Look up world by (owner_user_id, slug)
+      let row
+      try {
+        row = db.database.prepare(
+          'SELECT id, owner_user_id, document, visibility FROM worlds WHERE owner_user_id = ? AND slug = ?'
+        ).get(userRow.id, descriptor.slug)
+      } catch {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      if (!row) {
+        sendHttpResponse(socket, 404, 'Not Found')
+        return
+      }
+
+      // 3. Admission: visibility + ownership check
+      let upgradeUserId = null
+      try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+
+      if (row.visibility === 'private') {
+        // Private world: only the owner may connect via /public/ path
+        if (!upgradeUserId || upgradeUserId !== row.owner_user_id) {
+          sendHttpResponse(socket, 404, 'Not Found')
+          return
+        }
+      }
+      // Public world: admit anyone (including anonymous/unauthenticated)
+
+      // 4. Host key is row UUID, same /ws/<id> space
+      const hostId = row.id
+
+      // 5. Lazy create host on first join (with concurrency guard)
+      const doUpgrade = () => {
+        const host = hosts.get(hostId)
+        if (!host) {
+          sendHttpResponse(socket, 404, 'World Not Found')
+          return
+        }
+        // TOCTOU re-check: re-fetch row to verify visibility hasn't changed
+        // between the initial admission check and now (owner could flip
+        // public↔private while we were creating the host).
+        if (db) {
+          const currentRow = db.database.prepare(
+            'SELECT visibility FROM worlds WHERE id = ?'
+          ).get(hostId)
+          if (currentRow && currentRow.visibility === 'private') {
+            if (!upgradeUserId || upgradeUserId !== row.owner_user_id) {
+              sendHttpResponse(socket, 404, 'Not Found')
+              return
+            }
+          }
+        }
+        host.handleUpgrade(request, socket, head, upgradeUserId)
+      }
+
+      if (hosts.has(hostId)) {
+        cancelTeardown(hostId)
+        doUpgrade()
+        return
+      }
+
+      // First join — register from document, with in-flight guard for races
+      if (pendingCreations.has(hostId)) {
+        pendingCreations.get(hostId).then(doUpgrade, doUpgrade)
+        return
+      }
+
+      const createPromise = (async () => {
+        try {
+          const host = await registerWorldFromDocument(row)
+          return host
+        } catch (err) {
+          console.error(`[world-registry] Failed to register public world ${hostId}:`, err.message)
+          pendingCreations.delete(hostId)
+          throw err
+        }
+      })()
+
+      pendingCreations.set(hostId, createPromise)
+      createPromise.then(
+        () => { pendingCreations.delete(hostId); cancelTeardown(hostId); doUpgrade() },
+        () => { pendingCreations.delete(hostId); sendHttpResponse(socket, 404, 'Not Found') }
+      )
+      return
+    }
+
     // Fallback: unknown descriptor
     sendHttpResponse(socket, 404, 'Not Found')
   })
 
   // ---------------------------------------------------------------------------
-  // Parse cookie userId helper (matches session.js token)
+  // resolveWsUserId — imported from http-routes.js (shared to avoid duplication
+  // with session.js)
   // ---------------------------------------------------------------------------
-  function resolveWsUserId(req, dbRef) {
-    const raw = req.headers['cookie']
-    if (!raw) return null
-
-    let authSessionId = null
-    const cookies = raw.split(';').map(c => c.trim())
-    for (const cookie of cookies) {
-      const [name, ...rest] = cookie.split('=')
-      if (name.trim() === 'atrium_auth_session' && rest.length > 0) {
-        authSessionId = rest.join('=').trim()
-        break
-      }
-    }
-    if (!authSessionId) return null
-
-    const row = dbRef.database.prepare(
-      'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
-    ).get(authSessionId)
-
-    if (!row) return null
-
-    if (row.expires_at && new Date(row.expires_at) <= new Date()) {
-      try {
-        dbRef.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
-      } catch {}
-      return null
-    }
-
-    return row.user_id
-  }
 
   // ---------------------------------------------------------------------------
   // Session lifecycle — called from WorldHost when a session is removed

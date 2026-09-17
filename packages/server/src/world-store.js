@@ -73,7 +73,7 @@ export function createWorld(database, params, userId) {
  * @param {import('better-sqlite3').Database} database
  * @param {string} worldId
  * @param {string} userId
- * @param {{ slug?: string, name?: string, document?: string }} params
+ * @param {{ slug?: string, name?: string, document?: string, visibility?: string }} params
  * @returns {{ ok: boolean, world?: object, code?: string }}
  */
 export function updateWorld(database, worldId, userId, params) {
@@ -90,7 +90,8 @@ export function updateWorld(database, worldId, userId, params) {
 
   // Build SET clause dynamically for provided fields
   // slug, name, and document are the only mutable fields;
-  // owner_user_id, visibility, and id are ALWAYS server-authoritative.
+  // owner_user_id and id are ALWAYS server-authoritative.
+  // visibility is owner-settable but constrained to 'private'|'public'.
   const sets = []
   const values = []
 
@@ -105,6 +106,13 @@ export function updateWorld(database, worldId, userId, params) {
   if (params.document !== undefined) {
     sets.push('document = ?')
     values.push(params.document)
+  }
+  if (params.visibility !== undefined) {
+    if (params.visibility !== 'private' && params.visibility !== 'public') {
+      return { ok: false, code: 'VISIBILITY_INVALID' }
+    }
+    sets.push('visibility = ?')
+    values.push(params.visibility)
   }
 
   // Always bump updated_at

@@ -705,8 +705,8 @@ export function createRequestHandler(opts = {}) {
           skipDocument = true
         }
 
-        // Only accept slug and name from the client; document is always
-        // server-authoritative. Never accept visibility, owner_user_id, or id.
+        // Accept slug, name, and visibility from the client; document is always
+        // server-authoritative. Never accept owner_user_id or id.
         if (body?.slug?.trim() === 'home') {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Slug "home" is reserved' }))
@@ -726,9 +726,22 @@ export function createRequestHandler(opts = {}) {
           }
         }
 
+        // Route-level validation for visibility
+        if (body?.visibility !== undefined) {
+          if (body.visibility !== 'private' && body.visibility !== 'public') {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Invalid visibility value' }))
+            return
+          }
+          // Home worlds ('home' slug) are intentionally allowed to be toggled
+          // public. This lets users share their home space via /public/<user>/home
+          // — see resolveWorldId in world-registry.js for the routing side.
+        }
+
         const updateParams = {
           slug: body?.slug || undefined,
           name: body?.name || undefined,
+          visibility: body?.visibility !== undefined ? body.visibility : undefined,
         }
         if (!skipDocument) {
           updateParams.document = document
@@ -878,6 +891,39 @@ export function parseAuthSessionCookie(req) {
  * @param {{ database: import('better-sqlite3').Database }} db
  * @returns {string|null}
  */
+/**
+ * Resolve a userId from the request's auth session cookie at WebSocket upgrade
+ * time. Semantically identical to resolveUserIdFromCookie but named for use in
+ * WebSocket upgrade handlers. Shared across world-registry.js and session.js
+ * to avoid code duplication.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {string|null}
+ */
+export function resolveWsUserId(req, db) {
+  const authSessionId = parseAuthSessionCookie(req)
+  if (!authSessionId) return null
+
+  const row = db.database.prepare(
+    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
+  ).get(authSessionId)
+
+  if (!row) return null
+
+  // Check expiry
+  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+    try {
+      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
+    } catch {
+      // Swallow cleanup errors
+    }
+    return null
+  }
+
+  return row.user_id
+}
+
 export function resolveUserIdFromCookie(req, db) {
   const authSessionId = parseAuthSessionCookie(req)
   if (!authSessionId) return null

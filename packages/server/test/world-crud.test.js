@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { test, before, after } from 'node:test'
+import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { request } from 'node:http'
@@ -385,9 +385,59 @@ test('Cross-user: after delete attempt, user A world is byte-for-byte unchanged'
 // Tests: Server-authoritative values (client spoofing)
 // =========================================================================
 
-test('visibility spoofing: client sends visibility:public but stored as private', async () => {
+// =========================================================================
+// Tests: visibility toggle (Phase 2 Step 4)
+// =========================================================================
+
+test('PUT with visibility:public toggles world to public', async () => {
+  // Create a private world
+  const createRes = await httpPost('/api/worlds', { slug: 'toggle-to-public' }, userA.cookie)
+  assert.equal(createRes.statusCode, 201)
+  assert.equal(createRes.body.visibility, 'private')
+  const worldId = createRes.body.id
+
+  // Toggle to public
+  const putRes = await httpPut(`/api/worlds/${worldId}`, { visibility: 'public' }, userA.cookie)
+  assert.equal(putRes.statusCode, 200)
+  assert.equal(putRes.body.visibility, 'public')
+
+  // Verify via list
+  const listRes = await httpGet('/api/worlds', userA.cookie)
+  const found = listRes.body.find(w => w.id === worldId)
+  assert.equal(found.visibility, 'public')
+})
+
+test('PUT with visibility:private reverts a public world to private', async () => {
+  // Create world, toggle public, then revert
+  const createRes = await httpPost('/api/worlds', { slug: 'revert-to-private' }, userA.cookie)
+  assert.equal(createRes.statusCode, 201)
+  const worldId = createRes.body.id
+
+  // Set to public
+  const pubRes = await httpPut(`/api/worlds/${worldId}`, { visibility: 'public' }, userA.cookie)
+  assert.equal(pubRes.statusCode, 200)
+  assert.equal(pubRes.body.visibility, 'public')
+
+  // Revert to private
+  const privRes = await httpPut(`/api/worlds/${worldId}`, { visibility: 'private' }, userA.cookie)
+  assert.equal(privRes.statusCode, 200)
+  assert.equal(privRes.body.visibility, 'private')
+})
+
+test('PUT with invalid visibility value returns 400', async () => {
+  const createRes = await httpPost('/api/worlds', { slug: 'invalid-vis-test' }, userA.cookie)
+  assert.equal(createRes.statusCode, 201)
+  const worldId = createRes.body.id
+
+  // Invalid value
+  const res = await httpPut(`/api/worlds/${worldId}`, { visibility: 'invalid' }, userA.cookie)
+  assert.equal(res.statusCode, 400)
+  assert.ok(res.body.error.toLowerCase().includes('invalid visibility'))
+})
+
+test('visibility spoofing: client sends visibility:public but stored as private on create', async () => {
   const res = await httpPost('/api/worlds', {
-    slug: 'visibility-test',
+    slug: 'visibility-spoof-test',
     visibility: 'public',
   }, userA.cookie)
 
@@ -403,6 +453,21 @@ test('visibility spoofing: client sends visibility:public but stored as private'
   assert.equal(found.visibility, 'private')
 })
 
+test('visibility CHECK constraint now allows public values', async () => {
+  // Migration 4 relaxed the CHECK, so inserting 'public' should succeed
+  const id = 'visibility-check-public-test-id'
+  const now = new Date().toISOString()
+  const result = db.database.prepare(
+    `INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, userA.userId, 'public-vis-test', '', '', 'public', now, now)
+
+  assert.equal(result.changes, 1, 'INSERT with visibility=public succeeded (migration 4 relaxed CHECK)')
+
+  // Clean up
+  db.database.prepare('DELETE FROM worlds WHERE id = ?').run(id)
+})
+
 test('id spoofing: client sends id in create body but server assigns its own', async () => {
   const res = await httpPost('/api/worlds', {
     slug: 'id-spoof-test',
@@ -413,6 +478,13 @@ test('id spoofing: client sends id in create body but server assigns its own', a
   // The world-store directly generates its own UUID and ignores body.id
   assert.ok(res.body.id, 'server assigned an id')
   assert.notEqual(res.body.id, 'fake-id-12345', 'server ignored client-supplied id')
+
+  // Verify via list that the world was stored with server-assigned id
+  const listRes = await httpGet('/api/worlds', userA.cookie)
+  assert.equal(listRes.statusCode, 200)
+  const found = listRes.body.find(w => w.id === res.body.id)
+  assert.ok(found, 'world appears in list under server-assigned id')
+  assert.notEqual(found.id, 'fake-id-12345', 'server-assigned id persisted, not spoofed')
 })
 
 test('document spoofing: PUT with document in body uses server-serialized document', async () => {
@@ -871,20 +943,262 @@ test('pruneExpiredAuthSessions does not remove valid sessions', async () => {
   // Verify it still exists
   const after = db.database.prepare('SELECT id FROM auth_sessions WHERE id = ?').get(validId)
   assert.ok(after, 'valid session was not pruned')
-})
+  })
 
 // =========================================================================
-// Tests: visibility CHECK constraint at DB level
+// Registry-based WS admission tests — public path and /ws admission matrix
 // =========================================================================
+// These tests spin up a separate HTTP server with the full WorldRegistry
+// to test WebSocket upgrade routing for /public/<username>/<slug> and
+// /ws/<worldRowId> paths with visibility-aware admission.
 
-test('visibility CHECK constraint prevents non-private values', async () => {
-  // Directly insert a row with visibility = 'public' should fail
-  const id = 'visibility-check-test-id'
-  const now = new Date().toISOString()
-  assert.throws(() => {
-    db.database.prepare(
+import { createWorldRegistry } from '../src/world-registry.js'
+import { createWorldHost } from '../src/world-host.js'
+
+const WS_ADM_PORT = 3020
+const WS_ADM_BASE = `http://localhost:${WS_ADM_PORT}`
+
+describe('WS admission via world registry', () => {
+  let regDb
+  let regHttpServer
+  let registry
+  let regUserA
+  let regUserB
+
+  before(async () => {
+    // Create a fresh database so we control the exact world rows
+    const regDir = mkdtempSync(join(tmpdir(), 'atrium-ws-adm-test-'))
+    const regDbPath = join(regDir, 'test.db')
+    regDb = createDb(regDbPath)
+
+    // Create the HTTP server and registry
+    regHttpServer = createServer()
+    registry = createWorldRegistry({ httpServer: regHttpServer, db: regDb })
+
+    // Register a default world so the server is alive
+    const defaultWorld = await createWorld(FIXTURE_PATH)
+    const host = createWorldHost({
+      id: 'default',
+      world: defaultWorld,
+      db: regDb,
+      onSessionRemoved: () => {},
+    })
+    registry.hosts.set('default', host)
+
+    // Create a minimal request handler for auth routes
+    const handler = createRequestHandler({ db: regDb, auth, world: defaultWorld })
+    regHttpServer.on('request', handler)
+
+    regHttpServer.listen(WS_ADM_PORT)
+
+    // Register test users via direct DB insert (avoids HTTP dependency loop)
+    const now = new Date().toISOString()
+    regUserA = { id: 'ws-adm-user-a-uuid', username: 'AliceWs', cookie: null }
+    regUserB = { id: 'ws-adm-user-b-uuid', username: 'BobWs', cookie: null }
+
+    regDb.database.prepare(
+      'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+    ).run(regUserA.id, regUserA.username, regUserA.username, now)
+
+    regDb.database.prepare(
+      'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+    ).run(regUserB.id, regUserB.username, regUserB.username, now)
+
+    // Create auth sessions for both users
+    const sessionA = 'ws-adm-session-a'
+    const sessionB = 'ws-adm-session-b'
+    const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+    regDb.database.prepare(
+      'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+    ).run(sessionA, regUserA.id, now, farFuture)
+    regDb.database.prepare(
+      'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+    ).run(sessionB, regUserB.id, now, farFuture)
+
+    regUserA.cookie = `atrium_auth_session=${sessionA}`
+    regUserB.cookie = `atrium_auth_session=${sessionB}`
+
+    // Create worlds for Alice
+    // 1. Public world
+    regDb.database.prepare(
       `INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, userA.userId, 'visibility-check', '', '', 'public', now, now)
-  }, /CHECK constraint failed/, 'CHECK constraint rejects public visibility')
+    ).run('ws-adm-public-world', regUserA.id, 'my-public-space', 'Public Space', '', 'public', now, now)
+
+    // 2. Private world
+    regDb.database.prepare(
+      `INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run('ws-adm-private-world', regUserA.id, 'my-private-space', 'Private Space', '', 'private', now, now)
+  })
+
+  after(async () => {
+    registry.close()
+    regHttpServer.close()
+    regDb.close()
+  })
+
+  // ---------------------------------------------------------------------------
+  // Helper: perform WebSocket upgrade and return status code
+  // ---------------------------------------------------------------------------
+  function checkUpgrade(pathname, cookie) {
+    return new Promise((resolve, reject) => {
+      const headers = {
+        'Upgrade': 'websocket',
+        'Connection': 'Upgrade',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        'Sec-WebSocket-Version': '13',
+        'Host': `localhost:${WS_ADM_PORT}`,
+      }
+      if (cookie) headers['Cookie'] = cookie
+      const req = request({
+        hostname: 'localhost',
+        port: WS_ADM_PORT,
+        path: pathname,
+        method: 'GET',
+        headers,
+      })
+      req.on('upgrade', (res) => {
+        resolve({ statusCode: 101 })
+        res.destroy()
+      })
+      req.on('response', (res) => {
+        let body = ''
+        res.on('data', c => { body += c })
+        res.on('end', () => resolve({ statusCode: res.statusCode, body }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  }
+
+  // ===================================================================
+  // Public world: /public/<username>/<slug>
+  // ===================================================================
+
+  test('/public/AliceWs/my-public-space — anonymous can connect (public world)', async () => {
+    const result = await checkUpgrade('/public/AliceWs/my-public-space')
+    assert.equal(result.statusCode, 101, 'anonymous can upgrade to public world')
+  })
+
+  test('/public/AliceWs/my-public-space — non-owner (Bob) can connect (public world)', async () => {
+    const result = await checkUpgrade('/public/AliceWs/my-public-space', regUserB.cookie)
+    assert.equal(result.statusCode, 101, 'non-owner can upgrade to public world')
+  })
+
+  test('/public/AliceWs/my-public-space — owner (Alice) can connect (public world)', async () => {
+    const result = await checkUpgrade('/public/AliceWs/my-public-space', regUserA.cookie)
+    assert.equal(result.statusCode, 101, 'owner can upgrade to public world')
+  })
+
+  // ===================================================================
+  // Private world: /public/<username>/<slug>
+  // ===================================================================
+
+  test('/public/AliceWs/my-private-space — anonymous gets 404 (private world)', async () => {
+    const result = await checkUpgrade('/public/AliceWs/my-private-space')
+    assert.equal(result.statusCode, 404, 'anonymous rejected from private world')
+  })
+
+  test('/public/AliceWs/my-private-space — non-owner (Bob) gets 404 (private world)', async () => {
+    const result = await checkUpgrade('/public/AliceWs/my-private-space', regUserB.cookie)
+    assert.equal(result.statusCode, 404, 'non-owner rejected from private world')
+  })
+
+  test('/public/AliceWs/my-private-space — owner (Alice) can connect (private world)', async () => {
+    const result = await checkUpgrade('/public/AliceWs/my-private-space', regUserA.cookie)
+    assert.equal(result.statusCode, 101, 'owner can upgrade to own private world')
+  })
+
+  // ===================================================================
+  // Unknown user / slug
+  // ===================================================================
+
+  test('/public/UnknownUser/my-space returns 404', async () => {
+    const result = await checkUpgrade('/public/UnknownUser/my-space')
+    assert.equal(result.statusCode, 404, 'unknown username returns 404')
+  })
+
+  test('/public/AliceWs/non-existent-slug returns 404', async () => {
+    const result = await checkUpgrade('/public/AliceWs/non-existent-slug')
+    assert.equal(result.statusCode, 404, 'unknown slug returns 404')
+  })
+
+  // ===================================================================
+  // Case-insensitive username
+  // ===================================================================
+
+  test('/public/alicews/my-public-space — case-insensitive username resolves', async () => {
+    const result = await checkUpgrade('/public/alicews/my-public-space')
+    assert.equal(result.statusCode, 101, 'lowercase username resolves via COLLATE NOCASE')
+  })
+
+  test('/public/ALICEWS/my-public-space — uppercase username resolves', async () => {
+    const result = await checkUpgrade('/public/ALICEWS/my-public-space')
+    assert.equal(result.statusCode, 101, 'uppercase username resolves via COLLATE NOCASE')
+  })
+
+  // ===================================================================
+  // /ws/<worldRowId> backdoor
+  // ===================================================================
+
+  test('/ws/ws-adm-public-world — non-owner can connect (public world via /ws backdoor)', async () => {
+    const result = await checkUpgrade('/ws/ws-adm-public-world', regUserB.cookie)
+    assert.equal(result.statusCode, 101, 'non-owner can reach public world via /ws')
+  })
+
+  test('/ws/ws-adm-public-world — anonymous can connect (public world via /ws backdoor)', async () => {
+    const result = await checkUpgrade('/ws/ws-adm-public-world')
+    assert.equal(result.statusCode, 101, 'anonymous can reach public world via /ws')
+  })
+
+  test('/ws/ws-adm-public-world — owner can connect (public world via /ws backdoor)', async () => {
+    const result = await checkUpgrade('/ws/ws-adm-public-world', regUserA.cookie)
+    assert.equal(result.statusCode, 101, 'owner can reach own public world via /ws')
+  })
+
+  test('/ws/ws-adm-private-world — non-owner gets 404 (private world /ws backdoor fail-closed)', async () => {
+    const result = await checkUpgrade('/ws/ws-adm-private-world', regUserB.cookie)
+    assert.equal(result.statusCode, 404, 'non-owner rejected from private world via /ws')
+  })
+
+  test('/ws/ws-adm-private-world — anonymous gets 404 (private world /ws backdoor fail-closed)', async () => {
+    const result = await checkUpgrade('/ws/ws-adm-private-world')
+    assert.equal(result.statusCode, 404, 'anonymous rejected from private world via /ws')
+  })
+
+  test('/ws/ws-adm-private-world — owner can connect (private world via /ws backdoor)', async () => {
+    const result = await checkUpgrade('/ws/ws-adm-private-world', regUserA.cookie)
+    assert.equal(result.statusCode, 101, 'owner can reach own private world via /ws')
+  })
+
+  test('/ws/non-existent-world-id returns 404', async () => {
+    const result = await checkUpgrade('/ws/non-existent-world-id')
+    assert.equal(result.statusCode, 404, 'non-existent /ws/<id> returns 404')
+  })
+
+  // ===================================================================
+  // End-to-end WS upgrade flow for /public/<username>/<slug>
+  // ===================================================================
+
+  test('E2E: full WS connect via /public/AliceWs/my-public-space with hello/som-dump', async () => {
+    const ws = new WebSocket(`ws://localhost:${WS_ADM_PORT}/public/AliceWs/my-public-space`)
+    const q = makeMessageQueue(ws)
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+
+    // Send hello
+    ws.send(JSON.stringify({ type: 'hello', id: 'ws-adm-e2e-session' }))
+
+    // Should receive hello response and som-dump
+    const helloMsg = await q.waitForType('hello', 1000)
+    assert.ok(helloMsg, 'received hello response on public path')
+
+    const somDump = await q.waitForType('som-dump', 1000)
+    assert.ok(somDump, 'received som-dump on public path')
+
+    ws.close()
+  })
 })

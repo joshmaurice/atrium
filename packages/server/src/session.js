@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
-import { isOriginAllowed } from './http-routes.js'
+import { isOriginAllowed, resolveWsUserId } from './http-routes.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -579,45 +579,10 @@ export function attachSessionHandlers({
 /**
  * Parse the atrium_auth_session cookie from a raw request and resolve it
  * to a userId. Returns null if the cookie is missing, expired, or unknown.
- * This is a standalone copy of the logic in world-registry.js to avoid
- * circular dependencies (world-registry → world-host → session.js).
+ * Delegated to http-routes.js resolveWsUserId to avoid code duplication.
  *
  * @param {import('node:http').IncomingMessage} req
  * @param {{ database: import('better-sqlite3').Database }} db
  * @returns {string|null}
  */
-function resolveWsUserId(req, db) {
-  const raw = req.headers['cookie']
-  if (!raw) return null
-
-  // Parse cookie
-  let authSessionId = null
-  const cookies = raw.split(';').map(c => c.trim())
-  for (const cookie of cookies) {
-    const [name, ...rest] = cookie.split('=')
-    if (name.trim() === 'atrium_auth_session' && rest.length > 0) {
-      authSessionId = rest.join('=').trim()
-      break
-    }
-  }
-  if (!authSessionId) return null
-
-  // Look up session in DB
-  const row = db.database.prepare(
-    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
-  ).get(authSessionId)
-
-  if (!row) return null
-
-  // Check expiry
-  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
-    try {
-      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
-    } catch {
-      // Swallow cleanup errors
-    }
-    return null
-  }
-
-  return row.user_id
-}
+// function removed — resolveWsUserId is now imported from http-routes.js

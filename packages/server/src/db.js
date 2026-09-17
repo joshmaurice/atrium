@@ -123,6 +123,37 @@ const MIGRATIONS = [
 
       ALTER TABLE worlds_new RENAME TO worlds;
     `
+  },
+  {
+    version: 4,
+    description: 'Relax worlds.visibility CHECK to allow public — Phase 2 visibility toggle',
+    sql: `
+      -- SQLite does not support ALTER TABLE ADD CHECK, so rebuild.
+      -- Phase 1 locked visibility to 'private'; Phase 2 Step 4 relaxes
+      -- to IN ('private','public') for the visibility toggle.
+      CREATE TABLE IF NOT EXISTS worlds_new (
+        id            TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL,
+        slug          TEXT NOT NULL,
+        name          TEXT NOT NULL DEFAULT '',
+        document      TEXT NOT NULL DEFAULT '',
+        visibility    TEXT NOT NULL DEFAULT 'private'
+                      CHECK (visibility IN ('private','public')),
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        FOREIGN KEY (owner_user_id) REFERENCES users(id),
+        UNIQUE (owner_user_id, slug)
+      );
+
+      INSERT INTO worlds_new
+        SELECT id, owner_user_id, slug, name, document, visibility,
+               created_at, updated_at
+        FROM worlds;
+
+      DROP TABLE worlds;
+
+      ALTER TABLE worlds_new RENAME TO worlds;
+    `
   }
 ]
 
