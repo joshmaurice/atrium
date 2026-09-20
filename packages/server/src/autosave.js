@@ -62,6 +62,7 @@ export function createAutoSaveCoordinator(opts = {}) {
     const entry = worlds.get(worldId)
     if (!entry || entry.saving) return
     if (!host || host.ownerUserId === null) return
+    if (host.mutationPolicy === 'read-only') return
     if (!host.world || !db) return
 
     entry.saving = true
@@ -116,7 +117,8 @@ export function createAutoSaveCoordinator(opts = {}) {
   function markDirty(worldId, host) {
     // Only owned worlds participate in autosave
     if (!host || host.ownerUserId === null) return
-    if (worldId === 'default') return
+    // Read-only worlds never mutate, never save
+    if (host.mutationPolicy === 'read-only') return
 
     let entry = worlds.get(worldId)
     if (!entry) {
@@ -188,6 +190,33 @@ export function createAutoSaveCoordinator(opts = {}) {
   }
 
   // -------------------------------------------------------------------------
+  // flushWorld — flush only (no teardown). Used by the registry when the last
+  // session leaves the root world (commons). Same save logic as flushAndTeardown
+  // but the host stays resident.
+  // -------------------------------------------------------------------------
+  async function flushWorld(worldId, host) {
+    const entry = worlds.get(worldId)
+    if (!entry || !entry.dirty) return
+
+    if (entry.debounceTimer) {
+      clearTimeout(entry.debounceTimer)
+      entry.debounceTimer = null
+    }
+
+    await doSave(worldId, host)
+
+    if (entry.dirty) {
+      console.warn(`[autosave] Retrying flush for world "${worldId}" (previous save failed)`)
+      await doSave(worldId, host)
+      if (entry.dirty) {
+        console.error(
+          `[autosave] CRITICAL: Flush failed for world "${worldId}" after retry — changes may be lost`
+        )
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // stop — clean up all timers for a world
   // -------------------------------------------------------------------------
   function stop(worldId) {
@@ -207,5 +236,5 @@ export function createAutoSaveCoordinator(opts = {}) {
     }
   }
 
-  return { markDirty, flushAndTeardown, stop, close }
+  return { markDirty, flushAndTeardown, flushWorld, stop, close }
 }

@@ -139,6 +139,7 @@ export function attachSessionHandlers({
   presence = createPresence(),
   maxUsers = 100,
   worldOwnerUserId = null,
+  mutationPolicy,
   onSessionRemoved = null,
   onSaveableMutation = null,
   keepaliveInterval = KEEPALIVE_INTERVAL,
@@ -203,16 +204,24 @@ export function attachSessionHandlers({
     }
   }
 
+  // Resolve mutation policy default if not explicitly provided.
+  // 'open' = legacy behavior (null owner = everyone can mutate).
+  // 'owner' = only the worldOwnerUserId may mutate.
+  // 'read-only' = nobody may mutate (used for degraded commons boot).
+  const resolvedPolicy = mutationPolicy ?? (worldOwnerUserId !== null ? 'owner' : 'open')
+
   // ---------------------------------------------------------------------------
   // Mutation gate — returns true if the session may mutate the world.
   // Avatar adds are always allowed (session-owned, ephemeral, session-coupled).
-  // When worldOwnerUserId is null (default world, backward compat), all
+  // Read-only policy is checked BEFORE the null-owner shortcut (§4B-3).
+  // When resolvedPolicy is 'open' (null owner / legacy backward compat), all
   // mutations are permitted — no gate.
-  // Otherwise, the session.userId must match the world's owner.
+  // When resolvedPolicy is 'owner', the session.userId must match the world's owner.
   // ---------------------------------------------------------------------------
   function isMutator(session, isAvatar) {
     if (isAvatar) return true
-    if (worldOwnerUserId === null) return true
+    if (resolvedPolicy === 'read-only') return false
+    if (resolvedPolicy === 'open') return true
     return session.userId === worldOwnerUserId
   }
 

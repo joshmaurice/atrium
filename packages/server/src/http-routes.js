@@ -120,7 +120,7 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
-  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef, getWorldHost } = opts
+  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef, getWorldHost, getRootWorldId } = opts
 
   // Resolve the live world reference: prefer the default host's world when
   // running in registry mode (index.js), fall back to legacy direct world
@@ -667,6 +667,9 @@ export function createRequestHandler(opts = {}) {
           return
         }
 
+        // Row protection (§4B-6): the commons root world has restrictions
+        const isRootWorld = getRootWorldId && worldId === getRootWorldId()
+
         // Server-authoritative save: serialize the live SOM, excluding avatars.
         // The request body is read for optional metadata fields (slug, name)
         // but the document is ALWAYS server-generated.
@@ -712,6 +715,12 @@ export function createRequestHandler(opts = {}) {
           res.end(JSON.stringify({ error: 'Slug "home" is reserved' }))
           return
         }
+        // Row protection: the commons root world cannot be renamed
+        if (isRootWorld && body?.slug !== undefined && body?.slug?.trim() !== 'commons') {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Cannot rename the commons world' }))
+          return
+        }
         // Forbid changing the slug of a world whose current slug is 'home'
         // (the user's home world). Renaming it would orphan the home
         // relationship — next login would create a fresh default home.
@@ -731,6 +740,12 @@ export function createRequestHandler(opts = {}) {
           if (body.visibility !== 'private' && body.visibility !== 'public') {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: 'Invalid visibility value' }))
+            return
+          }
+          // Row protection: the commons root world must remain public
+          if (isRootWorld && body.visibility !== 'public') {
+            res.writeHead(403, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'The commons world must remain public' }))
             return
           }
           // Home worlds ('home' slug) are intentionally allowed to be toggled
@@ -784,6 +799,13 @@ export function createRequestHandler(opts = {}) {
         if (!userId) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Not authenticated' }))
+          return
+        }
+
+        // Row protection (§4B-6): the commons root world cannot be deleted
+        if (getRootWorldId && worldId === getRootWorldId()) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'The commons world cannot be deleted' }))
           return
         }
 

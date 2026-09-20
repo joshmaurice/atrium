@@ -8,6 +8,7 @@ import { createRequestHandler } from './http-routes.js'
 import { createDb } from './db.js'
 import { createWorldRegistry } from './world-registry.js'
 import * as auth from './auth.js'
+import { setupCommons } from './commons.js'
 
 // ---------------------------------------------------------------------------
 // Port extraction from a WebSocket URL
@@ -68,6 +69,7 @@ const httpServer = createServer(createRequestHandler({
   auth,
   defaultHostRef,
   getWorldHost: (id) => registry.getWorldHost(id),
+  getRootWorldId: () => registry.getRootWorldId(),
 }))
 
 // ---------------------------------------------------------------------------
@@ -76,14 +78,14 @@ const httpServer = createServer(createRequestHandler({
 
 const registry = createWorldRegistry({ httpServer, db })
 
-// Register the default world from the boot glTF file
+// Register the commons via setupCommons (handles owned and degraded read-only boot)
 const resolvedWorldPath = resolvePath(worldPath)
-const defaultHost = await registry.registerWorld('default', resolvedWorldPath)
+const { host: defaultHost, mode } = await setupCommons({ registry, db, worldPath: resolvedWorldPath })
 defaultHostRef.current = defaultHost
 
 const nodeCount = defaultHost.world.listNodeNames().length
 const worldName = defaultHost.world.meta?.name ?? 'unnamed'
-console.log(`Atrium world loaded: ${worldName} (${nodeCount} nodes)`)
+console.log(`Atrium world loaded: ${worldName} (${nodeCount} nodes, mode=${mode})`)
 console.log(`Atrium server listening on http://localhost:${port} (HTTP + WebSocket, multi-world ready)`)
 
 httpServer.listen(port)

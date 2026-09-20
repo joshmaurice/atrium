@@ -17,6 +17,8 @@ import { attachSessionHandlers } from './session.js'
  * @param {object|null}     opts.db                 - Database handle
  * @param {string|null}     opts.ownerUserId        - The userId that owns this world; null for the
  *                                                     default world (no-owner, backward compat behavior)
+ * @param {string}          opts.mutationPolicy     - 'owner', 'read-only', or 'open'; defaults based
+ *                                                     on ownerUserId if absent
  * @param {function|null}   opts.onSessionRemoved   - Called with the session object when a session is
  *                                                     cleaned up. Used by the registry for refcounting.
  * @param {function|null}   opts.onSaveableMutation - Called when a saveable mutation occurs on this
@@ -33,6 +35,7 @@ export function createWorldHost(opts = {}) {
     world,
     db = null,
     ownerUserId = null,
+    mutationPolicy,
     onSessionRemoved = null,
     onSaveableMutation = null,
   } = opts
@@ -50,6 +53,7 @@ export function createWorldHost(opts = {}) {
     presence,
     maxUsers: 100,
     worldOwnerUserId: ownerUserId,
+    mutationPolicy,
     onSessionRemoved,
     onSaveableMutation,
   })
@@ -88,6 +92,7 @@ export function createWorldHost(opts = {}) {
     sessions,
     presence,
     ownerUserId,
+    mutationPolicy,
     handleUpgrade,
     close,
   }
