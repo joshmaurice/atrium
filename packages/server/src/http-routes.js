@@ -716,10 +716,15 @@ export function createRequestHandler(opts = {}) {
           return
         }
         // Row protection: the commons root world cannot be renamed
-        if (isRootWorld && body?.slug !== undefined && body?.slug?.trim() !== 'commons') {
-          res.writeHead(403, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Cannot rename the commons world' }))
-          return
+        if (isRootWorld && body?.slug !== undefined) {
+          const current = db.database.prepare(
+            "SELECT slug FROM worlds WHERE id = ?"
+          ).get(worldId)
+          if (current && body.slug.trim() !== current.slug) {
+            res.writeHead(403, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Cannot rename the commons world' }))
+            return
+          }
         }
         // Forbid changing the slug of a world whose current slug is 'home'
         // (the user's home world). Renaming it would orphan the home

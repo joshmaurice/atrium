@@ -296,6 +296,99 @@ test('commons — operator username in display name still denied', async () => {
 })
 
 // ===================================================================
+// Test 3b: Regression — non-default commons slug (F2 slug guard fix)
+// ===================================================================
+
+test('commons — non-default slug guard works via DB query, not hard-coded value', async () => {
+  const tDir = mkdtempSync(join(tmpdir(), 'atrium-commons-slugtest-'))
+  const dbPath = join(tDir, 'test.db')
+  const db3b = createDb(dbPath)
+  const now = new Date().toISOString()
+
+  // Use a non-default commons slug
+  const customSlug = 'homepage'
+  process.env.ATRIUM_COMMONS_SLUG = customSlug
+
+  // Create operator
+  const opId = 'slugtest-op-uuid'
+  db3b.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(opId, 'SlugTestOp', 'SlugTestOp', now)
+
+  // Create auth session
+  const opSession = 'slugtest-op-session'
+  db3b.database.prepare(
+    'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(opSession, opId, now, new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString())
+  const opCookie = `atrium_auth_session=${opSession}`
+
+  process.env.ATRIUM_COMMONS_OWNER = 'SlugTestOp'
+
+  // Boot server with custom slug
+  const http3b = createServer()
+  const reg3b = createWorldRegistry({ httpServer: http3b, db: db3b })
+  const result = await setupCommons({ registry: reg3b, db: db3b, worldPath: FIXTURE_PATH })
+  const rootWorldId3b = reg3b.getRootWorldId()
+
+  const handler3b = createRequestHandler({
+    db: db3b, auth,
+    defaultHostRef: { current: result.host },
+    getWorldHost: (id) => reg3b.getWorldHost(id),
+    getRootWorldId: () => reg3b.getRootWorldId(),
+  })
+  http3b.on('request', handler3b)
+  http3b.listen(9201)
+
+  try {
+    // Build an http PUT request with a custom port
+    const options = (port, path, payload, cookie) => {
+      const data = JSON.stringify(payload)
+      const headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      }
+      if (cookie) headers['Cookie'] = cookie
+      return new Promise((resolve, reject) => {
+        const req = request({ hostname: 'localhost', port, path, method: 'PUT', headers }, (res) => {
+          let body = ''
+          res.on('data', (c) => { body += c })
+          res.on('end', () => {
+            try { resolve({ statusCode: res.statusCode, body: JSON.parse(body || '{}') }) }
+            catch { resolve({ statusCode: res.statusCode, body }) }
+          })
+        })
+        req.on('error', reject)
+        req.write(data)
+        req.end()
+      })
+    }
+
+    // PUT with SAME slug as current — should NOT be rejected
+    const sameRes = await options(9201, `/api/worlds/${rootWorldId3b}`, { slug: customSlug }, opCookie)
+    // Should not be 403 — same slug is allowed
+    assert.notEqual(
+      sameRes.statusCode, 403,
+      'PUT with same slug as current commons slug should not be rejected'
+    )
+
+    // PUT with DIFFERENT slug — should be 403
+    const renameRes = await options(9201, `/api/worlds/${rootWorldId3b}`, { slug: 'new-name' }, opCookie)
+    assert.equal(renameRes.statusCode, 403)
+    assert.ok(
+      renameRes.body.error.toLowerCase().includes('cannot rename'),
+      'rename of commons world returns cannot rename error'
+    )
+  } finally {
+    // Clean up
+    reg3b.close()
+    http3b.close()
+    db3b.close()
+    await rm(tDir, { recursive: true, force: true })
+    delete process.env.ATRIUM_COMMONS_SLUG
+  }
+})
+
+// ===================================================================
 // Test 4: Operator mutation succeeds, autosaves, no avatars in document
 // ===================================================================
 
@@ -321,7 +414,15 @@ test('commons — operator mutation succeeds and persists', async () => {
   const nodeNames = defaultHost.world.listNodeNames() || []
   assert.ok(nodeNames.includes('op-added-node'), 'operator-added node present')
 
+  // Close session — triggers flush to DB
   ws.close()
+  await new Promise(r => setTimeout(r, 200))
+
+  // Verify the node was flushed to the DB
+  const row = db.database.prepare(
+    "SELECT document FROM worlds WHERE id = ?"
+  ).get(commonsWorldId)
+  assert.ok(row?.document?.includes('op-added-node'), 'node persisted in DB after operator mutation')
 })
 
 // ===================================================================
@@ -496,6 +597,13 @@ test('commons — last session leaves, host remains in registry', async () => {
   // Node should be in the live world
   const nodeNames = hostAfter.world.listNodeNames() || []
   assert.ok(nodeNames.includes('flush-test-node'), 'node persisted in host after flush')
+
+  // Verify the node was persisted to the DB row
+  const row = db.database.prepare(
+    "SELECT document FROM worlds WHERE id = ?"
+  ).get(commonsWorldId)
+  assert.ok(row, 'row exists after last-session flush')
+  assert.ok(row.document.includes('flush-test-node'), 'node persisted in DB row after last-session flush')
 
   // Clean up test node
   hostAfter.world.removeNode('flush-test-node')
