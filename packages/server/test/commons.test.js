@@ -840,3 +840,163 @@ test('commons — idempotent seeding does not create second row', async () => {
   assert.ok(rows[0].id, 'commons row has an id')
   assert.ok(rows[0].document && rows[0].document.length > 10, 'commons row has document content')
 })
+
+// ===================================================================
+// Test 14: Degraded-mode convergence — other user's commons slug is rejected
+// ===================================================================
+
+test('degraded — another user commons slug via /public/ returns 503 in degraded/operator-known mode', async () => {
+  const tDir = mkdtempSync(join(tmpdir(), 'atrium-degraded-conv-'))
+  const dbPath = join(tDir, 'test.db')
+  const db14 = createDb(dbPath)
+
+  const now = new Date().toISOString()
+  const opId = 'degraded-conv-op'
+  db14.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(opId, 'ConvOp', 'ConvOp', now)
+
+  // A non-operator user who has a world with the commons slug
+  const otherId = 'degraded-conv-other'
+  db14.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(otherId, 'OtherUser', 'OtherUser', now)
+  const otherSession = 'degraded-conv-other-session'
+  db14.database.prepare(
+    'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(otherSession, otherId, now, new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString())
+  const otherCookie = `atrium_auth_session=${otherSession}`
+
+  // Create a private commons row for operator to trigger degraded boot
+  const privateRowId = 'degraded-conv-row-id'
+  db14.database.prepare(
+    `INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'private', ?, ?)`
+  ).run(privateRowId, opId, 'commons', '', '{"asset":{"version":"2.0","generator":"Atrium"}}', now, now)
+
+  // Other user creates a world with slug = commons
+  const otherWorldId = 'degraded-conv-other-world'
+  db14.database.prepare(
+    `INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'public', ?, ?)`
+  ).run(otherWorldId, otherId, 'commons', "Other's Commons", '{"asset":{"version":"2.0","generator":"Atrium"}}', now, now)
+
+  process.env.ATRIUM_COMMONS_OWNER = 'ConvOp'
+  process.env.ATRIUM_COMMONS_SLUG = 'commons'
+
+  const http14 = createServer()
+  const reg14 = createWorldRegistry({ httpServer: http14, db: db14 })
+
+  // Boot should degrade due to private commons row
+  const result = await setupCommons({ registry: reg14, db: db14, worldPath: FIXTURE_PATH })
+  assert.equal(result.mode, 'read-only', 'degraded boot in read-only mode')
+  const rootHost = reg14.getDefaultHost()
+  assert.ok(rootHost._degradedOperatorUserId, 'operator identity stored on degraded host')
+  assert.equal(rootHost._degradedOperatorUserId, opId)
+
+  http14.listen(9202)
+
+  try {
+    // Attempt to connect to /public/OtherUser/commons — should get 503
+    const ws = await new Promise((resolve, reject) => {
+      const ws = new WebSocket('ws://localhost:9202/public/OtherUser/commons', {
+        headers: { Cookie: otherCookie },
+        handshakeTimeout: 2000,
+      })
+      ws.once('open', () => resolve(ws))
+      ws.once('error', (err) => reject(err))
+      ws.once('unexpected-response', (req, res) => {
+        let body = ''
+        res.on('data', (c) => { body += c })
+        res.on('end', () => {
+          reject({ statusCode: res.statusCode, body })
+        })
+      })
+    })
+    // If we get here, connection was erroneously accepted
+    ws.close()
+    assert.fail('expected 503 rejection, got open WebSocket')
+  } catch (err) {
+    assert.equal(err.statusCode, 503, 'other user commons slug returns 503')
+    assert.ok(err.body.includes('reserved'), 'body mentions reserved')
+  }
+  // Verify no additional host was created for this world
+  assert.ok(!reg14.hosts.has(otherWorldId), 'no host created for other user commons slug world')
+
+  http14.close()
+  await rm(tDir, { recursive: true, force: true })
+})
+
+// ===================================================================
+// Test 15: Degraded-mode convergence — operator's own commons slug routes
+// to existing degraded root host
+// ===================================================================
+
+test('degraded — operator commons slug via /public/ routes to root host in degraded/operator-known mode', async () => {
+  const tDir = mkdtempSync(join(tmpdir(), 'atrium-degraded-conv-op-'))
+  const dbPath = join(tDir, 'test.db')
+  const db15 = createDb(dbPath)
+
+  const now = new Date().toISOString()
+  const opId = 'degraded-conv-op2'
+  db15.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(opId, 'ConvOp2', 'ConvOp2', now)
+
+  const opSession = 'degraded-conv-op2-session'
+  db15.database.prepare(
+    'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(opSession, opId, now, new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString())
+  const opCookie = `atrium_auth_session=${opSession}`
+
+  // Create a private commons row for operator to trigger degraded boot
+  const privateRowId = 'degraded-conv-op2-row'
+  db15.database.prepare(
+    `INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'private', ?, ?)`
+  ).run(privateRowId, opId, 'commons', '', '{"asset":{"version":"2.0","generator":"Atrium"}}', now, now)
+
+  process.env.ATRIUM_COMMONS_OWNER = 'ConvOp2'
+  process.env.ATRIUM_COMMONS_SLUG = 'commons'
+
+  const http15 = createServer()
+  const reg15 = createWorldRegistry({ httpServer: http15, db: db15 })
+
+  const result = await setupCommons({ registry: reg15, db: db15, worldPath: FIXTURE_PATH })
+  assert.equal(result.mode, 'read-only', 'degraded boot')
+
+  http15.listen(9203)
+
+  try {
+    // Connect to /public/ConvOp2/commons — should route to existing degraded root host
+    const ws = await new Promise((resolve, reject) => {
+      const ws = new WebSocket('ws://localhost:9203/public/ConvOp2/commons', {
+        headers: { Cookie: opCookie },
+        handshakeTimeout: 2000,
+      })
+      ws.once('open', () => resolve(ws))
+      ws.once('error', reject)
+      ws.once('unexpected-response', (req, res) => {
+        let body = ''
+        res.on('data', (c) => { body += c })
+        res.on('end', () => {
+          reject({ statusCode: res.statusCode, body })
+        })
+      })
+    })
+
+    // Should be connected and receive hello from the root host
+    const q = makeMessageQueue(ws)
+    sendHello(ws, 'deg-conv-op-test')
+    const hello = await q.waitForType('hello', 2000)
+    assert.ok(hello, 'operator got hello via /public/ commons in degraded mode')
+    ws.close()
+
+    // Verify only one host exists in registry (the degraded root host)
+    assert.equal(reg15.hosts.size, 1, 'only one host in registry')
+    assert.ok(reg15.hosts.has(privateRowId), 'degraded root host exists under the private row UUID')
+  } finally {
+    http15.close()
+    await rm(tDir, { recursive: true, force: true })
+  }
+})

@@ -101,7 +101,10 @@ export function createWorldRegistry(opts = {}) {
   // ---------------------------------------------------------------------------
   function sendHttpResponse(socket, status, body) {
       const buf = Buffer.from(body, 'utf-8')
-      const reason = status === 404 ? 'Not Found' : 'Bad Request'
+      let reason
+      if (status === 404) reason = 'Not Found'
+      else if (status === 503) reason = 'Service Unavailable'
+      else reason = 'Bad Request'
       socket.write([
         `HTTP/1.1 ${status} ${reason}`,
         'Content-Type: text/plain',
@@ -256,20 +259,6 @@ export function createWorldRegistry(opts = {}) {
 
       if (hosts.has(hostId)) {
         cancelTeardown(hostId)
-
-        // Convergence check: degraded root host matching commons slug
-        const commonsSlug = (process.env.ATRIUM_COMMONS_SLUG || 'commons').trim()
-        const rootId = getRootWorldId()
-        const rootHost = hosts.get(rootId)
-
-        if (rootHost && rootHost._degradedOperatorUserId !== undefined &&
-            descriptor.slug === commonsSlug &&
-            row.owner_user_id === rootHost._degradedOperatorUserId) {
-          // Identity confirmed: route to existing degraded host
-          rootHost.handleUpgrade(request, socket, head, upgradeUserId)
-          return
-        }
-
         doUpgrade()
         return
       }
@@ -346,6 +335,24 @@ export function createWorldRegistry(opts = {}) {
         }
       }
       // Public world: admit anyone (including anonymous/unauthenticated)
+
+      // 3b. Convergence check: degraded mode + commons slug reservation
+      const commonsSlug = (process.env.ATRIUM_COMMONS_SLUG || 'commons').trim()
+      const rootId = getRootWorldId()
+      const rootHost = hosts.get(rootId)
+
+      if (rootHost && rootHost._degradedOperatorUserId !== undefined &&
+          descriptor.slug === commonsSlug) {
+        // Another user's world with the commons slug — reject in degraded mode
+        if (row.owner_user_id !== rootHost._degradedOperatorUserId) {
+          sendHttpResponse(socket, 503, 'Service Unavailable: Commons slug is reserved in degraded mode')
+          return
+        }
+        // Owner matches operator — route to the degraded root host
+        cancelTeardown(rootId)
+        rootHost.handleUpgrade(request, socket, head, upgradeUserId)
+        return
+      }
 
       // 4. Host key is row UUID, same /ws/<id> space
       const hostId = row.id
