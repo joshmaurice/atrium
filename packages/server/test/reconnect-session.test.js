@@ -189,41 +189,37 @@ test('can register alice and bob for test setup', async () => {
 // Item 1 eviction: same-user dedupe at hello
 // ---------------------------------------------------------------------------
 
-test('authenticated reconnect evicts stale session for same user', async () => {
+test('same-user reconnection keeps both sessions open (no eviction)', async () => {
   // Register a dedicated user for this test
-  const { cookieStr } = await registerUser('evict')
+  const { cookieStr } = await registerUser('noconvict')
 
   // Connect first session — authenticated
   const { ws: ws1, q: q1 } = websocketConnectWithHeaders({ Cookie: cookieStr })
   await waitForOpen(ws1)
-  const hello1 = await handshake(ws1, { clientId: 'evict-test-1' })
+  const hello1 = await handshake(ws1, { clientId: 'noconvict-1' })
   assert.equal(hello1.type, 'hello')
   const sessionId1 = hello1.id
-  const avatarName1 = hello1.avatarNodeName
 
-  // Connect alice #2 — same cookie, should evict ws1
+  // Connect second session — same cookie, but eviction is removed
   const { ws: ws2, q: q2 } = websocketConnectWithHeaders({ Cookie: cookieStr })
   await waitForOpen(ws2)
-  const hello2 = await handshake(ws2, { clientId: 'evict-test-2' })
+  const hello2 = await handshake(ws2, { clientId: 'noconvict-2' })
   const sessionId2 = hello2.id
 
-  // ws1 should have been closed by the eviction
-  await waitForClose(ws1)
+  // Both sessions should have distinct IDs
+  assert.notEqual(sessionId1, sessionId2, 'sessions must have distinct IDs')
 
-  // ws1's session should be gone from server state
-  assert.ok(!server.sessions.has(sessionId1), 'evicted session should be removed from sessions map')
-  assert.ok(!server.presence.has(sessionId1), 'evicted session should be removed from presence')
+  // Both sessions should still be in server state
+  assert.ok(server.sessions.has(sessionId1), 'first session should still be in sessions map')
+  assert.ok(server.sessions.has(sessionId2), 'second session should be in sessions map')
 
-  // The avatar node should have been removed from world
-  const avatarNode = world.getNode(avatarName1)
-  assert.equal(avatarNode, null, 'avatar node should be removed from world')
+  // Both WS should be OPEN (no eviction)
+  assert.equal(ws1.readyState, WebSocket.OPEN, 'first WS should still be open')
+  assert.equal(ws2.readyState, WebSocket.OPEN, 'second WS should still be open')
 
-  // ws2 should be fully functional — its session should exist
-  assert.ok(server.sessions.has(sessionId2), 'new session should be in sessions map')
-  assert.equal(ws2.readyState, WebSocket.OPEN, 'new session should still be open')
-
+  ws1.close()
   ws2.close()
-  await waitForClose(ws2)
+  await Promise.all([waitForClose(ws1), waitForClose(ws2)])
 })
 
 test('cross-user connection does not evict different user session', async () => {
@@ -268,80 +264,9 @@ test('anonymous session must not be evicted by another anonymous connection', as
   await Promise.all([waitForClose(ws1), waitForClose(ws2)])
 })
 
-test('client cannot trigger eviction of unrelated session via crafted hello', async () => {
-  // The eviction loop keys on upgradeUserId, which is resolved server-side
-  // from the auth cookie. No client-controlled field feeds it. This test
-  // confirms: attacker connects with their own cookie (legitimate auth),
-  // their hello does NOT reach the eviction loop's trigger condition because
-  // upgradeUserId is attacker's, not the target's.
-  const target = await registerUser('target')
-  const attacker = await registerUser('attacker')
 
-  const { ws: wsTarget } = websocketConnectWithHeaders({ Cookie: target.cookieStr })
-  await waitForOpen(wsTarget)
-  const hello = await handshake(wsTarget, { clientId: 'target-main' })
-  const sessionIdTarget = hello.id
 
-  // Attacker connects with their own cookie — different upgradeUserId.
-  // Use a unique clientId so hello passes the duplicate-sessionId check
-  // and reaches the eviction loop.
-  const { ws: wsAttacker } = websocketConnectWithHeaders({ Cookie: attacker.cookieStr })
-  await waitForOpen(wsAttacker)
-  await handshake(wsAttacker, { clientId: 'attacker-own-id-1' })
 
-  await new Promise(r => setTimeout(r, 100))
-  // Target's session must survive — attacker has a different userId
-  assert.ok(server.sessions.has(sessionIdTarget), 'target session must survive attacker connect')
-  assert.equal(wsTarget.readyState, WebSocket.OPEN, 'target WS must remain open')
-
-  wsTarget.close()
-  wsAttacker.close()
-  await Promise.all([waitForClose(wsTarget), waitForClose(wsAttacker)])
-})
-
-test('bystander observes exactly one remove+leave after eviction (no double broadcast)', async () => {
-  const userX = await registerUser('userx')
-  const bystander = await registerUser('bypass')
-
-  const { ws: wsB, q: qB } = websocketConnectWithHeaders({ Cookie: bystander.cookieStr })
-  await waitForOpen(wsB)
-  await handshake(wsB, { clientId: 'bystander-1' })
-
-  const { ws: wsX1 } = websocketConnectWithHeaders({ Cookie: userX.cookieStr })
-  await waitForOpen(wsX1)
-  const helloX1 = await handshake(wsX1, { clientId: 'userx-1' })
-  const sessionIdX1 = helloX1.id
-  const avatarNameX1 = helloX1.avatarNodeName
-
-  wsX1.send(JSON.stringify({
-    type: 'add', seq: 1,
-    id: sessionIdX1,
-    node: { name: avatarNameX1, translation: [0, 0, 0] },
-  }))
-
-  await new Promise(r => setTimeout(r, 200))
-
-  const { ws: wsX2 } = websocketConnectWithHeaders({ Cookie: userX.cookieStr })
-  await waitForOpen(wsX2)
-  await handshake(wsX2, { clientId: 'userx-2' })
-
-  const removeMsg = await qB.waitForType('remove', 2000)
-  assert.ok(removeMsg !== null, 'bystander should receive remove')
-  assert.equal(removeMsg.id, sessionIdX1, 'remove should reference evicted session id')
-
-  const leaveMsg = await qB.waitForType('leave', 1000)
-  assert.ok(leaveMsg !== null, 'bystander should receive leave')
-  assert.equal(leaveMsg.id, sessionIdX1, 'leave should reference evicted session id')
-
-  const secondRemove = await qB.waitForType('remove', 300)
-  assert.equal(secondRemove, null, 'remove should not be broadcast a second time')
-  const secondLeave = await qB.waitForType('leave', 300)
-  assert.equal(secondLeave, null, 'leave should not be broadcast a second time')
-
-  wsB.close()
-  wsX2.close()
-  await Promise.all([waitForClose(wsB), waitForClose(wsX2)])
-})
 
 // ---------------------------------------------------------------------------
 // Item 2 regression: hello handler race
