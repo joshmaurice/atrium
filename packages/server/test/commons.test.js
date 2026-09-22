@@ -658,6 +658,7 @@ test('degraded — private row, degradedBoot gets UUID as host key', async () =>
   const host = registry2.hosts.get(privateRowId)
   assert.equal(host._degradedOperatorUserId, opId, 'operator identity stored on host')
 
+  registry2.close()
   httpServer2.close()
   await rm(tempDir2, { recursive: true, force: true })
 })
@@ -701,6 +702,7 @@ test('degraded — stale default cleanup when degradedBoot receives UUID', async
   // Host count is exactly 1
   assert.equal(registry2.hosts.size, 1, 'exactly one host')
 
+  registry2.close()
   httpServer2.close()
   await rm(tempDir2, { recursive: true, force: true })
 })
@@ -737,9 +739,12 @@ test('degraded — private row + operator stored on host (no registry global sta
   assert.equal(host._degradedOperatorUserId, opId, 'identity on host')
   assert.equal(registry2._degradedOperatorUserId, undefined, 'registry has no identity property')
 
+  registry2.close()
   httpServer2.close()
   await rm(tempDir2, { recursive: true, force: true })
-})// ===================================================================
+})
+
+// ===================================================================
 // Test 10: Row protection — DELETE / PUT restrictions
 // ===================================================================
 
@@ -923,7 +928,11 @@ test('degraded — another user commons slug via /public/ returns 503 in degrade
   // Verify no additional host was created for this world
   assert.ok(!reg14.hosts.has(otherWorldId), 'no host created for other user commons slug world')
 
-  http14.close()
+  try {
+    reg14.close()
+  } finally {
+    http14.close()
+  }
   await rm(tDir, { recursive: true, force: true })
 })
 
@@ -996,6 +1005,7 @@ test('degraded — operator commons slug via /public/ routes to root host in deg
     assert.equal(reg15.hosts.size, 1, 'only one host in registry')
     assert.ok(reg15.hosts.has(privateRowId), 'degraded root host exists under the private row UUID')
   } finally {
+    reg15.close()
     http15.close()
     await rm(tDir, { recursive: true, force: true })
   }
