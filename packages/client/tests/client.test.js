@@ -799,3 +799,62 @@ test('light mutation — light with null qualifiedName is skipped silently', () 
   const sends = mock.sent.filter(m => m.type === 'send')
   assert.equal(sends.length, 0, 'no send emitted for light with null qualifiedName')
 })
+
+// ---------------------------------------------------------------------------
+// Regression: Bug A — disconnect closes the WebSocket
+// ---------------------------------------------------------------------------
+
+test('logout lifecycle — disconnect() closes the WebSocket', () => {
+  const { client, mock } = makeWiredClient()
+  let closeCalled = false
+  const origClose = mock.close.bind(mock)
+  mock.close = () => { closeCalled = true; origClose() }
+
+  assert.ok(client._connected, 'client is connected before disconnect')
+  assert.ok(mock.readyState === 1, 'WebSocket is OPEN before disconnect')
+
+  client.disconnect()
+
+  assert.strictEqual(closeCalled, true, 'WebSocket.close() was called')
+  assert.strictEqual(client._connected, false, 'client._connected is false after disconnect')
+  assert.strictEqual(client._ws, null, 'client._ws is null after disconnect')
+})
+
+// ---------------------------------------------------------------------------
+// Regression: Bug B — protocol errors don't change _connected
+// ---------------------------------------------------------------------------
+
+test('protocol error — PERMISSION_DENIED does not set client._connected=false', () => {
+  const { client, mock } = makeWiredClient()
+
+  assert.ok(client._connected, 'client._connected is true before error')
+  assert.ok(mock.readyState === 1, 'WebSocket is OPEN before error')
+
+  // Simulate a PERMISSION_DENIED protocol error
+  mock.simulateMessage({
+    type: 'error',
+    seq: 42,
+    code: 'PERMISSION_DENIED',
+    message: 'Only the owner may mutate this world',
+  })
+
+  // Give the error handler a tick
+  assert.ok(client._connected, 'client._connected remains true after PERMISSION_DENIED error')
+  assert.ok(mock.readyState === 1, 'WebSocket is still OPEN after PERMISSION_DENIED error')
+})
+
+test('protocol error — UNKNOWN_MESSAGE does not set client._connected=false', () => {
+  const { client, mock } = makeWiredClient()
+
+  assert.ok(client._connected, 'client._connected is true before error')
+
+  mock.simulateMessage({
+    type: 'error',
+    seq: 42,
+    code: 'UNKNOWN_MESSAGE',
+    message: 'World not loaded',
+  })
+
+  assert.ok(client._connected, 'client._connected remains true after UNKNOWN_MESSAGE error')
+  assert.ok(mock.readyState === 1, 'WebSocket still OPEN after UNKNOWN_MESSAGE error')
+})
