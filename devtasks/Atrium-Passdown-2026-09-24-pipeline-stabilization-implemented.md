@@ -267,7 +267,18 @@ profile directory's local git repo (host-only; check `git remote -v`).
 
 **`/root/.hermes/SOUL.md`** (default profile, the Telegram front door) gained
 a section to record approvals verbatim and route Atrium work only to
-`atrium-*` profiles. Backup: `SOUL.md.bak-<timestamp>`.
+`atrium-*` profiles. It also gained front-door item 9: never assign pipeline
+stages yourself, always hand off to an `atrium-orchestrator` kickoff, plus the
+profile roster. That was added on 2026-09-25, after a fresh session asked the
+user which profiles should write and critique the brief. Backups:
+`SOUL.md.bak-<timestamp>`.
+
+Hermes scans every `SOUL.md` for prompt-injection patterns and replaces the
+whole file with a `[BLOCKED …]` notice if anything matches, so the agent would
+silently run without it. All the text above passes that scanner. Recheck after
+any future edit:
+
+    cd /usr/local/lib/hermes-agent && PYTHONPATH=. venv/bin/python -c "from agent import prompt_builder as pb; [print(f, pb._scan_for_threats(open(f).read(), scope='context') or 'clean') for f in ('/root/.hermes/SOUL.md', '/root/.hermes/profiles/atrium-orchestrator/SOUL.md')]"
 
 **`/root/.hermes/skills/devops/atrium-workflows/SKILL.md`:**
 
