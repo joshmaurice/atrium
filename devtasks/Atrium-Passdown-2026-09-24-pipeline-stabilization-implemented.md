@@ -212,9 +212,10 @@ which is deliberately a human decision.
 - Assignees must be `atrium-*` (never `default`).
 - Deployer tasks must use a stage title, request exactly one `atrium_deploy`
   action, and never mention `kanban_create`.
-- Only deployer tasks may mention `atrium_deploy`.
-- Titles that look like a MAIN merge or push must be `MAIN push` deployer
-  tasks.
+- Worker tasks (GLM, Nemotron, DeepSeek) may not mention `atrium_deploy` or
+  be titled as a MAIN merge or push. The orchestrator is exempt, because its
+  kickoff and gate bodies legitimately describe later deploy steps; this was
+  narrowed in v1.0.1.
 - Drifted `Awaiting …` or finalizer titles are refused.
 
 **Human approvals.** Unblocking a human gate, or creating a `MAIN push` or
@@ -247,7 +248,7 @@ max 29.9; Nemotron reviews max 36.6; DeepSeek max 46.8.
 **Check / operate:**
 
     bash /root/install-atrium-guard.sh status     # enabled state + recent decisions
-    bash /root/install-atrium-guard.sh install    # rewrites files and reruns the 37-check self-test
+    bash /root/install-atrium-guard.sh install    # rewrites files and reruns the 40-check self-test
     bash /root/install-atrium-guard.sh disable    # disables in both profiles, restarts gateway if idle
 
 ## 6. Prompt changes
