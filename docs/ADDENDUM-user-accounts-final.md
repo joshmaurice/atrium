@@ -99,7 +99,7 @@ WebSocket `sessionId`.
 
 All Phase-1 persisted worlds are **private**. The `visibility` column exists
 from day one with a fixed value; the public toggle, unauthenticated
-`GET /api/worlds/:id`, and `/public/<user>/<slug>` addressing all arrive in
+`GET /api/worlds/:id`, `/worlds/<user>/<slug>` (canonical, pre-brief #13), `/public/<user>/<slug>` addressing all arrive in
 Phase 2 together. Remove "public worlds need no auth" from the Phase-1 load
 flow. (Anonymous users continue to browse ordinary static glTF worlds as
 today — that path is unaffected.)

@@ -177,34 +177,43 @@ function renderWorldList(worlds) {
       `<div class="wb-meta">${escHtml(w.slug)} · ${formatTime(w.updated_at)}</div>`
     item.appendChild(info)
 
-    const loadBtn = document.createElement('button')
-    loadBtn.textContent = 'Load'
+    const itemLoadBtn = document.createElement('button')
+    itemLoadBtn.textContent = 'Load'
     // Load works whether or not connected (pre-brief decision)
-    loadBtn.disabled = false
-    loadBtn.title = 'Load this world'
-    loadBtn.addEventListener('click', async () => {
-      loadBtn.disabled = true
+    itemLoadBtn.disabled = false
+    itemLoadBtn.title = 'Load this world'
+    itemLoadBtn.addEventListener('click', async () => {
+      itemLoadBtn.disabled = true
       try {
-        const res = await fetch(`/api/worlds/${w.id}`)
-        if (!res.ok) {
-          if (res.status === 404) {
-            wbError.textContent = 'World not found (may have been deleted)'
-          } else {
-            wbError.textContent = 'Failed to load world'
-          }
+        // Perform a real WS connect via buildWorldWsUrl (pre-brief #1/#3, F1 fix)
+        if (!currentUser) {
+          wbError.textContent = 'Not logged in'
           refreshWorldList()
           return
         }
-        const text = await res.text()
-        await client.loadWorldFromData(text, w.name || w.slug)
-        overlayEl.textContent = `Loaded: ${w.name || w.slug}`
+        const wsUrl = buildWorldWsUrl(
+          accountWsBase || computeWsUrl(window.location),
+          currentUser.username || currentUser.id,
+          w.slug
+        )
+        if (!wsUrl) {
+          wbError.textContent = 'Invalid world identifier'
+          refreshWorldList()
+          return
+        }
+        showOverlay('Connecting to world…')
+        client.connect(wsUrl, {
+          avatar: buildAvatarDescriptor(),
+          displayName: currentUser.displayName || currentUser.username,
+        })
+        showOverlay('')
       } catch (err) {
         wbError.textContent = 'Load failed: ' + err.message
       } finally {
-        loadBtn.disabled = false
+        itemLoadBtn.disabled = false
       }
     })
-    item.appendChild(loadBtn)
+    item.appendChild(itemLoadBtn)
 
     const delBtn = document.createElement('button')
     delBtn.textContent = 'Delete'
@@ -349,25 +358,22 @@ function setConnectionState(state) {
   } else if (state === 'connected') {
     connectBtn.textContent = 'Disconnect'
     connectBtn.disabled    = false
-    // Load works whether or not connected — no disable needed (pre-brief decision)
   } else {
     // disconnected or error
     connectBtn.textContent = 'Connect'
     connectBtn.disabled    = false
-
+    // Re-enable Load button — it was disabled while connected
+    loadBtn.disabled = false
+    loadBtn.title = 'Load a static file'
   }
+
+  // Update Load button state based on connection status
+  loadBtn.disabled = (state === 'connected')
+  loadBtn.title = (state === 'connected')
+    ? 'Disconnect to open a local file'
+    : 'Load a static file'
 
   updateHud()
-}
-
-function enableWbLoadButtons() {
-  // Re-enable any disabled Load buttons when disconnected
-  for (const btn of wbList.querySelectorAll('button')) {
-    if (btn.textContent === 'Load') {
-      btn.disabled = false
-      btn.title = 'Load this world'
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -375,15 +381,15 @@ function enableWbLoadButtons() {
 // ---------------------------------------------------------------------------
 
 function homeWorldWsUrl(userId) {
-  return buildHomeWorldWsUrl(wsUrlInput.value.trim(), userId)
+  return buildHomeWorldWsUrl(accountWsBase, userId)
 }
 
 function autoConnectToHomeWorld(user) {
   // Always constructs a /home/<uuid>/home path on the origin extracted
-  // from wsUrlInput, regardless of any pathname in the field. This may
-  // differ from Manual Connect, which uses wsUrlInput's raw value — the
-  // divergence is by design (auto-connect targets the home world endpoint,
-  // manual connect targets whatever URL the user entered).
+  // from accountWsBase (pre-brief #2/#12), regardless of any pathname in
+  // the connection box — the divergence from Manual Connect is by design
+  // (auto-connect targets the home world endpoint, manual connect targets
+  // whatever URL the user entered).
   if (!user || !user.id) return
   if (client.connected) return
 
@@ -417,10 +423,9 @@ const pointerBridge = new PointerInputBridge({
 client.on('world:loaded', ({ name, description, author }) => {
   if (!client.som) return
 
-  // Derive base URL for resolving relative texture paths
-  const rawUrl = worldUrlInput.value.trim()
-  const absUrl  = new URL(rawUrl, window.location.href).href
-  worldBaseUrl  = absUrl.substring(0, absUrl.lastIndexOf('/') + 1)
+  // Derive base URL for resolving relative texture paths from client.worldBaseUrl
+  // (pre-brief #7) — always use the client's base, not the module-level worldUrlInput.
+  const bgBaseUrl = client.worldBaseUrl || ''
 
   // Clear previous background/environment before loading new world
   threeScene.background = null
@@ -429,7 +434,7 @@ client.on('world:loaded', ({ name, description, author }) => {
   ;({ docView, sceneGroup } = initDocumentView(renderer, threeScene, client.som, { prevDocView: docView, prevSceneGroup: sceneGroup }))
   stage.setSceneGroup(sceneGroup)
 
-  loadBackground(threeScene, client.som.extras?.atrium?.background, worldBaseUrl)
+  loadBackground(threeScene, client.som.extras?.atrium?.background, bgBaseUrl)
 
   // HUD world line
   hudWorldEl.textContent = name ? `World: ${name}` : ''
@@ -498,11 +503,10 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 })
 
 // Live property updates on the selected node, and world-info panel for document extras
-let worldBaseUrl = ''
 client.on('som:set', ({ nodeName }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
-    loadBackground(threeScene, client.som.extras?.atrium?.background, worldBaseUrl)
+    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl || '')
     return
   }
 })
@@ -585,6 +589,11 @@ viewportEl.addEventListener('drop', async (e) => {
   viewportEl.classList.remove('drag-over')
   const file = e.dataTransfer.files[0]
   if (!file) return
+  // Reject drops while connected (pre-brief #15)
+  if (client.connected) {
+    showOverlay('Disconnect to open a local file')
+    return
+  }
   overlayEl.textContent = 'Loading…'
   try {
     const msg = await loadDroppedFile(file)
@@ -612,15 +621,13 @@ loadBtn.addEventListener('click', async () => {
   loadBtn.disabled = true
 
   // Load works whether or not connected (pre-brief decision).
-  // If connected and URL is not a static file, perform real WS connect via buildWorldWsUrl.
-  const lower = url.toLowerCase()
-  const isStaticFile = lower.endsWith('.gltf') || lower.endsWith('.glb') || lower.endsWith('.json')
-
-  if (client.connected && !isStaticFile) {
-    showOverlay('Connecting to world…')
-    try {
-      // Treat URL as world slug — connect via account server
-      client.disconnect()
+  try {
+    // Static file load — disabled while connected (pre-brief #15)
+    const lower = url.toLowerCase()
+    const isStaticFile = lower.endsWith('.gltf') || lower.endsWith('.glb') || lower.endsWith('.json')
+    if (!isStaticFile && client.connected) {
+      // WS world URL while connected — connect via buildWorldWsUrl (same as F1)
+      showOverlay('Connecting to world…')
       const wsUrl = buildWorldWsUrl(
         accountWsBase || computeWsUrl(window.location),
         currentUser ? (currentUser.username || currentUser.id) : 'anonymous',
@@ -636,15 +643,11 @@ loadBtn.addEventListener('click', async () => {
       const connectOpts = { avatar: avatarDesc, displayName }
       client.connect(wsUrl, connectOpts)
       showOverlay('')
-    } catch (err) {
-      showOverlay('Load failed: ' + err.message)
-      console.error(err)
-    } finally {
-      loadBtn.disabled = false
-    }
-  } else {
-    showOverlay('Loading…')
-    try {
+    } else if (client.connected) {
+      // Static file load while connected — refuse
+      showOverlay('Disconnect to open a local file')
+    } else {
+      showOverlay('Loading…')
       if (url.endsWith('.json')) {
         const configUrl = new URL(url, window.location.href).href
         const resp = await fetch(configUrl)
@@ -653,19 +656,15 @@ loadBtn.addEventListener('click', async () => {
         showOverlay(msg ?? '')
       } else {
         const absoluteUrl = new URL(url, window.location.href).href
-        if (client.connected) {
-          // Disconnect first to allow static loading while live
-          client.disconnect()
-        }
         await client.loadWorld(absoluteUrl)
         showOverlay('')
       }
-    } catch (err) {
-      showOverlay('Load failed: ' + err.message)
-      console.error(err)
-    } finally {
-      loadBtn.disabled = false
     }
+  } catch (err) {
+    showOverlay('Load failed: ' + err.message)
+    console.error(err)
+  } finally {
+    loadBtn.disabled = false
   }
 })
 
@@ -680,11 +679,10 @@ connectBtn.addEventListener('contextmenu', (e) => {
   if (!wsUrl) return
   setConnectionState('connecting')
   const worldUrl = worldUrlInput.value.trim()
+  const connectOpts = { avatar: buildAvatarDescriptor() }
   if (worldUrl) {
-    client.worldBaseUrl = new URL(worldUrl, window.location.href).href
+    connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
   }
-  const avatarDesc = buildAvatarDescriptor()
-  const connectOpts = { avatar: avatarDesc }
   if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
   client.connect(wsUrl, connectOpts)
 })
@@ -698,11 +696,10 @@ connectBtn.addEventListener('click', () => {
   if (!wsUrl) return
   setConnectionState('connecting')
   const worldUrl = worldUrlInput.value.trim()
+  const connectOpts = { avatar: buildAvatarDescriptor() }
   if (worldUrl) {
-    client.worldBaseUrl = new URL(worldUrl, window.location.href).href
+    connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
   }
-  const avatarDesc = buildAvatarDescriptor()
-  const connectOpts = { avatar: avatarDesc }
   if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
   client.connect(wsUrl, connectOpts)
 })

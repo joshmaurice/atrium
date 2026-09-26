@@ -541,11 +541,12 @@
 
 <div class="toolbar">
   <h1>SOM INSPECTOR</h1>
+  <span>File:</span>
   <input id="worldUrl" type="text" value="../../tests/fixtures/space.gltf"
          placeholder=".gltf or .atrium.json URL" />
   <button id="loadBtn" class="primary">Load</button>
-  <span class="ws-label">Server:</span>
-  <input id="wsUrl" type="text" value="ws://localhost:3000" style="width:170px;flex:0 0 auto" />
+  <span class="ws-label">World:</span>
+  <input id="wsUrl" type="text" value="ws://localhost:3000" placeholder="wss://host/worlds/user/slug" style="width:170px;flex:0 0 auto" />
   <div class="status-dot" id="statusDot"></div>
   <button id="connectBtn">Connect</button>
   <select id="mode-switcher">

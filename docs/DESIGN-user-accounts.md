@@ -435,6 +435,7 @@ Phase 1.
 - Disconnect-save as final flush (not the only save — periodic saves handle crashes)
 - World visibility (public / private toggle)
 - `/public/<user>/<slug>` URL path for public world sharing
+- `/worlds/<user>/<slug>` became the canonical path in worldload-address-sync; `/public/` is retained as a backward-compatible alias
 
 ### Phase 3 — Power User Features
 

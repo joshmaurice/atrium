@@ -295,6 +295,13 @@ export function createRequestHandler(opts = {}) {
       // -- Normalize username --
       const normalized = auth.normalizeUsername(username)
 
+      // Reject exact '.' or '..' as username (pre-brief #10)
+      if (normalized === '.' || normalized === '..') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid username' }))
+        return
+      }
+
       // -- Hash password --
       let passwordHash
       try {
@@ -574,6 +581,13 @@ export function createRequestHandler(opts = {}) {
         return
       }
 
+      // Reject path traversal: 'slug' must not be '.' or '..' (pre-brief #10)
+      if (body.slug.trim() === '.' || body.slug.trim() === '..') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid slug' }))
+        return
+      }
+
       // Serialize the current live world as the initial document
       // so a created world is always valid glTF from the moment it exists.
       let initialDocument = ''
@@ -710,6 +724,12 @@ export function createRequestHandler(opts = {}) {
         if (body?.slug?.trim() === 'home') {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Slug "home" is reserved' }))
+          return
+        }
+        // Reject path traversal: 'slug' must not be '.' or '..' (pre-brief #10)
+        if (body?.slug?.trim() === '.' || body?.slug?.trim() === '..') {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid slug' }))
           return
         }
         // Forbid changing the slug of a world whose current slug is 'home'

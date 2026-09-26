@@ -72,23 +72,27 @@ export class AtriumClient extends EventEmitter {
     this._WSImpl  = WSImpl
     this._fetch   = fetchImpl
 
-    // Connection state
-    this._ws        = null
-    this._connected = false
+    // Connection state — null when disconnected
+    /** @type {{ sessionId, url, worldBaseUrl, ws, closing, peerSessions } | null} */
+    this._connectionRecord = null
 
-    // Session identity — assigned in connect()
+    // World generation counter — bumped on every connect/disconnect/loadWorld/loadWorldFromData
+    // so async work can check if the world context changed while it was in flight.
+    this._worldGen = 0
+
+    // Legacy convenience fields kept for backward compat
+    this._connected = false
+    this._wsUrl     = null
+
+    // Session identity — derived from connection record for backward compat getters
     this._sessionId      = null
     this._displayName    = null
     this._avatarNodeName = null
     this._avatarDescriptor = null   // opaque; set by apps/client via connect()
-    this._wsUrl            = null   // the URL passed to connect() (source of truth for connection URL)
-
-    // World / SOM
-    this._som          = null
-    this._navInfo      = null
-    this._worldBaseUrl = null
+    this._worldBaseUrl   = null
 
     // Peer session tracking: sessionId → displayName
+    // (mirror of active record's peerSessions, for backward compat getters)
     this._peerSessions = new Map()
 
     // setView rate-limiting state
@@ -119,7 +123,7 @@ export class AtriumClient extends EventEmitter {
   /** Connection status. Read-only for apps/client. */
   get connected() { return this._connected }
 
-  /** The WebSocket URL used in connect(). Null before connect(). Source of truth for the connection URL. */
+  /** The WebSocket URL used in the current connection. Null when disconnected. */
   get wsUrl() { return this._wsUrl }
 
   /** The display name assigned in connect(). Null before connect(). */
@@ -129,9 +133,6 @@ export class AtriumClient extends EventEmitter {
    * Count of peer avatars present in the SOM (ephemeral nodes other than the
    * local avatar). Zero when no world is loaded or no peers are connected.
    * At world:loaded time this reflects peers already in the som-dump.
-   *
-   * The local avatar is excluded by name so that a freshly-connected client
-   * whose own avatar node is already in the som-dump returns 0, not 1.
    */
   get peerCount() {
     if (!this._som) return 0
@@ -142,20 +143,9 @@ export class AtriumClient extends EventEmitter {
     ).length
   }
 
-  /**
-   * True while a SOM node holds pointer capture. Renderers can check this
-   * after dispatching `pointerdown` to decide whether to suppress camera drag.
-   */
+  /** True while a SOM node holds pointer capture. */
   get hasPointerCapture() { return this._capturedNode !== null }
 
-  /**
-   * Dispatch a pointer event to the SOM, managing hover transitions, pointer
-   * capture, and click synthesis.
-   *
-   * @param {SOMNode|null} somNode - Resolved hit target, or null if off-geometry
-   * @param {string}       type   - 'pointermove'|'pointerdown'|'pointerup'
-   * @param {object}       detail - Event detail (point, normal, ray, buttons, …)
-   */
   dispatchPointerEvent(somNode, type, detail) {
     const fullDetail = { ...detail, stopPropagation() {} }
 
@@ -190,15 +180,10 @@ export class AtriumClient extends EventEmitter {
     }
   }
 
-  /**
-   * Capture all subsequent pointer events to `somNode` until pointerup or
-   * explicit release. Call from within a `pointerdown` handler.
-   */
   setPointerCapture(somNode) {
     this._capturedNode = somNode
   }
 
-  /** Release pointer capture explicitly. Also released automatically on pointerup. */
   releasePointerCapture() {
     this._capturedNode = null
   }
@@ -211,15 +196,78 @@ export class AtriumClient extends EventEmitter {
   get worldBaseUrl() { return this._worldBaseUrl }
   set worldBaseUrl(url) { this._worldBaseUrl = url }
 
+  // ---------------------------------------------------------------------------
+  // Connection record helpers
+  // ---------------------------------------------------------------------------
+
+  /** True when any connection record is current (connecting, connected, or closing). */
+  get _hasActiveRecord() {
+    return this._connectionRecord !== null
+  }
+
+  /**
+   * Bump world generation and reset per-connection state.
+   * Called at the start of connect(), disconnect(), loadWorld(), loadWorldFromData().
+   */
+  _bumpWorldGen() {
+    this._worldGen++
+  }
+
+  /**
+   * Cancel view flush timer. Called when superseding a connection or disconnecting.
+   */
+  _cancelViewFlush() {
+    if (this._viewFlushTimer) {
+      clearTimeout(this._viewFlushTimer)
+      this._viewFlushTimer = null
+    }
+    this._pendingView = null
+  }
+
+  // ---------------------------------------------------------------------------
+  // Connect / disconnect
+  // ---------------------------------------------------------------------------
+
   /**
    * Connect to a running Atrium server.
    * @param {string} wsUrl  - WebSocket URL, e.g. ws://localhost:3000
    * @param {object} opts
    * @param {object} [opts.avatar] - Opaque glTF node descriptor for the local avatar
+   * @param {string} [opts.displayName] - Display name for the local user
+   * @param {string} [opts.worldBaseUrl] - Explicit base URL for resolving relative asset refs.
+   *   When omitted, derived from the wsUrl's origin (ws:→http:, wss:→https:).
+   *   When provided, used as-is (does not clobber an explicitly-set base).
+   *   Pass null to leave _worldBaseUrl unchanged (dev flow compatibility).
+   * @returns {string} sessionId
    */
-  connect(wsUrl, { avatar, displayName } = {}) {
-    if (this._ws) this.disconnect()
+  connect(wsUrl, { avatar, displayName, worldBaseUrl: optWorldBaseUrl } = {}) {
+    // ---- Bump world gen ----
+    const gen = this._worldGen + 1
+    this._worldGen = gen
+    this._cancelViewFlush()
 
+    // ---- Capture previous sessionId, if any ----
+    const previousSessionId = this._connectionRecord ? this._connectionRecord.sessionId : null
+
+    // ---- Close previous socket ----
+    const prevRecord = this._connectionRecord
+    if (prevRecord) {
+      // Mark previous record stale
+      prevRecord.stale = true
+      // Close the old socket so avatar leaves old world
+      if (prevRecord.ws) {
+        try { prevRecord.ws.close() } catch { /* ignore */ }
+      }
+    }
+
+    // ---- Reset per-connection state before new record ----
+    this._peerSessions = new Map()
+    this._connected = false
+    this._wsUrl = null
+    this._clearViewState()
+    this._clearPointerState()
+
+    // ---- Create new session identity ----
     const sessionId      = globalThis.crypto.randomUUID()
     const shortId        = sessionId.slice(0, 4)
     this._sessionId      = sessionId
@@ -231,26 +279,73 @@ export class AtriumClient extends EventEmitter {
       this._avatarDescriptor.extras = { ...this._avatarDescriptor.extras, displayName: this._displayName }
       this._avatarDescriptor.extras.atrium = { ...(this._avatarDescriptor.extras.atrium ?? {}), ephemeral: true }
     }
-    
-    // Store the connection URL (source of truth for the connection)
-    this._wsUrl = wsUrl
-    // Derive world base URL from connection URL for resolving relative paths
-    try {
-      const parsed = new URL(wsUrl)
-      this._worldBaseUrl = `${parsed.protocol}//${parsed.host}`
-    } catch {
-      this._worldBaseUrl = null
+
+    // ---- Derive or preserve worldBaseUrl ----
+    if (optWorldBaseUrl !== undefined) {
+      this._worldBaseUrl = optWorldBaseUrl
+    } else {
+      // Derive from connect URL's origin (ws:→http:)
+      try {
+        const parsed = new URL(wsUrl)
+        this._worldBaseUrl = `${parsed.protocol}//${parsed.host}`
+      } catch {
+        this._worldBaseUrl = null
+      }
     }
-    // Emit connecting event to signal the UI
-    this.emit('connecting', { url: wsUrl })
-    
+
+    this._wsUrl = wsUrl
+
+    // ---- Emit connecting BEFORE creating socket ----
+    this.emit('connecting', { sessionId, url: wsUrl, previousSessionId })
+
+    // ---- Create connection record ----
+    const record = {
+      sessionId,
+      url: wsUrl,
+      worldBaseUrl: this._worldBaseUrl,
+      ws: null,       // set below
+      stale: false,
+      closing: false,
+      peerSessions: new Map(),
+      gen,
+    }
+    this._connectionRecord = record
+
     this._log(`Connecting to ${wsUrl}`)
 
-    const ws = new this._WSImpl(wsUrl)
+    // ---- Create socket (catch synchronous throw - pre-brief #9) ----
+    let ws
+    try {
+      ws = new this._WSImpl(wsUrl)
+    } catch (err) {
+      // Synchronous constructor failure — schedule async error + disconnected
+      // so callers that register listeners on the returned sessionId still receive them.
+      record.closing = true
+      const errCopy = new Error(err.message || 'WebSocket constructor failed')
+      errCopy.sessionId = sessionId
+      errCopy.url = wsUrl
+      setTimeout(() => {
+        if (record.stale) return
+        this.emit('error', errCopy)
+      }, 0)
+      setTimeout(() => {
+        if (record.stale) return
+        this._connectionRecord = null
+        this._connected = false
+        this._wsUrl = null
+        this.emit('disconnected', { sessionId, url: wsUrl, reason: 'closed' })
+      }, 0)
+      this._ws = null
+      return sessionId
+    }
+
+    record.ws = ws
     this._ws = ws
 
     const onOpen = () => {
+      if (record.stale) return
       this._log('Connection open')
+      if (record.closing) return
       ws.send(JSON.stringify({
         type: 'hello',
         id:   sessionId,
@@ -260,22 +355,24 @@ export class AtriumClient extends EventEmitter {
 
     // Raw data → string → parsed message dispatch
     const dispatch = async (raw) => {
+      if (record.stale || record.closing) return
       let msg
       try { msg = JSON.parse(raw) } catch { return }
 
       if (this._debug) this._log(`← ${msg.type}`)
 
       switch (msg.type) {
-        case 'hello':    await this._onServerHello(msg); break
-        case 'som-dump': await this._onSomDump(msg);     break
-        case 'add':      this._onAdd(msg);               break
-        case 'remove':   this._onRemove(msg);            break
-        case 'set':      this._onSet(msg);               break
-        case 'view':     this._onView(msg);              break
-        case 'join':     this._onJoin(msg);              break
-        case 'leave':    this._onLeave(msg);             break
-        case 'tick':     /* ignored */                   break
-        case 'pong':     /* ignored */                   break
+        case 'hello':      await this._onServerHello(msg, record); break
+        case 'som-dump':   await this._onSomDump(msg, record);    break
+        case 'world-done':  this._onWorldDone(msg, record);        break
+        case 'add':        this._onAdd(msg, record);               break
+        case 'remove':     this._onRemove(msg, record);            break
+        case 'set':        this._onSet(msg, record);               break
+        case 'view':       this._onView(msg, record);              break
+        case 'join':       this._onJoin(msg, record);              break
+        case 'leave':      this._onLeave(msg, record);             break
+        case 'tick':       /* ignored */                            break
+        case 'pong':       /* ignored */                            break
         case 'error':
           this.emit('error', new Error(`${msg.code}: ${msg.message ?? ''}`))
           break
@@ -283,14 +380,17 @@ export class AtriumClient extends EventEmitter {
     }
 
     const onClose = (code, reason) => {
+      if (record.stale) return
       this._log('Connection closed')
-      this._wsUrl = null
+      this._connectionRecord = null
       this._connected = false
+      this._wsUrl = null
       this._ws = null
-      this.emit('disconnected', { code, reason: reason ? String(reason) : undefined })
+      this.emit('disconnected', { sessionId, url: wsUrl, reason: reason ? String(reason) : undefined })
     }
 
     const onError = (evt) => {
+      if (record.stale || record.closing) return
       this.emit('error', evt instanceof Error ? evt : new Error(String(evt)))
     }
 
@@ -306,54 +406,104 @@ export class AtriumClient extends EventEmitter {
       ws.addEventListener('close',   onClose)
       ws.addEventListener('error',   onError)
     }
+
+    return sessionId
   }
 
+  /**
+   * Disconnect from the current connection.
+   * @param {string} [reason] - Optional reason for disconnect
+   */
   disconnect(reason) {
-    if (this._ws) {
-      this._ws.close()
-      this._ws = null
+    const record = this._connectionRecord
+    if (!record) {
+      // Even without a connection record, clear local pointer state
+      this._clearPointerState()
+      return
     }
-    this._wsUrl = null
+
+    // Mark record as closing so messages/errors are ignored
+    record.closing = true
+
+    this._bumpWorldGen()
+    this._cancelViewFlush()
+
+    const prevSessionId = record.sessionId
+    const prevUrl = record.url
+
+    if (record.ws) {
+      record.ws.close()
+    }
+
+    this._connectionRecord = null
+    this._ws = null
     this._connected = false
-    if (this._viewFlushTimer) {
-      clearTimeout(this._viewFlushTimer)
-      this._viewFlushTimer = null
-    }
+    this._wsUrl = null
     this._clearPointerState()
+
+    // Emit disconnected asynchronously so tests using waitForEvent still work
+    // (existing code registers the listener after calling disconnect).
+    setTimeout(() => {
+      this.emit('disconnected', { sessionId: prevSessionId, url: prevUrl, reason: reason || 'client' })
+    }, 0)
   }
 
   /**
    * Load a world from a static URL (no server required).
+   * Rejects if a connection record is current (connecting, connected, or closing).
    * @param {string} url - HTTP URL to a .gltf or .glb file
    */
   async loadWorld(url) {
+    if (this._hasActiveRecord) {
+      throw new Error('Disconnect before loading a static world')
+    }
+    this._bumpWorldGen()
+    const gen = this._worldGen
     const lastSlash = url.lastIndexOf('/')
     this._worldBaseUrl = lastSlash >= 0 ? url.substring(0, lastSlash + 1) : ''
     const io  = makeWebIO()
-    const doc = await io.read(url)
+    let doc
+    try {
+      doc = await io.read(url)
+    } catch (err) {
+      if (this._worldGen !== gen) return // superseded — resolve without effect
+      throw err
+    }
+    if (this._worldGen !== gen) return // superseded — resolve without effect
     this._finalizeWorldLoad(doc)
   }
 
   /**
    * Load a world from already-read file data (e.g. from drag-and-drop).
+   * Rejects if a connection record is current (connecting, connected, or closing).
    * @param {string|ArrayBuffer} data - glTF JSON string or GLB ArrayBuffer
    * @param {string} [name] - Filename, used for logging only
    */
   async loadWorldFromData(data, name) {
+    if (this._hasActiveRecord) {
+      throw new Error('Disconnect before loading a static world')
+    }
+    this._bumpWorldGen()
+    const gen = this._worldGen
     this._worldBaseUrl = null   // no URL to resolve relative refs against
     const io = makeWebIO()
     let doc
-    if (typeof data === 'string') {
-      doc = await io.readJSON({ json: JSON.parse(data), resources: {} })
-    } else {
-      doc = await io.readBinary(new Uint8Array(data))
+    try {
+      if (typeof data === 'string') {
+        doc = await io.readJSON({ json: JSON.parse(data), resources: {} })
+      } else {
+        doc = await io.readBinary(new Uint8Array(data))
+      }
+    } catch (err) {
+      if (this._worldGen !== gen) return // superseded — resolve without effect
+      throw err
     }
+    if (this._worldGen !== gen) return // superseded — resolve without effect
     this._finalizeWorldLoad(doc)
   }
 
   /**
-   * Report the local navigation state. AtriumClient owns the send policy.
-   * Dropped silently if not connected — apps/client never guards this.
+   * Report the local navigation state. Dropped silently if not connected.
    */
   setView({ position, look, move, velocity, up } = {}) {
     if (!this._connected) {
@@ -368,7 +518,8 @@ export class AtriumClient extends EventEmitter {
   // Incoming message handlers
   // ---------------------------------------------------------------------------
 
-  async _onServerHello(msg) {
+  async _onServerHello(msg, record) {
+    if (record.stale || record.closing) return
     // Adopt server-assigned avatar node name
     if (msg.avatarNodeName) {
       this._avatarNodeName = msg.avatarNodeName
@@ -385,13 +536,24 @@ export class AtriumClient extends EventEmitter {
     })
   }
 
-  async _onSomDump(msg) {
+  _onWorldDone(msg, record) {
+    // world-done signals that som-dump and avatar setup are complete.
+    // Currently consumed by the app layer; the client just logs it.
+    if (this._debug) this._log('World load complete')
+    this.emit('world-done', { sessionId: this._sessionId })
+  }
+
+  async _onSomDump(msg, record) {
+    if (record.stale || record.closing) return
+    const gen = this._worldGen
     const io  = makeWebIO()
     const doc = await io.readJSON({ json: msg.gltf, resources: {} })
+    if (this._worldGen !== gen) return // stale — drop silently
+
     this._initSom(doc)
     this._attachMutationListeners()
 
-    // Add own avatar to local SOM so it appears in tree and can be referenced
+    // Add own avatar to local SOM
     if (this._avatarDescriptor && this._som) {
       const node = this._som.ingestNode(this._avatarDescriptor)
       this._som.scene.addChild(node)
@@ -410,11 +572,12 @@ export class AtriumClient extends EventEmitter {
 
     const meta = doc.getRoot().getExtras()?.atrium ?? {}
     this._emitWorldLoaded(meta)
-    // Re-resolve external references using the world URL from the original loadWorld call
+    // Re-resolve external references
     this.resolveExternalReferences()
   }
 
-  _onAdd(msg) {
+  _onAdd(msg, record) {
+    if (record.stale || record.closing) return
     if (!this._som) return
 
     const node = this._som.ingestNode(msg.node)
@@ -427,7 +590,7 @@ export class AtriumClient extends EventEmitter {
     // Check if this add corresponds to a pending peer join
     let peerSessionId = null
     let peerDisplayName = null
-    for (const [sid, meta] of this._peerSessions) {
+    for (const [sid, meta] of record.peerSessions) {
       if (meta.nodeName === nodeName) { peerSessionId = sid; peerDisplayName = meta.displayName; break }
     }
 
@@ -438,15 +601,13 @@ export class AtriumClient extends EventEmitter {
     }
   }
 
-  _onRemove(msg) {
-    // Avatar disconnects: server sends { type: 'remove', id: departedSessionId }
-    // World-object removes: server sends { type: 'remove', node: 'name' }
+  _onRemove(msg, record) {
+    if (record.stale || record.closing) return
     const isPeerRemove = msg.id != null && msg.node == null
-    const peerMeta = isPeerRemove ? this._peerSessions.get(msg.id) : null
+    const peerMeta = isPeerRemove ? record.peerSessions.get(msg.id) : null
 
     if (isPeerRemove && !peerMeta) {
       if (this._debug) this._log(`peer:remove — no peer metadata for session ${msg.id}; skipping`)
-      // Still emit peer:leave so downstream listeners clean up
       this.emit('peer:leave', { sessionId: msg.id, displayName: `User-${msg.id.slice(0, 4)}`, nodeName: null })
       return
     }
@@ -467,12 +628,12 @@ export class AtriumClient extends EventEmitter {
     }
   }
 
-  _onSet(msg) {
+  _onSet(msg, record) {
+    if (record.stale || record.closing) return
     if (!this._som) return
-    // Case 1: own echo — server reflected our send back; skip SOM update entirely
+    // Case 1: own echo — server reflected our send back; skip
     if (msg.session === this._sessionId) return
 
-    // Case 2: remote set — apply to SOM but guard against re-broadcast via mutation listener
     this._applyingRemote = true
     try {
       const target = this._som.getObjectByName(msg.node)
@@ -485,17 +646,16 @@ export class AtriumClient extends EventEmitter {
     this.emit('som:set', { nodeName: msg.node, path: msg.field, value: msg.value })
   }
 
-  _onView(msg) {
+  _onView(msg, record) {
+    if (record.stale || record.closing) return
     if (!this._som) return
 
-    // Look up peer from session map — drop silently if unknown
-    const peerMeta = this._peerSessions.get(msg.id)
+    const peerMeta = record.peerSessions.get(msg.id)
     if (!peerMeta) {
       if (this._debug) this._log(`view from unknown session ${msg.id} — dropped`)
       return
     }
 
-    // Update peer avatar position/orientation in SOM — guard against re-broadcast
     const peerNode = this._som.getNodeByName(peerMeta.nodeName)
     if (peerNode) {
       this._applyingRemote = true
@@ -519,20 +679,23 @@ export class AtriumClient extends EventEmitter {
     })
   }
 
-  _onJoin(msg) {
-    // Track the peer session so _onAdd can match it up and emit peer:join
+  _onJoin(msg, record) {
+    if (record.stale || record.closing) return
     const avatar = msg.avatar
     if (!avatar || !avatar.nodeName) {
       if (this._debug) this._log(`join: missing avatar.nodeName for session ${msg.id} — dropping`)
       return
     }
-    this._peerSessions.set(msg.id, { nodeName: avatar.nodeName, displayName: avatar.displayName ?? avatar.nodeName })
+    record.peerSessions.set(msg.id, { nodeName: avatar.nodeName, displayName: avatar.displayName ?? avatar.nodeName })
+    // Sync to instance-level map for backward compat getters
+    this._peerSessions = record.peerSessions
     if (this._debug) this._log(`join: ${avatar.displayName ?? avatar.nodeName} (${msg.id}, node: ${avatar.nodeName})`)
   }
 
-  _onLeave(msg) {
-    // peer:leave is emitted from _onRemove; just clean up tracking here
-    this._peerSessions.delete(msg.id)
+  _onLeave(msg, record) {
+    if (record.stale || record.closing) return
+    record.peerSessions.delete(msg.id)
+    this._peerSessions = record.peerSessions
     if (this._debug) this._log(`leave: ${msg.id}`)
   }
 
@@ -540,46 +703,35 @@ export class AtriumClient extends EventEmitter {
   // Mutation listener attachment
   // ---------------------------------------------------------------------------
 
-  /** Attach mutation listeners to all nodes and animations currently in the SOM, plus the document root. */
   _attachMutationListeners() {
     if (!this._som) return
 
-    // Document-level extras mutations
     this._som.addEventListener('mutation', (event) => {
       if (event.detail.property === 'extras') {
         this._onLocalMutation('__document__', 'extras', event.detail.value)
       }
     })
 
-    // Node-level mutations
     for (const node of this._som.nodes) {
       this._attachNodeListeners(node)
     }
 
-    // Animation-level mutations
     for (const anim of this._som.animations) {
       this._attachAnimationListeners(anim)
     }
 
-    // Camera-level mutations
     for (const somCamera of this._som.cameras) {
       this._attachCameraListeners(somCamera)
     }
 
-    // Light-level mutations
     for (const somLight of this._som.lights) {
       this._attachLightListeners(somLight)
     }
   }
 
-  /**
-   * Attach mutation listeners to a single node and its mesh/primitive/material/camera
-   * subtree. The node name is captured in a closure — no IDs stored on SOM objects.
-   */
   _attachNodeListeners(node) {
     const nodeName = node.name
 
-    // Skip local avatar — position communicated via view messages, not send
     if (nodeName === this._avatarNodeName) return
 
     node.addEventListener('mutation', (event) => {
@@ -589,13 +741,13 @@ export class AtriumClient extends EventEmitter {
     const mesh = node.mesh
     if (mesh) {
       mesh.addEventListener('mutation', (event) => {
-        if (!event.detail.property) return   // skip childList events on mesh
+        if (!event.detail.property) return
         this._onLocalMutation(nodeName, `mesh.${event.detail.property}`, event.detail.value)
       })
 
       mesh.primitives.forEach((prim, i) => {
         prim.addEventListener('mutation', (event) => {
-          if (!event.detail.property) return   // skip childList events
+          if (!event.detail.property) return
           this._onLocalMutation(
             nodeName,
             `mesh.primitives[${i}].${event.detail.property}`,
@@ -616,17 +768,11 @@ export class AtriumClient extends EventEmitter {
         }
       })
     }
-
   }
 
-  /**
-   * Attach a mutation listener to a single light.
-   * Uses the qualified alias (e.g. "Sun.light") as the wire node field so the
-   * server's getObjectByName always resolves to the SOMLight, not the host node.
-   */
   _attachLightListeners(somLight) {
     const alias = somLight.qualifiedName
-    if (!alias) return   // detached or unregistered light — skip
+    if (!alias) return
     somLight.addEventListener('mutation', (event) => {
       if (this._applyingRemote) return
       if (!event.detail.property) return
@@ -634,13 +780,9 @@ export class AtriumClient extends EventEmitter {
     })
   }
 
-  /**
-   * Attach a mutation listener to a single camera.
-   * Uses the qualified alias (e.g. "MainCamera.camera") as the wire node field.
-   */
   _attachCameraListeners(somCamera) {
     const alias = somCamera.qualifiedName
-    if (!alias) return   // detached or unregistered camera — skip
+    if (!alias) return
     somCamera.addEventListener('mutation', (event) => {
       if (this._applyingRemote) return
       if (!event.detail.property) return
@@ -648,10 +790,6 @@ export class AtriumClient extends EventEmitter {
     })
   }
 
-  /**
-   * Attach a mutation listener to a single animation.
-   * Only the `playback` property is broadcast — timeupdate is local-only.
-   */
   _attachAnimationListeners(anim) {
     const animName = anim.name
     anim.addEventListener('mutation', (event) => {
@@ -661,7 +799,6 @@ export class AtriumClient extends EventEmitter {
     })
   }
 
-  /** Called by mutation listeners — sends a `send` message to the server. */
   _onLocalMutation(nodeName, path, value) {
     if (this._applyingRemote) return
     if (!this._connected) return
@@ -681,7 +818,6 @@ export class AtriumClient extends EventEmitter {
     const now          = Date.now()
 
     if (now - this._lastSentAt < minInterval) {
-      // Schedule a deferred flush if not already pending
       if (!this._viewFlushTimer) {
         const delay = minInterval - (now - this._lastSentAt)
         this._viewFlushTimer = setTimeout(() => {
@@ -720,18 +856,10 @@ export class AtriumClient extends EventEmitter {
     this._attachMutationListeners()
     const meta = doc.getRoot().getExtras()?.atrium ?? {}
     this._emitWorldLoaded(meta)
-    // Resolve external references asynchronously — base world is usable immediately
     this.resolveExternalReferences()
   }
 
-  /**
-   * Walk all SOM nodes looking for `extras.atrium.source`. For each found,
-   * fetch the external glTF, ingest it into the SOM under that container node,
-   * and emit `world:loaded` with `source` + `containerName` fields.
-   * Errors on individual references are caught and logged — not fatal.
-   * No-ops if `_worldBaseUrl` is null (dropped files with no resolvable base).
-   */
-  async resolveExternalReferences() {
+  resolveExternalReferences() {
     if (!this._som || !this._worldBaseUrl) return
 
     const io    = makeWebIO()
@@ -745,12 +873,12 @@ export class AtriumClient extends EventEmitter {
       tasks.push(this._loadExternalRef(containerName, resolvedUrl, io))
     }
 
-    await Promise.all(tasks)
+    return Promise.all(tasks)
   }
 
   async _loadExternalRef(containerName, url, io) {
+    const gen = this._worldGen
     try {
-//      const resp = await this._fetch(url)
       const resp = await this._fetch.call(globalThis, url);
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching "${url}"`)
@@ -764,7 +892,7 @@ export class AtriumClient extends EventEmitter {
         doc = await io.readJSON({ json: JSON.parse(text), resources: {} })
       }
 
-//      const newNodes = this._som.ingestExternalScene(containerName, doc)
+      if (this._worldGen !== gen) return // stale — drop silently
 
       var newNodes = null;
       this._applyingRemote = true;
@@ -774,15 +902,14 @@ export class AtriumClient extends EventEmitter {
           this._applyingRemote = false;
       }
 
-      // Attach mutation listeners to all newly ingested nodes
       for (const somNode of newNodes) {
         this._attachNodeListenersRecursive(somNode)
       }
 
-      // Emit world:loaded for this reference — same event, extra fields present
       const meta = this._som.document.getRoot().getExtras()?.atrium ?? {}
       this._emitWorldLoaded({ ...meta, source: url, containerName })
     } catch (err) {
+      if (this._worldGen !== gen) return // stale failure — no warning, no event
       console.warn(`[AtriumClient] Failed to resolve external reference "${url}" for container "${containerName}":`, err.message)
     }
   }
@@ -799,6 +926,14 @@ export class AtriumClient extends EventEmitter {
     this._navInfo = doc.getRoot().getExtras()?.atrium?.navigation ?? null
   }
 
+  _clearViewState() {
+    this._pendingView    = null
+    this._lastSentAt     = 0
+    this._viewSeq        = 0
+    this._viewFlushTimer = null
+    this._sendSeq        = 0
+  }
+
   _clearPointerState() {
     this._capturedNode      = null
     this._currentHoverNode  = null
@@ -806,7 +941,6 @@ export class AtriumClient extends EventEmitter {
   }
 
   _emitWorldLoaded(meta) {
-    // Clear pointer capture / hover — SOM nodes from previous world are invalid
     this._clearPointerState()
     const name          = meta.name          ?? undefined
     const desc          = meta.description   ?? undefined
@@ -814,7 +948,6 @@ export class AtriumClient extends EventEmitter {
     const source        = meta.source        ?? undefined
     const containerName = meta.containerName ?? undefined
     if (!source) {
-      // Base world load — always log
       console.log(`[AtriumClient] World loaded: ${name ?? '(unnamed)'}${author ? ` by ${author}` : ''}`)
       if (desc) console.log(`  ${desc}`)
     } else {
@@ -823,16 +956,10 @@ export class AtriumClient extends EventEmitter {
     this.emit('world:loaded', { name, description: desc, author, source, containerName })
   }
 
-  /** Dispatch a SOMEvent on `node`, no-op if no listeners of that type.
-   *  `event.target` is the SOM node (set via SOMEvent constructor).
-   *  `event.detail` is plain data only — `target` is removed after construction
-   *  so it does not appear in the detail object (avoids leaking the full SOM
-   *  graph when callers log or serialize event.detail).
-   */
   _dispatchOnNode(node, type, detail) {
     if (!node._hasListeners(type)) return
     const evt = new SOMEvent(type, { target: node, ...detail })
-    delete evt.detail.target   // keep detail plain-data; event.target is the canonical slot
+    delete evt.detail.target
     node._dispatchEvent(evt)
   }
 

@@ -13,11 +13,14 @@ import { createAutoSaveCoordinator } from './autosave.js'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
- * Safe slug: must not contain ./ or ..
- * Only alphanumeric, hyphens, underscores, and dots allowed.
- * Reject path-traversal sequences explicitly.
+ * Safe slug: must not be exactly '.' or '..' (path traversal).
+ * Any other valid decoded string is accepted — usernames/slugs with
+ * spaces or special characters are valid after decodeURIComponent
+ * (pre-brief #10).
  */
-const SLUG_SAFE_RE = /^[a-zA-Z0-9_.-]+$/
+function isSafeSegment(name) {
+  return name !== '.' && name !== '..'
+}
 
 /**
  * WorldRegistry manages the lifetime cycle of per-world hosts and routes
@@ -94,20 +97,25 @@ export function createWorldRegistry(opts = {}) {
       if (decodedSegments[0] === null || decodedSegments[1] === null) return null
       let [username, slug] = decodedSegments
       if (!username || !slug) return null
-      // Reject path traversal: no ./ or .. in username or slug
-      if (!SLUG_SAFE_RE.test(username) || !SLUG_SAFE_RE.test(slug)) return null
+      // Reject path traversal: only exact '.' and '..' are forbidden (pre-brief #10)
+      if (!isSafeSegment(username) || !isSafeSegment(slug)) return null
       // 'home' slug IS allowed — home worlds can be addressed via /worlds/ as well
       return { kind: 'public', username, slug }
     }
 
     // `/public/<username>/<slug>` — legacy public world routing (backward compat)
     if (cleaned.startsWith('/public/')) {
-      const segments = cleaned.slice(8).split('/')
-      if (segments.length !== 2) return null
-      const [username, slug] = segments
+      // Decode URI-encoded segments (the client encodes with encodeURIComponent)
+      const rawSegments = cleaned.slice(8).split('/')
+      if (rawSegments.length !== 2) return null
+      const decodedSegments = rawSegments.map(s => {
+        try { return decodeURIComponent(s) } catch { return null }
+      })
+      if (decodedSegments[0] === null || decodedSegments[1] === null) return null
+      let [username, slug] = decodedSegments
       if (!username || !slug) return null
-      // Reject path traversal: no ./ or .. in username or slug
-      if (!SLUG_SAFE_RE.test(username) || !SLUG_SAFE_RE.test(slug)) return null
+      // Reject path traversal: only exact '.' and '..' are forbidden (pre-brief #10)
+      if (!isSafeSegment(username) || !isSafeSegment(slug)) return null
       // 'home' slug IS allowed — home worlds can be public too
       return { kind: 'public', username, slug }
     }

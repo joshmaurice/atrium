@@ -66,10 +66,7 @@ window.addEventListener('resize', onResize)
 onResize()
 
 // ---------------------------------------------------------------------------
-// Background state
-// ---------------------------------------------------------------------------
-
-let worldBaseUrl = ''
+// No longer needed — using client.worldBaseUrl instead (pre-brief #7)
 
 // ---------------------------------------------------------------------------
 // TreeView + PropertySheet + WorldInfoPanel
@@ -217,11 +214,6 @@ function updateStatusBar(text) {
 client.on('world:loaded', ({ name }) => {
   if (!client.som) return
 
-  // Derive base URL for resolving relative texture paths
-  const rawUrl = worldUrlInput.value.trim()
-  const absUrl  = new URL(rawUrl, window.location.href).href
-  worldBaseUrl  = absUrl.substring(0, absUrl.lastIndexOf('/') + 1)
-
   // Clear previous background/environment before loading new world
   threeScene.background  = null
   threeScene.environment = null
@@ -250,7 +242,7 @@ client.on('world:loaded', ({ name }) => {
   animationsPanel.show(client.som, animCtrl)
   updateStatusBar(name ? `World: ${name}` : '')
 
-  loadBackground(threeScene, client.som.extras?.atrium?.background, worldBaseUrl)
+  loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl || '')
 
   // Attach selection and drag listeners to all non-ephemeral SOM nodes
   for (const node of client.som.nodes) {
@@ -301,7 +293,7 @@ client.on('som:set', ({ nodeName }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
     worldInfo.refresh()
-    loadBackground(threeScene, client.som.extras?.atrium?.background, worldBaseUrl)
+    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl || '')
     return
   }
   const selected = treeView.selectedNode
@@ -389,6 +381,11 @@ viewportEl.addEventListener('drop', async (e) => {
   viewportEl.classList.remove('drag-over')
   const file = e.dataTransfer.files[0]
   if (!file) return
+  // Reject drops while connected (pre-brief #15)
+  if (client.connected) {
+    updateStatusBar('Disconnect to open a local file')
+    return
+  }
   updateStatusBar('Loading…')
   try {
     const msg = await loadDroppedFile(file)
@@ -400,12 +397,17 @@ viewportEl.addEventListener('drop', async (e) => {
 })
 
 // ---------------------------------------------------------------------------
-// Toolbar — Load
+// Toolbar — Load (disabled while connected, pre-brief #15)
 // ---------------------------------------------------------------------------
 
 loadBtn.addEventListener('click', async () => {
   const url = worldUrlInput.value.trim()
   if (!url) return
+  // Refuse while connected (pre-brief #15)
+  if (client.connected) {
+    updateStatusBar('Disconnect to open a local file')
+    return
+  }
   loadBtn.disabled = true
   updateStatusBar('Loading…')
   try {
@@ -440,11 +442,12 @@ connectBtn.addEventListener('click', () => {
   if (!wsUrl) return
   setConnectionState('connecting')
   const worldUrl = worldUrlInput.value.trim()
+  // Pass worldBaseUrl as connect option instead of clobbering via setter (pre-brief #6)
+  const connectOpts = { avatar: { translation: [0, 1.6, 0] } }
   if (worldUrl) {
-    client.worldBaseUrl = new URL(worldUrl, window.location.href).href
+    connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
   }
-  // Minimal avatar: no mesh — invisible, but present for networking + navigation
-  client.connect(wsUrl, { avatar: { translation: [0, 1.6, 0] } })
+  client.connect(wsUrl, connectOpts)
 })
 
 // ---------------------------------------------------------------------------
