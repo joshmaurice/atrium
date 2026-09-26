@@ -51,6 +51,13 @@ export function createWorldRegistry(opts = {}) {
   // Auto-save coordinator — manages debounced, periodic, and disconnect-flush saves
   const coordinator = createAutoSaveCoordinator({ db })
 
+  // Root world id — the world at '/'. Set by setupCommons after the commons
+  // host is registered. COMPAT RULE: until setRootWorldId is called,
+  // getRootWorldId returns 'default', keeping existing tests working unchanged.
+  let rootWorldId = null
+  function setRootWorldId(id) { rootWorldId = id }
+  function getRootWorldId() { return rootWorldId ?? 'default' }
+
   // ---------------------------------------------------------------------------
   // URL path → resolution descriptor
   // ---------------------------------------------------------------------------
@@ -129,7 +136,10 @@ export function createWorldRegistry(opts = {}) {
   // ---------------------------------------------------------------------------
   function sendHttpResponse(socket, status, body) {
       const buf = Buffer.from(body, 'utf-8')
-      const reason = status === 404 ? 'Not Found' : 'Bad Request'
+      let reason
+      if (status === 404) reason = 'Not Found'
+      else if (status === 503) reason = 'Service Unavailable'
+      else reason = 'Bad Request'
       socket.write([
         `HTTP/1.1 ${status} ${reason}`,
         'Content-Type: text/plain',
@@ -175,7 +185,7 @@ export function createWorldRegistry(opts = {}) {
 
     // ── Default world (root path, /apps/client) ──
     if (descriptor.kind === 'default') {
-      const host = hosts.get('default')
+      const host = hosts.get(getRootWorldId())
       if (!host) {
         sendHttpResponse(socket, 404, 'World Not Found')
         return
@@ -361,6 +371,24 @@ export function createWorldRegistry(opts = {}) {
       }
       // Public world: admit anyone (including anonymous/unauthenticated)
 
+      // 3b. Convergence check: degraded mode + commons slug reservation
+      const commonsSlug = (process.env.ATRIUM_COMMONS_SLUG || 'commons').trim()
+      const rootId = getRootWorldId()
+      const rootHost = hosts.get(rootId)
+
+      if (rootHost && rootHost._degradedOperatorUserId !== undefined &&
+          descriptor.slug === commonsSlug) {
+        // Another user's world with the commons slug — reject in degraded mode
+        if (row.owner_user_id !== rootHost._degradedOperatorUserId) {
+          sendHttpResponse(socket, 503, 'Service Unavailable: Commons slug is reserved in degraded mode')
+          return
+        }
+        // Owner matches operator — route to the degraded root host
+        cancelTeardown(rootId)
+        rootHost.handleUpgrade(request, socket, head, upgradeUserId)
+        return
+      }
+
       // 4. Host key is row UUID, same /ws/<id> space
       const hostId = row.id
 
@@ -436,7 +464,15 @@ export function createWorldRegistry(opts = {}) {
     if (!host) return
 
     if (host.sessions.size === 0) {
-      scheduleTeardown(worldId)
+      // The root world (commons) is never torn down — flush immediately
+      // when the last session leaves (§4B-7 / §6C)
+      if (worldId === getRootWorldId()) {
+        coordinator.flushWorld(worldId, host).catch(err => {
+          console.error(`[world-registry] Flush failed for root world: ${err.message}`)
+        })
+      } else {
+        scheduleTeardown(worldId)
+      }
     }
   }
 
@@ -447,8 +483,8 @@ export function createWorldRegistry(opts = {}) {
   const teardownTimers = new Map()
 
   function scheduleTeardown(worldId) {
-    // The boot 'default' world is never torn down (see ADDENDUM-user-accounts-phase2.md §6).
-    if (worldId === 'default') return
+    // The root world is never torn down (see §4B-7).
+    if (worldId === getRootWorldId()) return
     if (teardownTimers.has(worldId)) return
     const timer = setTimeout(() => {
       teardownTimers.delete(worldId)
@@ -467,7 +503,7 @@ export function createWorldRegistry(opts = {}) {
   }
 
   async function performTeardown(worldId) {
-    if (worldId === 'default') return
+    if (worldId === getRootWorldId()) return
     const host = hosts.get(worldId)
     if (!host) return
     if (host.sessions.size > 0) return // reconnected, skip
@@ -486,7 +522,7 @@ export function createWorldRegistry(opts = {}) {
   // ---------------------------------------------------------------------------
   // Registration — create a new world and its host from a file path
   // ---------------------------------------------------------------------------
-  async function registerWorld(worldId = 'default', gltfPath, ownerUserId = null) {
+  async function registerWorld(worldId = 'default', gltfPath, ownerUserId = null, mutationPolicy) {
     if (hosts.has(worldId)) {
       throw new Error(`World "${worldId}" is already registered`)
     }
@@ -502,6 +538,7 @@ export function createWorldRegistry(opts = {}) {
       world,
       db,
       ownerUserId,
+      mutationPolicy,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
       onSaveableMutation: () => coordinator.markDirty(worldId, host),
     })
@@ -515,7 +552,7 @@ export function createWorldRegistry(opts = {}) {
   // serialized glTF document column. Used for home worlds and other
   // document-stored worlds whose live instance is created on first join.
   // ---------------------------------------------------------------------------
-  async function registerWorldFromDocument(worldRow) {
+  async function registerWorldFromDocument(worldRow, mutationPolicy) {
     const worldId = worldRow.id
 
     if (hosts.has(worldId)) {
@@ -536,6 +573,7 @@ export function createWorldRegistry(opts = {}) {
       world,
       db,
       ownerUserId: worldRow.owner_user_id,
+      mutationPolicy,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
       onSaveableMutation: () => coordinator.markDirty(worldId, host),
     })
@@ -552,7 +590,7 @@ export function createWorldRegistry(opts = {}) {
   }
 
   function getDefaultHost() {
-    return hosts.get('default') || null
+    return hosts.get(getRootWorldId()) || null
   }
 
   // ---------------------------------------------------------------------------
@@ -579,6 +617,8 @@ export function createWorldRegistry(opts = {}) {
     registerWorldFromDocument,
     getWorldHost,
     getDefaultHost,
+    getRootWorldId,
+    setRootWorldId,
     onSessionRemoved,
     scheduleTeardown,
     cancelTeardown,

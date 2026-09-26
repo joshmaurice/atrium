@@ -30,7 +30,7 @@ independent instance. The singleton behavior is purely a boot-time choice in
 `index.js`, calling each once. What's missing is a registry above them, and
 a routing step to decide which instance a given connection belongs to.
 
-## 1. Multi-world hosting
+## 1. Multi-world hosting (Step 1)
 
 - Introduce a server-side registry mapping `worldId -> { world, sessions }`.
   `createWorld()` / `createSessionServer()` get called once per instance
@@ -56,7 +56,7 @@ a routing step to decide which instance a given connection belongs to.
   personally-owned worlds exist with no authorization on who can change
   them.
 
-## 2. Mutation authorization
+## 2. Mutation authorization (also Step 1)
 
 Today, `send` (setField), `add`, and `remove` — the only ways to mutate a
 live world — have **no authorization check at all**. `session.userId` is
@@ -86,7 +86,7 @@ moment worlds are personally owned.
   per-node "visitor may trigger this" permission mechanism in Phase 2; there
   is nothing in this phase that would use it.
 
-## 3. Home world
+## 3. Home world (Step 2)
 
 - Represented as a **reserved slug, `"home"`, per user** — not a new schema
   column. Reuses the existing slug-addressing scheme worlds already have.
@@ -96,7 +96,7 @@ moment worlds are personally owned.
 - **Auto-loaded** into the multi-world registry (§1) when the owner logs
   in, using the same resolution path as any other world.
 
-## 4. Auto-save
+## 4. Auto-save (Step 3)
 
 Three distinct mechanisms, each solving a different failure mode:
 
@@ -125,7 +125,7 @@ placement), there is no owner-facing editing feature in the product at all
 existing automated test suite or via `tools/som-inspector` before §7 lands,
 but it will not do anything meaningful for a real user until it does.
 
-## 5. Visibility and public sharing
+## 5. Visibility and public sharing (Step 4)
 
 This is smaller than it looks, because Phase 1 already laid groundwork for
 it on purpose. The `worlds` table already has a `visibility` column,
@@ -140,7 +140,7 @@ specifically to defer this decision.
   admitting a non-owner session: private worlds admit only their owner;
   public worlds admit anyone.
 
-## 6. The commons
+## 6. The commons (Step 5)
 
 **Decision: keep it, don't retire it.** The strongest reason is the first
 visitor problem — an anonymous, not-yet-registered person needs somewhere
@@ -167,7 +167,7 @@ current architecture.)
 - **Routing:** resolves to the bare root path, using the same
   already-existing path-threading and routing seam described in §1.
 
-## 7. Teleporter placement
+## 7. Teleporter placement (Step 6)
 
 The one owner-facing editing feature in Phase 2, and deliberately the
 *only* one. This is scoped narrowly on purpose: it is not a general

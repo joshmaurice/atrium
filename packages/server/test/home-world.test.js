@@ -328,7 +328,7 @@ test('owner can upgrade on /home/<userId>/home and receives hello + som-dump', a
   ws.close()
 })
 
-test('second connection evicts existing session for same user', async () => {
+test('second connection keeps both sessions open (no eviction)', async () => {
   const loginRes = await httpPost('/api/auth/login', {
     username: 'homeworld-alice',
     password: 'correct horse battery staple',
@@ -349,7 +349,7 @@ test('second connection evicts existing session for same user', async () => {
   // Small delay to ensure first session is fully established
   await new Promise(r => setTimeout(r, 100))
 
-  // Second connection — should evict ws1's session (same upgradeUserId)
+  // Second connection — same user, eviction removed so both stay
   let ws2Error = null
   const ws2 = new WebSocket(`ws://localhost:${PORT}/home/${userId}/home`, {
     headers: { Cookie: cookie },
@@ -360,23 +360,24 @@ test('second connection evicts existing session for same user', async () => {
   assert.equal(ws2Hello?.type, 'hello')
   assert.equal(ws2Error, null, 'ws2 has no error')
 
-  // Wait briefly for eviction to complete
+  // Wait briefly for state to settle
   await new Promise(r => setTimeout(r, 200))
 
-  // The host should still exist, but only ws2's session survives
-  // (session dedup evicts old sessions for the same authenticated user)
+  // The host should exist with BOTH sessions (no eviction)
   const host = registry.hosts.get(row.id)
   assert.ok(host, 'host exists')
-  assert.equal(host.sessions.size, 1, 'only one session per auth user')
-  // ws2's session id should be 'alice-conn-b'
+  assert.equal(host.sessions.size, 2, 'both sessions present for same user')
+  assert.ok(host.sessions.has('alice-conn-a'), 'ws1 session registered')
   assert.ok(host.sessions.has('alice-conn-b'), 'ws2 session registered')
-  assert.equal(host.sessions.has('alice-conn-a'), false, 'ws1 session evicted')
 
-  // ws1 should have been closed by eviction
-  await new Promise(r => setTimeout(r, 100))
-  assert.equal(ws1.readyState, WebSocket.CLOSED, 'ws1 closed by eviction')
+  // Both WS should be OPEN (no eviction)
+  assert.equal(ws1.readyState, WebSocket.OPEN, 'ws1 still open')
+  assert.equal(ws2.readyState, WebSocket.OPEN, 'ws2 still open')
 
+  ws1.close()
   ws2.close()
+  // Small delay for close to propagate
+  await new Promise(r => setTimeout(r, 100))
 })
 
 // ── Admission: anonymous and mismatched user ──

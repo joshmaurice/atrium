@@ -477,8 +477,7 @@ client.on('disconnected', () => {
 })
 
 client.on('error', (err) => {
-  console.error('[app] client error:', err)
-  setConnectionState('error')
+  console.error(`[app] client error: connected=${client.connected} message="${err.message}"`, err)
 })
 
 // ---------------------------------------------------------------------------
@@ -720,12 +719,13 @@ authLogoutBtn.addEventListener('click', async () => {
   authLogoutBtn.disabled = true
   try {
     await logout()
-    setAuthState(null)
+    client.disconnect()
   } catch (err) {
+    client.disconnect()
     // Even if the server request fails, clear local state — the session
     // may still be invalidated on the next request.
-    setAuthState(null)
   } finally {
+    setAuthState(null)
     authLogoutBtn.disabled = false
   }
 })
