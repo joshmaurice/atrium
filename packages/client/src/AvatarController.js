@@ -76,6 +76,7 @@ export class AvatarController extends EventEmitter {
   _bindClientEvents() {
     this._client.on('world:loaded',  ()                              => this._onWorldLoaded())
     this._client.on('disconnected',  ()                              => this._onDisconnected())
+    this._client.on('connecting',    ()                              => this._onConnecting())
     this._client.on('peer:join',     ({ displayName, nodeName })     => this._onPeerJoin(displayName, nodeName))
     this._client.on('peer:leave',    ({ displayName, nodeName })     => this._onPeerLeave(displayName, nodeName))
   }
@@ -124,6 +125,14 @@ export class AvatarController extends EventEmitter {
       if (this._peers.has(node.name))              continue
       this._addPeer(extras.displayName, node)
     }
+  }
+
+  _onConnecting() {
+    // Reset avatar state when a new connection is starting (pre-brief decision #9)
+    this._localNode    = null
+    this._cameraNode   = null
+    this._peers.clear()
+    this._lastSentView = null
   }
 
   _onDisconnected() {

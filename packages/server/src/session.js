@@ -381,6 +381,9 @@ export function attachSessionHandlers({
               const gltf = await world.serialize()
               if (session && session.ws.readyState === 1 /* OPEN */) {
                 session.ws.send(JSON.stringify({ type: 'som-dump', seq: nextSeq(), gltf }))
+                // Emit world-done after som-dump to signal load completion
+                // (pre-brief decision: loader tasks critical with world-done:som-dump)
+                session.ws.send(JSON.stringify({ type: 'world-done', seq: nextSeq() }))
               }
             } catch (err) {
               console.error('som-dump serialize failed:', err)

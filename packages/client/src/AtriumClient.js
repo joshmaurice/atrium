@@ -81,6 +81,7 @@ export class AtriumClient extends EventEmitter {
     this._displayName    = null
     this._avatarNodeName = null
     this._avatarDescriptor = null   // opaque; set by apps/client via connect()
+    this._wsUrl            = null   // the URL passed to connect() (source of truth for connection URL)
 
     // World / SOM
     this._som          = null
@@ -117,6 +118,9 @@ export class AtriumClient extends EventEmitter {
 
   /** Connection status. Read-only for apps/client. */
   get connected() { return this._connected }
+
+  /** The WebSocket URL used in connect(). Null before connect(). Source of truth for the connection URL. */
+  get wsUrl() { return this._wsUrl }
 
   /** The display name assigned in connect(). Null before connect(). */
   get displayName() { return this._displayName }
@@ -228,6 +232,18 @@ export class AtriumClient extends EventEmitter {
       this._avatarDescriptor.extras.atrium = { ...(this._avatarDescriptor.extras.atrium ?? {}), ephemeral: true }
     }
     
+    // Store the connection URL (source of truth for the connection)
+    this._wsUrl = wsUrl
+    // Derive world base URL from connection URL for resolving relative paths
+    try {
+      const parsed = new URL(wsUrl)
+      this._worldBaseUrl = `${parsed.protocol}//${parsed.host}`
+    } catch {
+      this._worldBaseUrl = null
+    }
+    // Emit connecting event to signal the UI
+    this.emit('connecting', { url: wsUrl })
+    
     this._log(`Connecting to ${wsUrl}`)
 
     const ws = new this._WSImpl(wsUrl)
@@ -266,11 +282,12 @@ export class AtriumClient extends EventEmitter {
       }
     }
 
-    const onClose = () => {
+    const onClose = (code, reason) => {
       this._log('Connection closed')
+      this._wsUrl = null
       this._connected = false
       this._ws = null
-      this.emit('disconnected')
+      this.emit('disconnected', { code, reason: reason ? String(reason) : undefined })
     }
 
     const onError = (evt) => {
@@ -291,11 +308,12 @@ export class AtriumClient extends EventEmitter {
     }
   }
 
-  disconnect() {
+  disconnect(reason) {
     if (this._ws) {
       this._ws.close()
       this._ws = null
     }
+    this._wsUrl = null
     this._connected = false
     if (this._viewFlushTimer) {
       clearTimeout(this._viewFlushTimer)
@@ -363,6 +381,7 @@ export class AtriumClient extends EventEmitter {
     this.emit('session:ready', {
       sessionId:   this._sessionId,
       displayName: this._displayName,
+      url:         this._wsUrl,
     })
   }
 

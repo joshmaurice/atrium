@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildHomeWorldWsUrl } from './wsUrl.js'
+import { computeWsUrl, buildHomeWorldWsUrl, buildWorldWsUrl, wsOriginToHttpOrigin } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -15,6 +15,8 @@ const worldUrlInput = document.getElementById('worldUrl')
 const wsUrlInput    = document.getElementById('wsUrl')
 wsUrlInput.value    = computeWsUrl(window.location)
 const loadBtn       = document.getElementById('loadBtn')
+// Capture account-server WS base at startup
+let accountWsBase = wsOriginToHttpOrigin(computeWsUrl(window.location))
 const connectBtn    = document.getElementById('connectBtn')
 const statusDot     = document.getElementById('statusDot')
 const viewportEl    = document.getElementById('viewport')
@@ -177,8 +179,9 @@ function renderWorldList(worlds) {
 
     const loadBtn = document.createElement('button')
     loadBtn.textContent = 'Load'
-    loadBtn.disabled = client.connected
-    loadBtn.title = client.connected ? 'Disconnect before loading a saved world' : 'Load this world'
+    // Load works whether or not connected (pre-brief decision)
+    loadBtn.disabled = false
+    loadBtn.title = 'Load this world'
     loadBtn.addEventListener('click', async () => {
       loadBtn.disabled = true
       try {
@@ -346,17 +349,12 @@ function setConnectionState(state) {
   } else if (state === 'connected') {
     connectBtn.textContent = 'Disconnect'
     connectBtn.disabled    = false
-    // Disable all world-browser Load buttons while connected
-    document.querySelectorAll('.wb-item button:first-of-type').forEach(b => {
-      b.disabled = true
-      b.title = 'Disconnect before loading a saved world'
-    })
+    // Load works whether or not connected — no disable needed (pre-brief decision)
   } else {
     // disconnected or error
     connectBtn.textContent = 'Connect'
     connectBtn.disabled    = false
-    // Re-enable world-browser Load buttons since we're no longer connected
-    enableWbLoadButtons()
+
   }
 
   updateHud()
@@ -451,9 +449,14 @@ client.on('world:loaded', ({ name, description, author }) => {
   }
 })
 
-client.on('session:ready', () => {
+client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) => {
   setConnectionState('connected')
   updateHintText()
+  // Sync the connection box with the actual connection URL (pre-brief decision:
+  // AtriumClient is source of truth for the connection URL)
+  if (connectUrl) {
+    wsUrlInput.value = connectUrl
+  }
 })
 
 client.on('disconnected', () => {
@@ -593,6 +596,13 @@ viewportEl.addEventListener('drop', async (e) => {
 })
 
 // ---------------------------------------------------------------------------
+// Overlay feedback — show transient messages while loading/connecting
+// ---------------------------------------------------------------------------
+function showOverlay(msg) {
+  overlayEl.textContent = msg || ''
+}
+
+// ---------------------------------------------------------------------------
 // UI actions
 // ---------------------------------------------------------------------------
 
@@ -600,25 +610,83 @@ loadBtn.addEventListener('click', async () => {
   const url = worldUrlInput.value.trim()
   if (!url) return
   loadBtn.disabled = true
-  overlayEl.textContent = 'Loading…'
-  try {
-    if (url.endsWith('.json')) {
-      const configUrl = new URL(url, window.location.href).href
-      const resp = await fetch(configUrl)
-      const config = await resp.json()
-      const msg = await loadAtriumConfig(config, configUrl)
-      overlayEl.textContent = msg ?? ''
-    } else {
-      const absoluteUrl = new URL(url, window.location.href).href
-      await client.loadWorld(absoluteUrl)
-      overlayEl.textContent = ''
+
+  // Load works whether or not connected (pre-brief decision).
+  // If connected and URL is not a static file, perform real WS connect via buildWorldWsUrl.
+  const lower = url.toLowerCase()
+  const isStaticFile = lower.endsWith('.gltf') || lower.endsWith('.glb') || lower.endsWith('.json')
+
+  if (client.connected && !isStaticFile) {
+    showOverlay('Connecting to world…')
+    try {
+      // Treat URL as world slug — connect via account server
+      client.disconnect()
+      const wsUrl = buildWorldWsUrl(
+        accountWsBase || computeWsUrl(window.location),
+        currentUser ? (currentUser.username || currentUser.id) : 'anonymous',
+        url
+      )
+      if (!wsUrl) {
+        showOverlay('Invalid world identifier')
+        return
+      }
+      setConnectionState('connecting')
+      const avatarDesc = buildAvatarDescriptor()
+      const displayName = currentUser ? (currentUser.displayName || currentUser.username) : 'User'
+      const connectOpts = { avatar: avatarDesc, displayName }
+      client.connect(wsUrl, connectOpts)
+      showOverlay('')
+    } catch (err) {
+      showOverlay('Load failed: ' + err.message)
+      console.error(err)
+    } finally {
+      loadBtn.disabled = false
     }
-  } catch (err) {
-    overlayEl.textContent = 'Load failed: ' + err.message
-    console.error(err)
-  } finally {
-    loadBtn.disabled = false
+  } else {
+    showOverlay('Loading…')
+    try {
+      if (url.endsWith('.json')) {
+        const configUrl = new URL(url, window.location.href).href
+        const resp = await fetch(configUrl)
+        const config = await resp.json()
+        const msg = await loadAtriumConfig(config, configUrl)
+        showOverlay(msg ?? '')
+      } else {
+        const absoluteUrl = new URL(url, window.location.href).href
+        if (client.connected) {
+          // Disconnect first to allow static loading while live
+          client.disconnect()
+        }
+        await client.loadWorld(absoluteUrl)
+        showOverlay('')
+      }
+    } catch (err) {
+      showOverlay('Load failed: ' + err.message)
+      console.error(err)
+    } finally {
+      loadBtn.disabled = false
+    }
   }
+})
+
+// Dev right-click Connect bypasses Load (pre-brief decision: bypasses Load)
+connectBtn.addEventListener('contextmenu', (e) => {
+  e.preventDefault()
+  if (client.connected) {
+    client.disconnect()
+    return
+  }
+  const wsUrl = wsUrlInput.value.trim()
+  if (!wsUrl) return
+  setConnectionState('connecting')
+  const worldUrl = worldUrlInput.value.trim()
+  if (worldUrl) {
+    client.worldBaseUrl = new URL(worldUrl, window.location.href).href
+  }
+  const avatarDesc = buildAvatarDescriptor()
+  const connectOpts = { avatar: avatarDesc }
+  if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
+  client.connect(wsUrl, connectOpts)
 })
 
 connectBtn.addEventListener('click', () => {

@@ -13,13 +13,21 @@ import { createAutoSaveCoordinator } from './autosave.js'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
+ * Safe slug: must not contain ./ or ..
+ * Only alphanumeric, hyphens, underscores, and dots allowed.
+ * Reject path-traversal sequences explicitly.
+ */
+const SLUG_SAFE_RE = /^[a-zA-Z0-9_.-]+$/
+
+/**
  * WorldRegistry manages the lifetime cycle of per-world hosts and routes
  * WebSocket upgrades to the correct world by URL path.
  *
  * Path resolution:
  *   - `/` or ``      → 'default' (the common, boot-loaded)
  *   - `/home/<uid>/home`  → { kind: 'home', homeUserId, slug }
- *   - `/public/<user>/<slug>` → { kind: 'public', username, slug }
+ *   - `/worlds/<user>/<slug>` → { kind: 'public', username, slug } (canonical, pre-brief #1+#13)
+ *   - `/public/<user>/<slug>` → { kind: 'public', username, slug } (legacy alias)
  *   - `/ws/<id>`     → world with that id (reserved for future multi-world routing)
  *   - anything else  → 404 at upgrade
  */
@@ -75,12 +83,31 @@ export function createWorldRegistry(opts = {}) {
       return { kind: 'home', homeUserId: userId, slug: 'home' }
     }
 
-    // `/public/<username>/<slug>` — public world routing (Step 4)
+    // `/worlds/<username>/<slug>` — canonical public world routing (pre-brief #1+#13)
+    if (cleaned.startsWith('/worlds/')) {
+      // Decode URI-encoded segments (the client encodes with encodeURIComponent)
+      const rawSegments = cleaned.slice(8).split('/')
+      if (rawSegments.length !== 2) return null
+      const decodedSegments = rawSegments.map(s => {
+        try { return decodeURIComponent(s) } catch { return null }
+      })
+      if (decodedSegments[0] === null || decodedSegments[1] === null) return null
+      let [username, slug] = decodedSegments
+      if (!username || !slug) return null
+      // Reject path traversal: no ./ or .. in username or slug
+      if (!SLUG_SAFE_RE.test(username) || !SLUG_SAFE_RE.test(slug)) return null
+      // 'home' slug IS allowed — home worlds can be addressed via /worlds/ as well
+      return { kind: 'public', username, slug }
+    }
+
+    // `/public/<username>/<slug>` — legacy public world routing (backward compat)
     if (cleaned.startsWith('/public/')) {
       const segments = cleaned.slice(8).split('/')
       if (segments.length !== 2) return null
       const [username, slug] = segments
       if (!username || !slug) return null
+      // Reject path traversal: no ./ or .. in username or slug
+      if (!SLUG_SAFE_RE.test(username) || !SLUG_SAFE_RE.test(slug)) return null
       // 'home' slug IS allowed — home worlds can be public too
       return { kind: 'public', username, slug }
     }
@@ -279,7 +306,7 @@ export function createWorldRegistry(opts = {}) {
       return
     }
 
-    // ── Public world (/public/<username>/<slug>) ──
+    // ── Public world (/public/<username>/<slug> or /worlds/<username>/<slug>) ──
     if (descriptor.kind === 'public') {
       // 1. Resolve username → userId (case-insensitive, COLLATE NOCASE)
       let userRow
@@ -318,7 +345,7 @@ export function createWorldRegistry(opts = {}) {
       try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
 
       if (row.visibility === 'private') {
-        // Private world: only the owner may connect via /public/ path
+        // Private world: only the owner may connect via /public/ or /worlds/ path
         if (!upgradeUserId || upgradeUserId !== row.owner_user_id) {
           sendHttpResponse(socket, 404, 'Not Found')
           return
@@ -494,7 +521,7 @@ export function createWorldRegistry(opts = {}) {
     await world.resolveExternalReferences()
 
     const nodeCount = world.listNodeNames().length
-    console.log(`[world-registry] Home world loaded: "${worldId}" — ${nodeCount} nodes`)
+    console.log(`[world-registry] World loaded from document: "${worldId}" — ${nodeCount} nodes`)
 
     const host = createWorldHost({
       id: worldId,
