@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeWsUrl, buildHomeWorldWsUrl } from '../src/wsUrl.js'
+import { computeWsUrl, buildHomeWorldWsUrl, buildWorldWsUrl } from '../src/wsUrl.js'
 
 describe('computeWsUrl', () => {
 
@@ -128,5 +128,50 @@ describe('buildHomeWorldWsUrl', () => {
 
   test('returns null for invalid URL', () => {
     assert.equal(buildHomeWorldWsUrl('not-a-url', '550e8400-e29b-41d4-a716-446655440000'), null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildWorldWsUrl — world WS URL construction (browser-scheme regression guard)
+// ---------------------------------------------------------------------------
+
+describe('buildWorldWsUrl', () => {
+
+  test('wss:// scheme preserved', () => {
+    const result = buildWorldWsUrl('wss://atrium.example.com', 'jane', 'my-world')
+    assert.ok(result.startsWith('wss://'), 'result starts with wss://')
+    assert.equal(result, 'wss://atrium.example.com/worlds/jane/my-world')
+  })
+
+  test('ws:// scheme preserved (no http:// regression)', () => {
+    const result = buildWorldWsUrl('ws://localhost:3000', 'alice', 'test-world')
+    assert.ok(result.startsWith('ws://'), 'result starts with ws://')
+    assert.equal(result, 'ws://localhost:3000/worlds/alice/test-world')
+  })
+
+  test('wss:// with deployment subpath strips pathname', () => {
+    const result = buildWorldWsUrl('wss://dev.example.com/apps/client/', 'bob', 'home')
+    assert.equal(result, 'wss://dev.example.com/worlds/bob/home')
+  })
+
+  test('encodeURIComponent applied to username and slug', () => {
+    const result = buildWorldWsUrl('ws://localhost:3000', 'user name', 'my world')
+    assert.equal(result, 'ws://localhost:3000/worlds/user%20name/my%20world')
+  })
+
+  test('returns null for empty base', () => {
+    assert.equal(buildWorldWsUrl('', 'jane', 'slug'), null)
+  })
+
+  test('returns null for null username', () => {
+    assert.equal(buildWorldWsUrl('ws://localhost:3000', null, 'slug'), null)
+  })
+
+  test('returns null for null slug', () => {
+    assert.equal(buildWorldWsUrl('ws://localhost:3000', 'jane', null), null)
+  })
+
+  test('returns null for invalid base URL', () => {
+    assert.equal(buildWorldWsUrl('not-a-url', 'jane', 'slug'), null)
   })
 })

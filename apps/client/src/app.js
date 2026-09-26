@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildHomeWorldWsUrl, buildWorldWsUrl, wsOriginToHttpOrigin } from './wsUrl.js'
+import { computeWsUrl, buildHomeWorldWsUrl, buildWorldWsUrl } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -16,7 +16,7 @@ const wsUrlInput    = document.getElementById('wsUrl')
 wsUrlInput.value    = computeWsUrl(window.location)
 const loadBtn       = document.getElementById('loadBtn')
 // Capture account-server WS base at startup
-let accountWsBase = wsOriginToHttpOrigin(computeWsUrl(window.location))
+let accountWsBase = computeWsUrl(window.location)
 const connectBtn    = document.getElementById('connectBtn')
 const statusDot     = document.getElementById('statusDot')
 const viewportEl    = document.getElementById('viewport')

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { test, before, after } from 'node:test'
+import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'http'
 import { fileURLToPath } from 'url'
@@ -162,6 +162,96 @@ test('disconnect() → disconnected event fires', async () => {
   const gone = waitForEvent(client, 'disconnected')
   client.disconnect()
   await gone
+})
+
+// ---------------------------------------------------------------------------
+// Disconnect-integrity — double-disconnected and late-close clobber
+// ---------------------------------------------------------------------------
+
+describe('disconnect-integrity', () => {
+
+  test('disconnect() emits exactly one disconnected event (no double-emit)', async () => {
+    const client = new AtriumClient({ WebSocket })
+    const ready  = waitForEvent(client, 'session:ready')
+    client.connect(`ws://localhost:${BASE_PORT}`)
+    await ready
+
+    const events = []
+    client.on('disconnected', (d) => { events.push(d) })
+
+    client.disconnect()
+    // Wait for the deferred setTimeout in disconnect() and the socket close handler
+    await new Promise(r => setTimeout(r, 200))
+
+    assert.equal(events.length, 1,
+      `expected exactly 1 disconnected event, got ${events.length}`)
+    assert.equal(events[0].reason, 'client', 'reason is "client" (from disconnect())')
+  })
+
+  test('disconnect→connect race: late close does not clobber new connection', async () => {
+    // Use mock WS to simulate the race precisely:
+    // 1. Connect client A via real mock
+    // 2. disconnect(A) — sets record.closing + record.stale
+    // 3. connect(B) with new mock — new record created
+    // 4. A's onClose fires late — should be rejected by stale/closing guard
+    // 5. Verify B's state is intact
+
+    let mockA
+    const client = new AtriumClient({
+      WebSocket: class {
+        constructor() {
+          // First connect gets mockA, second connect gets mockB
+          if (!mockA) {
+            mockA = new MockWebSocket()
+            return mockA
+          }
+          const b = new MockWebSocket()
+          return b
+        }
+      },
+    })
+
+    // --- Connect A ---
+    client.connect('ws://mock-a')
+    client._sessionId   = 'session-a-1111-1111-1111-111111111111'
+    client._displayName = 'User-sess'
+    client._connected   = true
+
+    // Verify A's record exists
+    const recA = client._connectionRecord
+    assert.ok(recA, 'connection record A exists after connect')
+
+    // --- Disconnect A ---
+    client.disconnect('test-disconnect')
+    // At this point: recordA.closing=true, recordA.stale=true, _connectionRecord=null, _connected=false
+
+    // --- Connect B (different mock) ---
+    client.connect('ws://mock-b')
+    client._displayName = 'User-sess'
+    client._connected   = true
+
+    const recB = client._connectionRecord
+    assert.ok(recB, 'connection record B exists after second connect')
+    const bSessionId = recB.sessionId
+    assert.ok(bSessionId, 'record B has a sessionId')
+    assert.equal(client._connected, true, 'client._connected is true after B connect')
+    assert.equal(client.wsUrl, 'ws://mock-b', 'client.wsUrl is Bs URL')
+
+    // --- Simulate A's late close ---
+    // The onClose closure captured recordA which has stale=true
+    mockA._fire('close')
+    // onClose should return immediately because record.stale is true
+
+    // Give async a tick
+    await new Promise(r => setImmediate(r))
+
+    // --- Verify B's state is NOT clobbered ---
+    assert.ok(client._connectionRecord !== null, 'connection record still exists (not clobbered)')
+    assert.equal(client._connected, true, 'client._connected still true after late close')
+    assert.equal(client.wsUrl, 'ws://mock-b', 'client.wsUrl unchanged after late close')
+    assert.equal(client._connectionRecord.sessionId, bSessionId,
+      'record B sessionId preserved after late close')
+  })
 })
 
 test('setView() while disconnected → dropped silently, no error fired', async () => {

@@ -380,7 +380,7 @@ export class AtriumClient extends EventEmitter {
     }
 
     const onClose = (code, reason) => {
-      if (record.stale) return
+      if (record.stale || record.closing) return
       this._log('Connection closed')
       this._connectionRecord = null
       this._connected = false
@@ -422,6 +422,8 @@ export class AtriumClient extends EventEmitter {
       return
     }
 
+    // Mark record as stale so late close can't clobber a new connection
+    record.stale = true
     // Mark record as closing so messages/errors are ignored
     record.closing = true
 
