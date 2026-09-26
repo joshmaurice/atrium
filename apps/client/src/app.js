@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildHomeWorldWsUrl, buildWorldWsUrl } from './wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -380,20 +380,20 @@ function setConnectionState(state) {
 // Home world auto-connect helpers
 // ---------------------------------------------------------------------------
 
-function homeWorldWsUrl(userId) {
-  return buildHomeWorldWsUrl(accountWsBase, userId)
+function homeWorldWsUrl(username) {
+  return buildWorldWsUrl(accountWsBase, username, 'home')
 }
 
 function autoConnectToHomeWorld(user) {
-  // Always constructs a /home/<uuid>/home path on the origin extracted
-  // from accountWsBase (pre-brief #2/#12), regardless of any pathname in
-  // the connection box — the divergence from Manual Connect is by design
-  // (auto-connect targets the home world endpoint, manual connect targets
-  // whatever URL the user entered).
+  // Builds the canonical /worlds/<username>/home URL from accountWsBase
+  // (pre-brief #2/#5), regardless of any pathname in the connection box.
+  // Auto-connect always targets the home world via buildWorldWsUrl; manual
+  // Connect uses whatever URL the user entered in the box.
+  // The server's /home/<uuid>/home route stays for compatibility.
   if (!user || !user.id) return
   if (client.connected) return
 
-  const homeWsUrl = homeWorldWsUrl(user.id)
+  const homeWsUrl = homeWorldWsUrl(user.username || user.id)
   if (!homeWsUrl) return
 
   setConnectionState('connecting')
