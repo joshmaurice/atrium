@@ -321,8 +321,24 @@ Supporting goals:
    box.**
    - Capture `computeWsUrl(window.location)` once at startup as
      `accountWsBase`.
-   - Home auto-connect builds from it.
-   - Rewrite the "by design" comment.
+   - **Home auto-connect uses the canonical address**
+     `/worlds/<username>/home`, built with
+     `buildWorldWsUrl(accountWsBase, user.username, 'home')`, the same
+     helper Load uses. It no longer uses `/home/<userId>/home`, so the World
+     box shows one address for the home world however you got there.
+     - This is safe. Both routes key the live host by the home world's row
+       id, so they reach the same room. The owner is admitted even when the
+       home world is private. The home world row is created by the login and
+       registration HTTP flow before auto-connect runs, and both routes need
+       it to exist.
+     - If `user.username` is missing, don't connect, just as a missing
+       `user.id` is handled today. Don't fall back to `/home/`.
+     - The server's `/home/<userId>/home` route stays for compatibility
+       (#13). If the client-side `homeWorldWsUrl` / `buildHomeWorldWsUrl`
+       helpers become unused, remove them together with their tests.
+   - Rewrite auto-connect's "by design" comment to describe the current
+     behavior. That means the canonical `/worlds/` address built from
+     `accountWsBase`, while manual Connect uses the box's value.
    - Manual Connect keeps using the box's value, because that's the one path
      where the user is telling us the URL.
 3. **Load works whether or not you're connected.**
@@ -350,7 +366,7 @@ Supporting goals:
      connect, with what", and so do error logs. Multiple `AtriumClient`
      instances also each need to report their own connection.
 5. **Leave the home-world entry in My Worlds as-is.** Load on it connects
-   via `/worlds/<username>/home`, which is equivalent to auto-connect.
+   via `/worlds/<username>/home`, the same address auto-connect uses (#2).
 6. **`connect()` always sets `_worldBaseUrl`. An explicit value wins;
    otherwise it's derived from the connect URL.**
    - `connect(…, { worldBaseUrl })` accepts an optional explicit base.
@@ -788,6 +804,18 @@ Manual DEV acceptance:
   Load, and manual Connect. After a failed manual Connect, the typed URL
   stays in the box, but the HUD and client state don't treat it as
   connected.
+- **Auto-connect shows the canonical address:** after registering, after
+  logging in, and on page load, the World box shows
+  `/worlds/<username>/home`, never `/home/<uuid>/home`. Load on the
+  home-world entry shows the same address.
+- **Log out, then log in as another user in the same window:**
+  - logging out disconnects, and a second window in that world sees the
+    avatar leave;
+  - logging in as the second user auto-connects to *their* home world,
+    showing `You:` with their name and their `/worlds/` address.
+
+  Repeat starting from the commons and from a non-home world. This checks
+  that the Bug A fix (`9eab59f`) is still in place.
 - **Refresh still goes to the home world** (unchanged).
 - **Auto-connect after dropping a `.atrium.json` that points elsewhere**
   still goes to the account server.
