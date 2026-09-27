@@ -386,6 +386,22 @@ test('POST /api/auth/register normalizes username', async () => {
   assert.equal(res.body.username, 'Eve')
 })
 
+test('POST /api/auth/register rejects username . (dot) with 400 (pre-brief #10)', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: '.',
+    password: 'a truly magnificent long password',
+  })
+  assert.equal(res.statusCode, 400)
+})
+
+test('POST /api/auth/register rejects username .. (dotdot) with 400 (pre-brief #10)', async () => {
+  const res = await httpPost('/api/auth/register', {
+    username: '..',
+    password: 'a truly magnificent long password',
+  })
+  assert.equal(res.statusCode, 400)
+})
+
 // ---------------------------------------------------------------------------
 // POST /api/auth/login tests
 // ---------------------------------------------------------------------------

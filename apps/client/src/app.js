@@ -393,7 +393,8 @@ function autoConnectToHomeWorld(user) {
   if (!user || !user.id) return
   if (client.connected) return
 
-  const homeWsUrl = homeWorldWsUrl(user.username || user.id)
+  if (!user.username) return
+  const homeWsUrl = homeWorldWsUrl(user.username)
   if (!homeWsUrl) return
 
   setConnectionState('connecting')

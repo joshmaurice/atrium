@@ -223,6 +223,16 @@ test('POST /api/worlds creates a world with the live world as initial document',
   assert.ok(res.body.updated_at)
 })
 
+test('POST /api/worlds rejects slug . (dot) with 400 (pre-brief #10)', async () => {
+  const res = await httpPost('/api/worlds', { slug: '.', name: 'Dot World' }, userA.cookie)
+  assert.equal(res.statusCode, 400)
+})
+
+test('POST /api/worlds rejects slug .. (dotdot) with 400 (pre-brief #10)', async () => {
+  const res = await httpPost('/api/worlds', { slug: '..', name: 'DotDot World' }, userA.cookie)
+  assert.equal(res.statusCode, 400)
+})
+
 test('GET /api/worlds lists own worlds', async () => {
   const res = await httpGet('/api/worlds', userA.cookie)
 
@@ -263,6 +273,20 @@ test('PUT /api/worlds/:id saves the world and returns metadata', async () => {
   assert.equal(res.body.name, 'Updated World')
   assert.equal(res.body.visibility, 'private')
   assert.ok(new Date(res.body.updated_at) > new Date(listRes.body[0].updated_at), 'updated_at changed')
+})
+
+test('PUT /api/worlds/:id rejects slug . (dot) with 400 (pre-brief #10)', async () => {
+  const listRes = await httpGet('/api/worlds', userA.cookie)
+  const worldId = listRes.body.find(w => w.slug === 'my-world').id
+  const res = await httpPut(`/api/worlds/${worldId}`, { slug: '.' }, userA.cookie)
+  assert.equal(res.statusCode, 400)
+})
+
+test('PUT /api/worlds/:id rejects slug .. (dotdot) with 400 (pre-brief #10)', async () => {
+  const listRes = await httpGet('/api/worlds', userA.cookie)
+  const worldId = listRes.body.find(w => w.slug === 'my-world').id
+  const res = await httpPut(`/api/worlds/${worldId}`, { slug: '..' }, userA.cookie)
+  assert.equal(res.statusCode, 400)
 })
 
 test('PUT /api/worlds/:id persists server-serialized document', async () => {
@@ -1175,6 +1199,102 @@ describe('WS admission via world registry', () => {
   test('/ws/non-existent-world-id returns 404', async () => {
     const result = await checkUpgrade('/ws/non-existent-world-id')
     assert.equal(result.statusCode, 404, 'non-existent /ws/<id> returns 404')
+  })
+
+  // ===================================================================
+  // Canonical /worlds/<username>/<slug> — pre-brief #1+#13
+  // ===================================================================
+
+  test('/worlds/AliceWs/my-public-space — anonymous can connect (public world, canonical path)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/my-public-space')
+    assert.equal(result.statusCode, 101, 'anonymous can upgrade via /worlds/ path')
+  })
+
+  test('/worlds/AliceWs/my-public-space — non-owner (Bob) can connect (public world, canonical)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/my-public-space', regUserB.cookie)
+    assert.equal(result.statusCode, 101, 'non-owner can upgrade via /worlds/ path')
+  })
+
+  test('/worlds/AliceWs/my-public-space — owner (Alice) can connect (public world, canonical)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/my-public-space', regUserA.cookie)
+    assert.equal(result.statusCode, 101, 'owner can upgrade via /worlds/ path')
+  })
+
+  test('/worlds/AliceWs/my-private-space — anonymous gets 404 (private world, canonical)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/my-private-space')
+    assert.equal(result.statusCode, 404, 'anonymous rejected from private world via /worlds/')
+  })
+
+  test('/worlds/AliceWs/my-private-space — non-owner (Bob) gets 404 (private world, canonical)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/my-private-space', regUserB.cookie)
+    assert.equal(result.statusCode, 404, 'non-owner rejected from private world via /worlds/')
+  })
+
+  test('/worlds/AliceWs/my-private-space — owner (Alice) can connect (private world, canonical)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/my-private-space', regUserA.cookie)
+    assert.equal(result.statusCode, 101, 'owner can connect to own private world via /worlds/')
+  })
+
+  test('/worlds/UnknownUser/my-space returns 404 (canonical)', async () => {
+    const result = await checkUpgrade('/worlds/UnknownUser/my-space')
+    assert.equal(result.statusCode, 404, 'unknown username via /worlds/ returns 404')
+  })
+
+  test('/worlds/AliceWs/non-existent-slug returns 404 (canonical)', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/non-existent-slug')
+    assert.equal(result.statusCode, 404, 'non-existent slug via /worlds/ returns 404')
+  })
+
+  test('/worlds/AliceWs/my-public-space — case-insensitive username resolves (COLLATE NOCASE)', async () => {
+    const result = await checkUpgrade('/worlds/alicews/my-public-space')
+    assert.equal(result.statusCode, 101, 'lowercase username via /worlds/ resolves')
+  })
+
+  test('/worlds/AliceWs/my-public-space — uppercase username resolves (COLLATE NOCASE)', async () => {
+    const result = await checkUpgrade('/worlds/ALICEWS/my-public-space')
+    assert.equal(result.statusCode, 101, 'uppercase username via /worlds/ resolves')
+  })
+
+  // ===================================================================
+  // /worlds/ path sanitization — pre-brief #10
+  // ===================================================================
+
+  test('/worlds/// — empty segments resolved to null/empty → 404', async () => {
+    const result = await checkUpgrade('/worlds///')
+    assert.equal(result.statusCode, 404, 'empty segments via /worlds/ returns 404')
+  })
+
+  test('/worlds/AliceWs/ — missing slug → 404', async () => {
+    const result = await checkUpgrade('/worlds/AliceWs/')
+    assert.equal(result.statusCode, 404, 'missing slug via /worlds/ returns 404')
+  })
+
+  test('/worlds/%2e%2e/AliceWs — encoded ../ rejected by decode → 404', async () => {
+    // %2e → '.' via decodeURIComponent, then caught by isSafeSegment
+    const result = await checkUpgrade('/worlds/%2e%2e/AliceWs')
+    assert.equal(result.statusCode, 404, 'encoded path traversal via /worlds/ returns 404')
+  })
+
+  test('/worlds/.%2e/AliceWs — mixed encoded dotdot → 404', async () => {
+    // decodeURIComponent('.%2e') → '..' → rejected by isSafeSegment
+    const result = await checkUpgrade('/worlds/.%2e/AliceWs')
+    assert.equal(result.statusCode, 404, 'mixed encoded path traversal via /worlds/ returns 404')
+  })
+
+  test('/worlds/%2e/AliceWs — single dot rejected → 404', async () => {
+    const result = await checkUpgrade('/worlds/%2e/AliceWs')
+    assert.equal(result.statusCode, 404, 'single dot via /worlds/ returns 404')
+  })
+
+  test('/worlds/./AliceWs — literal dot rejected → 404', async () => {
+    const result = await checkUpgrade('/worlds/./AliceWs')
+    assert.equal(result.statusCode, 404, 'literal dot via /worlds/ returns 404')
+  })
+
+  test('/worlds/%00/AliceWs — malformed encoding → null → 404', async () => {
+    // null byte in path may cause decodeURIComponent to throw
+    const result = await checkUpgrade('/worlds/%00/AliceWs')
+    assert.equal(result.statusCode, 404, 'null byte via /worlds/ returns 404')
   })
 
   // ===================================================================

@@ -165,6 +165,37 @@ test('disconnect() → disconnected event fires', async () => {
 })
 
 // ---------------------------------------------------------------------------
+// #9 Sync-constructor-failure test
+// ---------------------------------------------------------------------------
+
+test('#9 connect(\'not a url\') returns sessionId, fires async error + disconnected', async () => {
+  const client = new AtriumClient({ WebSocket })
+  const sessionId = client.connect('not a url')
+
+  assert.ok(sessionId, 'returned sessionId is truthy')
+  assert.equal(typeof sessionId, 'string',
+    'sessionId is a string')
+
+  const [errData, discData] = await Promise.all([
+    new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('timeout waiting for error')), 3000)
+      client.once('error', (e) => { clearTimeout(t); resolve({ message: e.message, sessionId: e.sessionId, url: e.url }) })
+    }),
+    new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('timeout waiting for disconnected')), 3000)
+      client.once('disconnected', (d) => { clearTimeout(t); resolve(d) })
+    }),
+  ])
+
+  assert.ok(errData.message, 'error has a message')
+  assert.equal(errData.sessionId, sessionId, 'error.sessionId matches returned sessionId')
+  assert.equal(errData.url, 'not a url', 'error.url is the bad URL')
+  assert.equal(discData.sessionId, sessionId, 'disconnected.sessionId matches')
+  assert.equal(discData.url, 'not a url', 'disconnected.url is the bad URL')
+  assert.equal(discData.reason, 'closed', 'disconnected reason is "closed"')
+})
+
+// ---------------------------------------------------------------------------
 // Disconnect-integrity — double-disconnected and late-close clobber
 // ---------------------------------------------------------------------------
 
@@ -251,6 +282,60 @@ describe('disconnect-integrity', () => {
     assert.equal(client.wsUrl, 'ws://mock-b', 'client.wsUrl unchanged after late close')
     assert.equal(client._connectionRecord.sessionId, bSessionId,
       'record B sessionId preserved after late close')
+  })
+
+  test('disconnect-then-connect race: pending disconnected suppressed when B takes over (F1)', async () => {
+    // Pre-brief #6 requirement:
+    // connect A -> disconnect(A) -> connect B before A's close arrives
+    // -> A's pending disconnected must NEVER be emitted while B is current.
+    // The existing "late close" test covers the socket onClose path.
+    // This test covers the scheduled-setTimeout emit from disconnect() itself.
+
+    let mockA
+    const client = new AtriumClient({
+      WebSocket: class {
+        constructor() {
+          if (!mockA) {
+            mockA = new MockWebSocket()
+            return mockA
+          }
+          const b = new MockWebSocket()
+          return b
+        }
+      },
+    })
+
+    // --- Connect A ---
+    client.connect('ws://mock-a')
+    client._sessionId   = 'session-a'
+    client._displayName = 'User-sess'
+    client._connected   = true
+
+    // --- Register disconnected listener ---
+    const disconnectedEvents = []
+    client.on('disconnected', (d) => { disconnectedEvents.push(d) })
+
+    // --- Disconnect A ---
+    client.disconnect('test-disconnect')
+    // At this point: a setTimeout(emit disconnected, 0) is queued.
+
+    // --- Immediately connect B ---
+    client.connect('ws://mock-b')
+    client._sessionId   = 'session-b'
+    client._displayName = 'User-sess'
+    client._connected   = true
+
+    // Give both timeouts a chance to fire
+    await new Promise(r => setTimeout(r, 50))
+
+    // --- Verify: B's state is intact, and no disconnected event fired for A ---
+    assert.ok(client._connectionRecord, 'connection record exists after B connect')
+    assert.equal(client._connected, true, 'client._connected is true')
+    assert.equal(client.wsUrl, 'ws://mock-b', 'wsUrl points to B')
+
+    // A's pending disconnected must have been suppressed by the guard
+    assert.equal(disconnectedEvents.length, 0,
+      'pending disconnected should NOT fire when B has taken over')
   })
 })
 

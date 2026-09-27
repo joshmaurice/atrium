@@ -78,7 +78,7 @@ const propSheet = new PropertySheet(propsPanelEl, propsHeaderEl, {
   onSetActiveCamera: (cam) => applyActiveCamera(cam),
 })
 const worldInfo = new WorldInfoPanel(worldInfoEl, {
-  onBackgroundChange: (bg) => loadBackground(threeScene, bg, worldBaseUrl),
+  onBackgroundChange: (bg) => loadBackground(threeScene, bg, client.worldBaseUrl),
 })
 const animationsPanel = new AnimationsPanel(animationsPanelEl)
 

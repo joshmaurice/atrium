@@ -445,7 +445,10 @@ export class AtriumClient extends EventEmitter {
 
     // Emit disconnected asynchronously so tests using waitForEvent still work
     // (existing code registers the listener after calling disconnect).
+    // Guard: if a newer connection exists by fire time, skip emitting stale
+    // disconnected (pre-brief #6 Disconnect-then-Connect race — DEV FINDING 1).
     setTimeout(() => {
+      if (this._connectionRecord) return   // superseded by a newer connection
       this.emit('disconnected', { sessionId: prevSessionId, url: prevUrl, reason: reason || 'client' })
     }, 0)
   }
