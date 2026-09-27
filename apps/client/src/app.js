@@ -464,11 +464,25 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) =>
   }
 })
 
-client.on('disconnected', () => {
+// ---------------------------------------------------------------------------
+// Shared world-teardown (pre-brief #9, DEV FINDING 1)
+// ---------------------------------------------------------------------------
+
+function teardownWorld() {
   labels.clear()
-  setConnectionState('disconnected')
   firstPerson = false   // reset to third-person for next session
+  updateHud()
   updateHintText()
+}
+
+client.on('connecting', () => {
+  teardownWorld()
+  setConnectionState('connecting')
+})
+
+client.on('disconnected', () => {
+  teardownWorld()
+  setConnectionState('disconnected')
 
   // Reload the world in static mode — clears avatar/peer nodes from the scene
   // and restores NavigationController's localNode for input to work again.

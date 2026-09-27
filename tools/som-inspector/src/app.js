@@ -259,12 +259,25 @@ client.on('session:ready', () => {
   updateStatusBar(`Connected · ${client.displayName}`)
 })
 
-client.on('disconnected', () => {
-  setConnectionState('disconnected')
+// ---------------------------------------------------------------------------
+// Shared panel-reset (pre-brief #9, DEV FINDING 1)
+// ---------------------------------------------------------------------------
+
+function resetPanels() {
   propSheet.clear()
   worldInfo.clear()
   animationsPanel.clear()
   updateStatusBar('')
+}
+
+client.on('connecting', () => {
+  resetPanels()
+  setConnectionState('connecting')
+})
+
+client.on('disconnected', () => {
+  resetPanels()
+  setConnectionState('disconnected')
 
   // Reload world in static mode — restores nav node and clears avatar geometry
   const url = worldUrlInput.value.trim()

@@ -819,9 +819,11 @@ Manual DEV acceptance:
 - **Refresh still goes to the home world** (unchanged).
 - **Auto-connect after dropping a `.atrium.json` that points elsewhere**
   still goes to the account server.
-- **`space-ext` and `atrium` dev flows, in both apps:** drop the
-  `.atrium.json` and Connect. `crate.gltf`, `lamp.gltf` and the
-  `skyboxtest1.png` background all load.
+- **`space-ext` and `atrium` dev flows, in both apps:** load the config by
+  URL through the File box (with a local server serving the assets). For
+  example, `http://localhost:3000/space-ext.atrium.json` — the glTF and its
+  relative source refs resolve against the server's origin.
+  `crate.gltf`, `lamp.gltf` and the `skyboxtest1.png` background all load.
 - **Swap from a world with a background to one without:** the old skybox
   doesn't reappear.
 - **`/worlds/` through Caddy:** Load connects over `/worlds/`. A `/public/`
