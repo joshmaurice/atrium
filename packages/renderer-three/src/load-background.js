@@ -30,9 +30,13 @@ export function loadBackground(threeScene, bg, baseUrl) {
 
   // Base URL is optional: an absolute texture works without it
   // (pre-brief #12). A relative texture with no base logs a warning.
+  // No fallback to location.href (pre-brief #10) — the caller provides
+  // the base, or the texture URL must be absolute.
   if (!baseUrl) {
-    // Try the page location as fallback (pre-brief hardening)
-    baseUrl = globalThis.location?.href || ''
+    if (!bg.texture.startsWith('http://') && !bg.texture.startsWith('https://') && !bg.texture.startsWith('//')) {
+      console.warn('Relative background texture requires a base URL:', bg.texture)
+      return
+    }
   }
 
   let textureUrl
