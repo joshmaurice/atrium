@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeWsUrl, buildWorldWsUrl } from '../src/wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress } from '../src/wsUrl.js'
 
 describe('computeWsUrl', () => {
 
@@ -120,5 +120,80 @@ describe('buildWorldWsUrl', () => {
 
   test('returns null for invalid base URL', () => {
     assert.equal(buildWorldWsUrl('not-a-url', 'jane', 'slug'), null)
+  })
+})
+
+describe('resolveWorldAddress', () => {
+
+  test('full ws:// URL passes through', () => {
+    assert.equal(
+      resolveWorldAddress('ws://other-server.com/worlds/jane/home', 'ws://current-server.com'),
+      'ws://other-server.com/worlds/jane/home'
+    )
+  })
+
+  test('full wss:// URL passes through', () => {
+    assert.equal(
+      resolveWorldAddress('wss://other-server.com:8443/worlds/bob/slug', 'ws://current-server.com'),
+      'wss://other-server.com:8443/worlds/bob/slug'
+    )
+  })
+
+  test('relative path resolved against origin', () => {
+    assert.equal(
+      resolveWorldAddress('/worlds/jane/my-world', 'ws://current-server.com'),
+      'ws://current-server.com/worlds/jane/my-world'
+    )
+  })
+
+  test('relative path without leading slash', () => {
+    assert.equal(
+      resolveWorldAddress('worlds/jane/my-world', 'ws://current-server.com'),
+      'ws://current-server.com/worlds/jane/my-world'
+    )
+  })
+
+  test('relative path with http origin', () => {
+    assert.equal(
+      resolveWorldAddress('/worlds/jane/home', 'http://current-server.com'),
+      'ws://current-server.com/worlds/jane/home'
+    )
+  })
+
+  test('http:// URL returns null (not a WS address)', () => {
+    assert.equal(
+      resolveWorldAddress('http://example.com/page', 'ws://current-server.com'),
+      null
+    )
+  })
+
+  test('https:// URL returns null', () => {
+    assert.equal(
+      resolveWorldAddress('https://example.com/page', 'ws://current-server.com'),
+      null
+    )
+  })
+
+  test('empty string returns null', () => {
+    assert.equal(resolveWorldAddress('', 'ws://current-server.com'), null)
+  })
+
+  test('whitespace-only returns null', () => {
+    assert.equal(resolveWorldAddress('   ', 'ws://current-server.com'), null)
+  })
+
+  test('null input returns null', () => {
+    assert.equal(resolveWorldAddress(null, 'ws://current-server.com'), null)
+  })
+
+  test('relative path with null origin returns null', () => {
+    assert.equal(resolveWorldAddress('/worlds/jane/home', null), null)
+  })
+
+  test('unparseable ws:// URL returns null', () => {
+    assert.equal(
+      resolveWorldAddress('ws://[invalid', 'ws://current-server.com'),
+      null
+    )
   })
 })

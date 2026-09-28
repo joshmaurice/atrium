@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildWorldWsUrl } from './wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -619,8 +619,57 @@ viewportEl.addEventListener('drop', async (e) => {
 })
 
 // ---------------------------------------------------------------------------
-// Overlay feedback — show transient messages while loading/connecting
+// WebSocket connect helper — trackConnect (pre-brief #5)
 // ---------------------------------------------------------------------------
+
+/**
+ * Connect to a world and track the outcome with lifecycle events.
+ * The caller provides a render callback for error display, so Load
+ * can show errors via wbError and Connect can use the overlay.
+ *
+ * @param {string} wsUrl — WebSocket URL to connect to
+ * @param {object} connectOpts — options passed to client.connect()
+ * @param {object} ui — UI callbacks
+ * @param {(msg: string) => void} ui.onError — render an error message
+ * @returns {Promise<void>} resolves on session:ready, rejects on error/disconnect
+ */
+function trackConnect(wsUrl, connectOpts, { onError } = {}) {
+  return new Promise((resolve, reject) => {
+    const sid = client.connect(wsUrl, connectOpts)
+    if (!sid) {
+      reject(new Error('Connect failed to return a session ID'))
+      return
+    }
+
+    const onReady = (data) => {
+      client.off('error', onErr)
+      client.off('disconnected', onDisco)
+      resolve(data)
+    }
+    const onErr = (err) => {
+      client.off('session:ready', onReady)
+      client.off('disconnected', onDisco)
+      if (typeof onError === 'function') onError(err.message || 'Connection failed')
+      reject(err)
+    }
+    const onDisco = (d) => {
+      client.off('session:ready', onReady)
+      client.off('error', onErr)
+      // Only reject if we haven't already resolved
+      if (typeof onError === 'function') onError(d.reason || 'Disconnected')
+      reject(new Error(d.reason || 'Disconnected'))
+    }
+
+    client.once('session:ready', onReady)
+    client.on('error', onErr)
+    client.on('disconnected', onDisco)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Overlay feedback
+// ---------------------------------------------------------------------------
+
 function showOverlay(msg) {
   overlayEl.textContent = msg || ''
 }
@@ -640,22 +689,23 @@ loadBtn.addEventListener('click', async () => {
     const lower = url.toLowerCase()
     const isStaticFile = lower.endsWith('.gltf') || lower.endsWith('.glb') || lower.endsWith('.json')
     if (!isStaticFile && client.connected) {
-      // WS world URL while connected — connect via buildWorldWsUrl (same as F1)
+      // WS world URL while connected — connect via resolveWorldAddress
       showOverlay('Connecting to world…')
-      const wsUrl = buildWorldWsUrl(
-        accountWsBase || computeWsUrl(window.location),
-        currentUser ? (currentUser.username || currentUser.id) : 'anonymous',
-        url
-      )
+      const worldOrigin = client.wsUrl
+        ? AtriumClient.wsOriginToHttpOrigin(client.wsUrl)
+        : accountWsBase
+      const wsUrl = resolveWorldAddress(url, worldOrigin)
       if (!wsUrl) {
-        showOverlay('Invalid world identifier')
+        showOverlay('Invalid world address')
         return
       }
       setConnectionState('connecting')
       const avatarDesc = buildAvatarDescriptor()
       const displayName = currentUser ? (currentUser.displayName || currentUser.username) : 'User'
       const connectOpts = { avatar: avatarDesc, displayName }
-      client.connect(wsUrl, connectOpts)
+      await trackConnect(wsUrl, connectOpts, {
+        onError: (msg) => { showOverlay('Connect failed: ' + msg) },
+      })
       showOverlay('')
     } else if (client.connected) {
       // Static file load while connected — refuse

@@ -75,3 +75,56 @@ export function buildWorldWsUrl(baseUrl, username, slug) {
 export function wsOriginToHttpOrigin(wsOrigin) {
   return AtriumClient.wsOriginToHttpOrigin(wsOrigin)
 }
+
+/**
+ * Resolve a user-entered world address to a full WebSocket URL.
+ *
+ * Pure function — tries to interpret the string as a world address:
+ * - `ws://...` or `wss://...` full URL: passed through as-is
+ * - Relative path (e.g. `/worlds/user/slug`, just `slug`, etc.):
+ *   resolved against `origin` (the current world server's origin).
+ * - `http(s)://...`, empty string, or unparseable: returns null.
+ *
+ * This lets the user enter a short path in the World box, or a full
+ * WebSocket URL for cross-server connections.
+ *
+ * @param {string|null} str — user-entered world address
+ * @param {string|null} origin — origin to resolve relative paths against
+ *   (e.g. the current world server's origin, or accountWsBase when disconnected)
+ * @returns {string|null} — full WebSocket URL, or null if unresolvable
+ */
+export function resolveWorldAddress(str, origin) {
+  if (!str) return null
+  const trimmed = str.trim()
+  if (!trimmed) return null
+
+  // Full ws:// or wss:// URL — pass through
+  if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) {
+    try {
+      new URL(trimmed)
+      return trimmed
+    } catch {
+      return null
+    }
+  }
+
+  // http(s):// or any other non-ws scheme — not a world address
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') ||
+      trimmed.includes('://')) {
+    return null
+  }
+
+  // Relative path — resolve against origin
+  if (!origin) return null
+  const originWs = origin.startsWith('ws://') || origin.startsWith('wss://')
+    ? origin
+    : `ws://${origin.replace(/^https?:\/\//, '')}`
+  try {
+    const base = originWs.endsWith('/') ? originWs : originWs + '/'
+    const resolved = new URL(trimmed.startsWith('/') ? trimmed.slice(1) : trimmed, base)
+    const result = `${resolved.protocol}//${resolved.host}${resolved.pathname}`
+    return result
+  } catch {
+    return null
+  }
+}
