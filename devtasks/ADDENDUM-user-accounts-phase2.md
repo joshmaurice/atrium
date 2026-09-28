@@ -167,12 +167,42 @@ current architecture.)
 - **Routing:** resolves to the bare root path, using the same
   already-existing path-threading and routing seam described in §1.
 
-## 7. Teleporter placement (Step 6)
+## 7. Cross-server world loading (Step 6)
 
-The one owner-facing editing feature in Phase 2, and deliberately the
-*only* one. This is scoped narrowly on purpose: it is not a general
-object-placement or world-editing system. If that's wanted later, it's a
-separate, well-motivated feature — don't build it speculatively here.
+Cross-server world loading lets a client connected to server A connect its
+live WebSocket to a world on server B without a page reload. The client
+separates "the server my account lives on" from "the server the current
+world is hosted on."
+
+- **Cross-origin WebSocket upgrades are permitted.** The server no longer
+  rejects cross-origin WebSocket upgrades. SameSite=Lax cookies do not
+  ride cross-origin handshakes, so cross-origin visitors arrive anonymous
+  — correct for server-local identity. HTTP routes retain Origin-based CSRF
+  protection.
+- **Client displayName protocol.** The client sends an optional `displayName`
+  in its `hello` message. The server echoes it back in the `hello` response
+  and has the final say (authenticated users' DB name overrides any
+  client-supplied value). The server stamps the canonical displayName on
+  the avatar node `extras.displayName` at add time.
+- **Asset-base derivation.** `AtriumClient.wsOriginToHttpOrigin` converts
+  `ws://` → `http://` and `wss://` → `https://`, so relative asset refs
+  resolve against the world server's origin automatically.
+- **Connect timeout.** A configurable timeout (default 15s) fires `error`
+  then `disconnected { reason: 'timeout' }` if no `hello` response arrives.
+  The timer is cleared on `session:ready`, explicit disconnect, or
+  supersede.
+- **`resolveWorldAddress` helper** (pure function) interprets user-entered
+  world addresses: full `ws://` URLs pass through, relative paths resolve
+  against the current connection's origin, and `http(s)://`/empty/garbage
+  return null.
+- **`trackConnect` helper** wraps `client.connect()` with lifecycle
+  tracking and accepts a render callback for error display, used by Load
+  and Connect paths.
+- **`loadBackground` no longer falls back to `location.href`.** The caller
+  must provide a base URL. Absolute textures work without one; relative
+  textures with no base log a warning.
+
+## 8. Teleporter placement (Step 7)
 
 - **Owner-only placement UI**, visible only in the owner's own world: a
   "Place Teleporter" affordance, click-to-place against the ground plane.
@@ -204,7 +234,10 @@ Land in this order — each step depends on the ones before it:
 3. **Auto-save** (§4) — debounce, disconnect-flush, periodic safety net.
 4. **Visibility toggle + public routing** (§5).
 5. **The commons** (§6) — seed, lifecycle exception, root-path routing.
-6. **Teleporter placement** (§7).
+|6. **Cross-server world loading** (§7) — client-side account/world-origin
+|   split, cross-origin WebSocket upgrades, resolveWorldAddress helper,
+|   trackConnect lifecycle, displayName protocol.
+|7. **Teleporter placement** (§8).
 
 ## Explicitly out of scope for Phase 2
 
@@ -215,6 +248,6 @@ Naming these so they're recognized as deliberate exclusions, not gaps:
   `ATRIUM_user_object` extension work in Phase 3.
 - A general admin/privilege system — the commons doesn't need one (§6).
 - A public-worlds directory or browse/search feature — teleporter
-  destinations are shared as plain links for now (§7).
+  destinations are shared as plain links for now (§8).
 - General object placement beyond teleporters — a separate feature to
   scope later if wanted, not part of this phase.
