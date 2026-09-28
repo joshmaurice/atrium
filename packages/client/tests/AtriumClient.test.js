@@ -170,3 +170,100 @@ test('wsOriginToHttpOrigin: empty string → null', () => {
 test('wsOriginToHttpOrigin: unparseable → null', () => {
   assert.equal(AtriumClient.wsOriginToHttpOrigin('not a url'), null)
 })
+
+// ---------------------------------------------------------------------------
+// Connect timeout (pre-brief #4)
+// ---------------------------------------------------------------------------
+
+test('connect timeout: fires error then disconnected with reason timeout', async () => {
+  // Synthetic WebSocket that never opens — triggers timeout
+  let closeCalled = false
+  const SynthNoopWS = function SynthNoopWS(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = () => {}  // EventEmitter-style API
+    this.addEventListener = () => {}  // EventTarget fallback
+    this.close = () => { closeCalled = true; this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthNoopWS, connectTimeout: 50 })
+
+  const events = []
+  client.on('error', (err) => events.push({ type: 'error', message: err.message }))
+  client.on('disconnected', (d) => events.push({ type: 'disconnected', reason: d.reason }))
+
+  client.connect('ws://nowhere.example/')
+
+  // Wait for timeout to fire
+  await new Promise(r => setTimeout(r, 100))
+
+  assert.equal(events.length, 2, 'error then disconnected')
+  assert.equal(events[0].type, 'error', 'first event is error')
+  assert.ok(events[0].message.includes('timeout'), 'error mentions timeout')
+  assert.equal(events[1].type, 'disconnected', 'second event is disconnected')
+  assert.equal(events[1].reason, 'timeout', 'disconnected reason is timeout')
+  assert.equal(client.connected, false, 'client not connected after timeout')
+})
+
+test('connect timeout: timeout=0 disables timeout', async () => {
+  const SynthNoopWS = function SynthNoopWS(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = () => {}
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+  const client = new AtriumClient({ WebSocket: SynthNoopWS, connectTimeout: 0 })
+
+  const events = []
+  client.on('error', (e) => events.push(e))
+  client.on('disconnected', (d) => events.push(d))
+
+  client.connect('ws://nowhere.example/')
+  await new Promise(r => setTimeout(r, 100))
+
+  assert.equal(events.length, 0, 'no timeout events with connectTimeout=0')
+})
+
+test('connect timeout: session:ready clears the timeout', async () => {
+  const handlers = {}
+
+  // Synthetic WebSocket that connects and immediately receives hello
+  const SynthInstantWS = function SynthInstantWS(url) {
+    this.url = url
+    this.readyState = 1  // OPEN
+    this.send = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.on = (evt, fn) => {
+      handlers[evt] = fn
+    }
+    this.addEventListener = (evt, fn) => {
+      handlers[evt] = fn
+    }
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthInstantWS, connectTimeout: 100 })
+
+  const events = []
+  client.on('error', (e) => events.push(e))
+  client.on('disconnected', (d) => events.push(d))
+
+  client.connect('ws://example.com/')
+
+  // Trigger open so onOpen fires (sends hello), then deliver hello response
+  if (handlers.open) {
+    handlers.open()
+  }
+
+  // Deliver the server hello response through the message handler
+  if (handlers.message) {
+    handlers.message(JSON.stringify({ type: 'hello', id: 'test', seq: 1, serverTime: Date.now() }))
+  }
+
+  // Wait longer than the timeout — hello should have cleared it
+  await new Promise(r => setTimeout(r, 200))
+
+  assert.equal(events.length, 0, 'no timeout events when hello arrives before timeout')
+})

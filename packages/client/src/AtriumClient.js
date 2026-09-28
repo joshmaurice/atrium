@@ -66,14 +66,15 @@ export class AtriumClient extends EventEmitter {
    * @param {boolean}  [opts.debug=false]  - Gate verbose console logging
    * @param {Function} [opts.WebSocket]    - WebSocket constructor (injectable for testing)
    */
-  constructor({ debug = false, WebSocket: WSImpl = globalThis.WebSocket, fetch: fetchImpl = globalThis.fetch } = {}) {
+  constructor({ debug = false, WebSocket: WSImpl = globalThis.WebSocket, fetch: fetchImpl = globalThis.fetch, connectTimeout = 15000 } = {}) {
     super()
     this._debug   = debug
     this._WSImpl  = WSImpl
     this._fetch   = fetchImpl
+    this._connectTimeout = connectTimeout
 
     // Connection state — null when disconnected
-    /** @type {{ sessionId, url, worldBaseUrl, ws, closing, peerSessions } | null} */
+    /** @type {{ sessionId, url, worldBaseUrl, ws, closing, stale, peerSessions, gen, connectTimeout } | null} */
     this._connectionRecord = null
 
     // World generation counter — bumped on every connect/disconnect/loadWorld/loadWorldFromData
@@ -246,6 +247,20 @@ export class AtriumClient extends EventEmitter {
       this._viewFlushTimer = null
     }
     this._pendingView = null
+  }
+
+  /**
+   * Clear the connect timeout timer on a record, if one is set.
+   * Called when the connection succeeds (_onServerHello), the user
+   * disconnects (disconnect), or the record is superseded (stale
+   * check in the timer itself).
+   * @param {{ connectTimeout?: ReturnType<typeof setTimeout> }} record
+   */
+  _clearConnectTimeout(record) {
+    if (record && record.connectTimeout) {
+      clearTimeout(record.connectTimeout)
+      record.connectTimeout = undefined
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -426,6 +441,25 @@ export class AtriumClient extends EventEmitter {
       ws.addEventListener('error',   onError)
     }
 
+    // ---- Connect timeout (pre-brief #4) ----
+    if (this._connectTimeout > 0) {
+      record.connectTimeout = setTimeout(() => {
+        if (record.stale || record.closing) return
+        // Order: error first, then disconnected with reason 'timeout'
+        const err = new Error(`Connection timeout after ${this._connectTimeout}ms`)
+        err.sessionId = sessionId
+        err.url = wsUrl
+        this.emit('error', err)
+        // Clear record state
+        this._connectionRecord = null
+        this._connected = false
+        this._wsUrl = null
+        this.emit('disconnected', { sessionId, url: wsUrl, reason: 'timeout' })
+        // Close the socket so server-side cleanup happens
+        try { ws.close() } catch { /* ignore */ }
+      }, this._connectTimeout)
+    }
+
     return sessionId
   }
 
@@ -440,6 +474,9 @@ export class AtriumClient extends EventEmitter {
       this._clearPointerState()
       return
     }
+
+    // Clear connect timeout if still pending (pre-brief #4)
+    this._clearConnectTimeout(record)
 
     // Mark record as stale so late close can't clobber a new connection
     record.stale = true
@@ -544,6 +581,8 @@ export class AtriumClient extends EventEmitter {
 
   async _onServerHello(msg, record) {
     if (record.stale || record.closing) return
+    // Clear connect timeout — connection established (pre-brief #4)
+    this._clearConnectTimeout(record)
     // Adopt server-assigned avatar node name
     if (msg.avatarNodeName) {
       this._avatarNodeName = msg.avatarNodeName
