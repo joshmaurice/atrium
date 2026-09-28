@@ -270,8 +270,17 @@ export function attachSessionHandlers({
 
           let userDisplayName = `User-${sessionId.slice(0, 4)}`
 
+          // Accept optional displayName from client hello (pre-brief #9).
+          // This allows cross-origin visitors to identify themselves; the
+          // server may still override with the authenticated user's name.
+          if (msg.displayName) {
+            userDisplayName = msg.displayName
+          }
+
           // When the user is authenticated, use their real display_name
-          // (from the users table) instead of the anonymous fallback.
+          // (from the users table) — this always takes priority over the
+          // client-supplied value, so cross-origin visitors cannot claim
+          // a name that belongs to an authenticated user.
           // This makes the real name visible to peers and the HUD.
           if (upgradeUserId && db) {
             try {
@@ -282,7 +291,7 @@ export function attachSessionHandlers({
                 userDisplayName = userRow.display_name
               }
             } catch {
-              // If the lookup fails, stick with the anonymous fallback
+              // If the lookup fails, stick with the client-supplied or anonymous fallback
             }
           }
 
@@ -311,6 +320,7 @@ export function attachSessionHandlers({
             seq: session.seq,
             serverTime: Date.now(),
             avatarNodeName: session.avatarNodeName,
+            displayName: session.displayName,
             capabilities: {
               tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
             },
@@ -456,6 +466,14 @@ export function attachSessionHandlers({
           if (!isMutator(session, isAvatar)) {
             sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may add nodes to this world')
             break
+          }
+
+          // Overwrite avatar extras.displayName with the server-assigned
+          // displayName (pre-brief #9). The server has the final say, so
+          // a cross-origin visitor cannot claim a different name.
+          if (isAvatar && session.displayName) {
+            if (!msg.node.extras) msg.node.extras = {}
+            msg.node.extras.displayName = session.displayName
           }
 
           const result = world.addNode(msg.node, msg.parent)

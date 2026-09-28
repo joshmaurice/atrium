@@ -11,6 +11,7 @@
     "serverTime": { "type": "integer", "minimum": 0 },
     "worldStartTime": { "type": "integer", "minimum": 0 },
     "avatarNodeName": { "type": "string", "description": "Server-assigned avatar node name for this session" },
+    "displayName": { "type": "string", "description": "Server-assigned display name (pre-brief #9)" },
     "capabilities": {
       "type": "object",
       "properties": {

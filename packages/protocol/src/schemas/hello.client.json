@@ -8,6 +8,7 @@
     "type": { "const": "hello" },
     "id": { "type": "string", "minLength": 1 },
     "ticket": { "type": "string" },
+    "displayName": { "type": "string", "description": "Optional display name sent by client (pre-brief #9)" },
     "capabilities": {
       "type": "object",
       "properties": {

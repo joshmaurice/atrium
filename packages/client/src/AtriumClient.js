@@ -383,6 +383,7 @@ export class AtriumClient extends EventEmitter {
       ws.send(JSON.stringify({
         type: 'hello',
         id:   sessionId,
+        displayName: this._displayName,
         capabilities: { tick: { interval: 5000 } },
       }))
     }
@@ -589,6 +590,13 @@ export class AtriumClient extends EventEmitter {
       if (this._avatarDescriptor) {
         this._avatarDescriptor.name = msg.avatarNodeName
       }
+    }
+    // Adopt server-assigned displayName (pre-brief #9)
+    // The server has the final say — this overrides what the client sent.
+    // Cross-origin visitors will have a server-assigned name,
+    // authenticated users get their DB display_name.
+    if (msg.displayName) {
+      this._displayName = msg.displayName
     }
     this._connected = true
     console.log(`[AtriumClient] Session ${this._sessionId} (${this._displayName})`)
