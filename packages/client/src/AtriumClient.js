@@ -113,6 +113,30 @@ export class AtriumClient extends EventEmitter {
     this._pointerDownTarget = null
   }
 
+  /**
+   * Convert a WebSocket origin to an HTTP origin for asset resolution.
+   * Pure: replaces ws:// with http:// or wss:// with https:// on the
+   * given URL's origin. Strips path/query/fragment. Returns null for
+   * unparseable input.
+   * @param {string|null} wsOrigin
+   * @returns {string|null}
+   */
+  static wsOriginToHttpOrigin(wsOrigin) {
+    if (!wsOrigin) return null
+    try {
+      const parsed = new URL(wsOrigin)
+      if (parsed.protocol === 'wss:') {
+        parsed.protocol = 'https:'
+      } else if (parsed.protocol === 'ws:') {
+        parsed.protocol = 'http:'
+      }
+      // http:/https: and other schemes pass through unchanged
+      return parsed.origin
+    } catch {
+      return null
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
@@ -284,13 +308,8 @@ export class AtriumClient extends EventEmitter {
     if (optWorldBaseUrl !== undefined) {
       this._worldBaseUrl = optWorldBaseUrl
     } else {
-      // Derive from connect URL's origin (ws:→http:)
-      try {
-        const parsed = new URL(wsUrl)
-        this._worldBaseUrl = `${parsed.protocol}//${parsed.host}`
-      } catch {
-        this._worldBaseUrl = null
-      }
+      // Derive HTTP base from connect URL's origin (ws:→http:, wss:→https:)
+      this._worldBaseUrl = AtriumClient.wsOriginToHttpOrigin(wsUrl)
     }
 
     this._wsUrl = wsUrl

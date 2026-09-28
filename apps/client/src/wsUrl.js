@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
+import { AtriumClient } from '@atrium/client'
+
 // ---------------------------------------------------------------------------
 // computeWsUrl — derive a WebSocket URL from page location
 //
@@ -65,17 +67,11 @@ export function buildWorldWsUrl(baseUrl, username, slug) {
  *
  * Pure function — replaces ws:// with http:// or wss:// with https://
  * on the given origin. Returns null if the input is not parseable.
+ * Canonical implementation is AtriumClient.wsOriginToHttpOrigin.
  *
  * @param {string|null} wsOrigin — e.g. 'ws://localhost:3000' or 'wss://example.com'
  * @returns {string|null} — e.g. 'http://localhost:3000' or 'https://example.com'
  */
 export function wsOriginToHttpOrigin(wsOrigin) {
-  if (!wsOrigin) return null
-  try {
-    const parsed = new URL(wsOrigin)
-    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
-    return parsed.origin
-  } catch {
-    return null
-  }
+  return AtriumClient.wsOriginToHttpOrigin(wsOrigin)
 }

@@ -134,3 +134,39 @@ test('peerCount: non-ephemeral nodes are not counted', async () => {
   })
   assert.strictEqual(client.peerCount, 0)
 })
+
+// ---------------------------------------------------------------------------
+// wsOriginToHttpOrigin static
+// ---------------------------------------------------------------------------
+
+test('wsOriginToHttpOrigin: ws:// → http://', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin('ws://localhost:3000'), 'http://localhost:3000')
+})
+
+test('wsOriginToHttpOrigin: wss:// → https://', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin('wss://example.com'), 'https://example.com')
+})
+
+test('wsOriginToHttpOrigin: wss:// with path and port', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin('wss://example.com:8443/path/to/world'), 'https://example.com:8443')
+})
+
+test('wsOriginToHttpOrigin: http:// passed through (non-ws scheme)', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin('http://localhost:3000'), 'http://localhost:3000')
+})
+
+test('wsOriginToHttpOrigin: https:// passed through', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin('https://example.com'), 'https://example.com')
+})
+
+test('wsOriginToHttpOrigin: null input → null', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin(null), null)
+})
+
+test('wsOriginToHttpOrigin: empty string → null', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin(''), null)
+})
+
+test('wsOriginToHttpOrigin: unparseable → null', () => {
+  assert.equal(AtriumClient.wsOriginToHttpOrigin('not a url'), null)
+})
