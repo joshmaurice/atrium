@@ -520,7 +520,7 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 client.on('som:set', ({ nodeName }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
-    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl || '')
+    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
     return
   }
 })

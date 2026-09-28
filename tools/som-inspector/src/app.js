@@ -242,7 +242,7 @@ client.on('world:loaded', ({ name }) => {
   animationsPanel.show(client.som, animCtrl)
   updateStatusBar(name ? `World: ${name}` : '')
 
-  loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl || '')
+  loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
 
   // Attach selection and drag listeners to all non-ephemeral SOM nodes
   for (const node of client.som.nodes) {
@@ -306,7 +306,7 @@ client.on('som:set', ({ nodeName }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
     worldInfo.refresh()
-    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl || '')
+    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
     return
   }
   const selected = treeView.selectedNode
