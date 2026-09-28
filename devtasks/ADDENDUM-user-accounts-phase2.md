@@ -1,12 +1,7 @@
 # Addendum: Phase 2 — Home Worlds, Auto-Save, and the Commons
 
 Status: Final — ready for implementation, **including §7 (Step 6,
-cross-server world loading).** Its design was confirmed on 2026-09-28,
-and the authoritative decisions are in
-`devtasks/PREBRIEF-cross-server-connect.md` (§3, decisions 1–12). §7
-below is an interim summary. The Step 6 work replaces it with the full
-section, and writes §8's remaining destination rules, as part of its doc
-commit.
+cross-server world loading).** Its design was confirmed on 2026-09-28.
 
 Renumbered 2026-09-28: cross-server world loading was inserted as Step 6
 (§7), and teleporter placement moved from Step 6 (§7) to Step 7 (§8).
@@ -183,23 +178,100 @@ current architecture.)
 
 ## 7. Cross-server world loading (Step 6)
 
-**Design confirmed 2026-09-28; ready for implementation.** The
-authoritative decisions are in `devtasks/PREBRIEF-cross-server-connect.md`
-§3, with background in
-`devtasks/Atrium-Passdown-2026-09-24-cross-server-findings.md`. This is an
-interim summary. The Step 6 work replaces it with the full section. Key
-points:
+**Design confirmed 2026-09-28.** Background is in
+`devtasks/Atrium-Passdown-2026-09-24-cross-server-findings.md`. Below, **A**
+is the server whose page the client loaded, and **B** is the server hosting
+the world it joins.
 
 - **Same-page cross-connect** (decided 2026-09-24). A client moves to a
   world hosted on another Atrium server by reconnecting its live
   connection in place, from the page it's already on. It doesn't navigate
   the browser to the other server's page.
+  - It's an ordinary `connect()` to B's full `ws://` or `wss://` URL.
+    There's no separate client lifecycle for it: replacing, abandoning and
+    tearing down a connection work the same as for any other connect.
+- **Visitors are anonymous on arrival.** B accepts WebSocket connections
+  whose page came from another origin, but attaches the session cookie's
+  identity only to a **same-origin** upgrade: the `Origin` header's
+  scheme, hostname and port all equal B's own, with B's browser-facing
+  scheme taken from `X-Forwarded-Proto`. A cross-origin visitor is always
+  anonymous on B, even if they're logged in to B in the same browser.
+  - So a cross-origin visitor can't reach private worlds or `/home/…` on B,
+    even ones they own there (they get 404). They can't change anything
+    except their own avatar, and they appear under B's anonymous name.
+  - **Why:** the protection against cross-site WebSocket hijacking moves
+    from refusing the socket to never attaching an identity to it. An
+    anonymous cross-origin connection can do exactly what a script sending
+    no `Origin` could already do. That holds however browsers treat
+    cookies, so it doesn't depend on cookie or site policy.
+  - The rule is by origin, never by site. Nothing compares registrable
+    domains or consults the Public Suffix List, there's no allowlist, and
+    cookie attributes are unchanged. `isOriginAllowed` remains the CSRF
+    check for HTTP routes only.
+- **Remote identity only ever affects presentation.** Remote identity is
+  anything about who a visitor is on another server: their name on A, the
+  server they came from, whether their client claims it or A someday
+  vouches for it.
+  - B may use it to *show* a visitor, such as a label, a badge or grouping
+    in a list.
+  - B never uses it to decide what a visitor may *do*: no access to private
+    worlds, no mutation rights, no ownership, and it never maps to a B user
+    id. Accounts `josh` on A and `josh` on B are unrelated, even if they're
+    the same person. Otherwise whoever runs or compromises A could grant
+    themselves access on B.
+  - A later, explicit federation feature (say, an owner on B inviting
+    `josh@a.example` to edit a world) would be its own design. It never
+    happens automatically because a visitor arrives with an identity
+    attached.
+- **B names its visitors.** The server tells each client its session name
+  in `hello` (the account's display name, or `User-xxxx`), puts that name
+  on the visitor's avatar, and refuses any `set` that would change an
+  avatar's name, under every world policy. The name a client asks for is a
+  request, not a claim. As a result, anonymous users also see themselves as
+  `User-xxxx` on their own server, as their peers already did.
+- **The asset base follows the world server.** A world's relative assets
+  and backgrounds resolve against the HTTP origin of the server hosting it,
+  derived from the connect URL. A File-box base applies to a manual Connect
+  only when it's on the same origin (loopback hosts may differ in port, for
+  local fixtures). Nothing falls back to the page's own URL, so a remote
+  world never silently loads A's assets.
+- **Failure is visible, and there's no automatic return.** Every entry
+  point that connects (My Worlds Load, manual Connect, auto-connect, and
+  the teleporters in §8) reports the outcome through one app-level helper.
+  - A connect that fails, is refused or times out shows a message naming
+    the target host. It doesn't claim a cause, since a browser can't tell a
+    missing world from a server that's down. A timeout can say it timed
+    out.
+  - The client is left disconnected. It doesn't try to return to the
+    previous world: that can fail too, can hide the original failure, and
+    needs a rule for what "previous" means. It can be added later as its
+    own decision.
+- **The account server and the world server are separate.** The account
+  server (A) serves login, My Worlds and home auto-connect. The world
+  server is whichever server the current connection targets.
+  - Loading one of your own worlds while on B takes you back to A. That's
+    correct: My Worlds lists A's worlds.
+  - Logging out while on B disconnects from B. Logging in to A while on B
+    leaves you on B, still anonymous there.
+- **Server-relative addresses follow the current world's server.** A
+  destination written as a path (`/`, `/worlds/<user>/<slug>`) resolves
+  against the origin of the connected world, not the account server. So `/`
+  in a world on B means B's commons. With nothing connected, it resolves
+  against the account server. Full `ws://` and `wss://` URLs are used
+  as-is, and `http://` or `https://` URLs are rejected rather than guessed
+  at.
 - **`/` is a working WebSocket endpoint on every server:** it's that
   server's commons (§6). This is a **deployment requirement**: any Atrium
   server behind a reverse proxy must pass WebSocket upgrades at `/`
   through to Node, not redirect them.
-  - Our Caddy config meets this since 2026-09-28. Its redirect of `/` to
-    `/apps/client/` excludes WebSocket upgrades.
+  - Our Caddy config meets this since 2026-09-28. In each site block, the
+    redirect of `/` to `/apps/client/` has a matcher that excludes upgrades
+    (`path /` plus `not header Connection *Upgrade*`, the same header check
+    `@websocket` uses). A plain request to `/` still redirects, and an
+    upgrade reaches Node, whatever order Caddy applies the directives in.
+  - The proxy must also send `X-Forwarded-Proto` (Caddy does by default).
+    Without it, every `https:` page looks cross-origin, so every user would
+    connect anonymously and home auto-connect would fail for everyone.
 - **Invariants** (from the 2026-09-24 findings):
   - `/` means "the commons of the server this connection targets". It's
     never a fixed URL, id or slug held in shared or client code.
@@ -229,16 +301,18 @@ separate, well-motivated feature — don't build it speculatively here.
   - **The free-text field** accepts either a server-relative path (someone
     else's public world on this server, or `/` for the commons), or a full
     URL of a world on **another server** (§7).
-  - **Decided in the Step 6 design, and written here by the Step 6 work:**
-    exactly which URL forms are accepted, and how a server-relative path
-    resolves when a visitor came from another server's page (pre-brief
-    #8).
+  - **Accepted forms:** a server-relative path, resolved against the
+    current world's server (§7), or a full `ws://` or `wss://` URL.
+    `ws://` is accepted so that localhost and dev teleporters work. An
+    `http://` or `https://` URL is rejected.
+    - So a teleporter in a world on B that says `/` leads to B's commons,
+      including for a visitor whose page came from A.
   - No public-worlds directory/browse feature is being built for this —
     that's separate, larger, unbuilt scope. Destination sharing works the
     same way any URL sharing does elsewhere.
 - **Trigger:** pure client-side proximity detection. When any avatar gets
   close, that client moves to the destination by **reconnecting in place**
-  (§7), not by loading a new page. No new protocol message and no server
+  (§7), with an ordinary `connect()`, not by loading a new page. No new protocol message and no server
   round-trip — the teleporter's position already syncs the normal way.
 - **Open, decide before Step 7: should a cross-server teleporter trigger
   automatically?** Proximity triggering means a visitor who walks onto a
@@ -256,8 +330,9 @@ separate, well-motivated feature — don't build it speculatively here.
 - Support deleting a placed teleporter. Skip in-place repositioning for v1;
   delete-and-replace covers the same need with less to build.
 - No upfront destination validation. If a pasted destination is wrong,
-  private, or gone by the time someone walks through, show a friendly
-  client-side error at that moment rather than checking it at save time.
+  private, or gone by the time someone walks through, show §7's failure
+  message at that moment (it names the destination host without claiming
+  a cause) rather than checking it at save time.
 
 ## Implementation sequencing
 
