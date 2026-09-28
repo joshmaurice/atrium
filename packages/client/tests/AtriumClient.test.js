@@ -267,3 +267,108 @@ test('connect timeout: session:ready clears the timeout', async () => {
 
   assert.equal(events.length, 0, 'no timeout events when hello arrives before timeout')
 })
+
+// ---------------------------------------------------------------------------
+// Event contract (pre-brief #4) — socket errors, close reason, code
+// ---------------------------------------------------------------------------
+
+test('socket error event carries sessionId and url', async () => {
+  const SynthErrWS = function SynthErrWS(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => { if (evt === 'error') setTimeout(fn, 10) }
+    this.addEventListener = (evt, fn) => { if (evt === 'error') setTimeout(fn, 10) }
+    this.close = () => {}
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthErrWS, connectTimeout: 0 })
+  const errorPromise = new Promise(resolve => client.once('error', resolve))
+
+  const sid = client.connect('wss://error-test.example/')
+  const err = await errorPromise
+
+  assert.equal(err.sessionId, sid, 'error has sessionId')
+  assert.equal(err.url, 'wss://error-test.example/', 'error has url')
+  assert.ok(err.message.includes('error-test.example'), 'error mentions host')
+})
+
+test('server error message carries sessionId, url and code', async () => {
+  const handlers = {}
+  const SynthWS = function SynthWS(url) {
+    this.url = url
+    this.readyState = 1
+    this.on = (evt, fn) => { handlers[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWS, connectTimeout: 0 })
+  const errorPromise = new Promise(resolve => client.once('error', resolve))
+
+  const sid = client.connect('wss://server-err.example/')
+
+  if (handlers.message) {
+    handlers.message(JSON.stringify({ type: 'error', code: 'PERMISSION_DENIED', message: 'Not allowed' }))
+  }
+
+  const err = await errorPromise
+  assert.equal(err.sessionId, sid, 'server error has sessionId')
+  assert.equal(err.url, 'wss://server-err.example/', 'server error has url')
+  assert.equal(err.code, 'PERMISSION_DENIED', 'server error has code property')
+  assert.ok(err.message.includes('PERMISSION_DENIED'), 'server error message includes code')
+})
+
+test('disconnected from server close carries reason closed and code', async () => {
+  const handlers = {}
+  const closeCode = 1000
+  const SynthWS = function SynthWS(url) {
+    this.url = url
+    this.readyState = 1
+    this.on = (evt, fn) => { handlers[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWS, connectTimeout: 0 })
+  const discPromise = new Promise(resolve => client.once('disconnected', resolve))
+
+  const sid = client.connect('wss://close-test.example/')
+
+  if (handlers.close) {
+    handlers.close(closeCode, 'Server shutting down')
+  }
+
+  const disc = await discPromise
+  assert.equal(disc.sessionId, sid, 'disconnected has sessionId')
+  assert.equal(disc.url, 'wss://close-test.example/', 'disconnected has url')
+  assert.equal(disc.reason, 'closed', 'reason is closed by default')
+  assert.equal(disc.code, 1000, 'close code is carried')
+  assert.equal(disc.closeReason, 'Server shutting down', 'close reason string is carried')
+})
+
+test('disconnected with no close args still gives reason closed', async () => {
+  const handlers = {}
+  const SynthWS = function SynthWS(url) {
+    this.url = url
+    this.readyState = 1
+    this.on = (evt, fn) => { handlers[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWS, connectTimeout: 0 })
+  const discPromise = new Promise(resolve => client.once('disconnected', resolve))
+
+  client.connect('wss://close-test2.example/')
+
+  if (handlers.close) {
+    handlers.close()
+  }
+
+  const disc = await discPromise
+  assert.equal(disc.reason, 'closed', 'reason is closed even with no args')
+})

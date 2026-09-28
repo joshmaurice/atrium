@@ -408,9 +408,14 @@ export class AtriumClient extends EventEmitter {
         case 'leave':      this._onLeave(msg, record);             break
         case 'tick':       /* ignored */                            break
         case 'pong':       /* ignored */                            break
-        case 'error':
-          this.emit('error', new Error(`${msg.code}: ${msg.message ?? ''}`))
+        case 'error': {
+          const err = new Error(`${msg.code}: ${msg.message ?? ''}`)
+          err.sessionId = sessionId
+          err.url = wsUrl
+          err.code = msg.code
+          this.emit('error', err)
           break
+        }
       }
     }
 
@@ -421,12 +426,21 @@ export class AtriumClient extends EventEmitter {
       this._connected = false
       this._wsUrl = null
       this._ws = null
-      this.emit('disconnected', { sessionId, url: wsUrl, reason: reason ? String(reason) : undefined })
+      this.emit('disconnected', {
+        sessionId,
+        url: wsUrl,
+        reason: 'closed',
+        code: typeof code === 'number' ? code : undefined,
+        closeReason: reason || undefined,
+      })
     }
 
     const onError = (evt) => {
       if (record.stale || record.closing) return
-      this.emit('error', evt instanceof Error ? evt : new Error(String(evt)))
+      const err = evt instanceof Error ? evt : new Error(`WebSocket error connecting to ${wsUrl}`)
+      err.sessionId = sessionId
+      err.url = wsUrl
+      this.emit('error', err)
     }
 
     // Prefer EventEmitter API (ws package in Node.js); fall back to EventTarget (browser)
