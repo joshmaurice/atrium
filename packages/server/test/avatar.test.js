@@ -242,7 +242,7 @@ test('F6: set extras.displayName blocked even when world owner is connected (gua
   const sessions = new Map()
   const presence = { add: () => {}, remove: () => null, list: () => [], setPosition: () => {} }
 
-  attachSessionHandlers({
+  const closeKeepalive = attachSessionHandlers({
     wss: ownerWss,
     world: w,
     sessions,
@@ -289,7 +289,15 @@ test('F6: set extras.displayName blocked even when world owner is connected (gua
     ws.close()
     await waitForClose(ws)
   } finally {
+    // attachSessionHandlers starts a keepalive interval; without clearing it
+    // the test process never exits (the deploy runs this file without
+    // --test-force-exit).
+    closeKeepalive()
+    for (const [, s] of sessions) {
+      s.ws.terminate()
+      s.tickStop?.()
+    }
     ownerWss.close()
-    ownerHttp.close()
+    await new Promise((r) => ownerHttp.close(r))
   }
 })
