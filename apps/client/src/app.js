@@ -650,28 +650,53 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
       return
     }
 
+    let settled = false
+
     const onReady = (data) => {
-      client.off('error', onErr)
-      client.off('disconnected', onDisco)
-      resolve(data)
+      if (data.sessionId !== sid) return
+      cleanup()
+      settle(true, data)
     }
     const onErr = (err) => {
-      client.off('session:ready', onReady)
-      client.off('disconnected', onDisco)
-      if (typeof onError === 'function') onError(err.message || 'Connection failed')
-      reject(err)
+      if (err.sessionId !== sid) return
+      cleanup()
+      settle(false, err)
     }
     const onDisco = (d) => {
+      if (d.sessionId !== sid) return
+      cleanup()
+      settle(false, new Error(d.reason || 'Disconnected'))
+    }
+    // A connecting event with previousSessionId === sid means superseded
+    const onConnecting = (d) => {
+      if (d.previousSessionId === sid) {
+        cleanup()
+        // Superseded — no error shown, the new connect handles it
+        settle(true, null)
+      }
+    }
+
+    function cleanup() {
+      settled = true
       client.off('session:ready', onReady)
       client.off('error', onErr)
-      // Only reject if we haven't already resolved
-      if (typeof onError === 'function') onError(d.reason || 'Disconnected')
-      reject(new Error(d.reason || 'Disconnected'))
+      client.off('disconnected', onDisco)
+      client.off('connecting', onConnecting)
+    }
+
+    function settle(ok, value) {
+      if (!ok) {
+        if (typeof onError === 'function') onError(value.message || 'Connection failed')
+        reject(value)
+      } else {
+        resolve(value)
+      }
     }
 
     client.once('session:ready', onReady)
     client.on('error', onErr)
     client.on('disconnected', onDisco)
+    client.on('connecting', onConnecting)
   })
 }
 

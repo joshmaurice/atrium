@@ -389,3 +389,77 @@ test('disconnected with no close args still gives reason closed', async () => {
   const disc = await discPromise
   assert.equal(disc.reason, 'closed', 'reason is closed even with no args')
 })
+
+// ---------------------------------------------------------------------------
+// F3: sessionId filtering (used by trackConnect, pre-brief #5)
+// ---------------------------------------------------------------------------
+
+test('session:ready carries sessionId matching the connect call', async () => {
+  const handlers = {}
+  const SynthWS = function SynthWS(url) {
+    this.url = url
+    this.readyState = 1
+    this.on = (evt, fn) => { handlers[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWS, connectTimeout: 0 })
+  const readyPromise = new Promise(resolve => client.once('session:ready', resolve))
+
+  const sid = client.connect('wss://ready-id-test.example/')
+
+  // Trigger open -> hello response
+  if (handlers.open) handlers.open()
+  if (handlers.message) {
+    handlers.message(JSON.stringify({
+      type: 'hello',
+      id: sid,
+      seq: 1,
+      serverTime: Date.now(),
+    }))
+  }
+
+  const ready = await readyPromise
+  assert.equal(ready.sessionId, sid, 'session:ready carries the sessionId')
+})
+
+test('connecting with previousSessionId event (used for superseded detection)', async () => {
+  const handlersA = {}
+  const SynthWSA = function SynthWSA(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => { handlersA[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWSA, connectTimeout: 0 })
+  const connectingEvents = []
+  client.on('connecting', (d) => connectingEvents.push(d))
+
+  const sid1 = client.connect('wss://connect-a.example/')
+  assert.equal(typeof sid1, 'string', 'first connect returns session id')
+
+  // Connect again — this should emit connecting with previousSessionId = sid1
+  const handlersB = {}
+  const SynthWSB = function SynthWSB(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => { handlersB[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+  client._WSImpl = SynthWSB
+
+  const sid2 = client.connect('wss://connect-b.example/')
+  assert.equal(typeof sid2, 'string', 'second connect returns session id')
+
+  // Should have gotten connecting events, second one with previousSessionId
+  const lastConnecting = connectingEvents[connectingEvents.length - 1]
+  assert.ok(lastConnecting, 'connecting event fired')
+  assert.equal(lastConnecting.previousSessionId, sid1, 'connecting has previousSessionId matching first connect')
+})
