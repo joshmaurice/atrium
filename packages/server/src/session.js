@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
-import { resolveWsUserId } from './http-routes.js'
+import { resolveUpgradeUserId } from './http-routes.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -63,9 +63,9 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
       return
     }
 
-    // Cross-origin WebSocket connections are permitted (pre-brief #2).
-    // SameSite=Lax cookies do not ride cross-origin, so cross-origin
-    // visitors arrive anonymous — correct for server-local identity.
+    // Cross-origin WebSocket connections are admitted anonymously (pre-brief #2).
+    // resolveUpgradeUserId returns the cookie's user only when the upgrade
+    // is same-origin. Cross-origin upgrades always arrive anonymous.
     // CSRF protection for HTTP routes remains in http-routes.js.
     // See decision #2 in the cross-server connect brief.
 
@@ -73,7 +73,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     let upgradeUserId = null
     if (db) {
       try {
-        upgradeUserId = resolveWsUserId(request, db)
+        upgradeUserId = resolveUpgradeUserId(request, db)
       } catch {
         // If resolution fails for any reason, treat as anonymous
         upgradeUserId = null

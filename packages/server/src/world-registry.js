@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { isOriginAllowed, resolveWsUserId } from './http-routes.js'
+import { isOriginAllowed, resolveUpgradeUserId } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
 import { createWorld, createWorldFromDocument } from './world.js'
 import { createAutoSaveCoordinator } from './autosave.js'
@@ -162,12 +162,6 @@ export function createWorldRegistry(opts = {}) {
       return
     }
 
-    // Validate Origin header
-    if (!isOriginAllowed(request)) {
-      socket.destroy()
-      return
-    }
-
     // Parse URL path
     let pathname
     try {
@@ -193,7 +187,7 @@ export function createWorldRegistry(opts = {}) {
       // Resolve userId from cookie (for backward compat with existing hello auth)
       let upgradeUserId = null
       if (db) {
-        try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+        try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
       }
       host.handleUpgrade(request, socket, head, upgradeUserId)
       return
@@ -208,7 +202,7 @@ export function createWorldRegistry(opts = {}) {
       }
       let upgradeUserId = null
       if (db) {
-        try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+        try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
       }
       // Admission: check DB visibility to allow public worlds for non-owners.
       // Public worlds reachable via /ws/<id> by anyone; private worlds require
@@ -241,7 +235,7 @@ export function createWorldRegistry(opts = {}) {
       // 1. Resolve user identity from session cookie
       let upgradeUserId = null
       if (db) {
-        try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+        try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
       }
 
       // 2. Admission: anonymous → 404 (no leak)
@@ -360,7 +354,7 @@ export function createWorldRegistry(opts = {}) {
 
       // 3. Admission: visibility + ownership check
       let upgradeUserId = null
-      try { upgradeUserId = resolveWsUserId(request, db) } catch { upgradeUserId = null }
+      try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
 
       if (row.visibility === 'private') {
         // Private world: only the owner may connect via /public/ or /worlds/ path

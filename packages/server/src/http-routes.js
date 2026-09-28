@@ -994,3 +994,91 @@ export function resolveUserIdFromCookie(req, db) {
 
   return row.user_id
 }
+
+/**
+ * Determine whether a WebSocket upgrade request is same-origin.
+ *
+ * A same-origin upgrade means the browser's Origin matches the server's own
+ * origin (scheme + hostname + effective port). Uses strict URL parsing for
+ * comparison, never string splitting — correct for IPv6, default ports, and
+ * case differences.
+ *
+ * The server's scheme comes from X-Forwarded-Proto (first value, trimmed and
+ * lowercased). `http` and `https` are valid; any other value means not
+ * same-origin (fail closed). When X-Forwarded-Proto is absent, assumes http
+ * (Node serves plain HTTP).
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {boolean}
+ */
+export function isSameOriginUpgrade(req) {
+  const origin = req.headers['origin']
+  // No Origin header: treat as same-origin (non-browser clients)
+  if (!origin) return true
+  // Origin: null — sandboxed iframe, file:// page
+  if (origin === 'null') return false
+
+  const host = req.headers['host']
+  if (!host) return false
+
+  let parsedOrigin
+  try {
+    parsedOrigin = new URL(origin)
+  } catch {
+    return false
+  }
+
+  // Scheme: from X-Forwarded-Proto first value, or http
+  const forwardedProto = req.headers['x-forwarded-proto']
+  let scheme
+  if (forwardedProto) {
+    const first = forwardedProto.split(',')[0].trim().toLowerCase()
+    if (first !== 'http' && first !== 'https') return false // fail closed
+    scheme = first
+  } else {
+    scheme = 'http'
+  }
+
+  // Build server origin: scheme://host
+  let serverUrl
+  try {
+    serverUrl = new URL(`${scheme}://${host}`)
+  } catch {
+    return false
+  }
+
+  return parsedOrigin.origin === serverUrl.origin
+}
+
+/**
+ * Resolve userId from the request's auth session cookie, but only when
+ * the WebSocket upgrade is same-origin. Cross-origin upgrades always
+ * return null (anonymous), even when the cookie is valid.
+ *
+ * This implements decision #2 in the cross-server connect brief:
+ * B admits cross-origin browser connections, and they are always
+ * anonymous on B.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {string|null}
+ */
+export function resolveUpgradeUserId(req, db) {
+  if (!isSameOriginUpgrade(req)) return null
+  // Same-origin: resolve from cookie
+  const authSessionId = parseAuthSessionCookie(req)
+  if (!authSessionId) return null
+  const row = db.database.prepare(
+    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
+  ).get(authSessionId)
+  if (!row) return null
+  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+    try {
+      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
+    } catch {
+      // Swallow cleanup errors
+    }
+    return null
+  }
+  return row.user_id
+}
