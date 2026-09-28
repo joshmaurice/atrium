@@ -271,18 +271,13 @@ export function attachSessionHandlers({
 
           let userDisplayName = `User-${sessionId.slice(0, 4)}`
 
-          // Accept optional displayName from client hello (pre-brief #9).
-          // This allows cross-origin visitors to identify themselves; the
-          // server may still override with the authenticated user's name.
-          if (msg.displayName) {
-            userDisplayName = msg.displayName
-          }
+          // The server never adopts a client-sent displayName (pre-brief #9).
+          // The session name is always the DB display_name for an authenticated
+          // session, or User-xxxx for anonymous/cross-origin visitors.
+          // A client-displayed name is a request, never a claim.
 
           // When the user is authenticated, use their real display_name
-          // (from the users table) — this always takes priority over the
-          // client-supplied value, so cross-origin visitors cannot claim
-          // a name that belongs to an authenticated user.
-          // This makes the real name visible to peers and the HUD.
+          // (from the users table).
           if (upgradeUserId && db) {
             try {
               const userRow = db.database.prepare(
