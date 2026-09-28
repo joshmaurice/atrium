@@ -5,7 +5,7 @@
 // Path resolver helpers (module-private)
 // ---------------------------------------------------------------------------
 
-function parsePath(path) {
+export function parsePath(path) {
   const segments = []
   const re = /([^.[]+)|\[(\d+)\]/g
   let match

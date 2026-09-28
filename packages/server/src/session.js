@@ -7,6 +7,7 @@ import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeUserId } from './http-routes.js'
+import { parsePath } from '@atrium/som'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -412,6 +413,31 @@ export function attachSessionHandlers({
             sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
             break
           }
+
+          // --- AVATAR DISPLAYNAME GUARD (pre-brief #9) ---
+          // The server is authoritative over session display names.
+          // Reject set when the target node is a live avatar node and
+          // the field is extras.displayName or extras (replacing whole).
+          // This runs before the mutation gate and applies to everyone,
+          // including the world owner.
+          const isAvatarNode = msg.node && Array.from(sessions.values()).some(
+            s => s.avatarNodeName === msg.node
+          )
+          if (isAvatarNode && msg.field) {
+            let segments
+            try {
+              segments = parsePath(msg.field)
+            } catch {
+              // Unparseable path — let the mutation gate decide
+            }
+            if (segments && segments.length > 0 &&
+                (segments[0] === 'extras') &&
+                (segments.length === 1 || (segments.length >= 2 && segments[1] === 'displayName'))) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Avatar display name is server-assigned and cannot be changed')
+              break
+            }
+          }
+
           // --- MUTATION GATE: only world owner may set fields ---
           if (!isMutator(session, false)) {
             sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate this message')
