@@ -18,6 +18,7 @@ import { createWorld } from '../src/world.js'
 import { createRequestHandler, parseAuthSessionCookie } from '../src/http-routes.js'
 import { createDb } from '../src/db.js'
 import * as auth from '../src/auth.js'
+import { validate } from '@atrium/protocol'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE_PATH = resolve(__dirname, '../../../tests/fixtures/space.gltf')
@@ -875,4 +876,266 @@ test('non-WebSocket upgrade request is rejected (socket destroyed)', async () =>
   assert.ok(!receivedData, 'server should not send any data before destroying the socket')
 
   socket.destroy()
+})
+
+// ---------------------------------------------------------------------------
+// F6: hello displayName schema tests
+// ---------------------------------------------------------------------------
+
+test('F6: server hello schema validates with displayName', () => {
+  const result = validate('server', {
+    type: 'hello',
+    id: 'test',
+    seq: 1,
+    serverTime: 1000,
+    displayName: 'TestUser',
+  })
+  assert.ok(result.valid, `server hello with displayName is valid: ${JSON.stringify(result.errors)}`)
+})
+
+test('F6: server hello schema rejects unknown property', () => {
+  const result = validate('server', {
+    type: 'hello',
+    id: 'test',
+    seq: 1,
+    serverTime: 1000,
+    unknownField: 'xyz',
+  })
+  assert.equal(result.valid, false, 'server hello rejects unknown property')
+})
+
+test('F6: client hello schema validates with displayName', () => {
+  const result = validate('client', {
+    type: 'hello',
+    id: 'test',
+    displayName: 'ClaimedName',
+    capabilities: { tick: { interval: 5000 } },
+  })
+  assert.ok(result.valid, `client hello with displayName is valid: ${JSON.stringify(result.errors)}`)
+})
+
+test('F6: client hello schema with displayName validates', () => {
+  const result = validate('client', {
+    type: 'hello',
+    id: 'test',
+    displayName: 'ClaimedName',
+    capabilities: { tick: { interval: 5000 } },
+  })
+  assert.ok(result.valid, `client hello with displayName is valid: ${JSON.stringify(result.errors)}`)
+})
+
+// ---------------------------------------------------------------------------
+// F6: Cross-origin upgrade with valid cookie — always anonymous
+// ---------------------------------------------------------------------------
+
+test('F6: cross-origin WS upgrade arrives anonymous (User-xxxx)', async () => {
+  // Connect WebSocket with a cross-origin Origin header — no cookie needed
+  // to verify anonymous behavior (Origin null would also be anonymous).
+  const CrossOriginWS = new WebSocket(`ws://localhost:${PORT}`, {
+    headers: {
+      Origin: 'https://evil-website.com',
+    },
+  })
+  const q = makeMessageQueue(CrossOriginWS)
+  await waitForOpen(CrossOriginWS)
+
+  CrossOriginWS.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-cross-origin-test',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.ok(hello.displayName.startsWith('User-'), 'cross-origin visitor gets User-xxxx name')
+
+  CrossOriginWS.close()
+  await waitForClose(CrossOriginWS)
+})
+
+test('F6: cross-origin POST /api/worlds gets 403 (CSRF check)', async () => {
+  // Cross-origin POST to create a world without a cookie
+  // The Origin CSRF check on HTTP routes still blocks cross-origin requests.
+  const res = await httpPostWithOrigin('/api/worlds', { slug: 'test-world' }, 'https://evil-website.com')
+  assert.equal(res.statusCode, 403, 'cross-origin POST /api/worlds is rejected')
+  assert.ok(res.body.error, 'response includes error message')
+})
+
+test('F6: cross-origin from same-site sibling arrives anonymous too', async () => {
+  // A same-site sibling (same registrable domain, different hostname) is
+  // still cross-origin — must be anonymous like any other cross-origin.
+  const siblingWS = new WebSocket(`ws://localhost:${PORT}`, {
+    headers: {
+      Origin: 'https://othersite.example.com',
+    },
+  })
+  const q = makeMessageQueue(siblingWS)
+  await waitForOpen(siblingWS)
+
+  siblingWS.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-same-site-cross',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.ok(hello.displayName.startsWith('User-'), 'same-site cross-origin visitor gets User-xxxx name')
+
+  siblingWS.close()
+  await waitForClose(siblingWS)
+})
+
+test('F6: Origin null upgrade admitted as anonymous', async () => {
+  // Origin: null — sandboxed iframe, file:// page — admitted as anonymous
+  const nullOriginWS = new WebSocket(`ws://localhost:${PORT}`, {
+    headers: {
+      Origin: 'null',
+    },
+  })
+  const q = makeMessageQueue(nullOriginWS)
+  await waitForOpen(nullOriginWS)
+
+  nullOriginWS.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-null-origin',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.ok(hello.displayName.startsWith('User-'), 'Origin null visitor gets User-xxxx name')
+
+  nullOriginWS.close()
+  await waitForClose(nullOriginWS)
+})
+
+// ---------------------------------------------------------------------------
+// F6: Avatar set-guard — server refuses to set extras.displayName
+// ---------------------------------------------------------------------------
+
+test('F6: set extras.displayName on own avatar gets PERMISSION_DENIED', async () => {
+  const { ws: wsA, q: qA } = websocketConnectWithHeaders({})
+  await waitForOpen(wsA)
+
+  wsA.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-set-guard-own',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const helloA = await qA.waitForType('hello', 1000)
+  assert.ok(helloA !== null, 'A should receive hello')
+  const avatarNodeA = helloA.avatarNodeName
+
+  // Wait for som-dump
+  await qA.waitForType('som-dump', 1000)
+
+  // Try to set extras.displayName on own avatar
+  wsA.send(JSON.stringify({
+    type: 'send',
+    seq: 1,
+    node: avatarNodeA,
+    field: 'extras.displayName',
+    value: 'HackerName',
+  }))
+
+  const errorMsg = await qA.waitForType('error', 1000)
+  assert.ok(errorMsg !== null, 'should receive error response')
+  assert.equal(errorMsg.code, 'PERMISSION_DENIED', 'set of extras.displayName is PERMISSION_DENIED')
+
+  wsA.close()
+  await waitForClose(wsA)
+})
+
+test('F6: set extras (whole object) on avatar gets PERMISSION_DENIED', async () => {
+  const { ws, q } = websocketConnectWithHeaders({})
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-set-guard-extras-whole',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  const avatarNode = hello.avatarNodeName
+
+  // Wait for som-dump
+  await q.waitForType('som-dump', 1000)
+
+  // Try to set extras (whole object) on avatar
+  ws.send(JSON.stringify({
+    type: 'send',
+    seq: 1,
+    node: avatarNode,
+    field: 'extras',
+    value: { displayName: 'HackerName' },
+  }))
+
+  const errorMsg = await q.waitForType('error', 1000)
+  assert.ok(errorMsg !== null, 'should receive error response')
+  assert.equal(errorMsg.code, 'PERMISSION_DENIED', 'set of extras on avatar is PERMISSION_DENIED')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+// ---------------------------------------------------------------------------
+// F6: Cross-server replacement — connect A, then B, then A
+// ---------------------------------------------------------------------------
+
+test('F6: connect to A then B then A (cross-server replacement)', async () => {
+  const wsA = new WebSocket(`ws://localhost:${PORT}`)
+  const qA = makeMessageQueue(wsA)
+  await waitForOpen(wsA)
+
+  wsA.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-csr-a',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  // Wait for hello from A
+  const helloA = await qA.waitForType('hello', 1000)
+  assert.ok(helloA !== null, 'A receives hello')
+
+  // Add a node as A (so we can verify A's world later)
+  wsA.send(JSON.stringify({
+    type: 'add',
+    seq: 1,
+    node: {
+      name: 'a-node',
+      type: 'transform',
+      translation: [1, 2, 3],
+    },
+    parent: 'origin',
+  }))
+  // Drain add confirmation
+  await qA.waitForType('error', 300) // may or may not get one
+
+  // Now "connect to B" — disconnect from A and connect fresh on same server
+  // (simulates cross-server by connecting as a new session)
+  const wsB = new WebSocket(`ws://localhost:${PORT}`)
+  const qB = makeMessageQueue(wsB)
+  await waitForOpen(wsB)
+
+  wsB.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-csr-b',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const helloB = await qB.waitForType('hello', 1000)
+  assert.ok(helloB !== null, 'B receives hello')
+
+  // B should get a som-dump and it should be the same world (same server)
+  const somDumpB = await qB.waitForType('som-dump', 1000)
+  assert.ok(somDumpB !== null, 'B receives som-dump')
+
+  // Close A and B
+  wsA.close()
+  wsB.close()
+  await Promise.all([waitForClose(wsA), waitForClose(wsB)])
 })

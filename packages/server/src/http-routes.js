@@ -1065,20 +1065,6 @@ export function isSameOriginUpgrade(req) {
  */
 export function resolveUpgradeUserId(req, db) {
   if (!isSameOriginUpgrade(req)) return null
-  // Same-origin: resolve from cookie
-  const authSessionId = parseAuthSessionCookie(req)
-  if (!authSessionId) return null
-  const row = db.database.prepare(
-    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
-  ).get(authSessionId)
-  if (!row) return null
-  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
-    try {
-      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
-    } catch {
-      // Swallow cleanup errors
-    }
-    return null
-  }
-  return row.user_id
+  // Same-origin: reuse resolveWsUserId for the cookie lookup
+  return resolveWsUserId(req, db)
 }

@@ -6,43 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-
-// Replicate the function here so this test file has no import side effects.
-// The canonical implementation is in http-routes.js.
-function isSameOriginUpgrade(req) {
-  const origin = req.headers['origin']
-  if (!origin) return true
-  if (origin === 'null') return false
-
-  const host = req.headers['host']
-  if (!host) return false
-
-  let parsedOrigin
-  try {
-    parsedOrigin = new URL(origin)
-  } catch {
-    return false
-  }
-
-  const forwardedProto = req.headers['x-forwarded-proto']
-  let scheme
-  if (forwardedProto) {
-    const first = forwardedProto.split(',')[0].trim().toLowerCase()
-    if (first !== 'http' && first !== 'https') return false
-    scheme = first
-  } else {
-    scheme = 'http'
-  }
-
-  let serverUrl
-  try {
-    serverUrl = new URL(`${scheme}://${host}`)
-  } catch {
-    return false
-  }
-
-  return parsedOrigin.origin === serverUrl.origin
-}
+import { isSameOriginUpgrade } from '../src/http-routes.js'
 
 test('same-origin: match via X-Forwarded-Proto', () => {
   const req = {
