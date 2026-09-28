@@ -719,31 +719,11 @@ loadBtn.addEventListener('click', async () => {
 
   // Load works whether or not connected (pre-brief decision).
   try {
-    // Static file load — disabled while connected (pre-brief #15)
-    const lower = url.toLowerCase()
-    const isStaticFile = lower.endsWith('.gltf') || lower.endsWith('.glb') || lower.endsWith('.json')
-    if (!isStaticFile && client.connected) {
-      // WS world URL while connected — connect via resolveWorldAddress
-      showOverlay('Connecting to world…')
-      const worldOrigin = client.wsUrl
-        ? AtriumClient.wsOriginToHttpOrigin(client.wsUrl)
-        : accountWsBase
-      const wsUrl = resolveWorldAddress(url, worldOrigin)
-      if (!wsUrl) {
-        showOverlay('Invalid world address')
-        return
-      }
-      setConnectionState('connecting')
-      const avatarDesc = buildAvatarDescriptor()
-      const displayName = currentUser ? (currentUser.displayName || currentUser.username) : 'User'
-      const connectOpts = { avatar: avatarDesc, displayName }
-      await trackConnect(wsUrl, connectOpts, {
-        onError: (msg) => { showOverlay('Connect failed: ' + msg) },
-      })
-      showOverlay('')
-    } else if (client.connected) {
-      // Static file load while connected — refuse
-      showOverlay('Disconnect to open a local file')
+    // While connected, Load opens no new content — use Connect or Disconnect.
+    if (client.connected) {
+      // #7: no WS world URL while connected branch; Load works only
+      // when disconnected. While connected, use Connect or Disconnect.
+      showOverlay('Disconnect to open a file or connect to a new world')
     } else {
       showOverlay('Loading…')
       if (url.endsWith('.json')) {
