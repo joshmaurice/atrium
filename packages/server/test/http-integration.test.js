@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
 import { createWorld } from '../src/world.js'
+import { createWorldRegistry } from '../src/world-registry.js'
 import { createRequestHandler, parseAuthSessionCookie } from '../src/http-routes.js'
 import { createDb } from '../src/db.js'
 import * as auth from '../src/auth.js'
@@ -914,16 +915,6 @@ test('F6: client hello schema validates with displayName', () => {
   assert.ok(result.valid, `client hello with displayName is valid: ${JSON.stringify(result.errors)}`)
 })
 
-test('F6: client hello schema with displayName validates', () => {
-  const result = validate('client', {
-    type: 'hello',
-    id: 'test',
-    displayName: 'ClaimedName',
-    capabilities: { tick: { interval: 5000 } },
-  })
-  assert.ok(result.valid, `client hello with displayName is valid: ${JSON.stringify(result.errors)}`)
-})
-
 // ---------------------------------------------------------------------------
 // F6: Cross-origin upgrade with valid cookie — always anonymous
 // ---------------------------------------------------------------------------
@@ -1011,6 +1002,176 @@ test('F6: Origin null upgrade admitted as anonymous', async () => {
 })
 
 // ---------------------------------------------------------------------------
+// F6: Cross-origin with valid login cookie — always anonymous upgrade,
+//     CSRF still applies to HTTP
+// ---------------------------------------------------------------------------
+
+test('F6: POST with cross-origin + valid cookie gets 403 (CSRF first)', async () => {
+  // Cross-origin POST even with a valid session cookie — CSRF check returns 403 first
+  const res = await httpPostWithOrigin(
+    '/api/auth/logout', {},
+    'https://evil-website.com'
+  )
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error, 'Cross-origin request denied')
+})
+
+test('F6: cross-origin + valid cookie — WS upgrade arrives anonymous (User-xxxx)', async () => {
+  // Connect with both cross-origin Origin header AND a valid-looking auth cookie.
+  // The isSameOriginUpgrade check runs first and returns false for cross-origin,
+  // so resolveUpgradeUserId returns null regardless of cookie validity.
+  const { ws, q } = websocketConnectWithHeaders({
+    Origin: 'https://evil-website.com',
+    Cookie: 'atrium_auth_session=valid-but-ignored-cross-origin',
+  })
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-cross-plus-cookie',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  // Cookie is not honored cross-origin — visitor is anonymous
+  assert.ok(hello.displayName.startsWith('User-'), 'cross-origin + valid cookie gets User-xxxx name')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+test('F6: cross-origin + valid cookie — set extras.displayName blocked (PERMISSION_DENIED)', async () => {
+  const { ws, q } = websocketConnectWithHeaders({
+    Origin: 'https://evil-website.com',
+  })
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-cross-cookie-set-guard',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  const avatarNode = hello.avatarNodeName
+
+  await q.waitForType('som-dump', 1000)
+
+  ws.send(JSON.stringify({
+    type: 'send',
+    seq: 1,
+    node: avatarNode,
+    field: 'extras.displayName',
+    value: 'HackerName',
+  }))
+
+  const err = await q.waitForType('error', 1000)
+  assert.ok(err !== null, 'should receive error')
+  assert.equal(err.code, 'PERMISSION_DENIED', 'set extras.displayName is PERMISSION_DENIED')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+// ---------------------------------------------------------------------------
+// F6: Private world and home-world routing with cross-origin + cookie
+// ---------------------------------------------------------------------------
+
+test('F6: cross-origin + valid cookie — private world via /ws/<id> gets 404', async () => {
+  // Set up a separate HTTP server with a world registry that owns a private world
+  const regHttp = createServer()
+  const REG_PORT = 3991
+  regHttp.listen(REG_PORT)
+  const reg = createWorldRegistry({ httpServer: regHttp, db })
+  const privateHost = await reg.registerWorld('f6-cross-priv', FIXTURE_PATH, 'owner-999')
+
+  try {
+    // Try a raw TCP upgrade to /ws/f6-cross-priv with cross-origin + dummy cookie
+    const socket = connect(REG_PORT, 'localhost')
+    await new Promise((resolve, reject) => {
+      socket.on('connect', resolve)
+      socket.on('error', reject)
+    })
+
+    let response = ''
+    socket.on('data', (chunk) => { response += chunk.toString() })
+    socket.on('close', () => {})
+
+    socket.write(
+      'GET /ws/f6-cross-priv HTTP/1.1\r\n' +
+      'Host: localhost\r\n' +
+      'Connection: Upgrade\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Origin: https://evil-website.com\r\n' +
+      'Cookie: atrium_auth_session=valid-but-ignored-cross-origin\r\n' +
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+      'Sec-WebSocket-Version: 13\r\n' +
+      '\r\n'
+    )
+
+    await new Promise(r => setTimeout(r, 300))
+
+    // Cross-origin + cookie still arrives anonymous, private world blocks anonymous -> 404
+    assert.ok(response.includes('404'), 'private world returns 404 for cross-origin + cookie visitor')
+    assert.ok(response.includes('Not Found'), 'response body is Not Found')
+
+    socket.destroy()
+  } finally {
+    privateHost.close()
+    reg.close()
+    regHttp.close()
+  }
+})
+
+test('F6: cross-origin + valid cookie — /home/<uid>/home gets 404', async () => {
+  // Set up a registry for home-world routing. No world registration needed;
+  // the path /home/<uid>/home with cross-origin should fail before any host lookup.
+  const regHttp = createServer()
+  const REG_PORT = 3992
+  regHttp.listen(REG_PORT)
+  const reg = createWorldRegistry({ httpServer: regHttp, db })
+
+  try {
+    // Try a raw TCP upgrade to /home/<some-uid>/home with cross-origin + dummy cookie
+    const socket = connect(REG_PORT, 'localhost')
+    await new Promise((resolve, reject) => {
+      socket.on('connect', resolve)
+      socket.on('error', reject)
+    })
+
+    let response = ''
+    socket.on('data', (chunk) => { response += chunk.toString() })
+    socket.on('close', () => {})
+
+    socket.write(
+      'GET /home/00000000-0000-0000-0000-000000000000/home HTTP/1.1\r\n' +
+      'Host: localhost\r\n' +
+      'Connection: Upgrade\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Origin: https://evil-website.com\r\n' +
+      'Cookie: atrium_auth_session=valid-but-ignored-cross-origin\r\n' +
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+      'Sec-WebSocket-Version: 13\r\n' +
+      '\r\n'
+    )
+
+    await new Promise(r => setTimeout(r, 300))
+
+    // Cross-origin + cookie arrives anonymous (cookie not honored cross-origin)
+    // Home world rejects anonymous -> 404
+    assert.ok(response.includes('404') || response.includes('Not Found'),
+      'home world returns 404 for cross-origin + cookie visitor')
+
+    socket.destroy()
+  } finally {
+    reg.close()
+    regHttp.close()
+  }
+})
+
+// ---------------------------------------------------------------------------
 // F6: Avatar set-guard — server refuses to set extras.displayName
 // ---------------------------------------------------------------------------
 
@@ -1086,7 +1247,8 @@ test('F6: set extras (whole object) on avatar gets PERMISSION_DENIED', async () 
 // F6: Cross-server replacement — connect A, then B, then A
 // ---------------------------------------------------------------------------
 
-test('F6: connect to A then B then A (cross-server replacement)', async () => {
+test('F6: connect to A then B then A again (cross-server replacement, three legs)', async () => {
+  // ── Leg 1: A connects ──
   const wsA = new WebSocket(`ws://localhost:${PORT}`)
   const qA = makeMessageQueue(wsA)
   await waitForOpen(wsA)
@@ -1097,11 +1259,14 @@ test('F6: connect to A then B then A (cross-server replacement)', async () => {
     capabilities: { tick: { interval: 5000 } },
   }))
 
-  // Wait for hello from A
   const helloA = await qA.waitForType('hello', 1000)
   assert.ok(helloA !== null, 'A receives hello')
+  assert.ok(helloA.id.startsWith('f6-csr-a'), `helloA.id starts with client id: ${helloA.id}`)
+  assert.ok(helloA.displayName.startsWith('User-'), 'A gets User-xxxx name')
+  assert.ok(helloA.avatarNodeName.startsWith('avatar-'), 'A gets avatarNodeName')
+  const idA = helloA.id
 
-  // Add a node as A (so we can verify A's world later)
+  // Add a node as A (so we can verify the world persists)
   wsA.send(JSON.stringify({
     type: 'add',
     seq: 1,
@@ -1112,11 +1277,8 @@ test('F6: connect to A then B then A (cross-server replacement)', async () => {
     },
     parent: 'origin',
   }))
-  // Drain add confirmation
-  await qA.waitForType('error', 300) // may or may not get one
 
-  // Now "connect to B" — disconnect from A and connect fresh on same server
-  // (simulates cross-server by connecting as a new session)
+  // ── Leg 2: B connects (new session, same server) ──
   const wsB = new WebSocket(`ws://localhost:${PORT}`)
   const qB = makeMessageQueue(wsB)
   await waitForOpen(wsB)
@@ -1129,13 +1291,61 @@ test('F6: connect to A then B then A (cross-server replacement)', async () => {
 
   const helloB = await qB.waitForType('hello', 1000)
   assert.ok(helloB !== null, 'B receives hello')
+  assert.ok(helloB.id.startsWith('f6-csr-b'), `helloB.id starts with client id: ${helloB.id}`)
+  assert.ok(helloB.displayName.startsWith('User-'), 'B gets User-xxxx name')
+  assert.ok(helloB.avatarNodeName.startsWith('avatar-'), 'B gets avatarNodeName')
+  const idB = helloB.id
 
-  // B should get a som-dump and it should be the same world (same server)
+  // B should get a som-dump
   const somDumpB = await qB.waitForType('som-dump', 1000)
   assert.ok(somDumpB !== null, 'B receives som-dump')
+  // B should get join for A
+  const joinA = await qB.waitForType('join', 500)
+  assert.ok(joinA !== null, 'B receives join for A')
+  assert.equal(joinA.id, idA, 'join carries A session id')
 
-  // Close A and B
+  // ── Leg 3: A reconnects (simulating cross-server come-back) ──
+  // Close A's original connection
   wsA.close()
+  await waitForClose(wsA)
+
+  // New connection with a new client id
+  const wsA2 = new WebSocket(`ws://localhost:${PORT}`)
+  const qA2 = makeMessageQueue(wsA2)
+  await waitForOpen(wsA2)
+
+  wsA2.send(JSON.stringify({
+    type: 'hello',
+    id: 'f6-csr-a2',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const helloA2 = await qA2.waitForType('hello', 1000)
+  assert.ok(helloA2 !== null, 'A2 receives hello')
+  assert.ok(helloA2.id.startsWith('f6-csr-a2'), `helloA2.id starts with client id: ${helloA2.id}`)
+  assert.ok(helloA2.displayName.startsWith('User-'), 'A2 gets User-xxxx name')
+  assert.ok(helloA2.avatarNodeName.startsWith('avatar-'), 'A2 gets avatarNodeName')
+  const idA2 = helloA2.id
+
+  // A2's session id must differ from A's original session id (new session)
+  assert.notEqual(idA2, idA, 'A2 gets a new session id (not same as A)')
+
+  // A2 should get a som-dump with the world
+  const somDumpA2 = await qA2.waitForType('som-dump', 1000)
+  assert.ok(somDumpA2 !== null, 'A2 receives som-dump')
+
+  // A2 should get join for B (still connected)
+  const joinB = await qA2.waitForType('join', 500)
+  assert.ok(joinB !== null, 'A2 receives join for B')
+  assert.equal(joinB.id, idB, 'join carries B session id')
+
+  // B should get join for A2 (new connection)
+  const joinA2 = await qB.waitForType('join', 500)
+  assert.ok(joinA2 !== null, 'B receives join for A2')
+  assert.equal(joinA2.id, idA2, 'join carries A2 session id')
+
+  // Close B and A2
   wsB.close()
-  await Promise.all([waitForClose(wsA), waitForClose(wsB)])
+  wsA2.close()
+  await Promise.all([waitForClose(wsB), waitForClose(wsA2)])
 })

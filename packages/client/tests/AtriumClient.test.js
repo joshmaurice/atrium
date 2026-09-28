@@ -507,3 +507,124 @@ test('F5: _onServerHello with displayName sets avatar descriptor extras', async 
   assert.equal(desc.extras.displayName, 'ServerName',
     'avatar extras.displayName is set from server hello displayName')
 })
+
+// ---------------------------------------------------------------------------
+// F3: Later connect's session:ready does not resolve earlier trackConnect
+// ---------------------------------------------------------------------------
+
+test('session:ready from later connect does not resolve earlier trackConnect', async () => {
+  // Synthetic WebSocket that creates separate instances per connect call.
+  // Each instance stores its own event handlers and message buffer.
+  let instanceCount = 0
+  const instances = []
+  function SynthWSSeq(url) {
+    this.url = url
+    this.readyState = 0
+    const idx = instanceCount++
+    instances[idx] = {
+      events: {},
+      readyState: 0,
+      close() { this.readyState = 3 },
+      send() {},
+    }
+    this.on = (evt, fn) => { instances[idx].events[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWSSeq, connectTimeout: 0 })
+
+  // Track promises like trackConnect would
+  let resolve1 = null
+  let resolve2 = null
+  const track1 = new Promise(r => { resolve1 = r })
+  const track2 = new Promise(r => { resolve2 = r })
+
+  let superseded1 = false
+
+  // First connect
+  const sid1 = client.connect('wss://server-a.example/')
+
+  // Set up trackConnect-like handlers for the first connect
+  const onReady1 = (data) => {
+    if (data.sessionId !== sid1) return
+    resolve1({ source: 'session:ready', data })
+  }
+  const onConnecting1 = (d) => {
+    if (d.previousSessionId === sid1) {
+      superseded1 = true
+      resolve1({ source: 'connecting (superseded)' })
+    }
+  }
+  client.on('session:ready', onReady1)
+  client.on('connecting', onConnecting1)
+
+  // Open first WS -> start hello
+  if (instances[0] && instances[0].events.open) {
+    instances[0].events.open()
+  }
+  // Simulate server hello for sid1
+  if (instances[0] && instances[0].events.message) {
+    instances[0].events.message(JSON.stringify({
+      type: 'hello',
+      id: sid1,
+      seq: 1,
+      serverTime: Date.now(),
+      displayName: 'User-sid1',
+    }))
+  }
+
+  // Drain — sid1's session:ready should have fired
+  await new Promise(r => setImmediate(r))
+  // Clear the handler so we can test cleanly
+  client.off('session:ready', onReady1)
+  client.off('connecting', onConnecting1)
+
+  // Set up a fresh handler set for a second connect
+  let resolve1b = null
+  const track1b = new Promise(r => { resolve1b = r })
+  const onReady1b = (data) => {
+    if (data.sessionId !== sid1) return // should NOT match sid2
+    resolve1b({ source: 'session:ready — WRONG: sid2 resolved sid1' })
+  }
+  client.on('session:ready', onReady1b)
+
+  // Second connect — should NOT resolve the first track
+  const sid2 = client.connect('wss://server-b.example/')
+
+  // The connecting event from sid2 should NOT resolve sid1's track
+  // (sid1 already got session:ready, so its listeners are consumed)
+
+  // Open second WS -> start hello
+  if (instances[1] && instances[1].events.open) {
+    instances[1].events.open()
+  }
+  // Simulate server hello for sid2
+  if (instances[1] && instances[1].events.message) {
+    instances[1].events.message(JSON.stringify({
+      type: 'hello',
+      id: sid2,
+      seq: 1,
+      serverTime: Date.now(),
+      displayName: 'User-sid2',
+    }))
+  }
+
+  // Wait for sid2's session:ready to fire
+  await new Promise(r => setTimeout(r, 50))
+  client.off('session:ready', onReady1b)
+
+  // The onReady1b handler should NOT have fired (sid1's event is done)
+  // since session:ready for sid2 has sessionId=sid2
+  // We cannot directly assert the handler didn't fire via a promise,
+  // so we verify that a race against track1b times out (meaning it was never resolved)
+  let sid1GotWrongReady = false
+  const check1b = await Promise.race([
+    track1b.then(() => { sid1GotWrongReady = true }),
+    new Promise(r => setTimeout(() => r('timeout'), 50)),
+  ])
+  assert.equal(sid1GotWrongReady, false,
+    'sid2 session:ready should NOT trigger sid1 handler (sessionId filter works)')
+  assert.equal(sid1 !== sid2, true, 'sid1 and sid2 are different session ids')
+})

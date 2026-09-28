@@ -3,6 +3,8 @@
 
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
 import { createServer } from 'node:http'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
@@ -217,4 +219,77 @@ test('view with optional fields (look, move, velocity) are relayed to other clie
   wsB.close()
   await Promise.all([waitForClose(wsA), waitForClose(wsB)])
   await drainServer()
+})
+
+// ---------------------------------------------------------------------------
+// F6: Avatar set-guard with mutationPolicy='owner' — guard fires before gate
+// ---------------------------------------------------------------------------
+
+test('F6: set extras.displayName blocked even when world owner is connected (guard fires before gate)', async () => {
+  const { WebSocketServer } = await import('ws')
+  const { createWorld } = await import('../src/world.js')
+  const { attachSessionHandlers } = await import('../src/session.js')
+
+  const __dirname = dirname(fileURLToPath(import.meta.url))
+  const FIXTURE_PATH = resolve(__dirname, '../../../tests/fixtures/space.gltf')
+
+  const w = await createWorld(FIXTURE_PATH)
+  const ownerHttp = createServer()
+  const AVATAR_PORT = 3019
+  ownerHttp.listen(AVATAR_PORT)
+
+  const ownerWss = new WebSocketServer({ noServer: true })
+  const sessions = new Map()
+  const presence = { add: () => {}, remove: () => null, list: () => [], setPosition: () => {} }
+
+  attachSessionHandlers({
+    wss: ownerWss,
+    world: w,
+    sessions,
+    presence,
+    worldOwnerUserId: 'owner-001',
+  })
+
+  ownerHttp.on('upgrade', (req, socket, head) => {
+    ownerWss.handleUpgrade(req, socket, head, (ws) => {
+      // Pass 'owner-001' as the upgradeUserId — session is the world owner
+      ownerWss.emit('connection', ws, req, 'owner-001')
+    })
+  })
+
+  try {
+    const ws = new WebSocket(`ws://localhost:${AVATAR_PORT}`)
+    const q = makeMessageQueue(ws)
+    await waitForOpen(ws)
+
+    ws.send(JSON.stringify({
+      type: 'hello',
+      id: 'f6-owner-set-guard',
+      capabilities: { tick: { interval: 5000 } },
+    }))
+
+    const hello = await q.waitForType('hello', 1000)
+    assert.ok(hello !== null, 'should receive hello')
+    const avatarNode = hello.avatarNodeName
+
+    // World owner tries to set extras.displayName on own avatar
+    ws.send(JSON.stringify({
+      type: 'send',
+      seq: 1,
+      node: avatarNode,
+      field: 'extras.displayName',
+      value: 'OwnerHack',
+    }))
+
+    // Guard fires before mutation gate — even the owner is blocked
+    const err = await q.waitForType('error', 1000)
+    assert.ok(err !== null, 'should receive error')
+    assert.equal(err.code, 'PERMISSION_DENIED', 'owner gets PERMISSION_DENIED for extras.displayName set')
+
+    ws.close()
+    await waitForClose(ws)
+  } finally {
+    ownerWss.close()
+    ownerHttp.close()
+  }
 })
