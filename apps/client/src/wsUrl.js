@@ -128,3 +128,37 @@ export function resolveWorldAddress(str, origin) {
     return null
   }
 }
+
+/**
+ * Determine whether the File box URL's HTTP origin should be used as the
+ * worldBaseUrl for a WebSocket connection (pre-brief #1).
+ *
+ * The File box base only applies when the File box URL's HTTP origin
+ * matches the connect URL's HTTP origin. Otherwise the base is derived
+ * from the connect URL itself. One narrow exception: when both hostnames
+ * are loopback (localhost, 127.x.x.x, [::1]), the ports may differ.
+ *
+ * @param {string|null} fileUrl  — File box URL (may be empty)
+ * @param {string} connectUrl    — WebSocket URL being connected to
+ * @returns {boolean} — true if the File box base should be passed
+ */
+export function shouldUseFileBase(fileUrl, connectUrl) {
+  if (!fileUrl) return false
+  const fileHttp = AtriumClient.wsOriginToHttpOrigin(fileUrl) || fileUrl
+  const connHttp = AtriumClient.wsOriginToHttpOrigin(connectUrl)
+  if (!connHttp) return false
+  try {
+    const fileOrigin = new URL(fileHttp)
+    const connOrigin = new URL(connHttp)
+    if (fileOrigin.origin === connOrigin.origin) return true
+    // Loopback exception: both hostnames are loopback
+    const isLoopback = (h) => h === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(h) || h === '::1'
+    if (isLoopback(fileOrigin.hostname) && isLoopback(connOrigin.hostname) &&
+        fileOrigin.protocol === connOrigin.protocol) {
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}

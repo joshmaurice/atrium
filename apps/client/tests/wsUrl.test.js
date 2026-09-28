@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress } from '../src/wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase } from '../src/wsUrl.js'
 
 describe('computeWsUrl', () => {
 
@@ -195,5 +195,52 @@ describe('resolveWorldAddress', () => {
       resolveWorldAddress('ws://[invalid', 'ws://current-server.com'),
       null
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// shouldUseFileBase (pre-brief #1)
+// ---------------------------------------------------------------------------
+
+describe('shouldUseFileBase', () => {
+
+  test('same HTTP origin → use file base', () => {
+    assert.equal(shouldUseFileBase('https://example.com/file.gltf', 'wss://example.com/world'), true)
+  })
+
+  test('different hostname → derive, not file base', () => {
+    assert.equal(shouldUseFileBase('https://a.example/file.gltf', 'wss://b.example/world'), false)
+  })
+
+  test('scheme mismatch → derive', () => {
+    assert.equal(shouldUseFileBase('https://example.com/file.gltf', 'ws://example.com/world'), false)
+  })
+
+  test('port mismatch on same host → derive', () => {
+    assert.equal(shouldUseFileBase('https://example.com:3000/file.gltf', 'wss://example.com:3100/world'), false)
+  })
+
+  test('loopback same scheme different port → use file base', () => {
+    assert.equal(shouldUseFileBase('http://localhost:8080/file.gltf', 'ws://localhost:3000/world'), true)
+  })
+
+  test('loopback scheme mismatch → derive', () => {
+    assert.equal(shouldUseFileBase('https://localhost:8443/file.gltf', 'ws://localhost:3000/world'), false)
+  })
+
+  test('127.0.0.1 loopback → use file base (different ports)', () => {
+    assert.equal(shouldUseFileBase('http://127.0.0.1:8080/file.gltf', 'ws://127.0.0.1:3000/world'), true)
+  })
+
+  test('one side loopback, other not → derive', () => {
+    assert.equal(shouldUseFileBase('http://localhost:8080/file.gltf', 'wss://example.com/world'), false)
+  })
+
+  test('empty file URL → derive', () => {
+    assert.equal(shouldUseFileBase('', 'wss://example.com/world'), false)
+  })
+
+  test('null file URL → derive', () => {
+    assert.equal(shouldUseFileBase(null, 'wss://example.com/world'), false)
   })
 })

@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress } from './wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -16,7 +16,7 @@ const wsUrlInput    = document.getElementById('wsUrl')
 wsUrlInput.value    = computeWsUrl(window.location)
 const loadBtn       = document.getElementById('loadBtn')
 // Capture account-server WS base at startup
-let accountWsBase = computeWsUrl(window.location)
+const accountWsBase = computeWsUrl(window.location)
 const connectBtn    = document.getElementById('connectBtn')
 const statusDot     = document.getElementById('statusDot')
 const viewportEl    = document.getElementById('viewport')
@@ -193,19 +193,28 @@ function renderWorldList(worlds) {
         }
         const wsUrl = buildWorldWsUrl(
           accountWsBase || computeWsUrl(window.location),
-          currentUser.username || currentUser.id,
+          currentUser.username,
           w.slug
         )
         if (!wsUrl) {
-          wbError.textContent = 'Invalid world identifier'
+          wbError.textContent = 'Invalid world identifier or missing username'
           refreshWorldList()
           return
         }
         showOverlay('Connecting to world…')
-        client.connect(wsUrl, {
-          avatar: buildAvatarDescriptor(),
-          displayName: currentUser.displayName || currentUser.username,
-        })
+        try {
+          await trackConnect(wsUrl, {
+            avatar: buildAvatarDescriptor(),
+            displayName: currentUser.displayName || currentUser.username,
+          }, {
+            onError: (msg) => { wbError.textContent = 'Load failed: ' + msg },
+          })
+        } catch {
+          refreshWorldList()
+          showOverlay('')
+          itemLoadBtn.disabled = false
+          return
+        }
         showOverlay('')
       } catch (err) {
         wbError.textContent = 'Load failed: ' + err.message
@@ -732,41 +741,44 @@ loadBtn.addEventListener('click', async () => {
   }
 })
 
-// Dev right-click Connect bypasses Load (pre-brief decision: bypasses Load)
+// ---------------------------------------------------------------------------
+// WebSocket connect/Disconnect — uses trackConnect for outcome visibility (#5)
+// ---------------------------------------------------------------------------
+
+function handleConnect() {
+  if (client.connected) {
+    client.disconnect()
+    return
+  }
+  const wsUrl = wsUrlInput.value.trim()
+  if (!wsUrl) return
+  setConnectionState('connecting')
+  const worldUrl = worldUrlInput.value.trim()
+  const connectOpts = { avatar: buildAvatarDescriptor() }
+
+  // Apply File box base only when HTTP origins match (#1)
+  if (worldUrl && shouldUseFileBase(worldUrl, wsUrl)) {
+    connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
+  }
+  if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
+
+  showOverlay('Connecting to world…')
+  trackConnect(wsUrl, connectOpts, {
+    onError: (msg) => { showOverlay('Connect failed: ' + msg) },
+  }).then(() => {
+    showOverlay('')
+  }).catch(() => {
+    // Error already displayed via onError
+  })
+}
+
+// Dev right-click Connect bypasses Load
 connectBtn.addEventListener('contextmenu', (e) => {
   e.preventDefault()
-  if (client.connected) {
-    client.disconnect()
-    return
-  }
-  const wsUrl = wsUrlInput.value.trim()
-  if (!wsUrl) return
-  setConnectionState('connecting')
-  const worldUrl = worldUrlInput.value.trim()
-  const connectOpts = { avatar: buildAvatarDescriptor() }
-  if (worldUrl) {
-    connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
-  }
-  if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
-  client.connect(wsUrl, connectOpts)
+  handleConnect()
 })
 
-connectBtn.addEventListener('click', () => {
-  if (client.connected) {
-    client.disconnect()
-    return
-  }
-  const wsUrl = wsUrlInput.value.trim()
-  if (!wsUrl) return
-  setConnectionState('connecting')
-  const worldUrl = worldUrlInput.value.trim()
-  const connectOpts = { avatar: buildAvatarDescriptor() }
-  if (worldUrl) {
-    connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
-  }
-  if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
-  client.connect(wsUrl, connectOpts)
-})
+connectBtn.addEventListener('click', handleConnect)
 
 // ---------------------------------------------------------------------------
 // Auth UI actions
