@@ -619,6 +619,14 @@ export class AtriumClient extends EventEmitter {
     // authenticated users get their DB display_name.
     if (msg.displayName) {
       this._displayName = msg.displayName
+      // Also update the avatar descriptor so outgoing avatar extras
+      // carry the server-assigned name (pre-brief #9)
+      if (this._avatarDescriptor) {
+        if (!this._avatarDescriptor.extras) {
+          this._avatarDescriptor.extras = {}
+        }
+        this._avatarDescriptor.extras.displayName = msg.displayName
+      }
     }
     this._connected = true
     console.log(`[AtriumClient] Session ${this._sessionId} (${this._displayName})`)

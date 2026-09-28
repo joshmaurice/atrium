@@ -463,3 +463,47 @@ test('connecting with previousSessionId event (used for superseded detection)', 
   assert.ok(lastConnecting, 'connecting event fired')
   assert.equal(lastConnecting.previousSessionId, sid1, 'connecting has previousSessionId matching first connect')
 })
+
+// ---------------------------------------------------------------------------
+// F5: _onServerHello sets _avatarDescriptor.extras.displayName (pre-brief #9)
+// ---------------------------------------------------------------------------
+
+test('F5: _onServerHello with displayName sets avatar descriptor extras', async () => {
+  const handlers = {}
+  const SynthWS = function SynthWS(url) {
+    this.url = url
+    this.readyState = 1
+    this.on = (evt, fn) => { handlers[evt] = fn }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWS, connectTimeout: 0 })
+  const readyPromise = new Promise(resolve => client.once('session:ready', resolve))
+
+  client.connect('wss://f5-displayname-test.example/', {
+    avatar: { name: 'test-avatar', extras: {} },
+  })
+
+  // Trigger open -> hello response with server-assigned displayName
+  if (handlers.open) handlers.open()
+  if (handlers.message) {
+    handlers.message(JSON.stringify({
+      type: 'hello',
+      id: 'f5-test',
+      seq: 1,
+      serverTime: Date.now(),
+      displayName: 'ServerName',
+    }))
+  }
+
+  await readyPromise
+
+  // After session:ready, _avatarDescriptor should carry the server name
+  const desc = client._avatarDescriptor
+  assert.ok(desc, 'avatar descriptor exists')
+  assert.ok(desc.extras, 'avatar extras exist')
+  assert.equal(desc.extras.displayName, 'ServerName',
+    'avatar extras.displayName is set from server hello displayName')
+})
