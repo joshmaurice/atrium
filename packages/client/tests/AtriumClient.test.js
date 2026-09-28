@@ -175,35 +175,52 @@ test('wsOriginToHttpOrigin: unparseable → null', () => {
 // Connect timeout (pre-brief #4)
 // ---------------------------------------------------------------------------
 
-test('connect timeout: fires error then disconnected with reason timeout', async () => {
-  // Synthetic WebSocket that never opens — triggers timeout
+test('connect timeout: fires error then disconnected with reason timeout (pinned #4 order)', async () => {
+  // Synthetic WebSocket that never opens — triggers timeout.
+  // Once close() is called while CONNECTING, the socket later fires
+  // its own error and close events (as a browser's WebSocket does).
+  // Those must NOT produce additional events.
   let closeCalled = false
-  const SynthNoopWS = function SynthNoopWS(url) {
+  let closeCallback = null
+  let errorCallback = null
+  const SynthBrowserWS = function SynthBrowserWS(url) {
     this.url = url
-    this.readyState = 0
-    this.on = () => {}  // EventEmitter-style API
-    this.addEventListener = () => {}  // EventTarget fallback
-    this.close = () => { closeCalled = true; this.readyState = 3 }
+    this.readyState = 0  // CONNECTING
+    this.on = (evt, fn) => {
+      if (evt === 'close') closeCallback = fn
+      if (evt === 'error') errorCallback = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => {
+      closeCalled = true
+      this.readyState = 3  // CLOSED
+      // Browser-style: fire error then close after close() on CONNECTING
+      if (errorCallback) setTimeout(errorCallback, 5)
+      if (closeCallback) setTimeout(closeCallback, 10)
+    }
     this.send = () => {}
   }
 
-  const client = new AtriumClient({ WebSocket: SynthNoopWS, connectTimeout: 50 })
+  const client = new AtriumClient({ WebSocket: SynthBrowserWS, connectTimeout: 50 })
 
   const events = []
-  client.on('error', (err) => events.push({ type: 'error', message: err.message }))
-  client.on('disconnected', (d) => events.push({ type: 'disconnected', reason: d.reason }))
+  client.on('error', (err) => events.push({ type: 'error', message: err.message, sessionId: err.sessionId }))
+  client.on('disconnected', (d) => events.push({ type: 'disconnected', reason: d.reason, sessionId: d.sessionId }))
 
-  client.connect('ws://nowhere.example/')
+  const sid = client.connect('ws://nowhere.example/')
 
-  // Wait for timeout to fire
-  await new Promise(r => setTimeout(r, 100))
+  // Wait for timeout to fire and any browser-style late events
+  await new Promise(r => setTimeout(r, 200))
 
-  assert.equal(events.length, 2, 'error then disconnected')
+  assert.equal(events.length, 2, 'exactly 2 events: error then disconnected')
   assert.equal(events[0].type, 'error', 'first event is error')
-  assert.ok(events[0].message.includes('timeout'), 'error mentions timeout')
+  assert.ok(events[0].message.includes('nowhere.example'), 'error mentions target host')
+  assert.equal(events[0].sessionId, sid, 'error has sessionId')
   assert.equal(events[1].type, 'disconnected', 'second event is disconnected')
   assert.equal(events[1].reason, 'timeout', 'disconnected reason is timeout')
+  assert.equal(events[1].sessionId, sid, 'disconnected has sessionId')
   assert.equal(client.connected, false, 'client not connected after timeout')
+  assert.ok(closeCalled, 'ws.close() was called')
 })
 
 test('connect timeout: timeout=0 disables timeout', async () => {

@@ -460,18 +460,26 @@ export class AtriumClient extends EventEmitter {
     if (this._connectTimeout > 0) {
       record.connectTimeout = setTimeout(() => {
         if (record.stale || record.closing) return
-        // Order: error first, then disconnected with reason 'timeout'
-        const err = new Error(`Connection timeout after ${this._connectTimeout}ms`)
-        err.sessionId = sessionId
-        err.url = wsUrl
-        this.emit('error', err)
-        // Clear record state
+        // Follow #4's pinned order exactly:
+        // 1) Clear the timer
+        clearTimeout(record.connectTimeout)
+        record.connectTimeout = undefined
+        // 2) Mark stale + closing so no late events from this record
+        record.stale = true
+        record.closing = true
+        // 3) Clear current-connection state
         this._connectionRecord = null
         this._connected = false
         this._wsUrl = null
-        this.emit('disconnected', { sessionId, url: wsUrl, reason: 'timeout' })
-        // Close the socket so server-side cleanup happens
+        // 4) Close the socket (which may fire error/close later)
         try { ws.close() } catch { /* ignore */ }
+        // 5) Emit error first, naming the target host
+        const err = new Error(`Connection timed out connecting to ${wsUrl}`)
+        err.sessionId = sessionId
+        err.url = wsUrl
+        this.emit('error', err)
+        // 6) Then emit disconnected with reason 'timeout'
+        this.emit('disconnected', { sessionId, url: wsUrl, reason: 'timeout' })
       }, this._connectTimeout)
     }
 
