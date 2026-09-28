@@ -694,6 +694,60 @@ test('WebSocket upgrade with expired/garbage cookie resolves to anonymous', asyn
 })
 
 // ---------------------------------------------------------------------------
+// F1: Server displayName — server is authoritative over session names
+// ---------------------------------------------------------------------------
+
+test('F1: anonymous hello claiming a name gets User-xxxx in hello response', async () => {
+  const { ws, q } = websocketConnectWithHeaders({})
+  await waitForOpen(ws)
+
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'f1-name-claim-test',
+    displayName: 'josh',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.ok(hello.displayName.startsWith('User-'), 'anonymous gets User-xxxx name, not claimed name')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+test('F1: authenticated session gets DB display_name regardless of client hello displayName', async () => {
+  // Login to get a valid session cookie
+  const loginRes = await httpPost('/api/auth/login', {
+    username: 'alice',
+    password: 'correct horse battery staple',
+  })
+  assert.equal(loginRes.statusCode, 200)
+
+  const cookieStr = Array.isArray(loginRes.headers['set-cookie'])
+    ? loginRes.headers['set-cookie'].join('; ')
+    : loginRes.headers['set-cookie']
+
+  const { ws, q } = websocketConnectWithHeaders({ Cookie: cookieStr })
+  await waitForOpen(ws)
+
+  // Send hello with a fake displayName — server should ignore it
+  ws.send(JSON.stringify({
+    type: 'hello',
+    id: 'f1-auth-name-test',
+    displayName: 'Impostor',
+    capabilities: { tick: { interval: 5000 } },
+  }))
+
+  const hello = await q.waitForType('hello', 1000)
+  assert.ok(hello !== null, 'should receive hello')
+  assert.equal(hello.displayName, 'alice', 'authenticated user gets DB display_name, not client-sent name')
+
+  ws.close()
+  await waitForClose(ws)
+})
+
+// ---------------------------------------------------------------------------
 // WebSocket integration tests
 // ---------------------------------------------------------------------------
 
