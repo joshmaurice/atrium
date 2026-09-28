@@ -1,6 +1,17 @@
 # Addendum: Phase 2 — Home Worlds, Auto-Save, and the Commons
 
-Status: Final — ready for implementation.
+Status: Final — ready for implementation, **including §7 (Step 6,
+cross-server world loading).** Its design was confirmed on 2026-09-28,
+and the authoritative decisions are in
+`devtasks/PREBRIEF-cross-server-connect.md` (§3, decisions 1–12). §7
+below is an interim summary. The Step 6 work replaces it with the full
+section, and writes §8's remaining destination rules, as part of its doc
+commit.
+
+Renumbered 2026-09-28: cross-server world loading was inserted as Step 6
+(§7), and teleporter placement moved from Step 6 (§7) to Step 7 (§8).
+Older devtasks files (passdowns, briefs) that say "Step 6" for
+teleporters refer to the old numbering.
 
 This addendum resolves the architectural and product decisions Phase 2 of
 `DESIGN-user-accounts.md` left open. It exists so that implementation work
@@ -76,7 +87,7 @@ moment worlds are personally owned.
   persisted to the canonical document), and the ability to trigger
   teleporters. Teleporter triggering causes **no server-side mutation** —
   it's the visiting client's own decision to navigate, so it needs no
-  authorization at all (§7).
+  authorization at all (§8).
 - **Explicitly out of scope for Phase 2:** any visitor-triggered action
   that *does* cause a real, server-synced change (buttons, toggles, doors,
   anything beyond navigation). That is general interactivity/scripting
@@ -119,10 +130,10 @@ Three distinct mechanisms, each solving a different failure mode:
 
 **Important dependency:** because mutation rights are owner-only (§2) and
 avatar movement is never persisted, the *only* thing that can ever produce
-a saveable change is the owner's own edits. Without §7 (teleporter
+a saveable change is the owner's own edits. Without §8 (teleporter
 placement), there is no owner-facing editing feature in the product at all
 — the auto-save mechanism can be built and correctness-tested via the
-existing automated test suite or via `tools/som-inspector` before §7 lands,
+existing automated test suite or via `tools/som-inspector` before §8 lands,
 but it will not do anything meaningful for a real user until it does.
 
 ## 5. Visibility and public sharing (Step 4)
@@ -135,7 +146,10 @@ specifically to defer this decision.
 - Relax or replace that constraint to also allow `'public'`.
 - Add an owner-facing way to toggle it (extending the existing world-update
   endpoint is the natural fit).
-- **Public worlds are reachable at `/public/<user>/<slug>`.**
+- **Public worlds are reachable at `/public/<user>/<slug>`.** Since the
+  worldload work (2026-09-27), `/worlds/<user>/<slug>` is the canonical
+  address, and `/public/` is still accepted as an alias. Both follow the
+  same visibility and ownership rules.
 - Connection-time routing (§1) must check visibility + ownership before
   admitting a non-owner session: private worlds admit only their owner;
   public worlds admit anyone.
@@ -167,7 +181,33 @@ current architecture.)
 - **Routing:** resolves to the bare root path, using the same
   already-existing path-threading and routing seam described in §1.
 
-## 7. Teleporter placement (Step 6)
+## 7. Cross-server world loading (Step 6)
+
+**Design confirmed 2026-09-28; ready for implementation.** The
+authoritative decisions are in `devtasks/PREBRIEF-cross-server-connect.md`
+§3, with background in
+`devtasks/Atrium-Passdown-2026-09-24-cross-server-findings.md`. This is an
+interim summary. The Step 6 work replaces it with the full section. Key
+points:
+
+- **Same-page cross-connect** (decided 2026-09-24). A client moves to a
+  world hosted on another Atrium server by reconnecting its live
+  connection in place, from the page it's already on. It doesn't navigate
+  the browser to the other server's page.
+- **`/` is a working WebSocket endpoint on every server:** it's that
+  server's commons (§6). This is a **deployment requirement**: any Atrium
+  server behind a reverse proxy must pass WebSocket upgrades at `/`
+  through to Node, not redirect them.
+  - Our Caddy config meets this since 2026-09-28. Its redirect of `/` to
+    `/apps/client/` excludes WebSocket upgrades.
+- **Invariants** (from the 2026-09-24 findings):
+  - `/` means "the commons of the server this connection targets". It's
+    never a fixed URL, id or slug held in shared or client code.
+  - User ids, usernames, ownership and host keys mean something only
+    within one server.
+  - No server bakes its own absolute URLs into seeded or saved documents.
+
+## 8. Teleporter placement (Step 7)
 
 The one owner-facing editing feature in Phase 2, and deliberately the
 *only* one. This is scoped narrowly on purpose: it is not a general
@@ -180,14 +220,39 @@ separate, well-motivated feature — don't build it speculatively here.
   visual (a ring or pad is enough), flowing through the same
   now-owner-gated pipeline as any other edit.
 - **Destination:** a dropdown of the owner's own other worlds (the existing
-  worlds-list endpoint already supports this) plus a free-text field for
-  pasting a full path, to cover linking to someone else's public world or
-  the commons. No public-worlds directory/browse feature is being built for
-  this — that's separate, larger, unbuilt scope. Destination sharing works
-  the same way any URL sharing does elsewhere.
+  worlds-list endpoint already supports this) plus a free-text field.
+  - **The dropdown saves a server-relative path,** such as
+    `/worlds/<user>/<slug>`, never an absolute URL of this server. That
+    follows the §7 invariant that no server bakes its own absolute URLs
+    into saved documents, and it keeps the teleporter valid if the world is
+    served under another hostname.
+  - **The free-text field** accepts either a server-relative path (someone
+    else's public world on this server, or `/` for the commons), or a full
+    URL of a world on **another server** (§7).
+  - **Decided in the Step 6 design, and written here by the Step 6 work:**
+    exactly which URL forms are accepted, and how a server-relative path
+    resolves when a visitor came from another server's page (pre-brief
+    #8).
+  - No public-worlds directory/browse feature is being built for this —
+    that's separate, larger, unbuilt scope. Destination sharing works the
+    same way any URL sharing does elsewhere.
 - **Trigger:** pure client-side proximity detection. When any avatar gets
-  close, that client navigates. No new protocol message and no server
+  close, that client moves to the destination by **reconnecting in place**
+  (§7), not by loading a new page. No new protocol message and no server
   round-trip — the teleporter's position already syncs the normal way.
+- **Open, decide before Step 7: should a cross-server teleporter trigger
+  automatically?** Proximity triggering means a visitor who walks onto a
+  pad is connected to whatever server the world owner chose, without
+  deciding to go there.
+  - That reveals their IP address, and the fact that their page came from
+    this server, to the destination server.
+  - It also reveals whatever name their client sends. The confirmed Step 6
+    design has Atrium servers replace that name with their own, but a
+    server not running Atrium's code need not.
+  - A link reveals similar things, but clicking a link is a deliberate
+    choice, and walking over a pad often isn't.
+  - **Suggested:** same-server destinations trigger automatically, and
+    other-server destinations ask first ("This leads to b.example. Go?").
 - Support deleting a placed teleporter. Skip in-place repositioning for v1;
   delete-and-replace covers the same need with less to build.
 - No upfront destination validation. If a pasted destination is wrong,
@@ -204,7 +269,8 @@ Land in this order — each step depends on the ones before it:
 3. **Auto-save** (§4) — debounce, disconnect-flush, periodic safety net.
 4. **Visibility toggle + public routing** (§5).
 5. **The commons** (§6) — seed, lifecycle exception, root-path routing.
-6. **Teleporter placement** (§7).
+6. **Cross-server world loading** (§7).
+7. **Teleporter placement** (§8).
 
 ## Explicitly out of scope for Phase 2
 
@@ -215,6 +281,6 @@ Naming these so they're recognized as deliberate exclusions, not gaps:
   `ATRIUM_user_object` extension work in Phase 3.
 - A general admin/privilege system — the commons doesn't need one (§6).
 - A public-worlds directory or browse/search feature — teleporter
-  destinations are shared as plain links for now (§7).
+  destinations are shared as plain links for now (§8).
 - General object placement beyond teleporters — a separate feature to
   scope later if wanted, not part of this phase.
