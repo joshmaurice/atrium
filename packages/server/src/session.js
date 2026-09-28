@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
-import { isOriginAllowed, resolveWsUserId } from './http-routes.js'
+import { resolveWsUserId } from './http-routes.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -63,11 +63,11 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
       return
     }
 
-    // Validate Origin header to prevent cross-origin WebSocket hijacking
-    if (!isOriginAllowed(request)) {
-      socket.destroy()
-      return
-    }
+    // Cross-origin WebSocket connections are permitted (pre-brief #2).
+    // SameSite=Lax cookies do not ride cross-origin, so cross-origin
+    // visitors arrive anonymous — correct for server-local identity.
+    // CSRF protection for HTTP routes remains in http-routes.js.
+    // See decision #2 in the cross-server connect brief.
 
     // Resolve userId from auth session cookie before the WebSocket handshake.
     let upgradeUserId = null

@@ -583,7 +583,7 @@ test('GET /api/health is exempt from origin validation', async () => {
   assert.deepEqual(res.body, { status: 'ok' })
 })
 
-test('WebSocket upgrade with cross-origin header is rejected (socket destroyed)', async () => {
+test('WebSocket upgrade with cross-origin header is now permitted (pre-brief #2)', async () => {
   const socket = connect(PORT, 'localhost')
 
   let receivedData = false
@@ -598,6 +598,9 @@ test('WebSocket upgrade with cross-origin header is rejected (socket destroyed)'
   })
 
   // Send a WebSocket upgrade request with a cross-origin Origin header
+  // Cross-origin WS upgrades are now permitted (pre-brief #2).
+  // SameSite=Lax cookies don't ride cross-origin, so the visitor arrives
+  // anonymous — correct behavior for server-local identity.
   socket.write(
     'GET / HTTP/1.1\r\n' +
     'Host: localhost\r\n' +
@@ -611,8 +614,10 @@ test('WebSocket upgrade with cross-origin header is rejected (socket destroyed)'
 
   await new Promise(r => setTimeout(r, 300))
 
-  assert.ok(closed, 'cross-origin WS upgrade should be destroyed')
-  assert.ok(!receivedData, 'no data should be sent to cross-origin upgrade')
+  // Cross-origin WS upgrades are now permitted — socket should NOT be destroyed
+  assert.ok(!closed, 'cross-origin WS upgrade should NOT be destroyed (pre-brief #2)')
+  // The WebSocket handshake response is 101 Switching Protocols
+  assert.ok(receivedData, 'cross-origin WS upgrade should receive a handshake response')
 
   socket.destroy()
 })
