@@ -386,4 +386,6 @@ test('concurrent hellos with delayed serialize — all peers complete bootstrap'
   wsB.close()
   wsC.close()
   await Promise.all([waitForClose(wsA), waitForClose(wsB), waitForClose(wsC)])
+  slowServer.close()
+  raceDb.close()
 })

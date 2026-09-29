@@ -121,7 +121,7 @@ test('non-avatar add blocked for anonymous session (PERMISSION_DENIED)', async (
     setPosition: () => {},
   }
 
-  attachSessionHandlers({
+  const closeKeepalive = attachSessionHandlers({
     wss: ownedWss,
     world: testWorld,
     sessions,
@@ -151,6 +151,7 @@ test('non-avatar add blocked for anonymous session (PERMISSION_DENIED)', async (
     ws.close()
     await waitForClose(ws)
   } finally {
+    closeKeepalive()
     ownerHttp.close()
     ownedWss.close()
   }
@@ -165,7 +166,7 @@ test('avatar add bypasses mutation gate', async () => {
   const sessions = new Map()
   const presence = { add: () => {}, remove: () => {}, list: () => [], setPosition: () => {} }
 
-  attachSessionHandlers({
+  const closeKeepalive = attachSessionHandlers({
     wss,
     world: testWorld,
     sessions,
@@ -202,6 +203,7 @@ test('avatar add bypasses mutation gate', async () => {
     ws.close()
     await waitForClose(ws)
   } finally {
+    closeKeepalive()
     ownerHttp.close()
     wss.close()
   }
