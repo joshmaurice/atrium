@@ -12,6 +12,7 @@
     "worldStartTime": { "type": "integer", "minimum": 0 },
     "avatarNodeName": { "type": "string", "description": "Server-assigned avatar node name for this session" },
     "displayName": { "type": "string", "description": "Server-assigned display name (pre-brief #9)" },
+    "canPlaceTeleporters": { "type": "boolean", "description": "True when this session may place teleporter pads (world owner, policy permits owner mutation)" },
     "capabilities": {
       "type": "object",
       "properties": {
