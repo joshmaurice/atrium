@@ -447,8 +447,26 @@ export function attachSessionHandlers({
 
           // --- DESTINATION LENGTH CAP (T10) ---
           // Enforce 2048-char limit when setting extras.atrium.teleporter.destination
-          if (msg.field === 'extras.atrium.teleporter.destination' &&
-              typeof msg.value === 'string' && msg.value.length > 2048) {
+          // or when setting extras/extras.atrium to an object containing a destination
+          function checkDestinationLength(field, value) {
+            // Direct set on the destination field
+            if (field === 'extras.atrium.teleporter.destination' &&
+                typeof value === 'string' && value.length > 2048) {
+              return true
+            }
+            // Set extras object that contains teleporter.destination
+            if (field === 'extras' && typeof value === 'object' && value !== null) {
+              const dest = value.atrium?.teleporter?.destination
+              if (typeof dest === 'string' && dest.length > 2048) return true
+            }
+            // Set extras.atrium object that contains teleporter.destination
+            if (field === 'extras.atrium' && typeof value === 'object' && value !== null) {
+              const dest = value.teleporter?.destination
+              if (typeof dest === 'string' && dest.length > 2048) return true
+            }
+            return false
+          }
+          if (checkDestinationLength(msg.field, msg.value)) {
             sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
             break
           }

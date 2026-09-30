@@ -19,24 +19,31 @@
  *  Unresolvable → 'invalid destination'
  *
  * @param {string} destination — the teleporter's destination string
- * @param {string|null} currentWorldUrl — WS URL of the current world
+ * @param {string|null} currentWorldUrl — WS URL of the world the player is in
+ * @param {string|null} padServerUrl — WS URL of the server where the teleporter pad
+ *   lives. When provided, the destination is resolved against this URL to determine
+ *   the actual target server. When omitted, falls back to currentWorldUrl.
  * @returns {string}
  */
-export function teleporterLabel(destination, currentWorldUrl) {
+export function teleporterLabel(destination, currentWorldUrl, padServerUrl) {
   if (!destination) return 'invalid destination'
 
   const trimmed = destination.trim()
   if (!trimmed) return 'invalid destination'
 
-  // Resolve the destination if we have a current world URL to resolve against
+  // Use padServerUrl (the teleporter's origin server) if provided, otherwise
+  // fall back to currentWorldUrl for resolving relative destinations.
+  const resolveBase = padServerUrl || currentWorldUrl
+
+  // Resolve the destination to determine the actual target server
   let resolvedUrl = null
   try {
     // Try parsing as a direct WS URL first
     if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) {
       resolvedUrl = new URL(trimmed)
-    } else if (currentWorldUrl) {
-      // Relative path — resolve against current world origin
-      const baseOrigin = new URL(currentWorldUrl).origin
+    } else if (resolveBase) {
+      // Relative path — resolve against the pad's server URL
+      const baseOrigin = new URL(resolveBase).origin
       const wsOrigin = baseOrigin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
       resolvedUrl = new URL(trimmed.startsWith('/') ? trimmed.slice(1) : trimmed, wsOrigin + '/')
     }
@@ -50,7 +57,19 @@ export function teleporterLabel(destination, currentWorldUrl) {
 
   // Check if destination is '/' — the commons
   if (trimmed === '/' || resolvedStr.endsWith('//')) {
-    // Is it the current world's commons or another server's commons?
+    // Determine whether the destination points to the current world's server
+    // or another server's commons.
+    if (currentWorldUrl && padServerUrl) {
+      try {
+        const currentOrigin = new URL(currentWorldUrl).origin
+        const destOrigin = resolvedUrl.origin
+        if (currentOrigin === destOrigin) return 'Commons'
+        return `${resolvedUrl.host} · Commons`
+      } catch {
+        return 'Commons'
+      }
+    }
+    // Without padServerUrl, fall back to simple origin comparison
     if (currentWorldUrl) {
       try {
         const currentOrigin = new URL(currentWorldUrl).origin

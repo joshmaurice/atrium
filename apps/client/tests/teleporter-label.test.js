@@ -15,9 +15,10 @@ describe('teleporterLabel', () => {
   })
 
   test('/ → host · Commons (other server)', () => {
-    assert.equal(teleporterLabel('/', 'wss://other.com'), 'example.com · Commons')
-    // Note: / resolves against current world wsUrl, so with no resolveWorldAddress,
-    // just check it returns something meaningful
+    // When '/' is the destination on a different server, the label should
+    // show 'host · Commons'. The padServerUrl parameter provides the server
+    // where the teleporter lives; currentWorldUrl is the player's current server.
+    assert.equal(teleporterLabel('/', 'wss://player-server.com', 'wss://pad-server.com'), 'pad-server.com · Commons')
   })
 
   test('same-server /worlds/u/s → u / s', () => {
