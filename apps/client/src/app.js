@@ -4,7 +4,7 @@
 import * as THREE from 'three'
 import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
-import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
+import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor, buildTeleporterDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
 import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
