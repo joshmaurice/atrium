@@ -348,6 +348,54 @@ separate, well-motivated feature — don't build it speculatively here.
   private, or gone by the time someone walks through, show §7's failure
   message at that moment (it names the destination host without claiming
   a cause) rather than checking it at save time.
+### What shipped (Step 7, 2026-09-30)
+The implementation described above is complete. Key details per decision:
+- **T0** — Cookie disclosure: the source server's Atrium cookie never reaches
+  another host; the destination server's own cookie may be sent and is ignored
+  for cross-origin connections. Already documented in §7/§8.
+- **T1** — Teleporter representation: `extras.atrium.teleporter.destination`
+  (non-empty string). Visual: flat teal ring, `RingGeometry(0.45, 0.75, 48)`
+  on the xz plane at y=0.02 (2 cm lift baked into geometry). Node name:
+  `teleporter-<uuid>`. No rotation, no scale.
+- **T2** — `hello.server.json` carries optional `canPlaceTeleporters` boolean.
+  Server computes: `userId !== null && userId === worldOwnerUserId && isMutator`.
+  Client exposes it, resets on each `connect()`.
+- **T3** — Server echoes successful non-avatar `add`/`remove` to sender too
+  (broadcast, not broadcastExcept). Avatar adds keep broadcastExcept. Errors
+  carry `seq`. Client `addNode(descriptor)`/`removeNode(name)` refuse until
+  world fully loaded (`_worldReady`), never touch local SOM, return request `seq`.
+- **T4** — Pure proximity trigger module (`teleport-trigger.js`): R=0.75m,
+  H=2.0m. Arming rule: start disarmed, arm on exit, trigger on re-enter. One
+  at a time, nearest pad wins. Inert while not ready, while connecting, while
+  editing, or while teleport in flight. Wired in app.js: pads derived from SOM
+  via `isTeleporter`/`teleporterDestination` on `som:dump`, `som:add`,
+  `som:remove`, `som:set`; `trigger.update()` called after `stage.tick()` in
+  the rAF loop; `setReady(true)` on `avatar:local-ready`, `false` on
+  `connecting`; `setActive(false)` while placement/delete mode is open.
+- **T5** — Placement UI: toolbar "Place Teleporter" button → click-to-place
+  at y=0 (via `projectRayToPlane`) → dropdown of own worlds (from `/api/worlds`)
+  + free-text field + spawn-point warning (via `nearSpawn`). Delete mode:
+  click on pad → confirm → `client.removeNode()`. Both modes exit on Esc.
+- **T7** — App rule: manual Connect and teleporter trigger send `displayName`
+  only when `sameOriginAsAccount(destUrl, accountWsBase)` is true.
+  `AtriumClient` omits `displayName` from `hello` when none provided (key not
+  set, not `null`).
+- **T8** — Teleport failure shows message naming destination host (`new
+  URL(worldUrl).host`) plus "Go back" button. "Go back" re-connects to the
+  previous world; if that also fails, ordinary failure with no second "Go
+  back". `trackConnect` hardened: uses `client.on` not `once`, returns
+  `{status:'ready', data}` or `{status:'superseded'}`. Superseded callers
+  do no UI work.
+- **T13** — Pad labels via `LabelOverlay`: per-label height offset (1.2m),
+  distinct teal border style (`.pad-label` CSS class), text prefixed with `↳`
+  arrow, `textContent` only (no HTML). Derived via `teleporterLabel` helper.
+  Removed on world teardown and rebuilt on SOM changes.
+- **T9** — Server duplicate-name guard (`INVALID_VALUE`), parent-before-ingest
+  (`NODE_NOT_FOUND`), both `addNode` functions.
+- **T10** — Server-side 2048-char length cap on
+  `extras.atrium.teleporter.destination` in `add` and `set` handlers.
+- **T6** — `resolveWorldAddress` fixed: reduces origin to scheme+host before
+  resolution, maps http→ws/https→wss, keeps ports, handles IPv6.
 
 ## Implementation sequencing
 
