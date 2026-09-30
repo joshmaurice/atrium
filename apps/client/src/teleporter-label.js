@@ -15,25 +15,19 @@
  *  '/' → 'Commons'
  *  Same-server '/worlds/u/s' → 'u / s'
  *  Other server's full ws(s) URL → 'host · u / s'
- *  Other server's '/' → 'host · Commons'
+ *  Other server's '/' or root URL → 'host · Commons'
+ *  Same-origin root URL → 'Commons'
  *  Unresolvable → 'invalid destination'
  *
  * @param {string} destination — the teleporter's destination string
  * @param {string|null} currentWorldUrl — WS URL of the world the player is in
- * @param {string|null} padServerUrl — WS URL of the server where the teleporter pad
- *   lives. When provided, the destination is resolved against this URL to determine
- *   the actual target server. When omitted, falls back to currentWorldUrl.
  * @returns {string}
  */
-export function teleporterLabel(destination, currentWorldUrl, padServerUrl) {
+export function teleporterLabel(destination, currentWorldUrl) {
   if (!destination) return 'invalid destination'
 
   const trimmed = destination.trim()
   if (!trimmed) return 'invalid destination'
-
-  // Use padServerUrl (the teleporter's origin server) if provided, otherwise
-  // fall back to currentWorldUrl for resolving relative destinations.
-  const resolveBase = padServerUrl || currentWorldUrl
 
   // Resolve the destination to determine the actual target server
   let resolvedUrl = null
@@ -41,9 +35,9 @@ export function teleporterLabel(destination, currentWorldUrl, padServerUrl) {
     // Try parsing as a direct WS URL first
     if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) {
       resolvedUrl = new URL(trimmed)
-    } else if (resolveBase) {
-      // Relative path — resolve against the pad's server URL
-      const baseOrigin = new URL(resolveBase).origin
+    } else if (currentWorldUrl) {
+      // Relative path — resolve against current world URL
+      const baseOrigin = new URL(currentWorldUrl).origin
       const wsOrigin = baseOrigin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
       resolvedUrl = new URL(trimmed.startsWith('/') ? trimmed.slice(1) : trimmed, wsOrigin + '/')
     }
@@ -53,28 +47,15 @@ export function teleporterLabel(destination, currentWorldUrl, padServerUrl) {
 
   if (!resolvedUrl) return 'invalid destination'
 
-  const resolvedStr = `${resolvedUrl.protocol}//${resolvedUrl.host}${resolvedUrl.pathname.replace(/\/$/, '')}`
+  // Check if the destination is the Commons — '/' literal, or a full URL
+  // whose path is empty or '/' (e.g. 'wss://other.com/' or 'wss://other.com')
+  const isCommons = trimmed === '/' || resolvedUrl.pathname === '/' || resolvedUrl.pathname === ''
 
-  // Check if destination is '/' — the commons
-  if (trimmed === '/' || resolvedStr.endsWith('//')) {
-    // Determine whether the destination points to the current world's server
-    // or another server's commons.
-    if (currentWorldUrl && padServerUrl) {
-      try {
-        const currentOrigin = new URL(currentWorldUrl).origin
-        const destOrigin = resolvedUrl.origin
-        if (currentOrigin === destOrigin) return 'Commons'
-        return `${resolvedUrl.host} · Commons`
-      } catch {
-        return 'Commons'
-      }
-    }
-    // Without padServerUrl, fall back to simple origin comparison
+  if (isCommons) {
     if (currentWorldUrl) {
       try {
         const currentOrigin = new URL(currentWorldUrl).origin
-        const destOrigin = resolvedUrl.origin
-        if (currentOrigin === destOrigin) return 'Commons'
+        if (resolvedUrl.origin === currentOrigin) return 'Commons'
         return `${resolvedUrl.host} · Commons`
       } catch {
         return 'Commons'
