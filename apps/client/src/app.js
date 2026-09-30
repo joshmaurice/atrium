@@ -869,7 +869,10 @@ function handleConnect() {
   if (worldUrl && shouldUseFileBase(worldUrl, wsUrl)) {
     connectOpts.worldBaseUrl = new URL(worldUrl, window.location.href).href
   }
-  if (currentUser) connectOpts.displayName = currentUser.displayName || currentUser.username
+  // T7: only send displayName when the destination is the same origin as the account server
+  if (currentUser && sameOriginAsAccount(wsUrl, accountWsBase)) {
+    connectOpts.displayName = currentUser.displayName || currentUser.username
+  }
 
   showOverlay('Connecting to world…')
   trackConnect(wsUrl, connectOpts, {
