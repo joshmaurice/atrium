@@ -177,6 +177,46 @@ export function resolveWorldAddress(str, origin) {
 }
 
 /**
+ * Validate a teleporter destination string before saving.
+ *
+ * Pure function — accepts only:
+ * - '/' (the Commons)
+ * - '/worlds/<user>/<slug>' (leading slash optional)
+ * - A full ws:// or wss:// URL
+ *
+ * @param {string|null} str — user-entered destination
+ * @returns {boolean} — true if the string is a valid destination format
+ */
+export function isValidDestination(str) {
+  if (!str) return false
+  const trimmed = str.trim()
+  if (!trimmed) return false
+
+  // '/' is valid (the Commons)
+  if (trimmed === '/') return true
+
+  // ws:// or wss:// URL — validate it's parseable
+  if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) {
+    try {
+      new URL(trimmed)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // '/worlds/<user>/<slug>' or 'worlds/<user>/<slug>' (leading slash optional)
+  const path = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed
+  if (path.startsWith('worlds/') && path.length > 8) {
+    const parts = path.split('/')
+    // parts[0] = 'worlds', parts[1] = username, parts[2] = slug
+    return parts.length >= 3 && parts[1].length > 0 && parts[2].length > 0
+  }
+
+  return false
+}
+
+/**
  * Determine whether the File box URL's HTTP origin should be used as the
  * worldBaseUrl for a WebSocket connection (pre-brief #1).
  *

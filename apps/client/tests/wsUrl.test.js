@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase, reduceWsUrlToOrigin, httpOriginToWsOrigin, sameOriginAsAccount } from '../src/wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination, shouldUseFileBase, reduceWsUrlToOrigin, httpOriginToWsOrigin, sameOriginAsAccount } from '../src/wsUrl.js'
 
 describe('computeWsUrl', () => {
 
@@ -331,5 +331,80 @@ describe('sameOriginAsAccount', () => {
 
   test('null worldUrl → false', () => {
     assert.equal(sameOriginAsAccount(null, 'https://example.com'), false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isValidDestination (R4) — teleporter destination validation
+// ---------------------------------------------------------------------------
+
+describe('isValidDestination', () => {
+
+  test('/ → true (Commons)', () => {
+    assert.equal(isValidDestination('/'), true)
+  })
+
+  test('/worlds/user/slug → true', () => {
+    assert.equal(isValidDestination('/worlds/jane/my-world'), true)
+  })
+
+  test('worlds/user/slug (no leading slash) → true', () => {
+    assert.equal(isValidDestination('worlds/jane/my-world'), true)
+  })
+
+  test('full ws:// URL → true', () => {
+    assert.equal(isValidDestination('ws://other-server.com/worlds/jane/home'), true)
+  })
+
+  test('full wss:// URL → true', () => {
+    assert.equal(isValidDestination('wss://example.com:8443/path/to/world'), true)
+  })
+
+  test('http:// URL → false', () => {
+    assert.equal(isValidDestination('http://example.com/world'), false)
+  })
+
+  test('https:// URL → false', () => {
+    assert.equal(isValidDestination('https://example.com'), false)
+  })
+
+  test('"hi" → false', () => {
+    assert.equal(isValidDestination('hi'), false)
+  })
+
+  test('"<3" → false', () => {
+    assert.equal(isValidDestination('<3'), false)
+  })
+
+  test('empty string → false', () => {
+    assert.equal(isValidDestination(''), false)
+  })
+
+  test('whitespace-only → false', () => {
+    assert.equal(isValidDestination('   '), false)
+  })
+
+  test('null → false', () => {
+    assert.equal(isValidDestination(null), false)
+  })
+
+  test('random path without worlds prefix → false', () => {
+    assert.equal(isValidDestination('/some/random/path'), false)
+  })
+
+  test('worlds/ with no slug → false', () => {
+    assert.equal(isValidDestination('/worlds/jane'), false)
+  })
+
+  test('worlds/ with empty username → false', () => {
+    assert.equal(isValidDestination('/worlds//slug'), false)
+  })
+
+  test('unparseable ws:// URL → false', () => {
+    assert.equal(isValidDestination('ws://[invalid'), false)
+  })
+
+  test('single-slash ws:// → true (parseable URL)', () => {
+    assert.equal(isValidDestination('ws://example.com/'), true)
   })
 })
