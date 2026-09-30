@@ -348,11 +348,50 @@ const trigger = createTeleportTrigger({
     showOverlay('Connecting to world…')
     trackConnect(worldUrl, connectOpts, {
       onError: (msg) => {
-        // T8 failure message naming the destination host (added later)
-        showOverlay('Teleport failed: ' + msg)
+        // T8: failure message naming the destination host
+        let host = '(unknown)'
+        try { host = new URL(worldUrl).host } catch { /* fallback */ }
+        showOverlay(`Could not connect to ${host}`)
+        // Add "Go back" button
+        let goBackBtn = document.getElementById('tp-goback-btn')
+        if (!goBackBtn) {
+          goBackBtn = document.createElement('button')
+          goBackBtn.id = 'tp-goback-btn'
+          goBackBtn.textContent = 'Go back'
+          goBackBtn.className = 'text-btn'
+          overlayEl.after(goBackBtn)
+        }
+        goBackBtn.style.display = ''
+        goBackBtn.onclick = () => {
+          goBackBtn.style.display = 'none'
+          goBackBtn.onclick = null
+          if (!prevWorldUrl) {
+            showOverlay('Could not connect')
+            return
+          }
+          showOverlay('Connecting to previous world…')
+          const goBackOpts = { avatar: buildAvatarDescriptor() }
+          if (sameOriginAsAccount(prevWorldUrl, accountWsBase)) {
+            goBackOpts.displayName = client.displayName
+          }
+          trackConnect(prevWorldUrl, goBackOpts, {
+            onError: (msg) => {
+              let host = '(unknown)'
+              try { host = new URL(prevWorldUrl).host } catch { /* fallback */ }
+              // No second "Go back" — show ordinary failure
+              showOverlay(`Could not connect to ${host}`)
+            },
+          }).then((outcome) => {
+            if (outcome.status === 'superseded') return
+            showOverlay('')
+          }).catch(() => {})
+        }
       },
     }).then((outcome) => {
       if (outcome.status === 'superseded') return
+      // Clear any Go back button
+      const gb = document.getElementById('tp-goback-btn')
+      if (gb) gb.style.display = 'none'
       showOverlay('')
     }).catch(() => {
       // Error already displayed via onError
