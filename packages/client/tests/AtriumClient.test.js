@@ -628,3 +628,212 @@ test('session:ready from later connect does not resolve earlier trackConnect', a
     'sid2 session:ready should NOT trigger sid1 handler (sessionId filter works)')
   assert.equal(sid1 !== sid2, true, 'sid1 and sid2 are different session ids')
 })
+
+// ---------------------------------------------------------------------------
+// R4: Stale connect timeout — connect A fails before hello, connect B
+// succeeds; timeout from A must not clobber B.
+// ---------------------------------------------------------------------------
+
+test('R4: stale connect timeout does not clobber new connection (i)', async () => {
+  // Two synthetic WS constructors, each tracking their own handlers.
+  let closeCalledA = false
+  let closeCalledB = false
+  let closeCallbackA = null
+  let closeCallbackB = null
+  let errorCallbackA = null
+  let errorCallbackB = null
+  let openCallbackB = null
+  let messageCallbackB = null
+
+  let wsACalled = false
+  let wsBCalled = false
+
+  function SynthWSA(url) {
+    wsACalled = true
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => {
+      if (evt === 'close') closeCallbackA = fn
+      if (evt === 'error') errorCallbackA = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => {
+      closeCalledA = true
+      this.readyState = 3
+      // Browser-style: fire error then close after close() on CONNECTING
+      if (errorCallbackA) setTimeout(errorCallbackA, 5)
+      if (closeCallbackA) setTimeout(closeCallbackA, 10)
+    }
+    this.send = () => {}
+  }
+
+  function SynthWSB(url) {
+    wsBCalled = true
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => {
+      if (evt === 'close') closeCallbackB = fn
+      if (evt === 'error') errorCallbackB = fn
+      if (evt === 'open') openCallbackB = fn
+      if (evt === 'message') messageCallbackB = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => {
+      closeCalledB = true
+      this.readyState = 3
+    }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWSA, connectTimeout: 200 })
+
+  const events = []
+  client.on('error', (err) => events.push({ type: 'error', message: err.message }))
+  client.on('disconnected', (d) => events.push({ type: 'disconnected', reason: d.reason }))
+
+  // Connect A — socket will close before hello
+  const sidA = client.connect('ws://server-a.example/')
+  assert.ok(sidA, 'sidA returned')
+
+  // Connect A's socket closes (simulating connection refused before hello)
+  if (closeCallbackA) closeCallbackA(1006, 'Connection refused')
+  // Wait for any close-triggered events
+  await new Promise(r => setTimeout(r, 30))
+
+  // Now connect B — switch to a WS that completes hello
+  client._WSImpl = SynthWSB
+  const sidB = client.connect('ws://server-b.example/')
+  assert.ok(sidB, 'sidB returned')
+  assert.notEqual(sidA, sidB, 'sidA !== sidB')
+
+  // Open B's socket and send hello response
+  if (openCallbackB) openCallbackB()
+  if (messageCallbackB) {
+    messageCallbackB(JSON.stringify({
+      type: 'hello',
+      id: sidB,
+      seq: 1,
+      serverTime: Date.now(),
+    }))
+  }
+
+  // Wait for any pending events and past the timeout from A
+  await new Promise(r => setTimeout(r, 300))
+
+  // B should be connected and B's socket should NOT have been closed
+  assert.equal(client.connected, true, 'client is connected after B completes hello')
+  assert.equal(closeCalledB, false, "B's socket was not closed by A's stale timeout")
+})
+
+test('R4: failed connect timer never emits second disconnected (ii)', async () => {
+  let closeCallback = null
+  let errorCallback = null
+  const SynthWS = function SynthWS(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => {
+      if (evt === 'close') closeCallback = fn
+      if (evt === 'error') errorCallback = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => {
+      this.readyState = 3
+      if (errorCallback) setTimeout(errorCallback, 5)
+      if (closeCallback) setTimeout(closeCallback, 10)
+    }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWS, connectTimeout: 100 })
+
+  const events = []
+  client.on('error', (e) => events.push({ type: 'error', message: e.message }))
+  client.on('disconnected', (d) => events.push({ type: 'disconnected', reason: d.reason }))
+
+  // Connect A — it will close before hello
+  const sidA = client.connect('ws://server-a.example/')
+  assert.ok(sidA, 'sidA returned')
+
+  // Socket closes (connection refused)
+  if (closeCallback) closeCallback(1006, 'refused')
+  await new Promise(r => setTimeout(r, 30))
+
+  // Now connect B — switch impl
+  let closeCallbackB = null
+  let errorCallbackB = null
+  client._WSImpl = function SynthWSB(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => {
+      if (evt === 'close') closeCallbackB = fn
+      if (evt === 'error') errorCallbackB = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+  const sidB = client.connect('ws://server-b.example/')
+  assert.ok(sidB, 'sidB returned')
+
+  // Now disconnect B explicitly — this should be the only second disconnected
+  client.disconnect('client')
+  await new Promise(r => setTimeout(r, 50))
+
+  // Count disconnected events
+  const discEvents = events.filter(e => e.type === 'disconnected')
+  // There should be 2: one from A's close, one from B's disconnect
+  assert.equal(discEvents.length, 2,
+    `expected 2 disconnected events (A close + B disconnect), got ${discEvents.length}: ${JSON.stringify(discEvents)}`)
+})
+
+test('R4: messages on non-current socket are ignored (iii)', async () => {
+  let messageCallbackA = null
+  let messageCallbackB = null
+
+  function SynthWSA(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => {
+      if (evt === 'message') messageCallbackA = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  function SynthWSB(url) {
+    this.url = url
+    this.readyState = 0
+    this.on = (evt, fn) => {
+      if (evt === 'message') messageCallbackB = fn
+    }
+    this.addEventListener = () => {}
+    this.close = () => { this.readyState = 3 }
+    this.send = () => {}
+  }
+
+  const client = new AtriumClient({ WebSocket: SynthWSA, connectTimeout: 0 })
+
+  const somEvents = []
+  client.on('som:add', (d) => somEvents.push(d))
+
+  // Connect A
+  const sidA = client.connect('ws://server-a.example/')
+  assert.ok(sidA, 'sidA returned')
+
+  // Connect B — replaces A
+  client._WSImpl = SynthWSB
+  const sidB = client.connect('ws://server-b.example/')
+  assert.ok(sidB, 'sidB returned')
+
+  // Send a message on A's socket (now non-current) — must be ignored
+  if (messageCallbackA) {
+    messageCallbackA(JSON.stringify({ type: 'som:add', nodeName: 'from-A' }))
+  }
+
+  await new Promise(r => setTimeout(r, 20))
+
+  // No som:add events should have fired from A's message
+  assert.equal(somEvents.length, 0,
+    `expected 0 som events from stale socket, got ${somEvents.length}`)
+})

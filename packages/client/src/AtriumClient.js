@@ -368,16 +368,18 @@ export class AtriumClient extends EventEmitter {
     } catch (err) {
       // Synchronous constructor failure — schedule async error + disconnected
       // so callers that register listeners on the returned sessionId still receive them.
+      // R4: clear connect timeout before marking closing
+      this._clearConnectTimeout(record)
       record.closing = true
       const errCopy = new Error(err.message || 'WebSocket constructor failed')
       errCopy.sessionId = sessionId
       errCopy.url = wsUrl
       setTimeout(() => {
-        if (record.stale) return
+        if (record !== this._connectionRecord) return
         this.emit('error', errCopy)
       }, 0)
       setTimeout(() => {
-        if (record.stale) return
+        if (record !== this._connectionRecord) return
         this._connectionRecord = null
         this._connected = false
         this._wsUrl = null
@@ -391,6 +393,7 @@ export class AtriumClient extends EventEmitter {
     this._ws = ws
 
     const onOpen = () => {
+      if (record !== this._connectionRecord) return
       if (record.stale) return
       this._log('Connection open')
       if (record.closing) return
@@ -408,6 +411,7 @@ export class AtriumClient extends EventEmitter {
 
     // Raw data → string → parsed message dispatch
     const dispatch = async (raw) => {
+      if (record !== this._connectionRecord) return
       if (record.stale || record.closing) return
       let msg
       try { msg = JSON.parse(raw) } catch { return }
@@ -439,7 +443,10 @@ export class AtriumClient extends EventEmitter {
     }
 
     const onClose = (code, reason) => {
-      if (record.stale || record.closing) return
+      if (record !== this._connectionRecord) return
+      this._clearConnectTimeout(record)
+      record.closing = true
+      if (record.stale) return
       this._log('Connection closed')
       this._connectionRecord = null
       this._connected = false
@@ -457,6 +464,7 @@ export class AtriumClient extends EventEmitter {
     }
 
     const onError = (evt) => {
+      if (record !== this._connectionRecord) return
       if (record.stale || record.closing) return
       const err = evt instanceof Error ? evt : new Error(`WebSocket error connecting to ${wsUrl}`)
       err.sessionId = sessionId
@@ -480,6 +488,7 @@ export class AtriumClient extends EventEmitter {
     // ---- Connect timeout (pre-brief #4) ----
     if (this._connectTimeout > 0) {
       record.connectTimeout = setTimeout(() => {
+        if (record !== this._connectionRecord) return
         if (record.stale || record.closing) return
         // Follow #4's pinned order exactly:
         // 1) Clear the timer
