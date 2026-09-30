@@ -314,19 +314,34 @@ separate, well-motivated feature — don't build it speculatively here.
   close, that client moves to the destination by **reconnecting in place**
   (§7), with an ordinary `connect()`, not by loading a new page. No new protocol message and no server
   round-trip — the teleporter's position already syncs the normal way.
-- **Open, decide before Step 7: should a cross-server teleporter trigger
-  automatically?** Proximity triggering means a visitor who walks onto a
-  pad is connected to whatever server the world owner chose, without
-  deciding to go there.
-  - That reveals their IP address, and the fact that their page came from
-    this server, to the destination server.
-  - It also reveals whatever name their client sends. The confirmed Step 6
-    design has Atrium servers replace that name with their own, but a
-    server not running Atrium's code need not.
-  - A link reveals similar things, but clicking a link is a deliberate
-    choice, and walking over a pad often isn't.
-  - **Suggested:** same-server destinations trigger automatically, and
-    other-server destinations ask first ("This leads to b.example. Go?").
+- **Cross-server teleporters trigger automatically too** (decided by the
+  human on 2026-09-29, and re-confirmed the same day after the cookie
+  point below was added). Every teleporter, same-server or cross-server,
+  triggers on proximity with no confirmation step.
+  - This was weighed against asking first for cross-server destinations.
+    Automatic triggering means a visitor who walks onto a pad connects to
+    whatever server the world owner chose, without choosing to go there.
+  - **What the destination server receives:**
+    - the visitor's IP address, and the fact that their page came from
+      this server;
+    - whatever name their client sends (Step 7 omits it for other
+      servers; Atrium servers replace it anyway, §7);
+    - **cookies that the destination's own site previously set in the
+      visitor's browser.** Browsers attach these to the connection, and
+      page code can't prevent it. For a same-site destination ordinary
+      cookies are sent; for a cross-site one, only cookies marked for
+      cross-site use, which some browsers block. Atrium servers ignore
+      cookies on cross-origin connections (§7).
+  - **What the world owner can't do:** they choose only the address.
+    Atrium's client sends only its fixed messages and discards replies it
+    doesn't understand, so the owner never sees what the destination
+    sends back. The main consequence is that the destination can see
+    who arrives, and sometimes link that to earlier visits.
+  - Asking first wouldn't stop any of this technically, only make each
+    cross-server jump a deliberate choice. It's accepted as the same kind
+    of disclosure as ordinary browsing, in exchange for teleporters that
+    behave the same everywhere. Details:
+    `devtasks/PREBRIEF-teleporters.md`, T0.
 - Support deleting a placed teleporter. Skip in-place repositioning for v1;
   delete-and-replace covers the same need with less to build.
 - No upfront destination validation. If a pasted destination is wrong,
