@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
+import * as THREE from 'three'
 import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
@@ -583,6 +584,7 @@ avatar.on('avatar:local-ready', () => {
   // Teleporter trigger: set ready when local avatar is ready (T4)
   avatarReady = true
   trigger.setReady(true)
+  updateTeleporterControls()
 })
 
 avatar.on('avatar:peer-added', ({ displayName, nodeName, node }) => {
@@ -895,6 +897,301 @@ connectBtn.addEventListener('contextmenu', (e) => {
 })
 
 connectBtn.addEventListener('click', handleConnect)
+
+// ---------------------------------------------------------------------------
+// Teleporter placement and delete UI (T5)
+// ---------------------------------------------------------------------------
+
+const tpPlaceBtn = document.getElementById('tp-place-btn')
+const tpDeleteBtn = document.getElementById('tp-delete-btn')
+const tpCancelBtn = document.getElementById('tp-cancel-btn')
+const tpForm = document.getElementById('tp-form')
+const tpWorldSelect = document.getElementById('tp-world-select')
+const tpDestInput = document.getElementById('tp-dest-input')
+const tpSpawnWarn = document.getElementById('tp-spawn-warn')
+const tpFormError = document.getElementById('tp-form-error')
+const tpSaveBtn = document.getElementById('tp-save-btn')
+const tpFormCancel = document.getElementById('tp-form-cancel')
+
+let placementMode = false
+let deleteMode = false
+let pendingPosition = null
+let pendingName = null
+let pendingSeq = null
+let deleteTargetName = null
+
+function updateTeleporterControls() {
+  const canEdit = client.canPlaceTeleporters && avatarReady && client.connected
+  tpPlaceBtn.disabled = !canEdit || placementMode
+  tpDeleteBtn.disabled = !canEdit || deleteMode
+  if (!canEdit && (placementMode || deleteMode)) {
+    exitTeleporterMode()
+  }
+}
+
+// Wire teleporter control updates into avatar:local-ready (already has a handler)
+// We extend the existing handler below — updateTeleporterControls is called there
+
+function exitTeleporterMode() {
+  placementMode = false
+  deleteMode = false
+  pendingPosition = null
+  pendingName = null
+  pendingSeq = null
+  deleteTargetName = null
+  tpForm.style.display = 'none'
+  tpCancelBtn.style.display = 'none'
+  tpPlaceBtn.style.display = ''
+  tpDeleteBtn.style.display = ''
+  viewportEl.style.cursor = ''
+  trigger.setActive(true)
+  showOverlay('')
+  updateTeleporterControls()
+}
+
+tpCancelBtn.addEventListener('click', exitTeleporterMode)
+
+// Escape key exits teleporter modes
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && (placementMode || deleteMode || tpForm.style.display !== 'none')) {
+    exitTeleporterMode()
+  }
+})
+
+// ── Placement mode ──────────────────────────────────────────────────────
+
+tpPlaceBtn.addEventListener('click', () => {
+  if (!client.canPlaceTeleporters || !avatarReady) return
+  placementMode = true
+  deleteMode = false
+  trigger.setActive(false)
+  tpCancelBtn.style.display = ''
+  tpPlaceBtn.disabled = true
+  tpDeleteBtn.style.display = 'none'
+  viewportEl.style.cursor = 'crosshair'
+  showOverlay('Click in the viewport to place a teleporter pad')
+})
+
+// Handle viewport click in placement mode
+viewportEl.addEventListener('click', (e) => {
+  if (!placementMode) return
+  if (tpForm.style.display !== 'none') return
+
+  const rect = viewportEl.getBoundingClientRect()
+  const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1
+  const my = -((e.clientY - rect.top) / rect.height) * 2 + 1
+  const camera = stage.camera
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(new THREE.Vector2(mx, my), camera)
+  const ray = { origin: raycaster.ray.origin.toArray(), direction: raycaster.ray.direction.toArray() }
+  const hit = projectRayToPlane(ray, 0)
+  if (!hit) {
+    showOverlay('Could not find a valid placement spot')
+    return
+  }
+
+  pendingPosition = [hit.x, 0, hit.z]
+  showOverlay('')
+  openPlacementForm()
+})
+
+function openPlacementForm() {
+  // Populate world list — only when same origin as account server
+  const accountHttp = AtriumClient.wsOriginToHttpOrigin(accountWsBase)
+  const worldHttp = currentWorldUrl ? AtriumClient.wsOriginToHttpOrigin(currentWorldUrl) : null
+  const sameOrigin = worldHttp && accountHttp && (() => {
+    try { return new URL(worldHttp).origin === new URL(accountHttp).origin } catch { return false }
+  })()
+
+  if (sameOrigin) {
+    tpWorldSelect.disabled = false
+    tpWorldSelect.innerHTML = '<option value="">-- Select your world --</option>'
+    // Add "The commons" option
+    const opt = document.createElement('option')
+    opt.value = '/'
+    opt.textContent = 'The commons'
+    tpWorldSelect.appendChild(opt)
+
+    fetch('/api/worlds').then(res => {
+      if (!res.ok) return null
+      return res.json()
+    }).then(worlds => {
+      if (!worlds) return
+      for (const w of worlds) {
+        const opt = document.createElement('option')
+        const username = currentUser?.username || ''
+        opt.value = `/worlds/${encodeURIComponent(username)}/${encodeURIComponent(w.slug)}`
+        opt.textContent = `${w.name || w.slug}${w.visibility === 'private' ? ' (private)' : ''}`
+        tpWorldSelect.appendChild(opt)
+      }
+    }).catch(() => {})
+  } else {
+    tpWorldSelect.disabled = true
+    tpWorldSelect.innerHTML = '<option value="">-- Manual entry only (different server) --</option>'
+  }
+
+  // Spawn warning
+  if (pendingPosition && nearSpawn(pendingPosition)) {
+    tpSpawnWarn.style.display = ''
+  } else {
+    tpSpawnWarn.style.display = 'none'
+  }
+
+  tpFormError.style.display = 'none'
+  tpDestInput.value = ''
+  tpSaveBtn.disabled = true
+  tpForm.style.display = ''
+}
+
+tpWorldSelect.addEventListener('change', () => {
+  if (tpWorldSelect.value) {
+    tpSaveBtn.disabled = false
+    tpFormError.style.display = 'none'
+  }
+})
+
+tpDestInput.addEventListener('input', () => {
+  tpSaveBtn.disabled = !tpDestInput.value.trim()
+  tpFormError.style.display = 'none'
+})
+
+tpSaveBtn.addEventListener('click', () => {
+  const dest = tpWorldSelect.value || tpDestInput.value.trim()
+  if (!dest) {
+    tpFormError.textContent = 'Select a world or enter a destination'
+    tpFormError.style.display = ''
+    return
+  }
+
+  const resolved = resolveWorldAddress(dest, currentWorldUrl)
+  if (!resolved) {
+    tpFormError.textContent = 'Invalid destination — enter a path (e.g. /worlds/user/slug) or ws(s) URL'
+    tpFormError.style.display = ''
+    return
+  }
+
+  tpSaveBtn.disabled = true
+
+  const name = 'teleporter-' + crypto.randomUUID()
+  try {
+    const descriptor = buildTeleporterDescriptor({
+      name,
+      position: pendingPosition,
+      destination: dest.trim(),
+    })
+    pendingName = name
+    pendingSeq = client.addNode(descriptor)
+    tpSaveBtn.textContent = 'Saving...'
+  } catch (err) {
+    tpFormError.textContent = 'Failed to place teleporter: ' + err.message
+    tpFormError.style.display = ''
+    tpSaveBtn.disabled = false
+    tpSaveBtn.textContent = 'Save'
+  }
+})
+
+tpFormCancel.addEventListener('click', () => {
+  tpForm.style.display = 'none'
+  pendingPosition = null
+  pendingName = null
+  pendingSeq = null
+  showOverlay('')
+})
+
+// Listen for som:add echo of our placement to close the form
+client.on('som:add', ({ nodeName }) => {
+  if (pendingName && nodeName === pendingName) {
+    tpForm.style.display = 'none'
+    pendingPosition = null
+    pendingName = null
+    pendingSeq = null
+    tpSaveBtn.textContent = 'Save'
+    exitTeleporterMode()
+  }
+})
+
+// Listen for error carrying our seq
+client.on('error', (err) => {
+  if (pendingSeq != null && err.seq === pendingSeq) {
+    tpFormError.textContent = err.message || 'Failed to place teleporter'
+    tpFormError.style.display = ''
+    tpSaveBtn.disabled = false
+    tpSaveBtn.textContent = 'Save'
+    pendingSeq = null
+    pendingName = null
+  }
+})
+
+// ── Delete mode ─────────────────────────────────────────────────────────
+
+tpDeleteBtn.addEventListener('click', () => {
+  if (!client.canPlaceTeleporters || !avatarReady) return
+  deleteMode = true
+  placementMode = false
+  trigger.setActive(false)
+  tpCancelBtn.style.display = ''
+  tpDeleteBtn.disabled = true
+  tpPlaceBtn.style.display = 'none'
+  viewportEl.style.cursor = 'pointer'
+  showOverlay('Click on a teleporter pad to delete it')
+})
+
+// Handle viewport click in delete mode — raycast to find teleporter
+viewportEl.addEventListener('click', (e) => {
+  if (!deleteMode) return
+
+  const rect = viewportEl.getBoundingClientRect()
+  const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1
+  const my = -((e.clientY - rect.top) / rect.height) * 2 + 1
+  const camera = stage.camera
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(new THREE.Vector2(mx, my), camera)
+
+  if (!sceneGroup) return
+  const intersects = raycaster.intersectObjects(sceneGroup.children, true)
+  if (intersects.length === 0) return
+
+  // Walk up to find SOM node
+  let somNode = null
+  for (const hit of intersects) {
+    let obj = hit.object
+    while (obj) {
+      if (obj.name && client.som) {
+        const node = client.som.getNodeByName(obj.name)
+        if (node) { somNode = node; break }
+      }
+      obj = obj.parent
+    }
+    if (somNode) break
+  }
+
+  if (!somNode || !isTeleporter(somNode)) return
+
+  deleteTargetName = somNode.name
+  const dest = teleporterDestination(somNode)
+  const label = dest ? teleporterLabel(dest, currentWorldUrl) : 'unknown'
+  if (!confirm(`Delete teleporter "${label}"?`)) {
+    deleteTargetName = null
+    return
+  }
+
+  try {
+    client.removeNode(somNode.name)
+    showOverlay('Deleting teleporter...')
+  } catch (err) {
+    showOverlay('Delete failed: ' + err.message)
+    deleteTargetName = null
+  }
+})
+
+// Listen for som:remove echo of our deletion
+client.on('som:remove', ({ nodeName }) => {
+  if (deleteTargetName && nodeName === deleteTargetName) {
+    showOverlay('')
+    deleteTargetName = null
+    exitTeleporterMode()
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Auth UI actions
