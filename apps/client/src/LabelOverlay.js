@@ -77,4 +77,16 @@ export class LabelOverlay {
     for (const { div } of this._labels.values()) div.remove()
     this._labels.clear()
   }
+
+  /**
+   * Remove all labels whose nodeName starts with a given prefix.
+   * @param {string} prefix
+   */
+  removeLabelsByPrefix(prefix) {
+    for (const [nodeName] of this._labels) {
+      if (nodeName.startsWith(prefix)) {
+        this.removeLabel(nodeName)
+      }
+    }
+  }
 }

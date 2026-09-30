@@ -405,6 +405,17 @@ const trigger = createTeleportTrigger({
 function rebuildPads() {
   const newPads = derivePads()
   trigger.setPads(newPads)
+  // Update pad labels (T13)
+  // Remove all existing pad labels
+  labels.removeLabelsByPrefix('teleporter-')
+  // Add labels for current pads
+  for (const pad of newPads) {
+    const label = teleporterLabel(pad.destination, currentWorldUrl)
+    labels.addLabel(pad.name, '\u21B3 ' + label, { name: pad.name, translation: pad.position }, {
+      heightOffset: 1.2,
+      className: 'pad-label',
+    })
+  }
 }
 
 function onResize() {
