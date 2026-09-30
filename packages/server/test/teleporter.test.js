@@ -240,19 +240,37 @@ test('length cap — destination at exactly 2048 chars is allowed', async () => 
   const q = makeMessageQueue(ws)
   await handshake(ws, { clientId: 'len-cap-ok' })
 
+  // First add a teleporter node so the extras path exists
+  const nodeName = 'len-cap-test-node'
+  ws.send(JSON.stringify({
+    type: 'add', seq: 1,
+    node: {
+      name: nodeName,
+      translation: [0, 0, 0],
+      extras: { atrium: { teleporter: { destination: '/' } } },
+    },
+  }))
+  // Wait for the add echo
+  const addEcho = await q.waitForType('add', 1000)
+  assert.ok(addEcho !== null, 'should receive add echo')
+
+  // Now set the destination to exactly 2048 chars
   const okDest = 'a'.repeat(2048)
   ws.send(JSON.stringify({
-    type: 'send', seq: 1, node: 'crate-01',
+    type: 'send', seq: 2, node: nodeName,
     field: 'extras.atrium.teleporter.destination',
     value: okDest,
   }))
   // Wait for the echo — the server broadcasts a 'set' message back to the sender
   const setMsg = await q.waitForType('set', 800)
   assert.ok(setMsg !== null, 'should receive set echo for 2048-char destination')
-  assert.equal(setMsg.node, 'crate-01')
+  assert.equal(setMsg.node, nodeName)
+  assert.equal(setMsg.field, 'extras.atrium.teleporter.destination')
+  assert.equal(setMsg.value, okDest)
+
   // Verify the value was stored on the node
-  const node = world.getNode('crate-01')
-  assert.ok(node !== null, 'crate-01 should exist')
+  const node = world.getNode(nodeName)
+  assert.ok(node !== null, `${nodeName} should exist`)
   assert.equal(node.extras?.atrium?.teleporter?.destination, okDest,
     'destination should be set to the 2048-char value')
 
