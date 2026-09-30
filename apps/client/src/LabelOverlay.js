@@ -10,26 +10,39 @@ export class LabelOverlay {
     this._container  = container
     // Accept a getter function so callers can pass () => stage.camera for a live read
     this._getCamera  = typeof camera === 'function' ? camera : () => camera
-    this._labels     = new Map()   // nodeName → { div, somNode }
+    /** @type {Map<string, { div: HTMLDivElement, somNode: object, heightOffset: number }>} */
+    this._labels     = new Map()
   }
 
-  addLabel(nodeName, displayName, somNode) {
+  /**
+   * Add a label for a SOM node.
+   * @param {string} nodeName
+   * @param {string} text — display text (textContent, never innerHTML)
+   * @param {object} somNode
+   * @param {object} [opts]
+   * @param {number} [opts.heightOffset=2.2] — vertical offset in meters
+   * @param {string} [opts.className] — optional CSS class for styling
+   */
+  addLabel(nodeName, text, somNode, { heightOffset = LABEL_HEIGHT_OFFSET, className } = {}) {
     const div = document.createElement('div')
-    div.textContent = displayName
+    div.textContent = text
     Object.assign(div.style, {
       position:      'absolute',
       pointerEvents: 'none',
       transform:     'translate(-50%, -100%)',
       color:         '#fff',
       fontSize:      '12px',
-      fontFamily:    '\'Cascadia Code\', \'Fira Code\', monospace',
+      fontFamily:    "'Cascadia Code', 'Fira Code', monospace",
       background:    'rgba(0,0,0,0.6)',
       borderRadius:  '8px',
       padding:       '2px 8px',
       whiteSpace:    'nowrap',
     })
+    if (className) {
+      div.className = className
+    }
     this._container.appendChild(div)
-    this._labels.set(nodeName, { div, somNode })
+    this._labels.set(nodeName, { div, somNode, heightOffset })
   }
 
   removeLabel(nodeName) {
@@ -42,9 +55,9 @@ export class LabelOverlay {
   update() {
     const w = this._container.clientWidth
     const h = this._container.clientHeight
-    for (const { div, somNode } of this._labels.values()) {
+    for (const { div, somNode, heightOffset } of this._labels.values()) {
       const t   = somNode.translation ?? [0, 0, 0]
-      const pos = new THREE.Vector3(t[0], t[1] + LABEL_HEIGHT_OFFSET, t[2])
+      const pos = new THREE.Vector3(t[0], t[1] + heightOffset, t[2])
       pos.project(this._getCamera())
 
       if (pos.z > 1) {
