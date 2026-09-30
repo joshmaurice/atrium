@@ -61,3 +61,43 @@ export function buildAvatarDescriptor(name) {
     mesh: { primitives: [primitive] },
   }
 }
+
+/**
+ * Build a glTF node descriptor for a teleporter pad (T1).
+ * A flat teal ring on the xz plane, 2 cm above y=0 to avoid z-fighting.
+ * Node translation stays at [x, 0, z] — the vertical offset is baked into
+ * the geometry.
+ *
+ * @param {object} params
+ * @param {string} params.name — node name (e.g. 'teleporter-<uuid>')
+ * @param {[number, number, number]} params.position — [x, y, z] world position; y is forced to 0
+ * @param {string} params.destination — teleporter destination string
+ * @returns {object} glTF node descriptor
+ */
+export function buildTeleporterDescriptor({ name, position, destination }) {
+  // Ring geometry: inner 0.45, outer 0.75 (outer = TELEPORT_TRIGGER_RADIUS)
+  //   so what you see is what triggers
+  const geo = new THREE.RingGeometry(0.45, 0.75, 48, 1)
+  // Rotate flat onto xz plane, then lift 2 cm above y=0 to avoid z-fighting
+  geo.rotateX(-Math.PI / 2)
+  geo.translate(0, 0.02, 0)
+
+  const primitive = threeGeometryToGltfPrimitive(geo, {
+    pbrMetallicRoughness: {
+      baseColorFactor: [0.2, 0.9, 0.8, 1.0],   // teal
+      metallicFactor:  0.0,
+      roughnessFactor: 0.5,
+    },
+  })
+
+  return {
+    name,
+    translation: [position[0], 0, position[2]],   // y forced to 0
+    extras: {
+      atrium: {
+        teleporter: { destination },
+      },
+    },
+    mesh: { primitives: [primitive] },
+  }
+}
