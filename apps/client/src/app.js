@@ -5,7 +5,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase } from './wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -203,12 +203,16 @@ function renderWorldList(worlds) {
         }
         showOverlay('Connecting to world…')
         try {
-          await trackConnect(wsUrl, {
+          const outcome = await trackConnect(wsUrl, {
             avatar: buildAvatarDescriptor(),
             displayName: currentUser.displayName || currentUser.username,
           }, {
             onError: (msg) => { wbError.textContent = 'Load failed: ' + msg },
           })
+          if (outcome.status === 'superseded') {
+            // Superseded — a newer connect took over; do nothing
+            return
+          }
         } catch {
           refreshWorldList()
           showOverlay('')
@@ -640,7 +644,9 @@ viewportEl.addEventListener('drop', async (e) => {
  * @param {object} connectOpts — options passed to client.connect()
  * @param {object} ui — UI callbacks
  * @param {(msg: string) => void} ui.onError — render an error message
- * @returns {Promise<void>} resolves on session:ready, rejects on error/disconnect
+ * @returns {Promise<{status: string, data?: object}>} resolves on
+ *   session:ready ({status:'ready', data}) or superseded
+ *   ({status:'superseded'}), rejects on error/disconnect
  */
 function trackConnect(wsUrl, connectOpts, { onError } = {}) {
   return new Promise((resolve, reject) => {
@@ -655,7 +661,7 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
     const onReady = (data) => {
       if (data.sessionId !== sid) return
       cleanup()
-      settle(true, data)
+      settle(true, { status: 'ready', data })
     }
     const onErr = (err) => {
       if (err.sessionId !== sid) return
@@ -672,7 +678,7 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
       if (d.previousSessionId === sid) {
         cleanup()
         // Superseded — no error shown, the new connect handles it
-        settle(true, null)
+        settle(true, { status: 'superseded' })
       }
     }
 
@@ -693,7 +699,7 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
       }
     }
 
-    client.once('session:ready', onReady)
+    client.on('session:ready', onReady)
     client.on('error', onErr)
     client.on('disconnected', onDisco)
     client.on('connecting', onConnecting)
@@ -770,7 +776,11 @@ function handleConnect() {
   showOverlay('Connecting to world…')
   trackConnect(wsUrl, connectOpts, {
     onError: (msg) => { showOverlay('Connect failed: ' + msg) },
-  }).then(() => {
+  }).then((outcome) => {
+    if (outcome.status === 'superseded') {
+      // Superseded — a newer connect took over; do nothing
+      return
+    }
     showOverlay('')
   }).catch(() => {
     // Error already displayed via onError
