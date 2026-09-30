@@ -310,6 +310,11 @@ export function attachSessionHandlers({
           }
           sessions.set(session.id, session)
 
+          // Compute canPlaceTeleporters at hello time (T2)
+          const canPlaceTeleporters = session.userId !== null &&
+            session.userId === worldOwnerUserId &&
+            isMutator(session, false)
+
           ws.send(JSON.stringify({
             type: 'hello',
             id: session.id,
@@ -317,6 +322,7 @@ export function attachSessionHandlers({
             serverTime: Date.now(),
             avatarNodeName: session.avatarNodeName,
             displayName: session.displayName,
+            canPlaceTeleporters,
             capabilities: {
               tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
             },
@@ -438,6 +444,14 @@ export function attachSessionHandlers({
             sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate this message')
             break
           }
+
+          // --- DESTINATION LENGTH CAP (T10) ---
+          // Enforce 2048-char limit when setting extras.atrium.teleporter.destination
+          if (msg.field === 'extras.atrium.teleporter.destination' &&
+              typeof msg.value === 'string' && msg.value.length > 2048) {
+            sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
+            break
+          }
           const result = world.setField(msg.node, msg.field, msg.value)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
@@ -490,26 +504,49 @@ export function attachSessionHandlers({
           }
 
           // Overwrite avatar extras.displayName with the server-assigned
-          // displayName (pre-brief #9). The server has the final say, so
-          // a cross-origin visitor cannot claim a different name.
+          // displayName (pre-brief #9).
           if (isAvatar && session.displayName) {
             if (!msg.node.extras) msg.node.extras = {}
             msg.node.extras.displayName = session.displayName
           }
 
+          // --- DESTINATION LENGTH CAP (T10) ---
+          // Enforce 2048-char limit on extras.atrium.teleporter.destination
+          if (!isAvatar && msg.node.extras?.atrium?.teleporter?.destination != null) {
+            const dest = msg.node.extras.atrium.teleporter.destination
+            if (typeof dest === 'string' && dest.length > 2048) {
+              sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
+              break
+            }
+          }
+
           const result = world.addNode(msg.node, msg.parent)
           if (!result.ok) {
-            sendError(ws, msg.seq, result.code, `${result.code}: ${msg.parent}`)
+            const detail = result.code === 'INVALID_VALUE'
+              ? `${result.code}: node name already exists`
+              : `${result.code}: ${msg.parent}`
+            sendError(ws, msg.seq, result.code, detail)
             break
           }
-          broadcastExcept(session, {
-            type: 'add',
-            seq: nextSeq(),
-            format: msg.format ?? 'gltf',
-            ...(msg.id ? { id: session.id } : {}),
-            ...(msg.parent != null ? { parent: msg.parent } : {}),
-            node: msg.node,
-          })
+          // T3: non-avatar adds echo to sender too; avatar adds keep broadcastExcept
+          if (isAvatar) {
+            broadcastExcept(session, {
+              type: 'add',
+              seq: nextSeq(),
+              format: msg.format ?? 'gltf',
+              ...(msg.id ? { id: session.id } : {}),
+              ...(msg.parent != null ? { parent: msg.parent } : {}),
+              node: msg.node,
+            })
+          } else {
+            broadcast({
+              type: 'add',
+              seq: nextSeq(),
+              format: msg.format ?? 'gltf',
+              ...(msg.parent != null ? { parent: msg.parent } : {}),
+              node: msg.node,
+            })
+          }
 
           // Notify autosave coordinator for non-avatar adds (saveable mutations)
           if (typeof onSaveableMutation === 'function' && !isAvatar && worldOwnerUserId !== null) {
@@ -563,7 +600,7 @@ export function attachSessionHandlers({
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
             break
           }
-          broadcastExcept(session, {
+          broadcast({
             type: 'remove',
             seq: nextSeq(),
             node: msg.node,
