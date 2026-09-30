@@ -76,25 +76,29 @@ describe('createTeleportTrigger', () => {
     trigger.setReady(true)
     trigger.setActive(true)
 
-    // Two pads: near at [0,0,0], far at [10,0,0]
+    // Two pads both within TELEPORT_TRIGGER_RADIUS of the entry point [0.4,0,0]:
+    //   pad at [0,0,0] (distance 0.4)
+    //   pad at [1,0,0] (distance 0.6)
+    // Avatar enters at [0.4,0,0] after both are armed.
     trigger.setPads([
-      { name: 'far-pad', position: [10, 0, 0], destination: 'ws://far.com' },
       { name: 'near-pad', position: [0, 0, 0], destination: 'ws://near.com' },
+      { name: 'far-pad',  position: [1, 0, 0], destination: 'ws://far.com' },
     ])
 
-    // Step 1: enter near-pad (disarmed)
+    // Step 1: enter at pad 0 position (disarmed)
     trigger.update([0, 0, 0])
     assert.equal(triggered.length, 0, 'no trigger on initial enter (disarmed)')
 
-    // Step 2: exit both (both arm since outside)
+    // Step 2: exit both (both arm since outside radius)
     trigger.update([100, 0, 100])
     assert.equal(triggered.length, 0, 'no trigger on exit')
 
-    // Step 3: re-enter near-pad (inside near, far is 10m away > R)
-    // Only near-pad should trigger since far-pad is outside range
-    trigger.update([0, 0, 0])
+    // Step 3: re-enter at [0.4,0,0] — both pads are within R=0.75
+    // near-pad is at distance 0.4, far-pad at 0.6 → near-pad should fire
+    trigger.update([0.4, 0, 0])
     assert.equal(triggered.length, 1, 'only nearest in-range pad should trigger')
     assert.equal(triggered[0].name, 'near-pad')
+    assert.equal(triggered[0].destination, 'ws://near.com')
   })
 
   test('state preserved across setPads for unchanged pads', () => {
