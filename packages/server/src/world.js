@@ -102,10 +102,18 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
   }
 
   function addNode(nodeDescriptor, parentName) {
-    const node = som.ingestNode(nodeDescriptor)
+    // Duplicate-name guard (T9)
+    if (som.getNodeByName(nodeDescriptor.name)) {
+      return { ok: false, code: 'INVALID_VALUE' }
+    }
+    // Check parent exists before ingesting (T9)
     if (parentName) {
       const parent = som.getNodeByName(parentName)
       if (!parent) return { ok: false, code: 'NODE_NOT_FOUND' }
+    }
+    const node = som.ingestNode(nodeDescriptor)
+    if (parentName) {
+      const parent = som.getNodeByName(parentName)
       parent.addChild(node)
     } else {
       som.scene.addChild(node)
@@ -268,10 +276,18 @@ export async function createWorldFromDocument(documentJson) {
   }
 
   function addNode(nodeDescriptor, parentName) {
-    const node = som.ingestNode(nodeDescriptor)
+    // Duplicate-name guard (T9)
+    if (som.getNodeByName(nodeDescriptor.name)) {
+      return { ok: false, code: 'INVALID_VALUE' }
+    }
+    // Check parent exists before ingesting (T9)
     if (parentName) {
       const parent = som.getNodeByName(parentName)
       if (!parent) return { ok: false, code: 'NODE_NOT_FOUND' }
+    }
+    const node = som.ingestNode(nodeDescriptor)
+    if (parentName) {
+      const parent = som.getNodeByName(parentName)
       parent.addChild(node)
     } else {
       som.scene.addChild(node)
