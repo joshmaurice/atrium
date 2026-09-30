@@ -77,20 +77,64 @@ export function wsOriginToHttpOrigin(wsOrigin) {
 }
 
 /**
+ * Reduce a WebSocket URL to scheme + host (includes port; IPv6 kept bracketed).
+ * Returns null for unparseable inputs.
+ */
+export function reduceWsUrlToOrigin(urlStr) {
+  try {
+    const parsed = new URL(urlStr)
+    return `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Map an http(s) origin to its ws(s) equivalent.
+ * Accepts URL strings of any scheme; returns null for unparseable input.
+ */
+export function httpOriginToWsOrigin(urlStr) {
+  try {
+    const parsed = new URL(urlStr)
+    const wsProto = parsed.protocol === 'https:' ? 'wss:' : parsed.protocol === 'http:' ? 'ws:' : parsed.protocol
+    return `${wsProto}//${parsed.host}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Determine whether a world URL's HTTP origin matches the account server's
+ * HTTP origin. Used by T7: only send displayName to the account server.
+ *
+ * @param {string} worldUrl — a full ws:// or wss:// URL
+ * @param {string} accountOrigin — the account server's http(s) origin
+ * @returns {boolean}
+ */
+export function sameOriginAsAccount(worldUrl, accountOrigin) {
+  const worldHttp = AtriumClient.wsOriginToHttpOrigin(worldUrl)
+  if (!worldHttp) return false
+  try {
+    const wo = new URL(worldHttp)
+    const ao = new URL(accountOrigin)
+    return wo.origin === ao.origin
+  } catch {
+    return false
+  }
+}
+
+/**
  * Resolve a user-entered world address to a full WebSocket URL.
  *
  * Pure function — tries to interpret the string as a world address:
- * - `ws://...` or `wss://...` full URL: passed through as-is
+ * - `ws://...` or `wss://...` full URL: validated and passed through as-is
  * - Relative path (e.g. `/worlds/user/slug`, just `slug`, etc.):
- *   resolved against `origin` (the current world server's origin).
+ *   resolved against `origin` reduced to scheme+host.
  * - `http(s)://...`, empty string, or unparseable: returns null.
- *
- * This lets the user enter a short path in the World box, or a full
- * WebSocket URL for cross-server connections.
  *
  * @param {string|null} str — user-entered world address
  * @param {string|null} origin — origin to resolve relative paths against
- *   (e.g. the current world server's origin, or accountWsBase when disconnected)
+ *   (e.g. the current world server's ws:// or wss:// URL)
  * @returns {string|null} — full WebSocket URL, or null if unresolvable
  */
 export function resolveWorldAddress(str, origin) {
@@ -98,7 +142,7 @@ export function resolveWorldAddress(str, origin) {
   const trimmed = str.trim()
   if (!trimmed) return null
 
-  // Full ws:// or wss:// URL — pass through
+  // Full ws:// or wss:// URL — validate and pass through
   if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) {
     try {
       new URL(trimmed)
@@ -114,14 +158,17 @@ export function resolveWorldAddress(str, origin) {
     return null
   }
 
-  // Relative path — resolve against origin
+  // Relative path — resolve against origin reduced to scheme+host.
+  // Map http(s) origins to ws(s) equivalents.
   if (!origin) return null
-  const originWs = origin.startsWith('ws://') || origin.startsWith('wss://')
-    ? origin
-    : `ws://${origin.replace(/^https?:\/\//, '')}`
+  const reducedOrigin = reduceWsUrlToOrigin(origin)
+  if (!reducedOrigin) return null
+  // Map http→ws, https→wss for the base
+  const baseOrigin = httpOriginToWsOrigin(reducedOrigin) || reducedOrigin
+  const base = baseOrigin.endsWith('/') ? baseOrigin : baseOrigin + '/'
   try {
-    const base = originWs.endsWith('/') ? originWs : originWs + '/'
-    const resolved = new URL(trimmed.startsWith('/') ? trimmed.slice(1) : trimmed, base)
+    const path = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed
+    const resolved = new URL(path, base)
     const result = `${resolved.protocol}//${resolved.host}${resolved.pathname}`
     return result
   } catch {

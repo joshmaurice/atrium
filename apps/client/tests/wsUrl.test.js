@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase } from '../src/wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase, reduceWsUrlToOrigin, httpOriginToWsOrigin, sameOriginAsAccount } from '../src/wsUrl.js'
 
 describe('computeWsUrl', () => {
 
@@ -242,5 +242,94 @@ describe('shouldUseFileBase', () => {
 
   test('null file URL → derive', () => {
     assert.equal(shouldUseFileBase(null, 'wss://example.com/world'), false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reduceWsUrlToOrigin
+// ---------------------------------------------------------------------------
+
+describe('reduceWsUrlToOrigin', () => {
+
+  test('ws:// with host and port', () => {
+    assert.equal(reduceWsUrlToOrigin('ws://localhost:3000/path/to/world'), 'ws://localhost:3000')
+  })
+
+  test('wss:// with host only', () => {
+    assert.equal(reduceWsUrlToOrigin('wss://example.com/worlds/jane/home'), 'wss://example.com')
+  })
+
+  test('wss:// with host and port', () => {
+    assert.equal(reduceWsUrlToOrigin('wss://example.com:8443/path'), 'wss://example.com:8443')
+  })
+
+  test('IPv6 kept bracketed', () => {
+    assert.equal(reduceWsUrlToOrigin('ws://[::1]:3000/world'), 'ws://[::1]:3000')
+  })
+
+  test('null for unparseable', () => {
+    assert.equal(reduceWsUrlToOrigin('not a url'), null)
+  })
+
+  test('null for empty string', () => {
+    assert.equal(reduceWsUrlToOrigin(''), null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// httpOriginToWsOrigin
+// ---------------------------------------------------------------------------
+
+describe('httpOriginToWsOrigin', () => {
+
+  test('http:// → ws://', () => {
+    assert.equal(httpOriginToWsOrigin('http://localhost:3000'), 'ws://localhost:3000')
+  })
+
+  test('https:// → wss://', () => {
+    assert.equal(httpOriginToWsOrigin('https://example.com'), 'wss://example.com')
+  })
+
+  test('https:// with port', () => {
+    assert.equal(httpOriginToWsOrigin('https://example.com:8443'), 'wss://example.com:8443')
+  })
+
+  test('ws:// pass-through', () => {
+    assert.equal(httpOriginToWsOrigin('ws://localhost:3000/world'), 'ws://localhost:3000')
+  })
+
+  test('null for unparseable', () => {
+    assert.equal(httpOriginToWsOrigin('not a url'), null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// sameOriginAsAccount (T7)
+// ---------------------------------------------------------------------------
+
+describe('sameOriginAsAccount', () => {
+
+  test('same ws/https origin → true', () => {
+    assert.equal(sameOriginAsAccount('wss://example.com/worlds/jane/home', 'https://example.com'), true)
+  })
+
+  test('same ws/http origin → true', () => {
+    assert.equal(sameOriginAsAccount('ws://localhost:3000/world', 'http://localhost:3000'), true)
+  })
+
+  test('different host → false', () => {
+    assert.equal(sameOriginAsAccount('wss://other.com/world', 'https://example.com'), false)
+  })
+
+  test('port mismatch → false', () => {
+    assert.equal(sameOriginAsAccount('wss://example.com:8443/world', 'https://example.com'), false)
+  })
+
+  test('scheme mismatch → false', () => {
+    assert.equal(sameOriginAsAccount('ws://example.com/world', 'https://example.com'), false)
+  })
+
+  test('null worldUrl → false', () => {
+    assert.equal(sameOriginAsAccount(null, 'https://example.com'), false)
   })
 })
