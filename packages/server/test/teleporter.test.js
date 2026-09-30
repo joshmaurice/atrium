@@ -13,8 +13,8 @@ import { mkdtempSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import WebSocket from 'ws'
-import { createSessionServer } from '../src/session.js'
+import WebSocket, { WebSocketServer } from 'ws'
+import { createSessionServer, attachSessionHandlers } from '../src/session.js'
 import { createWorld } from '../src/world.js'
 import { createRequestHandler } from '../src/http-routes.js'
 import { createDb } from '../src/db.js'
@@ -516,6 +516,59 @@ test('canPlaceTeleporters — authenticated non-owner gets false', async () => {
   assert.equal(hello.canPlaceTeleporters, false, 'non-owner should have false')
   sock.close()
   await waitForClose(sock)
+})
+
+test('canPlaceTeleporters — authenticated same-origin owner gets true', async () => {
+  // Create a separate server with an explicit world owner
+  const ownerHttp = createServer()
+  const OWNER_PORT = 3061
+  ownerHttp.listen(OWNER_PORT)
+
+  const ownedWss = new WebSocketServer({ noServer: true })
+  const sessions = new Map()
+  const presence = { add: () => {}, remove: () => {}, list: () => [], setPosition: () => {} }
+
+  const closeKeepalive = attachSessionHandlers({
+    wss: ownedWss,
+    world,
+    sessions,
+    presence,
+    worldOwnerUserId: userOwner.userId,
+  })
+
+  ownerHttp.on('upgrade', (req, socket, head) => {
+    ownedWss.handleUpgrade(req, socket, head, (ws) => {
+      // Pass the owner's userId as upgradeUserId (simulates same-origin cookie auth)
+      ownedWss.emit('connection', ws, req, userOwner.userId)
+    })
+  })
+
+  try {
+    const ws = new WebSocket(`ws://localhost:${OWNER_PORT}`)
+    const q = makeMessageQueue(ws)
+    let hello = null
+    await new Promise((resolve) => {
+      ws.once('open', () => {
+        ws.send(JSON.stringify({
+          type: 'hello', id: 'canplace-owner',
+          capabilities: { tick: { interval: 5000 } },
+        }))
+      })
+      ws.once('message', (raw) => {
+        hello = JSON.parse(raw)
+        resolve()
+      })
+      setTimeout(() => resolve(), 1000)
+    })
+    assert.ok(hello !== null, 'should receive hello')
+    assert.equal(hello.canPlaceTeleporters, true, 'same-origin owner should have canPlaceTeleporters=true')
+    ws.close()
+    await waitForClose(ws)
+  } finally {
+    closeKeepalive()
+    ownerHttp.close()
+    ownedWss.close()
+  }
 })
 
 // =========================================================================
