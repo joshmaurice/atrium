@@ -112,6 +112,11 @@ export class AtriumClient extends EventEmitter {
     this._capturedNode      = null
     this._currentHoverNode  = null
     this._pointerDownTarget = null
+
+    // Teleporter support (Step 7)
+    this._worldReady = false
+    this.canPlaceTeleporters = false
+    this._transmitName = null
   }
 
   /**
@@ -305,18 +310,27 @@ export class AtriumClient extends EventEmitter {
     this._wsUrl = null
     this._clearViewState()
     this._clearPointerState()
+    this._worldReady = false
+    this.canPlaceTeleporters = false
 
     // ---- Create new session identity ----
     const sessionId      = globalThis.crypto.randomUUID()
     const shortId        = sessionId.slice(0, 4)
     this._sessionId      = sessionId
+    this._transmitName   = displayName ?? null
     this._displayName    = displayName || `User-${shortId}`
     this._avatarNodeName = this._displayName
     this._avatarDescriptor = avatar ?? null
     if (this._avatarDescriptor) {
       this._avatarDescriptor.name = this._displayName
-      this._avatarDescriptor.extras = { ...this._avatarDescriptor.extras, displayName: this._displayName }
-      this._avatarDescriptor.extras.atrium = { ...(this._avatarDescriptor.extras.atrium ?? {}), ephemeral: true }
+      // T7: only include extras.displayName when a name was provided
+      if (displayName) {
+        this._avatarDescriptor.extras = { ...this._avatarDescriptor.extras, displayName }
+      }
+      this._avatarDescriptor.extras = {
+        ...this._avatarDescriptor.extras,
+        atrium: { ...(this._avatarDescriptor.extras?.atrium ?? {}), ephemeral: true },
+      }
     }
 
     // ---- Derive or preserve worldBaseUrl ----
@@ -380,12 +394,16 @@ export class AtriumClient extends EventEmitter {
       if (record.stale) return
       this._log('Connection open')
       if (record.closing) return
-      ws.send(JSON.stringify({
+      // T7: omit displayName key entirely when no name was provided
+      const helloMsg = {
         type: 'hello',
         id:   sessionId,
-        displayName: this._displayName,
         capabilities: { tick: { interval: 5000 } },
-      }))
+      }
+      if (this._transmitName != null) {
+        helloMsg.displayName = this._transmitName
+      }
+      ws.send(JSON.stringify(helloMsg))
     }
 
     // Raw data → string → parsed message dispatch
@@ -413,6 +431,7 @@ export class AtriumClient extends EventEmitter {
           err.sessionId = sessionId
           err.url = wsUrl
           err.code = msg.code
+          err.seq = msg.seq
           this.emit('error', err)
           break
         }
@@ -426,6 +445,8 @@ export class AtriumClient extends EventEmitter {
       this._connected = false
       this._wsUrl = null
       this._ws = null
+      this._worldReady = false
+      this.canPlaceTeleporters = false
       this.emit('disconnected', {
         sessionId,
         url: wsUrl,
@@ -520,6 +541,8 @@ export class AtriumClient extends EventEmitter {
     this._ws = null
     this._connected = false
     this._wsUrl = null
+    this._worldReady = false
+    this.canPlaceTeleporters = false
     this._clearPointerState()
 
     // Emit disconnected asynchronously so tests using waitForEvent still work
@@ -628,12 +651,15 @@ export class AtriumClient extends EventEmitter {
         this._avatarDescriptor.extras.displayName = msg.displayName
       }
     }
+    // Set canPlaceTeleporters from server hello (T2)
+    this.canPlaceTeleporters = msg.canPlaceTeleporters === true
     this._connected = true
     console.log(`[AtriumClient] Session ${this._sessionId} (${this._displayName})`)
     this.emit('session:ready', {
       sessionId:   this._sessionId,
       displayName: this._displayName,
       url:         this._wsUrl,
+      canPlaceTeleporters: this.canPlaceTeleporters,
     })
   }
 
@@ -672,9 +698,44 @@ export class AtriumClient extends EventEmitter {
     }
 
     const meta = doc.getRoot().getExtras()?.atrium ?? {}
+    this._worldReady = true
     this._emitWorldLoaded(meta)
     // Re-resolve external references
     this.resolveExternalReferences()
+  }
+
+  /**
+   * Send a non-avatar add. Requires the current world fully loaded (T3).
+   * @param {object} descriptor — glTF node descriptor
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  addNode(descriptor) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._viewSeq
+    this._wsSend({
+      type: 'add',
+      seq,
+      node: descriptor,
+    })
+    return seq
+  }
+
+  /**
+   * Remove a non-avatar node by name (T3).
+   * @param {string} name — node name to remove
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  removeNode(name) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._viewSeq
+    this._wsSend({
+      type: 'remove',
+      seq,
+      node: name,
+    })
+    return seq
   }
 
   _onAdd(msg, record) {
