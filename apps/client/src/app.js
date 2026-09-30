@@ -573,6 +573,25 @@ client.on('world:loaded', ({ name, description, author }) => {
     node.addEventListener('pointerup',   () => console.log('[pointer] up',    node.name))
     node.addEventListener('click',       (e) => console.log('[pointer] click', node.name, 'at', e.detail.point))
   }
+
+  // R2.2: rebuild pads after world finishes loading so pads saved in a world
+  // trigger and show labels for joiners and after reload (session:ready fires
+  // before som-dump, so the rebuild there sees no SOM).
+  // In static (disconnected) mode, use accountWsBase as the current world URL.
+  if (client.connected) {
+    // Connected: use the WS URL from the input (session:ready hasn't fired yet
+    // but the SOM is available now, so rebuild pads here)
+    if (!currentWorldUrl) {
+      currentWorldUrl = wsUrlInput.value.trim()
+    }
+    rebuildPads()
+  } else {
+    // Static mode: use accountWsBase so pad labels resolve correctly
+    const savedUrl = currentWorldUrl
+    currentWorldUrl = accountWsBase
+    rebuildPads()
+    currentWorldUrl = savedUrl
+  }
 })
 
 client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) => {
