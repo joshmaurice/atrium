@@ -608,6 +608,12 @@ client.on('connecting', () => {
   currentWorldUrl = null
   trigger.setReady(false)
   trigger.reset()
+  // R2.5: disable placement/delete controls and close open form immediately
+  if (placementMode || deleteMode || tpForm.style.display !== 'none') {
+    exitTeleporterMode()
+  } else {
+    updateTeleporterControls()
+  }
 })
 
 client.on('disconnected', () => {
