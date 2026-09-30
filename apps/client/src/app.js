@@ -6,7 +6,7 @@ import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor, buildTeleporterDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
-import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
+import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
 import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
@@ -597,6 +597,9 @@ client.on('world:loaded', ({ name, description, author }) => {
 client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) => {
   setConnectionState('connected')
   updateHintText()
+  // R4: hide Go back button on successful connection
+  const gb = document.getElementById('tp-goback-btn')
+  if (gb) gb.style.display = 'none'
   // Sync the connection box with the actual connection URL (pre-brief decision:
   // AtriumClient is source of truth for the connection URL)
   if (connectUrl) {
@@ -622,6 +625,9 @@ function teardownWorld() {
 client.on('connecting', () => {
   teardownWorld()
   setConnectionState('connecting')
+  // R4: hide Go back button on any new connection attempt
+  const gb = document.getElementById('tp-goback-btn')
+  if (gb) gb.style.display = 'none'
   // Clear teleporter state (T4)
   avatarReady = false
   currentWorldUrl = null
@@ -1134,6 +1140,13 @@ tpSaveBtn.addEventListener('click', () => {
   const dest = tpWorldSelect.value || tpDestInput.value.trim()
   if (!dest) {
     tpFormError.textContent = 'Select a world or enter a destination'
+    tpFormError.style.display = ''
+    return
+  }
+
+  // R4: validate destination format before resolving
+  if (!isValidDestination(dest)) {
+    tpFormError.textContent = 'Invalid destination — enter a path (e.g. /worlds/user/slug) or ws(s) URL'
     tpFormError.style.display = ''
     return
   }
