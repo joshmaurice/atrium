@@ -6,6 +6,10 @@ import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
 import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
+import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
+import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
+import { teleporterLabel } from './teleporter-label.js'
+import { projectRayToPlane } from '@atrium/renderer-three'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -311,6 +315,58 @@ let firstPerson    = false   // default: third-person when connected; V key togg
 
 const labels = new LabelOverlay(viewportEl, () => stage.camera)
 
+// Teleporter trigger (T4)
+let currentWorldUrl = null
+let avatarReady = false
+
+function derivePads() {
+  if (!client.som) return []
+  const result = []
+  for (const node of client.som.nodes) {
+    if (isTeleporter(node)) {
+      result.push({
+        name: node.name,
+        position: node.translation ?? [0, 0, 0],
+        destination: teleporterDestination(node),
+      })
+    }
+  }
+  return result
+}
+
+const trigger = createTeleportTrigger({
+  onTrigger: ({ name, destination, worldUrl }) => {
+    // Capture current world URL before connecting
+    const prevWorldUrl = currentWorldUrl
+    const connectOpts = { avatar: buildAvatarDescriptor() }
+    // T7: only send displayName when same origin as account
+    if (sameOriginAsAccount(worldUrl, accountWsBase)) {
+      connectOpts.displayName = client.displayName
+    }
+    // Show connecting overlay
+    showOverlay('Connecting to world…')
+    trackConnect(worldUrl, connectOpts, {
+      onError: (msg) => {
+        // T8 failure message naming the destination host (added later)
+        showOverlay('Teleport failed: ' + msg)
+      },
+    }).then((outcome) => {
+      if (outcome.status === 'superseded') return
+      showOverlay('')
+    }).catch(() => {
+      // Error already displayed via onError
+    })
+  },
+  resolveDestination: (destination) => {
+    return resolveWorldAddress(destination, currentWorldUrl)
+  },
+})
+
+function rebuildPads() {
+  const newPads = derivePads()
+  trigger.setPads(newPads)
+}
+
 function onResize() {
   stage.resize(viewportEl.clientWidth, viewportEl.clientHeight)
 }
@@ -476,6 +532,10 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) =>
   if (connectUrl) {
     wsUrlInput.value = connectUrl
   }
+  // Capture current world URL for teleporter resolution (T4)
+  currentWorldUrl = connectUrl || wsUrlInput.value
+  // Rebuild pads on session ready (world loaded before session:ready)
+  rebuildPads()
 })
 
 // ---------------------------------------------------------------------------
@@ -492,6 +552,11 @@ function teardownWorld() {
 client.on('connecting', () => {
   teardownWorld()
   setConnectionState('connecting')
+  // Clear teleporter state (T4)
+  avatarReady = false
+  currentWorldUrl = null
+  trigger.setReady(false)
+  trigger.reset()
 })
 
 client.on('disconnected', () => {
@@ -515,6 +580,9 @@ client.on('error', (err) => {
 avatar.on('avatar:local-ready', () => {
   updateHud()
   updateHintText()
+  // Teleporter trigger: set ready when local avatar is ready (T4)
+  avatarReady = true
+  trigger.setReady(true)
 })
 
 avatar.on('avatar:peer-added', ({ displayName, nodeName, node }) => {
@@ -535,6 +603,36 @@ client.on('som:set', ({ nodeName }) => {
   if (nodeName === '__document__') {
     loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
     return
+  }
+  // Rebuild pads if a teleporter node was modified (T4)
+  if (nodeName && client.som.getNodeByName(nodeName)) {
+    const node = client.som.getNodeByName(nodeName)
+    if (isTeleporter(node)) {
+      rebuildPads()
+    }
+  }
+})
+
+// Teleporter pad tracking (T4): rebuild pads on add/remove/set of teleporter nodes
+client.on('som:add', ({ nodeName }) => {
+  if (!client.som) return
+  if (nodeName) {
+    const node = client.som.getNodeByName(nodeName)
+    if (node && isTeleporter(node)) {
+      rebuildPads()
+    }
+  }
+})
+
+client.on('som:remove', ({ nodeName }) => {
+  if (!client.som) return
+  // Rebuild pads on any remove — we check isTeleporter below by looking
+  // at the current SOM (the node is already removed, but we just rebuild
+  // from what's left)
+  if (nodeName) {
+    // Always rebuild — removes are infrequent and it's simpler than tracking
+    // which removed node was a teleporter
+    rebuildPads()
   }
 })
 
@@ -961,6 +1059,10 @@ function tick(now) {
 
   stage.tick(dt)
   labels.update()
+  // Teleporter trigger update (T4): feed avatar position every frame
+  if (avatarReady && avatar.localNode) {
+    trigger.update(avatar.localNode.translation ?? [0, 0, 0])
+  }
 }
 
 requestAnimationFrame(tick)
