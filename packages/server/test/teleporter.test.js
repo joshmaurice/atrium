@@ -246,17 +246,15 @@ test('length cap — destination at exactly 2048 chars is allowed', async () => 
     field: 'extras.atrium.teleporter.destination',
     value: okDest,
   }))
-  // Should not be rejected for length — even if the set fails for another
-  // reason (e.g. SOM path error), the error code must NOT be INVALID_VALUE
-  const err = await q.waitForType('error', 800)
-  if (err) {
-    // If there's an error, it should NOT be the length cap error
-    assert.notEqual(err.code, 'INVALID_VALUE',
-      'destination at exactly 2048 chars should not trigger length cap')
-  } else {
-    // No error is also fine — the set succeeded or silently skipped
-    assert.ok(true, 'no error for destination at exactly 2048 chars')
-  }
+  // Wait for the echo — the server broadcasts a 'set' message back to the sender
+  const setMsg = await q.waitForType('set', 800)
+  assert.ok(setMsg !== null, 'should receive set echo for 2048-char destination')
+  assert.equal(setMsg.node, 'crate-01')
+  // Verify the value was stored on the node
+  const node = world.getNode('crate-01')
+  assert.ok(node !== null, 'crate-01 should exist')
+  assert.equal(node.extras?.atrium?.teleporter?.destination, okDest,
+    'destination should be set to the 2048-char value')
 
   ws.close()
   await waitForClose(ws)
