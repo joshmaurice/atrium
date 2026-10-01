@@ -203,21 +203,45 @@ numbered "revision round N (human-directed)" message (§8.5).
 ## 7. Follow-ups
 
 ### 7.1 Next task: public/private world toggle + server-sent failure reasons
-This is Step 7 §6.3 and §6.4, and they belong together: without reasons, a
-private world just looks like a broken teleport. Facts and decisions for the
-pre-brief:
+
+This is Step 7 §6.3 plus the first bullet of §6.4. They belong together:
+without reasons, a private world just looks like a broken teleport.
+
+**Already decided in Step 7 §6.3:**
+- the toggle goes **in the My Worlds list**;
+- it applies to **every world, including the home world** created at signup;
+- the **default is private**.
+
+**Facts:**
 - **The `worlds.visibility` column has `CHECK (visibility = 'private')`**
   (Phase 1), so this needs a DB migration.
-- **Decide:**
-  - what "private" blocks: everyone but the owner, or just anonymous
-    visitors?
-  - what happens to people already inside when the owner switches the world
-    to private;
-  - whether the commons is exempt;
-  - where the toggle lives in the UI (the world list rows are natural);
-  - which reason codes the server sends (not found / private / other) and
-    how the client words them in the U2 panel.
-- **Write the pre-brief with the repo cloned,** and verify every code fact.
+- **The U2 failure panel exists** (`teleport-failure.js`, `#tp-fail-panel`)
+  and currently says only "may not exist, or the server may not be
+  reachable".
+
+**Still to decide in the pre-brief:**
+- what "private" blocks: everyone but the owner, or just anonymous
+  visitors?
+- what happens to people already inside when the owner switches the world
+  to private;
+- whether the commons is exempt;
+- which reason codes the server sends (not found / private / other), and
+  how the client words each one.
+
+**Natural additions (recommended, not yet decided):**
+- **Show reasons on Load and manual Connect failures too,** not only
+  teleports. U2 deliberately left those surfaces alone, but someone typing a
+  private world's address into Connect needs "This world is private" just
+  as much.
+- **Optional: strict destination resolution** (Step 7 §6.4, third bullet),
+  which makes typo pads like `hi` or `<3` inert instead of misfiring. It's
+  related, since those pads produce "not found", but fully separable.
+
+**Keep out:** connect-before-leave (Step 7 §6.4, second bullet). It's a
+substantial change to connection handling, and doesn't belong in a task
+that already has a schema migration and new server enforcement.
+
+Write the pre-brief with the repo cloned, and verify every code fact.
 
 ### 7.2 Other follow-ups
 - **F-8:** replace the second reviewer for real. Use a paid model from a
