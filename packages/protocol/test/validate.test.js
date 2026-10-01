@@ -137,6 +137,27 @@ describe('error', () => {
     })
     assert.equal(valid, false)
   })
+
+  it('validates error with WORLD_UNAVAILABLE', () => {
+    const { valid } = validate('server', {
+      type: 'error', code: 'WORLD_UNAVAILABLE', message: 'World not available'
+    })
+    assert.equal(valid, true)
+  })
+
+  it('validates error with WORLD_NOW_PRIVATE', () => {
+    const { valid } = validate('server', {
+      type: 'error', code: 'WORLD_NOW_PRIVATE', message: 'This world is now private'
+    })
+    assert.equal(valid, true)
+  })
+
+  it('validates error with SESSION_CONFLICT', () => {
+    const { valid } = validate('server', {
+      type: 'error', code: 'SESSION_CONFLICT', message: 'Session already connected'
+    })
+    assert.equal(valid, true)
+  })
 })
 
 // ─── send ─────────────────────────────────────────────────────────

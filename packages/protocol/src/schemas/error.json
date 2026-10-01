@@ -16,7 +16,10 @@
         "WORLD_FULL",
         "AUTH_FAILED",
         "RATE_LIMITED",
-        "UNKNOWN_MESSAGE"
+        "UNKNOWN_MESSAGE",
+        "WORLD_UNAVAILABLE",
+        "WORLD_NOW_PRIVATE",
+        "SESSION_CONFLICT"
       ]
     },
     "seq": { "type": "integer", "minimum": 0 },
