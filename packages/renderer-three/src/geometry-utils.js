@@ -64,7 +64,7 @@ export function buildAvatarDescriptor(name) {
 
 /**
  * Build a glTF node descriptor for a teleporter pad (T1).
- * A flat teal ring on the xz plane, 2 cm above y=0 to avoid z-fighting.
+ * A flat teal ring on the xz plane, 5 cm above y=0 to avoid z-fighting.
  * Node translation stays at [x, 0, z] — the vertical offset is baked into
  * the geometry.
  *
@@ -78,9 +78,9 @@ export function buildTeleporterDescriptor({ name, position, destination }) {
   // Ring geometry: inner 0.45, outer 0.75 (outer = TELEPORT_TRIGGER_RADIUS)
   //   so what you see is what triggers
   const geo = new THREE.RingGeometry(0.45, 0.75, 48, 1)
-  // Rotate flat onto xz plane, then lift 2 cm above y=0 to avoid z-fighting
+  // Rotate flat onto xz plane, then lift 5 cm above y=0 to avoid z-fighting
   geo.rotateX(-Math.PI / 2)
-  geo.translate(0, 0.02, 0)
+  geo.translate(0, 0.05, 0)
 
   const primitive = threeGeometryToGltfPrimitive(geo, {
     pbrMetallicRoughness: {

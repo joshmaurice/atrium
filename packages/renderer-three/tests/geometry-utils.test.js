@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert   from 'node:assert/strict'
 import * as THREE from 'three'
-import { threeGeometryToGltfPrimitive, buildAvatarDescriptor } from '../src/geometry-utils.js'
+import { threeGeometryToGltfPrimitive, buildAvatarDescriptor, buildTeleporterDescriptor } from '../src/geometry-utils.js'
 
 // ---------------------------------------------------------------------------
 // 1. threeGeometryToGltfPrimitive — extracts position/normal/index arrays
@@ -115,4 +115,25 @@ test('buildAvatarDescriptor: color channels in [0.5, 1.0] and alpha = 1', () => 
 test('buildAvatarDescriptor: top-level name field is undefined (intentional omission)', () => {
   const desc = buildAvatarDescriptor('Carol')
   assert.strictEqual(desc.name, undefined, 'name field absent from descriptor')
+})
+
+// ---------------------------------------------------------------------------
+// 8. buildTeleporterDescriptor — ring vertices clear the grey floor box
+// ---------------------------------------------------------------------------
+
+test('buildTeleporterDescriptor: every ring vertex has y > 0.025 (clears grey floor box)', () => {
+  const desc = buildTeleporterDescriptor({
+    name: 'teleporter-test',
+    position: [1, 0, 2],
+    destination: 'ws://example/worlds/u/home',
+  })
+  const prim = desc.mesh?.primitives?.[0]
+  assert.ok(prim, 'mesh.primitives[0] exists')
+  const positions = prim.attributes.POSITION
+  assert.ok(Array.isArray(positions), 'POSITION is Array')
+  // Every 3 values is one vertex [x, y, z]
+  for (let i = 0; i < positions.length; i += 3) {
+    const y = positions[i + 1]
+    assert.ok(y > 0.025, `vertex y=${y} at index ${i} is NOT > 0.025`)
+  }
 })
