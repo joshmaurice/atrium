@@ -10,6 +10,7 @@ import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination,
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
 import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
+import { teleportFailureMessage } from './teleport-failure.js'
 import { projectRayToPlane } from '@atrium/renderer-three'
 
 // ---------------------------------------------------------------------------
@@ -190,6 +191,8 @@ function renderWorldList(worlds) {
     itemLoadBtn.addEventListener('click', async () => {
       itemLoadBtn.disabled = true
       try {
+        // Hide failure panel at start of user-initiated Load
+        hideTeleportFailurePanel()
         // Perform a real WS connect via buildWorldWsUrl (pre-brief #1/#3, F1 fix)
         if (!currentUser) {
           wbError.textContent = 'Not logged in'
@@ -348,50 +351,36 @@ const trigger = createTeleportTrigger({
     showOverlay('Connecting to world…')
     trackConnect(worldUrl, connectOpts, {
       onError: (msg) => {
-        // T8: failure message naming the destination host
-        let host = '(unknown)'
-        try { host = new URL(worldUrl).host } catch { /* fallback */ }
-        showOverlay(`Could not connect to ${host}`)
-        // Add "Go back" button
-        let goBackBtn = document.getElementById('tp-goback-btn')
-        if (!goBackBtn) {
-          goBackBtn = document.createElement('button')
-          goBackBtn.id = 'tp-goback-btn'
-          goBackBtn.textContent = 'Go back'
-          goBackBtn.className = 'text-btn'
-          overlayEl.after(goBackBtn)
-        }
-        goBackBtn.style.display = ''
-        goBackBtn.onclick = () => {
-          goBackBtn.style.display = 'none'
-          goBackBtn.onclick = null
-          if (!prevWorldUrl) {
-            showOverlay('Could not connect')
-            return
-          }
-          showOverlay('Connecting to previous world…')
-          const goBackOpts = { avatar: buildAvatarDescriptor() }
-          if (sameOriginAsAccount(prevWorldUrl, accountWsBase)) {
-            goBackOpts.displayName = client.displayName
-          }
-          trackConnect(prevWorldUrl, goBackOpts, {
-            onError: (msg) => {
-              let host = '(unknown)'
-              try { host = new URL(prevWorldUrl).host } catch { /* fallback */ }
-              // No second "Go back" — show ordinary failure
-              showOverlay(`Could not connect to ${host}`)
+              // Show the failure panel with teleport failure wording (U2)
+              showTeleportFailurePanel(teleportFailureMessage(worldUrl), { showGoBack: true })
+              // Wire Go back — only if a previous world exists
+              if (!prevWorldUrl) return
+              const panelGoBack = document.getElementById('tp-fail-goback')
+              if (panelGoBack) {
+                panelGoBack.addEventListener('click', function goBackHandler() {
+                  panelGoBack.removeEventListener('click', goBackHandler)
+                  hideTeleportFailurePanel()
+                  showOverlay('Connecting to previous world\u2026')
+                  const goBackOpts = { avatar: buildAvatarDescriptor() }
+                  if (sameOriginAsAccount(prevWorldUrl, accountWsBase)) {
+                    goBackOpts.displayName = client.displayName
+                  }
+                  trackConnect(prevWorldUrl, goBackOpts, {
+                    onError: (msg2) => {
+                      // No second Go back — Dismiss only
+                      showTeleportFailurePanel(teleportFailureMessage(prevWorldUrl, { returning: true }), { showGoBack: false })
+                    },
+                  }).then((outcome2) => {
+                    if (outcome2.status === 'superseded') return
+                    hideTeleportFailurePanel()
+                    showOverlay('')
+                  }).catch(() => {})
+                })
+              }
             },
-          }).then((outcome) => {
-            if (outcome.status === 'superseded') return
-            showOverlay('')
-          }).catch(() => {})
-        }
-      },
     }).then((outcome) => {
       if (outcome.status === 'superseded') return
-      // Clear any Go back button
-      const gb = document.getElementById('tp-goback-btn')
-      if (gb) gb.style.display = 'none'
+      hideTeleportFailurePanel()
       showOverlay('')
     }).catch(() => {
       // Error already displayed via onError
@@ -909,6 +898,8 @@ loadBtn.addEventListener('click', async () => {
 
   // Load works whether or not connected (pre-brief decision).
   try {
+    // Hide failure panel at start of user-initiated Load
+    hideTeleportFailurePanel()
     // While connected, Load opens no new content — use Connect or Disconnect.
     if (client.connected) {
       // #7: no WS world URL while connected branch; Load works only
@@ -945,6 +936,8 @@ function handleConnect() {
     client.disconnect()
     return
   }
+  // Hide failure panel at start of user-initiated Connect
+  hideTeleportFailurePanel()
   const wsUrl = wsUrlInput.value.trim()
   if (!wsUrl) return
   setConnectionState('connecting')
@@ -1067,7 +1060,16 @@ function showTeleportFailurePanel(msg, { showGoBack = true } = {}) {
   if (msgEl) msgEl.textContent = msg
   const goBackBtn = document.getElementById('tp-fail-goback')
   if (goBackBtn) goBackBtn.style.display = showGoBack ? '' : 'none'
+  const dismissBtn = document.getElementById('tp-fail-dismiss')
+  if (dismissBtn) {
+    // Replace with clone to kill stale listeners, then attach fresh one
+    const newDismiss = dismissBtn.cloneNode(true)
+    dismissBtn.parentNode.replaceChild(newDismiss, dismissBtn)
+    newDismiss.addEventListener('click', hideTeleportFailurePanel)
+  }
   panel.style.display = ''
+  // Clear overlay when panel shows
+  showOverlay('')
 }
 
 function updateTeleporterControls() {

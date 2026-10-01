@@ -252,13 +252,25 @@
     line-height: 1.6;
   }
 
-  /* Go back button (T8) */
-  #tp-goback-btn {
+  /* ── Teleporter failure panel (U2) ───────────────────────── */
+  #tp-fail-panel {
     position: absolute;
-    bottom: 30px;
-    left: 200px;
-    font-size: 11px;
-    z-index: 5;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.85);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    z-index: 10;
+    max-width: 420px;
+    width: max-content;
+  }
+  #tp-fail-panel .tp-fail-buttons {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
   }
 
   /* ── HUD hint — persistent controls hint, bottom-left  */
@@ -401,6 +413,15 @@
     <div style="display:flex;gap:6px">
       <button id="tp-save-btn" class="primary" disabled>Save</button>
       <button id="tp-form-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Teleporter failure panel (U2) -->
+  <div id="tp-fail-panel" style="display:none">
+    <div id="tp-fail-msg"></div>
+    <div class="tp-fail-buttons">
+      <button id="tp-fail-goback" class="primary">Go back</button>
+      <button id="tp-fail-dismiss">Dismiss</button>
     </div>
   </div>
 </div>
