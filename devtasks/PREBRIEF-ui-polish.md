@@ -1,9 +1,15 @@
 # Pre-brief: UI polish — teleporter form, failure panel, top bar
 
-Status: **FINAL, Revision 2. All decisions are confirmed by the human**
+Status: **FINAL, Revision 3. All decisions are confirmed by the human**
 (U1–U8, including the U2, U3 and U5 choices and the U8 test script, on
 2026-10-01, after external review). Ready for the brief/critic pipeline once
 this file is uploaded to `devtasks/`.
+
+Revision 3 (2026-10-01) corrects U8's stated effect. The deploy scripts
+don't run `pnpm -r test`; they run a fixed list of packages, which didn't
+include `apps/client`. The operator added an explicit `apps/client` test
+line to `atrium-deploy` and `atrium-deploy-prod` on 2026-10-01 (§2.6). U8's
+script is still added, for `pnpm -r test` and for reviewers.
 
 Revision 2 (2026-10-01) folds in external review. Each point was verified
 against `e36a3b8` before being adopted:
@@ -168,7 +174,16 @@ in `apps/client/src/`, and its tests in `apps/client/tests/`.
   `teleporter-marker`, `wsUrl`.
 - **`apps/client/package.json` has no `test` script.** `apps/*` is in the
   pnpm workspace, but `pnpm -r test` skips packages without one, so the
-  root test run, and therefore the deploy, never runs these tests.
+  root test run never includes these tests.
+- **The deploy runs a fixed list, not `pnpm -r test`.**
+  `/usr/local/sbin/atrium-deploy` runs `protocol`, `som`, each server test
+  file under its own timeout, `packages/client` (with `--test-force-exit`,
+  for the known hang), `renderer-three` and `interaction`. **Since
+  2026-10-01 it also runs `apps/client` directly** (an operator host change,
+  made in both `atrium-deploy` and `atrium-deploy-prod`, with backups):
+  `cd apps/client && node --test tests/*.test.js` under a 300 s timeout, with
+  no force-exit. That line doesn't depend on U8's script, so this task's own
+  DEV deploy is the first to gate on the app-client tests.
 - **Verified 2026-10-01 at `e36a3b8`** (Node 22, after `pnpm install`):
   `node --test tests/*.test.js` in `apps/client` passes **124 tests in 5
   files, 0 failures**, and each file exits on its own in about 1 s. That's
@@ -314,16 +329,15 @@ is a separate decision, not part of this task.
 4. U2, the failure panel, wired to U3.
 5. U4 and U5, the layout.
 
-**U8. Run the app-client tests in the root test run (endorsed).**
+**U8. Give `apps/client` a test script (endorsed).**
 - Add `"test": "node --test tests/*.test.js"` to
   `apps/client/package.json`, matching every other workspace package.
-- **Its own commit,** first in the series, so the deploy-gate change is
-  isolated and easy to review or revert.
-- **Effect:** `pnpm -r test`, and therefore every DEV and PROD deploy, now
-  runs these tests, under the deploy's rule that each file exits on its own
-  within 180 s. They do today (§2.6). Future regressions in
-  `resolveWorldAddress`, the trigger, the labels and U3's helpers will
-  block deploys instead of passing silently.
+- **Its own commit,** first in the series.
+- **Effect:** `pnpm -r test` and `pnpm --filter @atrium/app-client test`
+  now include these tests, so implementers and reviewers run them the
+  normal way. **The deploy gate doesn't depend on this script:** the deploy
+  runs the files directly (§2.6). Every file must still pass and exit on
+  its own, because the deploy now enforces that.
 
 ## 4. Out of scope
 
@@ -357,8 +371,10 @@ Automated. Run with `pnpm --filter @atrium/app-client test` once U8 lands,
 or `node --test tests/*.test.js` in `apps/client` (not `node --test tests/`;
 see §2.6), and report the output:
 
-- **U8:** the root `pnpm -r test` now includes the `apps/client` files, and
-  every one exits on its own.
+- **U8:** the root `pnpm -r test` now includes the `apps/client` files.
+  Run them exactly as the deploy does, too:
+  `cd apps/client && node --test tests/*.test.js` with no force-exit. Every
+  file must pass and exit on its own.
 - **U3 `formatDestination`:**
   - a short host + path is returned whole;
   - a long path is middle-truncated and **the host is intact**;
