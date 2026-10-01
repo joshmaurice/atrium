@@ -802,6 +802,14 @@ export function createRequestHandler(opts = {}) {
           return
         }
 
+        // V5: evict non-owners when switching to private
+        if (body?.visibility === 'private') {
+          const worldHost = getWorldForId(worldId)
+          if (worldHost && typeof worldHost.evictNonOwners === 'function') {
+            worldHost.evictNonOwners(userId)
+          }
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(result.world))
         return

@@ -45,7 +45,7 @@ export function createWorldHost(opts = {}) {
   const wss = new WebSocketServer({ noServer: true })
 
   // Wire up the session handlers for this host's wss
-  const closeKeepalive = attachSessionHandlers({
+  const { closeKeepalive, evictNonOwners } = attachSessionHandlers({
     wss,
     world,
     db,
@@ -94,6 +94,7 @@ export function createWorldHost(opts = {}) {
     ownerUserId,
     mutationPolicy,
     handleUpgrade,
+    evictNonOwners,
     close,
   }
 }

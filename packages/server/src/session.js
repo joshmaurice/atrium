@@ -51,6 +51,39 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
   const sessions = new Map()
   const presence = createPresence()
 
+  // Track pre-hello connections by WebSocket instance so eviction (V5)
+  // can disconnect sockets that haven't sent hello yet.
+  const preHelloSockets = new Map()  // ws -> upgradeUserId | null
+
+  // ---------------------------------------------------------------------------
+  // evictNonOwners — disconnect every connection (session or pre-hello) whose
+  // userId does not match the given ownerUserId. Sends WORLD_NOW_PRIVATE error
+  // and closes with 1008. Used when a world is switched to private (V5).
+  // ---------------------------------------------------------------------------
+  const doEvictNonOwners = function evictNonOwners(ownerUserId) {
+    const evictMsg = JSON.stringify({
+      type: 'error',
+      code: 'WORLD_NOW_PRIVATE',
+      message: 'This world is now private',
+    })
+
+    // Evict full sessions
+    for (const [, s] of sessions) {
+      if (s.ws.readyState === 1 /* OPEN */ && s.userId !== ownerUserId) {
+        s.ws.send(evictMsg)
+        s.ws.close(1008)
+      }
+    }
+
+    // Evict pre-hello sockets
+    for (const [ws, uid] of preHelloSockets) {
+      if (ws.readyState === 1 /* OPEN */ && uid !== ownerUserId) {
+        ws.send(evictMsg)
+        ws.close(1008)
+      }
+    }
+  }
+
   // Attach the WebSocket server to the provided HTTP server using noServer: true
   // and an explicit upgrade handler. This establishes the seam for later cookie
   // and Origin validation at upgrade time.
@@ -87,7 +120,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
   })
 
   // Wire up connection handlers
-  const closeKeepalive = attachSessionHandlers({
+  const { closeKeepalive, evictNonOwners } = attachSessionHandlers({
     wss,
     world,
     db,
@@ -229,6 +262,9 @@ export function attachSessionHandlers({
   wss.on('connection', (ws, req, upgradeUserId = null) => {
     let session = null
 
+    // Track pre-hello connection for eviction (V5)
+    preHelloSockets.set(ws, upgradeUserId)
+
     ws.on('message', async (raw) => {
       let msg
       try {
@@ -309,6 +345,9 @@ export function attachSessionHandlers({
             session.userId = upgradeUserId
           }
           sessions.set(session.id, session)
+
+          // Pre-hello tracking: hello is complete, clean up
+          preHelloSockets.delete(ws)
 
           // Compute canPlaceTeleporters at hello time (T2)
           const canPlaceTeleporters = session.userId !== null &&
@@ -637,6 +676,8 @@ export function attachSessionHandlers({
     })
 
     ws.on('close', () => {
+      // Clean up pre-hello tracking (V5)
+      preHelloSockets.delete(ws)
       if (session) {
         cleanupSession(session)
         session = null
@@ -660,9 +701,9 @@ export function attachSessionHandlers({
     }
   }, keepaliveInterval)
 
-  return function closeKeepalive() {
+  return { closeKeepalive() {
     clearInterval(keepaliveTimer)
-  }
+  }, evictNonOwners: doEvictNonOwners }
 }
 
 // ---------------------------------------------------------------------------
