@@ -5,6 +5,7 @@
 // Teleport failure message helpers — pure functions, no DOM.
 //
 // formatDestination(host, pathname, maxLen) — format a destination for display
+// evictionMessage(wsUrl) — build WORLD_NOW_PRIVATE eviction panel message (V8)
 // teleportFailureMessage(resolvedUrl, { returning }, code) — build failure msg
 // codeToReason(code) — map error code to human-readable reason (V8)
 // ---------------------------------------------------------------------------
@@ -82,6 +83,29 @@ export function formatDestination(host, pathname, maxLen = 64) {
   const prefix = pathname.slice(0, prefixLen)
   const suffix = pathname.slice(pathname.length - suffixLen)
   return host + prefix + ellipsis + suffix
+}
+
+/**
+ * Build the eviction panel message for a WORLD_NOW_PRIVATE event (V8).
+ * Safely parses the WS URL — never throws on garbage input.
+ *
+ * @param {string|null|undefined} wsUrl — the WebSocket URL that was evicted
+ * @returns {string}
+ */
+export function evictionMessage(wsUrl) {
+  let host = ''
+  let pathname = '/'
+  if (wsUrl && typeof wsUrl === 'string') {
+    try {
+      const parsed = new URL(wsUrl)
+      host = parsed.host
+      pathname = parsed.pathname || '/'
+    } catch {
+      // Garbage input — use fallback
+    }
+  }
+  const dest = formatDestination(host, pathname)
+  return `${dest} was made private by its owner, so you've been disconnected.`
 }
 
 /**

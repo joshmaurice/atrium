@@ -68,6 +68,11 @@ export function createWorldRegistry(opts = {}) {
 
   function sendRefusal(request, socket, head) {
     refusalWss.handleUpgrade(request, socket, head, (ws) => {
+      // Log WS errors without rethrowing (pre-brief security: prevent
+      // uncaught WS_ERR_EXPECTED_MASK from killing the server)
+      ws.on('error', (err) => {
+        console.error(`[world-registry] refusal socket error: ${err.message}`)
+      })
       ws.send(JSON.stringify({
         type: 'error',
         code: 'WORLD_UNAVAILABLE',
@@ -623,6 +628,10 @@ export function createWorldRegistry(opts = {}) {
     }
     teardownTimers.clear()
 
+    // Terminate all existing refusal connections before close() (ws 8 compat)
+    for (const client of refusalWss.clients) {
+      client.terminate()
+    }
     // Close the refusal WebSocketServer — terminates any lingering refusal sockets
     refusalWss.close()
 

@@ -262,6 +262,12 @@ export function attachSessionHandlers({
   wss.on('connection', (ws, req, upgradeUserId = null) => {
     let session = null
 
+    // Log WS errors without rethrowing (pre-brief security: prevent
+    // uncaught WS_ERR_EXPECTED_MASK from killing the server)
+    ws.on('error', (err) => {
+      console.error(`[session] connection error: ${err.message}`)
+    })
+
     // Track pre-hello connection for eviction (V5)
     preHelloSockets.set(ws, upgradeUserId)
 

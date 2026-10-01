@@ -10,7 +10,7 @@ import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination,
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
 import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
-import { teleportFailureMessage } from './teleport-failure.js'
+import { teleportFailureMessage, evictionMessage } from './teleport-failure.js'
 import { projectRayToPlane } from '@atrium/renderer-three'
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ function renderWorldList(worlds) {
     toggleLabel.className = 'wb-vis-toggle'
     const toggle = document.createElement('input')
     toggle.type = 'checkbox'
-    toggle.role = 'switch'
+    toggle.setAttribute('role', 'switch')
     toggle.checked = isPublic
     const toggleText = document.createTextNode(' ' + (isPublic ? 'Public' : 'Private'))
     toggleLabel.appendChild(toggle)
@@ -698,12 +698,8 @@ client.on('error', (err) => {
   console.error(`[app] client error: connected=${client.connected} message="${err.message}"`, err)
   // V8: eviction listener — WORLD_NOW_PRIVATE after session:ready shows panel
   if (err.code === 'WORLD_NOW_PRIVATE' && err.sessionId === readySessionId) {
-    const dest = formatDestination(
-      err.url ? new URL(err.url).host : '',
-      err.url ? new URL(err.url).pathname || '/' : '/'
-    )
     showTeleportFailurePanel(
-      `${dest} was made private by its owner, so you've been disconnected.`,
+      evictionMessage(err.url),
       { showGoBack: false }
     )
   }

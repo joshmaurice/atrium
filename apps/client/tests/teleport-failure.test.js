@@ -6,7 +6,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDestination, teleportFailureMessage, codeToReason } from '../src/teleport-failure.js'
+import { formatDestination, teleportFailureMessage, codeToReason, evictionMessage } from '../src/teleport-failure.js'
 
 describe('formatDestination', () => {
 
@@ -236,5 +236,36 @@ describe('teleportFailureMessage', () => {
   test('returning path shows correct message', () => {
     const msg = teleportFailureMessage('ws://srv.local/worlds/a/b', { returning: true })
     assert.equal(msg, "Couldn't return to srv.local/worlds/a/b.")
+  })
+})
+
+describe('evictionMessage', () => {
+  test('normal URL produces eviction message with host+path', () => {
+    const msg = evictionMessage('ws://atrium.example/worlds/josh/garden')
+    assert.equal(msg, 'atrium.example/worlds/josh/garden was made private by its owner, so you\'ve been disconnected.')
+  })
+
+  test('commons URL produces eviction message with commons label', () => {
+    const msg = evictionMessage('ws://atrium.example/')
+    assert.ok(msg.startsWith('the commons on atrium.example'))
+    assert.ok(msg.includes('made private'))
+  })
+
+  test('garbage input never throws — uses fallback', () => {
+    const msg = evictionMessage('not a valid url at all!!!')
+    assert.equal(typeof msg, 'string')
+    assert.ok(msg.includes('made private'))
+  })
+
+  test('null input never throws', () => {
+    const msg = evictionMessage(null)
+    assert.equal(typeof msg, 'string')
+    assert.ok(msg.includes('made private'))
+  })
+
+  test('undefined input never throws', () => {
+    const msg = evictionMessage(undefined)
+    assert.equal(typeof msg, 'string')
+    assert.ok(msg.includes('made private'))
   })
 })

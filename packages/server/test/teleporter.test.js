@@ -544,7 +544,7 @@ test('canPlaceTeleporters — authenticated same-origin owner gets true', async 
   const sessions = new Map()
   const presence = { add: () => {}, remove: () => {}, list: () => [], setPosition: () => {} }
 
-  const closeKeepalive = attachSessionHandlers({
+  const { closeKeepalive } = attachSessionHandlers({
     wss: ownedWss,
     world,
     sessions,
