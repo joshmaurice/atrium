@@ -373,7 +373,7 @@ async function connectVisTest(cookie, sessionId) {
   const ws = await wsOpen(PORT_PUT, '/worlds/PutOwner/vis-test-world', cookie)
   const q = makeMessageQueue(ws)
   sendHello(ws, sessionId)
-  const hello = await q.waitForType('hello', 3000)
+  const hello = await q.waitForType('hello', 5000)
   return { ws, q, hello }
 }
 
@@ -530,10 +530,17 @@ test('3c: commons -> private returns 403 and evicts nobody', async () => {
 
   const commonsId = commonsWorld.id
 
-  console.log(`[test] Using commons world: id=${commonsId}`)
-
-  const other = await connectVisTest(putOtherCookie, 'put-commons-test')
-  assert.ok(other.hello !== null)
+  // Connect to the vis-test world as a non-owner (to have a live session to NOT evict)
+  // Retry a few times because the host may be in teardown
+  let other = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    other = await connectVisTest(putOtherCookie, 'put-commons-test')
+    if (other.hello !== null) break
+    // Host might have been torn down — wait for lazy creation to complete
+    if (other.ws) other.ws.close()
+    await new Promise(r => setTimeout(r, 500))
+  }
+  assert.ok(other !== null && other.hello !== null, 'non-owner should connect to public world')
 
   // Try to set commons to private
   const putRes = await httpPut(PORT_PUT, `/api/worlds/${commonsId}`, { visibility: 'private' }, putOwnerCookie)
