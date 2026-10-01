@@ -521,14 +521,23 @@ test('3c: non-owner PUT returns 404 and evicts nobody', async () => {
 })
 
 test('3c: commons -> private returns 403 and evicts nobody', async () => {
-  const commonsId = putRegistry.getRootWorldId()
+  // Debug: find commons world
+  const allWorlds = putDb.database.prepare(
+    'SELECT id, slug, owner_user_id FROM worlds WHERE owner_user_id = ?'
+  ).all(putOwnerUserId)
+  const commonsWorld = allWorlds.find(w => w.slug === 'commons')
+  assert.ok(commonsWorld, 'commons world should exist in DB')
+
+  const commonsId = commonsWorld.id
+
+  console.log(`[test] Using commons world: id=${commonsId}`)
 
   const other = await connectVisTest(putOtherCookie, 'put-commons-test')
   assert.ok(other.hello !== null)
 
   // Try to set commons to private
   const putRes = await httpPut(PORT_PUT, `/api/worlds/${commonsId}`, { visibility: 'private' }, putOwnerCookie)
-  assert.equal(putRes.statusCode, 403)
+  assert.equal(putRes.statusCode, 403, `commons->private should be 403, got ${putRes.statusCode} body=${JSON.stringify(putRes.body)}`)
 
   // Nobody gets evicted
   const errMsg = await other.q.waitForType('error', 2000)
