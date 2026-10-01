@@ -185,6 +185,51 @@ function renderWorldList(worlds) {
       `<div class="wb-meta">${escHtml(w.slug)} · ${formatTime(w.updated_at)}</div>`
     item.appendChild(info)
 
+    // V6: visibility toggle switch
+    const isPublic = w.visibility === 'public'
+    const isCommons = w.isCommons === true
+    const toggleLabel = document.createElement('label')
+    toggleLabel.className = 'wb-vis-toggle'
+    const toggle = document.createElement('input')
+    toggle.type = 'checkbox'
+    toggle.role = 'switch'
+    toggle.checked = isPublic
+    const toggleText = document.createTextNode(' ' + (isPublic ? 'Public' : 'Private'))
+    toggleLabel.appendChild(toggle)
+    toggleLabel.appendChild(toggleText)
+    if (isCommons) {
+      toggle.disabled = true
+      toggleLabel.title = 'The commons is always public'
+    }
+    toggle.addEventListener('change', async () => {
+      toggle.disabled = true
+      const newVis = toggle.checked ? 'public' : 'private'
+      try {
+        const res = await fetch(`/api/worlds/${w.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visibility: newVis }),
+        })
+        if (res.ok) {
+          refreshWorldList()
+          return
+        }
+        // Failure: restore and show error
+        toggle.checked = !toggle.checked
+        const data = await res.json().catch(() => ({}))
+        wbError.textContent = data.error || "Couldn't change visibility"
+        if (res.status === 401) {
+          setAuthState(null)
+        }
+      } catch {
+        toggle.checked = !toggle.checked
+        wbError.textContent = "Couldn't change visibility"
+      } finally {
+        toggle.disabled = isCommons
+      }
+    })
+    item.appendChild(toggleLabel)
+
     const itemLoadBtn = document.createElement('button')
     itemLoadBtn.textContent = 'Load'
     // Load works whether or not connected (pre-brief decision)

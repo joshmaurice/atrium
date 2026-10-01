@@ -253,6 +253,49 @@
     padding: 3px 8px;
   }
 
+  .wb-vis-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: #94a3b8;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .wb-vis-toggle input[type="checkbox"] {
+    width: 28px;
+    height: 14px;
+    appearance: none;
+    -webkit-appearance: none;
+    background: #475569;
+    border-radius: 7px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .wb-vis-toggle input[type="checkbox"]::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    transition: transform 0.2s;
+  }
+  .wb-vis-toggle input[type="checkbox"]:checked {
+    background: #22c55e;
+  }
+  .wb-vis-toggle input[type="checkbox"]:checked::before {
+    transform: translateX(14px);
+  }
+  .wb-vis-toggle input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   /* ── Viewport (fills remaining space) ─────────────── */
   #viewport {
     flex: 1;
