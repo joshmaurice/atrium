@@ -600,6 +600,8 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) =>
   // R4: hide Go back button on successful connection
   const gb = document.getElementById('tp-goback-btn')
   if (gb) gb.style.display = 'none'
+  // Hide failure panel on successful session
+  hideTeleportFailurePanel()
   // Sync the connection box with the actual connection URL (pre-brief decision:
   // AtriumClient is source of truth for the connection URL)
   if (connectUrl) {
@@ -633,17 +635,17 @@ client.on('connecting', () => {
   currentWorldUrl = null
   trigger.setReady(false)
   trigger.reset()
-  // R2.5: disable placement/delete controls and close open form immediately
-  if (placementMode || deleteMode || tpForm.style.display !== 'none') {
-    exitTeleporterMode()
-  } else {
-    updateTeleporterControls()
-  }
+  // Reset teleporter UI (closes form, abandons pendings, guarded overlay)
+  resetTeleporterUi()
+  // Hide failure panel (connecting covers teleport/Go back retry)
+  hideTeleportFailurePanel()
 })
 
 client.on('disconnected', () => {
   teardownWorld()
   setConnectionState('disconnected')
+  // Reset teleporter UI (abandons pendings, closes form, guarded overlay)
+  resetTeleporterUi()
 
   // Reload the world in static mode — clears avatar/peer nodes from the scene
   // and restores NavigationController's localNode for input to work again.
@@ -892,6 +894,7 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
 // ---------------------------------------------------------------------------
 
 function showOverlay(msg) {
+  teleporterOverlayActive = false
   overlayEl.textContent = msg || ''
 }
 
@@ -980,6 +983,43 @@ connectBtn.addEventListener('contextmenu', (e) => {
 connectBtn.addEventListener('click', handleConnect)
 
 // ---------------------------------------------------------------------------
+// Teleporter UI reset — called from both 'connecting' and 'disconnected'
+// ---------------------------------------------------------------------------
+
+function resetTeleporterUi() {
+  const isActive = placementMode || deleteMode || tpForm.style.display !== 'none' ||
+    pendingSeq != null || pendingDeleteSeq != null
+
+  if (isActive) {
+    // Abandon pending save/delete
+    pendingSeq = null
+    pendingName = null
+    pendingDeleteSeq = null
+    deleteTargetName = null
+    pendingPosition = null
+    // Close form and mode
+    placementMode = false
+    deleteMode = false
+    tpForm.style.display = 'none'
+    tpCancelBtn.style.display = 'none'
+    tpPlaceBtn.style.display = ''
+    tpDeleteBtn.style.display = ''
+    viewportEl.style.cursor = ''
+    trigger.setActive(true)
+    // Restore Save button and re-enable cancels
+    tpSaveBtn.textContent = 'Save'
+    tpSaveBtn.disabled = true
+    tpFormCancel.disabled = false
+    tpCancelBtn.disabled = false
+    // Only clear overlay if teleporter owns it
+    if (teleporterOverlayActive) {
+      showTeleporterOverlay('')
+    }
+  }
+  updateTeleporterControls()
+}
+
+// ---------------------------------------------------------------------------
 // Teleporter placement and delete UI (T5)
 // ---------------------------------------------------------------------------
 
@@ -1000,6 +1040,35 @@ let pendingPosition = null
 let pendingName = null
 let pendingSeq = null
 let deleteTargetName = null
+let pendingDeleteSeq = null
+
+// Overlay ownership flag (operator correction #3):
+// Teleporter-originated messages go through showTeleporterOverlay, which sets
+// this flag. Any other showOverlay call clears it. resetTeleporterUi() only
+// clears the overlay when this flag is true.
+let teleporterOverlayActive = false
+
+function showTeleporterOverlay(msg) {
+  teleporterOverlayActive = true
+  overlayEl.textContent = msg || ''
+}
+
+// Teleporter failure panel — stub for U1, fleshed out in U2.
+// Called from connecting, session:ready, Escape handler before the panel DOM exists.
+function hideTeleportFailurePanel() {
+  const panel = document.getElementById('tp-fail-panel')
+  if (panel) panel.style.display = 'none'
+}
+
+function showTeleportFailurePanel(msg, { showGoBack = true } = {}) {
+  const panel = document.getElementById('tp-fail-panel')
+  if (!panel) return
+  const msgEl = document.getElementById('tp-fail-msg')
+  if (msgEl) msgEl.textContent = msg
+  const goBackBtn = document.getElementById('tp-fail-goback')
+  if (goBackBtn) goBackBtn.style.display = showGoBack ? '' : 'none'
+  panel.style.display = ''
+}
 
 function updateTeleporterControls() {
   const canEdit = client.canPlaceTeleporters && avatarReady && client.connected
@@ -1020,22 +1089,39 @@ function exitTeleporterMode() {
   pendingName = null
   pendingSeq = null
   deleteTargetName = null
+  pendingDeleteSeq = null
   tpForm.style.display = 'none'
   tpCancelBtn.style.display = 'none'
   tpPlaceBtn.style.display = ''
   tpDeleteBtn.style.display = ''
   viewportEl.style.cursor = ''
   trigger.setActive(true)
-  showOverlay('')
+  // Restore Save button
+  tpSaveBtn.textContent = 'Save'
+  tpSaveBtn.disabled = true
+  // Only clear overlay if teleporter owns it
+  if (teleporterOverlayActive) {
+    showTeleporterOverlay('')
+  }
   updateTeleporterControls()
 }
 
 tpCancelBtn.addEventListener('click', exitTeleporterMode)
 
-// Escape key exits teleporter modes
+// Escape key exits teleporter modes, hides failure panel
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && (placementMode || deleteMode || tpForm.style.display !== 'none')) {
-    exitTeleporterMode()
+  if (e.key === 'Escape') {
+    // If teleporter failure panel is visible, hide it
+    const failPanel = document.getElementById('tp-fail-panel')
+    if (failPanel && failPanel.style.display !== 'none') {
+      hideTeleportFailurePanel()
+      return
+    }
+    // Ignore Escape while a save is pending
+    if (pendingSeq != null) return
+    if (placementMode || deleteMode || tpForm.style.display !== 'none') {
+      exitTeleporterMode()
+    }
   }
 })
 
@@ -1050,12 +1136,14 @@ tpPlaceBtn.addEventListener('click', () => {
   tpPlaceBtn.disabled = true
   tpDeleteBtn.style.display = 'none'
   viewportEl.style.cursor = 'crosshair'
-  showOverlay('Click in the viewport to place a teleporter pad')
+  showTeleporterOverlay('Click in the viewport to place a teleporter pad')
 })
 
 // Handle viewport click in placement mode
 viewportEl.addEventListener('click', (e) => {
   if (!placementMode) return
+  // Act only on canvas clicks — overlay/form/panel clicks pass through
+  if (e.target !== canvas) return
   if (tpForm.style.display !== 'none') return
 
   const rect = viewportEl.getBoundingClientRect()
@@ -1067,7 +1155,7 @@ viewportEl.addEventListener('click', (e) => {
   const ray = { origin: raycaster.ray.origin.toArray(), direction: raycaster.ray.direction.toArray() }
   const hit = projectRayToPlane(ray, 0)
   if (!hit) {
-    showOverlay('Could not find a valid placement spot')
+    showTeleporterOverlay('Could not find a valid placement spot')
     return
   }
 
@@ -1120,7 +1208,10 @@ function openPlacementForm() {
 
   tpFormError.style.display = 'none'
   tpDestInput.value = ''
+  tpSaveBtn.textContent = 'Save'
   tpSaveBtn.disabled = true
+  tpFormCancel.disabled = false
+  tpCancelBtn.disabled = false
   tpForm.style.display = ''
 }
 
@@ -1159,6 +1250,8 @@ tpSaveBtn.addEventListener('click', () => {
   }
 
   tpSaveBtn.disabled = true
+  tpFormCancel.disabled = true
+  tpCancelBtn.disabled = true
 
   const name = 'teleporter-' + crypto.randomUUID()
   try {
@@ -1175,15 +1268,13 @@ tpSaveBtn.addEventListener('click', () => {
     tpFormError.style.display = ''
     tpSaveBtn.disabled = false
     tpSaveBtn.textContent = 'Save'
+    tpFormCancel.disabled = false
+    tpCancelBtn.disabled = false
   }
 })
 
 tpFormCancel.addEventListener('click', () => {
-  tpForm.style.display = 'none'
-  pendingPosition = null
-  pendingName = null
-  pendingSeq = null
-  showOverlay('')
+  exitTeleporterMode()
 })
 
 // Listen for som:add echo of our placement to close the form
@@ -1198,15 +1289,24 @@ client.on('som:add', ({ nodeName }) => {
   }
 })
 
-// Listen for error carrying our seq
+// Listen for error carrying our seq (placement or delete)
 client.on('error', (err) => {
   if (pendingSeq != null && err.seq === pendingSeq) {
+    // Placement save error — clear pending, restore Save, re-enable cancels
     tpFormError.textContent = err.message || 'Failed to place teleporter'
     tpFormError.style.display = ''
     tpSaveBtn.disabled = false
     tpSaveBtn.textContent = 'Save'
+    tpFormCancel.disabled = false
+    tpCancelBtn.disabled = false
     pendingSeq = null
     pendingName = null
+  }
+  if (pendingDeleteSeq != null && err.seq === pendingDeleteSeq) {
+    // Delete error
+    showOverlay(`Couldn't delete teleporter: ${err.message || 'refused'}`)
+    pendingDeleteSeq = null
+    deleteTargetName = null
   }
 })
 
@@ -1221,12 +1321,14 @@ tpDeleteBtn.addEventListener('click', () => {
   tpDeleteBtn.disabled = true
   tpPlaceBtn.style.display = 'none'
   viewportEl.style.cursor = 'pointer'
-  showOverlay('Click on a teleporter pad to delete it')
+  showTeleporterOverlay('Click on a teleporter pad to delete it')
 })
 
 // Handle viewport click in delete mode — raycast to find teleporter
 viewportEl.addEventListener('click', (e) => {
   if (!deleteMode) return
+  // Act only on canvas clicks — overlay/form/panel clicks pass through
+  if (e.target !== canvas) return
 
   const rect = viewportEl.getBoundingClientRect()
   const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1
@@ -1264,11 +1366,12 @@ viewportEl.addEventListener('click', (e) => {
   }
 
   try {
-    client.removeNode(somNode.name)
-    showOverlay('Deleting teleporter...')
+    pendingDeleteSeq = client.removeNode(somNode.name)
+    showTeleporterOverlay('Deleting teleporter...')
   } catch (err) {
     showOverlay('Delete failed: ' + err.message)
     deleteTargetName = null
+    pendingDeleteSeq = null
   }
 })
 
