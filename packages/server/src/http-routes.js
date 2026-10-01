@@ -531,8 +531,13 @@ export function createRequestHandler(opts = {}) {
       }
 
       const worlds = worldStore.listWorlds(db.database, userId)
+      // V7: add isCommons field (computed, not stored)
+      const enriched = worlds.map(w => ({
+        ...w,
+        isCommons: !!(getRootWorldId && w.id === getRootWorldId()),
+      }))
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify(worlds))
+      res.end(JSON.stringify(enriched))
       return
     }
 

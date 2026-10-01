@@ -246,6 +246,10 @@ test('GET /api/worlds lists own worlds', async () => {
   assert.ok(found.updated_at)
   // List should not include document
   assert.equal(found.document, undefined)
+  // V7: every row should have isCommons
+  for (const w of res.body) {
+    assert.equal(typeof w.isCommons, 'boolean', 'isCommons is boolean')
+  }
 })
 
 test('GET /api/worlds/:id fetches the full glTF document', async () => {
