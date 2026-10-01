@@ -1079,7 +1079,7 @@ test('F6: cross-origin + valid cookie — set extras.displayName blocked (PERMIS
 // F6: Private world and home-world routing with cross-origin + cookie
 // ---------------------------------------------------------------------------
 
-test('F6: cross-origin + valid cookie — private world via /ws/<id> gets 404', async () => {
+test('F6: cross-origin + valid cookie — private world via /ws/<id> gets refusal', async () => {
   // Set up a separate HTTP server with a world registry that owns a private world
   const regHttp = createServer()
   const REG_PORT = 3991
@@ -1088,36 +1088,28 @@ test('F6: cross-origin + valid cookie — private world via /ws/<id> gets 404', 
   const privateHost = await reg.registerWorld('f6-cross-priv', FIXTURE_PATH, 'owner-999')
 
   try {
-    // Try a raw TCP upgrade to /ws/f6-cross-priv with cross-origin + dummy cookie
-    const socket = connect(REG_PORT, 'localhost')
-    await new Promise((resolve, reject) => {
-      socket.on('connect', resolve)
-      socket.on('error', reject)
+    // Cross-origin + cookie still arrives anonymous, private world blocks anonymous
+    // with a WebSocket upgrade + WORLD_UNAVAILABLE error (V3).
+    const ws = new WebSocket(`ws://localhost:${REG_PORT}/ws/f6-cross-priv`, {
+      headers: {
+        Origin: 'https://evil-website.com',
+        Cookie: 'atrium_auth_session=valid-but-ignored-cross-origin',
+      },
+      handshakeTimeout: 2000,
     })
+    const messages = []
+    ws.on('message', (raw) => {
+      try { messages.push(JSON.parse(raw)) } catch {}
+    })
+    let opened = false
+    ws.once('open', () => { opened = true })
+    await new Promise(r => setTimeout(r, 500))
 
-    let response = ''
-    socket.on('data', (chunk) => { response += chunk.toString() })
-    socket.on('close', () => {})
-
-    socket.write(
-      'GET /ws/f6-cross-priv HTTP/1.1\r\n' +
-      'Host: localhost\r\n' +
-      'Connection: Upgrade\r\n' +
-      'Upgrade: websocket\r\n' +
-      'Origin: https://evil-website.com\r\n' +
-      'Cookie: atrium_auth_session=valid-but-ignored-cross-origin\r\n' +
-      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-      'Sec-WebSocket-Version: 13\r\n' +
-      '\r\n'
-    )
-
-    await new Promise(r => setTimeout(r, 300))
-
-    // Cross-origin + cookie still arrives anonymous, private world blocks anonymous -> 404
-    assert.ok(response.includes('404'), 'private world returns 404 for cross-origin + cookie visitor')
-    assert.ok(response.includes('Not Found'), 'response body is Not Found')
-
-    socket.destroy()
+    assert.equal(opened, true, 'upgrade succeeds for refusal')
+    assert.ok(messages.length >= 1, 'got error message')
+    assert.equal(messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(messages[0].message, 'World not available')
+    ws.close()
   } finally {
     privateHost.close()
     reg.close()
@@ -1125,7 +1117,7 @@ test('F6: cross-origin + valid cookie — private world via /ws/<id> gets 404', 
   }
 })
 
-test('F6: cross-origin + valid cookie — /home/<uid>/home gets 404', async () => {
+test('F6: cross-origin + valid cookie — /home/<uid>/home gets refusal', async () => {
   // Set up a registry for home-world routing. No world registration needed;
   // the path /home/<uid>/home with cross-origin should fail before any host lookup.
   const regHttp = createServer()
@@ -1134,37 +1126,28 @@ test('F6: cross-origin + valid cookie — /home/<uid>/home gets 404', async () =
   const reg = createWorldRegistry({ httpServer: regHttp, db })
 
   try {
-    // Try a raw TCP upgrade to /home/<some-uid>/home with cross-origin + dummy cookie
-    const socket = connect(REG_PORT, 'localhost')
-    await new Promise((resolve, reject) => {
-      socket.on('connect', resolve)
-      socket.on('error', reject)
-    })
-
-    let response = ''
-    socket.on('data', (chunk) => { response += chunk.toString() })
-    socket.on('close', () => {})
-
-    socket.write(
-      'GET /home/00000000-0000-0000-0000-000000000000/home HTTP/1.1\r\n' +
-      'Host: localhost\r\n' +
-      'Connection: Upgrade\r\n' +
-      'Upgrade: websocket\r\n' +
-      'Origin: https://evil-website.com\r\n' +
-      'Cookie: atrium_auth_session=valid-but-ignored-cross-origin\r\n' +
-      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-      'Sec-WebSocket-Version: 13\r\n' +
-      '\r\n'
-    )
-
-    await new Promise(r => setTimeout(r, 300))
-
     // Cross-origin + cookie arrives anonymous (cookie not honored cross-origin)
-    // Home world rejects anonymous -> 404
-    assert.ok(response.includes('404') || response.includes('Not Found'),
-      'home world returns 404 for cross-origin + cookie visitor')
+    // Home world rejects anonymous with a WebSocket upgrade + WORLD_UNAVAILABLE error (V3).
+    const ws = new WebSocket(`ws://localhost:${REG_PORT}/home/00000000-0000-0000-0000-000000000000/home`, {
+      headers: {
+        Origin: 'https://evil-website.com',
+        Cookie: 'atrium_auth_session=valid-but-ignored-cross-origin',
+      },
+      handshakeTimeout: 2000,
+    })
+    const messages = []
+    ws.on('message', (raw) => {
+      try { messages.push(JSON.parse(raw)) } catch {}
+    })
+    let opened = false
+    ws.once('open', () => { opened = true })
+    await new Promise(r => setTimeout(r, 500))
 
-    socket.destroy()
+    assert.equal(opened, true, 'upgrade succeeds for refusal')
+    assert.ok(messages.length >= 1, 'got error message')
+    assert.equal(messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(messages[0].message, 'World not available')
+    ws.close()
   } finally {
     reg.close()
     regHttp.close()

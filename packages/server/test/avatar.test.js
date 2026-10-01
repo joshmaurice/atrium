@@ -242,7 +242,7 @@ test('F6: set extras.displayName blocked even when world owner is connected (gua
   const sessions = new Map()
   const presence = { add: () => {}, remove: () => null, list: () => [], setPosition: () => {} }
 
-  const closeKeepalive = attachSessionHandlers({
+  const { closeKeepalive } = attachSessionHandlers({
     wss: ownerWss,
     world: w,
     sessions,

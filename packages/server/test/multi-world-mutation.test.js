@@ -121,7 +121,7 @@ test('non-avatar add blocked for anonymous session (PERMISSION_DENIED)', async (
     setPosition: () => {},
   }
 
-  const closeKeepalive = attachSessionHandlers({
+  const { closeKeepalive } = attachSessionHandlers({
     wss: ownedWss,
     world: testWorld,
     sessions,
@@ -166,7 +166,7 @@ test('avatar add bypasses mutation gate', async () => {
   const sessions = new Map()
   const presence = { add: () => {}, remove: () => {}, list: () => [], setPosition: () => {} }
 
-  const closeKeepalive = attachSessionHandlers({
+  const { closeKeepalive } = attachSessionHandlers({
     wss,
     world: testWorld,
     sessions,
@@ -277,21 +277,24 @@ test('registry upgrades WebSocket on /apps/client path', async () => {
   httpServer.close()
 })
 
-test('registry rejects unknown path with 404', async () => {
+test('registry rejects unknown path with refusal', async () => {
   const httpServer = createServer()
   httpServer.listen(9031)
   const reg = createWorldRegistry({ httpServer, db })
   await reg.registerWorld('default', FIXTURE_PATH, null)
 
-  // Connecting to an unknown path should fail immediately
+  // Connecting to an unknown path should complete upgrade then receive error
   let upgraded = false
+  const messages = []
   const ws = new WebSocket('ws://localhost:9031/some/garbage/path')
   ws.on('open', () => { upgraded = true })
-  ws.on('error', () => {})
+  ws.on('message', (raw) => { try { messages.push(JSON.parse(raw)) } catch {} })
 
-  // WebSocket should close/error since server sends 404 before upgrade
+  // WebSocket should upgrade then get refusal message
   await new Promise(r => setTimeout(r, 300))
-  assert.equal(upgraded, false, 'unknown path should not upgrade')
+  assert.equal(upgraded, true, 'unknown path does upgrade (refusal pattern)')
+  assert.ok(messages.length >= 1, 'got error message')
+  assert.equal(messages[0].code, 'WORLD_UNAVAILABLE')
 
   reg.close()
   httpServer.close()
