@@ -588,9 +588,6 @@ client.on('world:loaded', ({ name, description, author }) => {
 client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) => {
   setConnectionState('connected')
   updateHintText()
-  // R4: hide Go back button on successful connection
-  const gb = document.getElementById('tp-goback-btn')
-  if (gb) gb.style.display = 'none'
   // Hide failure panel on successful session
   hideTeleportFailurePanel()
   // Sync the connection box with the actual connection URL (pre-brief decision:
@@ -618,9 +615,6 @@ function teardownWorld() {
 client.on('connecting', () => {
   teardownWorld()
   setConnectionState('connecting')
-  // R4: hide Go back button on any new connection attempt
-  const gb = document.getElementById('tp-goback-btn')
-  if (gb) gb.style.display = 'none'
   // Clear teleporter state (T4)
   avatarReady = false
   currentWorldUrl = null
@@ -1061,7 +1055,12 @@ function showTeleportFailurePanel(msg, { showGoBack = true } = {}) {
   const msgEl = document.getElementById('tp-fail-msg')
   if (msgEl) msgEl.textContent = msg
   const goBackBtn = document.getElementById('tp-fail-goback')
-  if (goBackBtn) goBackBtn.style.display = showGoBack ? '' : 'none'
+  if (goBackBtn) {
+    // Clone-and-replace to kill stale listeners (same pattern as Dismiss)
+    const newGoBack = goBackBtn.cloneNode(true)
+    goBackBtn.parentNode.replaceChild(newGoBack, goBackBtn)
+    newGoBack.style.display = showGoBack ? '' : 'none'
+  }
   const dismissBtn = document.getElementById('tp-fail-dismiss')
   if (dismissBtn) {
     // Replace with clone to kill stale listeners, then attach fresh one
@@ -1100,9 +1099,11 @@ function exitTeleporterMode() {
   tpDeleteBtn.style.display = ''
   viewportEl.style.cursor = ''
   trigger.setActive(true)
-  // Restore Save button
+  // Restore Save button and re-enable both Cancels
   tpSaveBtn.textContent = 'Save'
   tpSaveBtn.disabled = true
+  tpFormCancel.disabled = false
+  tpCancelBtn.disabled = false
   // Only clear overlay if teleporter owns it
   if (teleporterOverlayActive) {
     showTeleporterOverlay('')

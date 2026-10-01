@@ -72,7 +72,8 @@ export function formatDestination(host, pathname, maxLen = 64) {
  * @param {boolean} [opts.returning=false] — true for a Go-back failure
  * @returns {string} — the message, never throws
  */
-export function teleportFailureMessage(resolvedUrl, { returning = false } = {}) {
+export function teleportFailureMessage(resolvedUrl, opts = {}) {
+  const { returning = false } = opts || {}
   let host = ''
   let pathname = '/'
   let dest = 'the destination'
