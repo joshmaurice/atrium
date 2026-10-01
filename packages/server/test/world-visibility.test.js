@@ -151,7 +151,7 @@ async function registerUser(port, username, password) {
 
 let db, httpRefusal, registry, handlerRefusal
 let ownerUserId, privateWorldId
-let tempDir
+let tempDir, otherUserCookie
 
 before(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'atrium-wv-test-'))
@@ -164,6 +164,18 @@ before(async () => {
   db.database.prepare(
     'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
   ).run(ownerUserId, 'WorldOwner', 'World Owner', now)
+
+  // Non-owner user for authenticated refusal tests (Finding 3a additions)
+  const otherUserIdRefusal = 'wv-other-uuid'
+  db.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(otherUserIdRefusal, 'OtherUser', 'Other User', now)
+  const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+  const otherAuthSess = 'wv-other-auth-sess'
+  db.database.prepare(
+    'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(otherAuthSess, otherUserIdRefusal, now, farFuture)
+  otherUserCookie = `atrium_auth_session=${otherAuthSess}`
 
   process.env.ATRIUM_COMMONS_OWNER = 'WorldOwner'
   process.env.ATRIUM_COMMONS_SLUG = 'commons'
@@ -366,6 +378,13 @@ before(async () => {
   })
   putHttp.on('request', putHandler)
   putHttp.listen(PORT_PUT)
+})
+
+after(async () => {
+  putRegistry?.close()
+  if (putHttp) putHttp.close()
+  if (putDb) putDb.close()
+  if (putTempDir) await rm(putTempDir, { recursive: true, force: true })
 })
 
 // Helper: connect to the vis-test world via /worlds/ path (triggers lazy host creation)
@@ -650,4 +669,248 @@ test('4: registry close terminates refusal sockets', async () => {
   http4.close()
   db4.close()
   await rm(tempDir4, { recursive: true, force: true })
+})
+
+// ===========================================================================
+// 3a additions (Finding 3): authenticated non-owner refusals — byte-identical
+// ===========================================================================
+
+test('3a: byte-identical refusals for authenticated non-owner', async () => {
+  const AUTH_REFUSAL_PATHS = [
+    { path: '/worlds/WorldOwner/private-world', label: 'private world x authenticated non-owner (/worlds/)' },
+    { path: '/public/WorldOwner/private-world', label: 'private world x authenticated non-owner (/public/)' },
+    { path: `/ws/${privateWorldId}`, label: '/ws/<id> private world x authenticated non-owner' },
+  ]
+
+  // Connect each path with the other user's cookie
+  const firstMessages = []
+  const closeCodes = []
+  const closeReasons = []
+
+  for (const { path } of AUTH_REFUSAL_PATHS) {
+    const ws = new WebSocket(`ws://localhost:${PORT_REFUSAL}${path}`, { headers: { Cookie: otherUserCookie } })
+    const closePromise = new Promise((resolve) => {
+      ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() }))
+    })
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+    const q = makeMessageQueue(ws)
+    const firstMsg = await q.waitForType('error', 2000)
+    firstMessages.push(firstMsg)
+    const closeInfo = await closePromise
+    closeCodes.push(closeInfo?.code)
+    closeReasons.push(closeInfo?.reason)
+  }
+
+  // Baseline anonymous refusal to compare against
+  const baseWs = new WebSocket(`ws://localhost:${PORT_REFUSAL}/worlds/UnknownNobody/foo`)
+  const baseClose = new Promise((resolve) => {
+    baseWs.once('close', (code, reason) => resolve({ code, reason: reason.toString() }))
+  })
+  await new Promise((resolve, reject) => {
+    baseWs.once('open', resolve)
+    baseWs.once('error', reject)
+  })
+  const baseQ = makeMessageQueue(baseWs)
+  const baseMsg = await baseQ.waitForType('error', 2000)
+  await baseClose
+
+  for (let i = 0; i < firstMessages.length; i++) {
+    assert.deepEqual(firstMessages[i], baseMsg,
+      `auth refusal mismatch: ${AUTH_REFUSAL_PATHS[i].label}`)
+  }
+  for (let i = 0; i < closeCodes.length; i++) {
+    assert.equal(closeCodes[i], 1008,
+      `auth close code for ${AUTH_REFUSAL_PATHS[i].label}: ${closeCodes[i]}`)
+  }
+  for (let i = 0; i < closeReasons.length; i++) {
+    assert.equal(closeReasons[i], '',
+      `auth close reason for ${AUTH_REFUSAL_PATHS[i].label}: "${closeReasons[i]}"`)
+  }
+})
+
+// ===========================================================================
+// 3b additions (Finding 4): refusal creates no host + no teardown cancellation
+// ===========================================================================
+
+test('3b: refusal for private/unknown slug creates no host in registry', async () => {
+  // Connect to private world anonymously — gets refused
+  const ws = new WebSocket(`ws://localhost:${PORT_REFUSAL}/worlds/WorldOwner/private-world`)
+  // Register message listener BEFORE awaiting open, to avoid race
+  const q = makeMessageQueue(ws)
+  await new Promise((resolve, reject) => {
+    ws.once('open', resolve)
+    ws.once('error', reject)
+  })
+  const msg = await q.waitForType('error', 4000)
+  assert.ok(msg !== null, 'private world anonymous should get error')
+  assert.equal(msg.code, 'WORLD_UNAVAILABLE')
+  ws.close()
+
+  // No host should exist in registry for the private world
+  assert.equal(registry.getWorldHost(privateWorldId), null,
+    'no host should exist for private world after refusal')
+})
+
+test('3b: refusal does not cancel a pending teardown', async () => {
+  const tdDir = mkdtempSync(join(tmpdir(), 'atrium-wv-td-test-'))
+  const dbPath = join(tdDir, 'test.db')
+  const tdDb = createDb(dbPath)
+  const tdHttp = createServer()
+  const tdRegistry = createWorldRegistry({ httpServer: tdHttp, db: tdDb })
+  const TD_PORT = 3056
+
+  const now = new Date().toISOString()
+  const tdOwnerId = 'td-owner-uuid'
+  tdDb.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(tdOwnerId, 'TdOwner', 'TD Owner', now)
+
+  process.env.ATRIUM_COMMONS_OWNER = 'TdOwner'
+  process.env.ATRIUM_COMMONS_SLUG = 'commons'
+
+  const dummyHostRef = { current: null }
+  const result = await setupCommons({ registry: tdRegistry, db: tdDb, worldPath: FIXTURE_PATH })
+  dummyHostRef.current = result.host
+
+  const tdWorldId = 'td-teardown-world-id'
+  tdDb.database.prepare(
+    `INSERT INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    tdWorldId, tdOwnerId, 'td-world', 'TD World', 'public',
+    JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, nodes: [{ name: 'root', translation: [0, 0, 0] }] }),
+    now, now
+  )
+
+  const tdHandler = createRequestHandler({
+    db: tdDb, auth,
+    defaultHostRef: dummyHostRef,
+    getWorldHost: (id) => tdRegistry.getWorldHost(id),
+    getRootWorldId: () => tdRegistry.getRootWorldId(),
+  })
+  tdHttp.on('request', tdHandler)
+  tdHttp.listen(TD_PORT)
+
+  // Connect owner to create a host for tdWorldId
+  const owner = await wsOpen(TD_PORT, '/worlds/TdOwner/td-world', null)
+  const ownerQ = makeMessageQueue(owner)
+  sendHello(owner, 'td-owner-session')
+  const hello = await ownerQ.waitForType('hello', 5000)
+  assert.ok(hello !== null, 'owner should connect')
+  assert.ok(tdRegistry.getWorldHost(tdWorldId) !== null, 'host should exist after connect')
+
+  // Disconnect owner — triggers scheduleTeardown
+  owner.close()
+  await new Promise(r => setTimeout(r, 300))
+
+  // Quickly connect via a refusal path on the same server
+  const refWs = new WebSocket(`ws://localhost:${TD_PORT}/worlds/UnknownNobody/bogus`)
+  const refQ = makeMessageQueue(refWs)
+  await new Promise((resolve, reject) => {
+    refWs.once('open', resolve)
+    refWs.once('error', reject)
+  })
+  const refMsg = await refQ.waitForType('error', 4000)
+  assert.ok(refMsg !== null, 'refusal should work during pending teardown')
+  refWs.close()
+
+  // Wait for teardown delay (3s) + buffer
+  await new Promise(r => setTimeout(r, 3500))
+
+  // Host should have been torn down despite the refusal
+  assert.equal(tdRegistry.getWorldHost(tdWorldId), null,
+    'host should be torn down after delay even though refusal was attempted')
+
+  tdRegistry.close()
+  tdHttp.close()
+  tdDb.close()
+  await rm(tdDir, { recursive: true, force: true })
+})
+
+// ===========================================================================
+// Finding 2: WS error-handler tests
+// ===========================================================================
+
+test('Finding 2a: raw unmasked frame on refusal path does not crash server', async () => {
+  // Connect to refusal path via ws library, register listener before awaiting open
+  const ws = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/UnknownNobody/bogus`)
+  const q = makeMessageQueue(ws)
+  await new Promise((resolve, reject) => {
+    ws.once('open', resolve)
+    ws.once('error', reject)
+  })
+  const msg = await q.waitForType('error', 4000)
+  assert.ok(msg !== null, 'first connection should get refusal')
+  assert.equal(msg.code, 'WORLD_UNAVAILABLE')
+
+  // Send an unmasked text frame on the underlying TCP socket
+  const sock = ws._socket
+  if (sock) {
+    sock.write(Buffer.from([0x81, 0x02, 0x68, 0x69]))
+  }
+
+  // Wait for server to process the unmasked frame
+  await new Promise(r => setTimeout(r, 600))
+
+  // Server should still accept new connections
+  const ws2 = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/UnknownNobody/bogus`)
+  const q2 = makeMessageQueue(ws2)
+  await new Promise((resolve, reject) => {
+    ws2.once('open', resolve)
+    ws2.once('error', reject)
+  })
+  const msg2 = await q2.waitForType('error', 4000)
+  assert.ok(msg2 !== null, 'server should still refuse new connections after unmasked frame')
+  assert.equal(msg2.code, 'WORLD_UNAVAILABLE')
+  ws2.close()
+  ws.close()
+})
+
+test('Finding 2b: raw unmasked frame on live session does not crash server', async () => {
+  // Connect a peer session that will observe remove + leave
+  const peer = await wsOpen(PORT_PUT, '/worlds/PutOwner/vis-test-world', putOwnerCookie)
+  const peerQ = makeMessageQueue(peer)
+  sendHello(peer, 'peer-session-wv')
+  const peerHello = await peerQ.waitForType('hello', 5000)
+  assert.ok(peerHello !== null, 'peer should connect')
+
+  // Connect a second session via ws library, send hello, then unmasked frame on raw socket
+  const target = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/PutOwner/vis-test-world`)
+  await new Promise((resolve, reject) => {
+    target.once('open', resolve)
+    target.once('error', reject)
+  })
+  // Send hello over the ws library
+  sendHello(target, 'raw-session-wv')
+  await new Promise(r => setTimeout(r, 400))
+
+  // Write an unmasked text frame on the underlying TCP socket
+  const sock = target._socket
+  if (sock) {
+    sock.write(Buffer.from([0x81, 0x02, 0x68, 0x69]))
+  }
+  await new Promise(r => setTimeout(r, 800))
+
+  // Peer should see remove + leave for the raw session
+  const removeMsg = await peerQ.waitForType('remove', 3000)
+  assert.ok(removeMsg !== null, 'peer should see remove after unmasked frame')
+  assert.equal(removeMsg.id, 'raw-session-wv')
+
+  const leaveMsg = await peerQ.waitForType('leave', 2000)
+  assert.ok(leaveMsg !== null, 'peer should see leave after unmasked frame')
+  assert.equal(leaveMsg.id, 'raw-session-wv')
+
+  // Server should still accept new connections
+  const check = await wsOpen(PORT_PUT, '/worlds/PutOwner/vis-test-world', putOtherCookie)
+  const checkQ = makeMessageQueue(check)
+  sendHello(check, 'check-session-wv')
+  const checkHello = await checkQ.waitForType('hello', 5000)
+  assert.ok(checkHello !== null, 'server should accept new connections after unmasked frame')
+
+  check.close()
+  peer.close()
+  target.close()
 })
