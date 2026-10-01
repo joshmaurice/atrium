@@ -149,6 +149,42 @@ specifically to defer this decision.
   admitting a non-owner session: private worlds admit only their owner;
   public worlds admit anyone.
 
+### What shipped (Step 9)
+
+- **Server-sent failure reasons (V2–V4):** every admission refusal now
+  completes the WebSocket upgrade and sends `WORLD_UNAVAILABLE` with
+  message `"World not available"` before closing with 1008. The byte-
+  identical reason applies to every admission gate (unknown user, unknown
+  slug, private world, home-path mismatch, `/ws/<id>` no-host or
+  private). Server-side failures (host creation failure, degraded-mode
+  503) still respond with plain HTTP. A dedicated `WebSocketServer` per
+  registry handles refusal upgrades; it is closed by `registry.close()`.
+- **Eviction on switch to private (V5):** after a successful `PUT` that
+  sets `visibility: 'private'`, the live host (if any) disconnects every
+  connection whose `userId` does not match the world's `ownerUserId`,
+  including sockets that haven't sent `hello` yet. Each evicted
+  connection receives `WORLD_NOW_PRIVATE` before a 1008 close.
+- **isCommons in world list (V7):** `GET /api/worlds` returns
+  `isCommons: true/false` per row, computed from `getRootWorldId()`,
+  not stored.
+- **Client wording helper (V8):** `codeToReason(code)` maps
+  `WORLD_UNAVAILABLE` and `WORLD_NOW_PRIVATE` to human-readable
+  sentences. `teleportFailureMessage` accepts an optional `code`
+  parameter. Every connect surface (teleport, Go back, My Worlds Load,
+  manual Connect) shows code-specific wording when available; without a
+  known code, today's generic text is preserved.
+- **Eviction listener (V8):** when `WORLD_NOW_PRIVATE` arrives for a
+  session that already reached `session:ready`, a failure panel is shown
+  with Dismiss only, naming the destination.
+- **Visibility toggle (V6):** each row in the My Worlds list has a
+  `role="switch"` checkbox marked "Public" / "Private". On change it
+  `PUT /api/worlds/:id` with the new visibility; on success it refreshes
+  the list, on failure it restores the previous state and shows the
+  error. The commons row is locked public with a tooltip.
+- **Protocol enum (V9):** `error.json` schema now includes
+  `WORLD_UNAVAILABLE`, `WORLD_NOW_PRIVATE`, and the previously-missing
+  `SESSION_CONFLICT`.
+
 ## 6. The commons (Step 5)
 
 **Decision: keep it, don't retire it.** The strongest reason is the first
