@@ -130,6 +130,50 @@
   .status-dot.connecting   { background: #f0ad4e; }
   .status-dot.error        { background: #d9534f; }
 
+  /* ── Subbar (second row, U4+U5) ──────────────────────────── */
+  #subbar {
+    background: #1e1e1e;
+    border-bottom: 1px solid #333;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  #subbar-worlds {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #subbar-auth {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  #subbar-worlds .wb-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #a78bfa;
+  }
+  #subbar-worlds .wb-create {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  #subbar-worlds .wb-create input {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #e2e8f0;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  #subbar-worlds .wb-create input:focus { outline: none; border-color: #a78bfa; }
+  #subbar-worlds .wb-create input#wb-slug { width: 120px; }
+  #subbar-worlds .wb-create input#wb-name { width: 160px; }
+
   /* ── World browser ────────────────────────────────── */
   #world-browser {
     background: #161616;
@@ -338,7 +382,7 @@
 </head>
 <body>
 
-<!-- Toolbar -->
+<!-- Toolbar (U4: top row — ATRIUM, File, World, connection) -->
 <div class="toolbar">
   <h1>ATRIUM</h1>
   <span>File:</span>
@@ -352,41 +396,42 @@
     <option value="WALK">Walk</option>
     <option value="ORBIT">Orbit</option>
   </select>
+</div>
 
-  <!-- Auth -->
-  <div class="toolbar-sep"></div>
-
-  <div id="auth-logged-out">
-    <input id="auth-username" type="text" placeholder="Username" style="width:110px" />
-    <input id="auth-password" type="password" placeholder="Password" style="width:110px" />
-    <!-- Honeypot: positioned off-screen, bots fill it, humans don't see it -->
-    <input id="auth-website" type="text" name="website" tabindex="-1" autocomplete="off"
-      style="position:absolute;left:-9999px;top:0;width:1px;height:1px" />
-    <button id="auth-submit-btn" class="primary">Login</button>
-    <button id="auth-toggle-btn" class="text-btn">Register</button>
-    <span id="auth-error"></span>
+<!-- Subbar (U5: second row — My Worlds, auth, teleporter controls) -->
+<div id="subbar">
+  <div id="subbar-worlds">
+    <div class="wb-header">My Worlds</div>
+    <div class="wb-create">
+      <input id="wb-slug" type="text" placeholder="slug" />
+      <input id="wb-name" type="text" placeholder="World name" />
+      <button id="wb-create-btn" class="primary">Create</button>
+    </div>
   </div>
-
-  <div id="auth-logged-in" style="display:none">
-    <span id="auth-user-label"></span>
-    <button id="auth-logout-btn">Logout</button>
+  <div id="subbar-auth">
+    <div id="auth-logged-out">
+      <input id="auth-username" type="text" placeholder="Username" style="width:110px" />
+      <input id="auth-password" type="password" placeholder="Password" style="width:110px" />
+      <!-- Honeypot: positioned off-screen, bots fill it, humans don't see it -->
+      <input id="auth-website" type="text" name="website" tabindex="-1" autocomplete="off"
+        style="position:absolute;left:-9999px;top:0;width:1px;height:1px" />
+      <button id="auth-submit-btn" class="primary">Login</button>
+      <button id="auth-toggle-btn" class="text-btn">Register</button>
+      <span id="auth-error"></span>
+    </div>
+    <div id="auth-logged-in" style="display:none">
+      <span id="auth-user-label"></span>
+      <button id="auth-logout-btn">Logout</button>
+    </div>
+    <div class="toolbar-sep"></div>
+    <button id="tp-place-btn" disabled title="Place a teleporter pad">Place Teleporter</button>
+    <button id="tp-delete-btn" disabled title="Delete a teleporter pad">Delete</button>
+    <button id="tp-cancel-btn" style="display:none">Cancel</button>
   </div>
-
-  <!-- Teleporter controls (T5) -->
-  <div class="toolbar-sep"></div>
-  <button id="tp-place-btn" disabled title="Place a teleporter pad">Place Teleporter</button>
-  <button id="tp-delete-btn" disabled title="Delete a teleporter pad">Delete</button>
-  <button id="tp-cancel-btn" style="display:none">Cancel</button>
 </div>
 
 <!-- World Browser (shown when logged in) -->
 <div id="world-browser" style="display:none">
-  <div class="wb-header">My Worlds</div>
-  <div class="wb-create">
-    <input id="wb-slug" type="text" placeholder="slug" />
-    <input id="wb-name" type="text" placeholder="World name" />
-    <button id="wb-create-btn" class="primary">Create</button>
-  </div>
   <div id="wb-error"></div>
   <div class="wb-list" id="wb-list"></div>
 </div>

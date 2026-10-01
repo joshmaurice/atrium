@@ -47,6 +47,7 @@ const authWebsite   = document.getElementById('auth-website')
 
 // World browser DOM refs
 const worldBrowser  = document.getElementById('world-browser')
+const subbarWorlds  = document.getElementById('subbar-worlds')
 const wbSlug        = document.getElementById('wb-slug')
 const wbName        = document.getElementById('wb-name')
 const wbCreateBtn   = document.getElementById('wb-create-btn')
@@ -66,8 +67,9 @@ function setAuthState(user) {
     authLoggedIn.style.display  = ''
     authUserLabel.textContent   = user.displayName || user.username
     authError.textContent       = ''
-    // Show world browser and refresh list
+    // Show world browser and subbar worlds, refresh list
     worldBrowser.style.display = ''
+    subbarWorlds.style.display = ''
     refreshWorldList()
   } else {
     authLoggedOut.style.display = ''
@@ -77,8 +79,9 @@ function setAuthState(user) {
     authUsername.value          = ''
     authPassword.value          = ''
     authError.textContent       = ''
-    // Hide world browser and clear list
+    // Hide world browser and subbar worlds, clear list
     worldBrowser.style.display = 'none'
+    subbarWorlds.style.display = 'none'
     wbList.innerHTML = ''
   }
 }
@@ -155,7 +158,6 @@ async function refreshWorldList() {
     const res = await fetch('/api/worlds')
     if (res.status === 401) {
       // Session expired — hide browser and update auth state
-      worldBrowser.style.display = 'none'
       setAuthState(null)
       return
     }
