@@ -1096,6 +1096,39 @@ describe('WS admission via world registry', () => {
     })
   }
 
+  // ---------------------------------------------------------------------------
+  // Helper: perform WebSocket upgrade, read first message (for V2/V3 refusals)
+  // ---------------------------------------------------------------------------
+  function checkRefusal(pathname, cookie) {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://localhost:${WS_ADM_PORT}${pathname}`, {
+        headers: cookie ? { Cookie: cookie } : {},
+        handshakeTimeout: 2000,
+      })
+      const messages = []
+      ws.on('message', (raw) => {
+        try { messages.push(JSON.parse(raw)) } catch {}
+      })
+      ws.on('open', () => {
+        // Wait briefly for the error message before close
+        setTimeout(() => {
+          resolve({ statusCode: 101, messages })
+          ws.close()
+        }, 200)
+      })
+      ws.on('error', (err) => {
+        resolve({ statusCode: 0, messages, error: err.message })
+      })
+      ws.on('unexpected-response', (req, res) => {
+        let body = ''
+        res.on('data', (c) => { body += c })
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode, body })
+        })
+      })
+    })
+  }
+
   // ===================================================================
   // Public world: /public/<username>/<slug>
   // ===================================================================
@@ -1119,14 +1152,20 @@ describe('WS admission via world registry', () => {
   // Private world: /public/<username>/<slug>
   // ===================================================================
 
-  test('/public/AliceWs/my-private-space — anonymous gets 404 (private world)', async () => {
-    const result = await checkUpgrade('/public/AliceWs/my-private-space')
-    assert.equal(result.statusCode, 404, 'anonymous rejected from private world')
+  test('/public/AliceWs/my-private-space — anonymous gets refusal (private world)', async () => {
+    const result = await checkRefusal('/public/AliceWs/my-private-space')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1, 'got error message')
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
-  test('/public/AliceWs/my-private-space — non-owner (Bob) gets 404 (private world)', async () => {
-    const result = await checkUpgrade('/public/AliceWs/my-private-space', regUserB.cookie)
-    assert.equal(result.statusCode, 404, 'non-owner rejected from private world')
+  test('/public/AliceWs/my-private-space — non-owner (Bob) gets refusal (private world)', async () => {
+    const result = await checkRefusal('/public/AliceWs/my-private-space', regUserB.cookie)
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1, 'got error message')
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
   test('/public/AliceWs/my-private-space — owner (Alice) can connect (private world)', async () => {
@@ -1138,14 +1177,20 @@ describe('WS admission via world registry', () => {
   // Unknown user / slug
   // ===================================================================
 
-  test('/public/UnknownUser/my-space returns 404', async () => {
-    const result = await checkUpgrade('/public/UnknownUser/my-space')
-    assert.equal(result.statusCode, 404, 'unknown username returns 404')
+  test('/public/UnknownUser/my-space returns refusal (unknown user)', async () => {
+    const result = await checkRefusal('/public/UnknownUser/my-space')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
-  test('/public/AliceWs/non-existent-slug returns 404', async () => {
-    const result = await checkUpgrade('/public/AliceWs/non-existent-slug')
-    assert.equal(result.statusCode, 404, 'unknown slug returns 404')
+  test('/public/AliceWs/non-existent-slug returns refusal (unknown slug)', async () => {
+    const result = await checkRefusal('/public/AliceWs/non-existent-slug')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
   // ===================================================================
@@ -1181,14 +1226,20 @@ describe('WS admission via world registry', () => {
     assert.equal(result.statusCode, 101, 'owner can reach own public world via /ws')
   })
 
-  test('/ws/ws-adm-private-world — non-owner gets 404 (private world /ws backdoor fail-closed)', async () => {
-    const result = await checkUpgrade('/ws/ws-adm-private-world', regUserB.cookie)
-    assert.equal(result.statusCode, 404, 'non-owner rejected from private world via /ws')
+  test('/ws/ws-adm-private-world — non-owner gets refusal (private world /ws backdoor)', async () => {
+    const result = await checkRefusal('/ws/ws-adm-private-world', regUserB.cookie)
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
-  test('/ws/ws-adm-private-world — anonymous gets 404 (private world /ws backdoor fail-closed)', async () => {
-    const result = await checkUpgrade('/ws/ws-adm-private-world')
-    assert.equal(result.statusCode, 404, 'anonymous rejected from private world via /ws')
+  test('/ws/ws-adm-private-world — anonymous gets refusal (private world /ws backdoor)', async () => {
+    const result = await checkRefusal('/ws/ws-adm-private-world')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
   test('/ws/ws-adm-private-world — owner can connect (private world via /ws backdoor)', async () => {
@@ -1196,9 +1247,12 @@ describe('WS admission via world registry', () => {
     assert.equal(result.statusCode, 101, 'owner can reach own private world via /ws')
   })
 
-  test('/ws/non-existent-world-id returns 404', async () => {
-    const result = await checkUpgrade('/ws/non-existent-world-id')
-    assert.equal(result.statusCode, 404, 'non-existent /ws/<id> returns 404')
+  test('/ws/non-existent-world-id returns refusal', async () => {
+    const result = await checkRefusal('/ws/non-existent-world-id')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
   // ===================================================================
@@ -1220,14 +1274,20 @@ describe('WS admission via world registry', () => {
     assert.equal(result.statusCode, 101, 'owner can upgrade via /worlds/ path')
   })
 
-  test('/worlds/AliceWs/my-private-space — anonymous gets 404 (private world, canonical)', async () => {
-    const result = await checkUpgrade('/worlds/AliceWs/my-private-space')
-    assert.equal(result.statusCode, 404, 'anonymous rejected from private world via /worlds/')
+  test('/worlds/AliceWs/my-private-space — anonymous gets refusal (private world, canonical)', async () => {
+    const result = await checkRefusal('/worlds/AliceWs/my-private-space')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
-  test('/worlds/AliceWs/my-private-space — non-owner (Bob) gets 404 (private world, canonical)', async () => {
-    const result = await checkUpgrade('/worlds/AliceWs/my-private-space', regUserB.cookie)
-    assert.equal(result.statusCode, 404, 'non-owner rejected from private world via /worlds/')
+  test('/worlds/AliceWs/my-private-space — non-owner (Bob) gets refusal (private world, canonical)', async () => {
+    const result = await checkRefusal('/worlds/AliceWs/my-private-space', regUserB.cookie)
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
   test('/worlds/AliceWs/my-private-space — owner (Alice) can connect (private world, canonical)', async () => {
@@ -1235,14 +1295,20 @@ describe('WS admission via world registry', () => {
     assert.equal(result.statusCode, 101, 'owner can connect to own private world via /worlds/')
   })
 
-  test('/worlds/UnknownUser/my-space returns 404 (canonical)', async () => {
-    const result = await checkUpgrade('/worlds/UnknownUser/my-space')
-    assert.equal(result.statusCode, 404, 'unknown username via /worlds/ returns 404')
+  test('/worlds/UnknownUser/my-space returns refusal (canonical)', async () => {
+    const result = await checkRefusal('/worlds/UnknownUser/my-space')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
-  test('/worlds/AliceWs/non-existent-slug returns 404 (canonical)', async () => {
-    const result = await checkUpgrade('/worlds/AliceWs/non-existent-slug')
-    assert.equal(result.statusCode, 404, 'non-existent slug via /worlds/ returns 404')
+  test('/worlds/AliceWs/non-existent-slug returns refusal (canonical)', async () => {
+    const result = await checkRefusal('/worlds/AliceWs/non-existent-slug')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
+    assert.equal(result.messages[0].message, 'World not available')
   })
 
   test('/worlds/AliceWs/my-public-space — case-insensitive username resolves (COLLATE NOCASE)', async () => {
@@ -1259,42 +1325,53 @@ describe('WS admission via world registry', () => {
   // /worlds/ path sanitization — pre-brief #10
   // ===================================================================
 
-  test('/worlds/// — empty segments resolved to null/empty → 404', async () => {
-    const result = await checkUpgrade('/worlds///')
-    assert.equal(result.statusCode, 404, 'empty segments via /worlds/ returns 404')
+  test('/worlds/// — empty segments resolved to null/empty → refusal', async () => {
+    const result = await checkRefusal('/worlds///')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
-  test('/worlds/AliceWs/ — missing slug → 404', async () => {
-    const result = await checkUpgrade('/worlds/AliceWs/')
-    assert.equal(result.statusCode, 404, 'missing slug via /worlds/ returns 404')
+  test('/worlds/AliceWs/ — missing slug → refusal', async () => {
+    const result = await checkRefusal('/worlds/AliceWs/')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
-  test('/worlds/%2e%2e/AliceWs — encoded ../ rejected by decode → 404', async () => {
-    // %2e → '.' via decodeURIComponent, then caught by isSafeSegment
-    const result = await checkUpgrade('/worlds/%2e%2e/AliceWs')
-    assert.equal(result.statusCode, 404, 'encoded path traversal via /worlds/ returns 404')
+  test('/worlds/%2e%2e/AliceWs — encoded ../ rejected by decode → refusal', async () => {
+    const result = await checkRefusal('/worlds/%2e%2e/AliceWs')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
-  test('/worlds/.%2e/AliceWs — mixed encoded dotdot → 404', async () => {
-    // decodeURIComponent('.%2e') → '..' → rejected by isSafeSegment
-    const result = await checkUpgrade('/worlds/.%2e/AliceWs')
-    assert.equal(result.statusCode, 404, 'mixed encoded path traversal via /worlds/ returns 404')
+  test('/worlds/.%2e/AliceWs — mixed encoded dotdot → refusal', async () => {
+    const result = await checkRefusal('/worlds/.%2e/AliceWs')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
-  test('/worlds/%2e/AliceWs — single dot rejected → 404', async () => {
-    const result = await checkUpgrade('/worlds/%2e/AliceWs')
-    assert.equal(result.statusCode, 404, 'single dot via /worlds/ returns 404')
+  test('/worlds/%2e/AliceWs — single dot rejected → refusal', async () => {
+    const result = await checkRefusal('/worlds/%2e/AliceWs')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
-  test('/worlds/./AliceWs — literal dot rejected → 404', async () => {
-    const result = await checkUpgrade('/worlds/./AliceWs')
-    assert.equal(result.statusCode, 404, 'literal dot via /worlds/ returns 404')
+  test('/worlds/./AliceWs — literal dot rejected → refusal', async () => {
+    const result = await checkRefusal('/worlds/./AliceWs')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
-  test('/worlds/%00/AliceWs — malformed encoding → null → 404', async () => {
-    // null byte in path may cause decodeURIComponent to throw
-    const result = await checkUpgrade('/worlds/%00/AliceWs')
-    assert.equal(result.statusCode, 404, 'null byte via /worlds/ returns 404')
+  test('/worlds/%00/AliceWs — malformed encoding → null → refusal', async () => {
+    const result = await checkRefusal('/worlds/%00/AliceWs')
+    assert.equal(result.statusCode, 101, 'upgrade succeeds for refusal')
+    assert.ok(result.messages.length >= 1)
+    assert.equal(result.messages[0].code, 'WORLD_UNAVAILABLE')
   })
 
   // ===================================================================

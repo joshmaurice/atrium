@@ -5,6 +5,7 @@ import { isOriginAllowed, resolveUpgradeUserId } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
 import { createWorld, createWorldFromDocument } from './world.js'
 import { createAutoSaveCoordinator } from './autosave.js'
+import { WebSocketServer } from 'ws'
 
 /**
  * UUID regex for hygiene check on /home/<userId>/home path segments.
@@ -57,6 +58,30 @@ export function createWorldRegistry(opts = {}) {
   let rootWorldId = null
   function setRootWorldId(id) { rootWorldId = id }
   function getRootWorldId() { return rootWorldId ?? 'default' }
+
+  // ---------------------------------------------------------------------------
+  // Refusal WebSocketServer — completes the upgrade and sends WORLD_UNAVAILABLE
+  // for admission refusals (V2/V3). Never becomes a session.
+  // ---------------------------------------------------------------------------
+  const REFUSAL_TIMEOUT = 5000
+  const refusalWss = new WebSocketServer({ noServer: true })
+
+  function sendRefusal(request, socket, head) {
+    refusalWss.handleUpgrade(request, socket, head, (ws) => {
+      ws.send(JSON.stringify({
+        type: 'error',
+        code: 'WORLD_UNAVAILABLE',
+        message: 'World not available',
+      }))
+      ws.close(1008)
+      // Terminate if the peer doesn't complete the close handshake
+      const timer = setTimeout(() => {
+        ws.terminate()
+      }, REFUSAL_TIMEOUT)
+      if (timer.unref) timer.unref()
+      ws.once('close', () => clearTimeout(timer))
+    })
+  }
 
   // ---------------------------------------------------------------------------
   // URL path → resolution descriptor
@@ -173,7 +198,7 @@ export function createWorldRegistry(opts = {}) {
 
     const descriptor = resolveWorldId(pathname)
     if (!descriptor) {
-      sendHttpResponse(socket, 404, 'Not Found')
+      sendRefusal(request, socket, head)
       return
     }
 
@@ -197,7 +222,7 @@ export function createWorldRegistry(opts = {}) {
     if (descriptor.kind === 'byWorldRowId') {
       const host = hosts.get(descriptor.worldRowId)
       if (!host) {
-        sendHttpResponse(socket, 404, 'World Not Found')
+        sendRefusal(request, socket, head)
         return
       }
       let upgradeUserId = null
@@ -214,13 +239,13 @@ export function createWorldRegistry(opts = {}) {
         if (worldRow && worldRow.visibility === 'public') {
           // Public world: admit anyone (including anonymous)
         } else if (host.ownerUserId && upgradeUserId !== host.ownerUserId) {
-          sendHttpResponse(socket, 404, 'Not Found')
+          sendRefusal(request, socket, head)
           return
         }
       } else {
         // No DB — fall back to owner-only check (legacy behavior)
         if (host.ownerUserId && upgradeUserId !== host.ownerUserId) {
-          sendHttpResponse(socket, 404, 'Not Found')
+          sendRefusal(request, socket, head)
           return
         }
       }
@@ -238,15 +263,15 @@ export function createWorldRegistry(opts = {}) {
         try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
       }
 
-      // 2. Admission: anonymous → 404 (no leak)
+      // 2. Admission: anonymous → refusal
       if (!upgradeUserId) {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
       // 3. Admission: path userId must match cookie identity
       if (upgradeUserId !== descriptor.homeUserId) {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
@@ -257,19 +282,19 @@ export function createWorldRegistry(opts = {}) {
           "SELECT id, owner_user_id, document FROM worlds WHERE owner_user_id = ? AND slug = 'home'"
         ).get(upgradeUserId)
       } catch {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
-      // 5. No row → 404 (auto-create happens at login HTTP route, not upgrade)
+      // 5. No row → refusal (auto-create happens at login HTTP route, not upgrade)
       if (!row) {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
       // 6. Verify owner matches (redundant with WHERE clause but explicit for clarity)
       if (row.owner_user_id !== upgradeUserId) {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
@@ -327,12 +352,12 @@ export function createWorldRegistry(opts = {}) {
           'SELECT id FROM users WHERE username = ? COLLATE NOCASE'
         ).get(descriptor.username)
       } catch {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
       if (!userRow) {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
@@ -343,12 +368,12 @@ export function createWorldRegistry(opts = {}) {
           'SELECT id, owner_user_id, document, visibility FROM worlds WHERE owner_user_id = ? AND slug = ?'
         ).get(userRow.id, descriptor.slug)
       } catch {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
       if (!row) {
-        sendHttpResponse(socket, 404, 'Not Found')
+        sendRefusal(request, socket, head)
         return
       }
 
@@ -359,7 +384,7 @@ export function createWorldRegistry(opts = {}) {
       if (row.visibility === 'private') {
         // Private world: only the owner may connect via /public/ or /worlds/ path
         if (!upgradeUserId || upgradeUserId !== row.owner_user_id) {
-          sendHttpResponse(socket, 404, 'Not Found')
+          sendRefusal(request, socket, head)
           return
         }
       }
@@ -402,7 +427,7 @@ export function createWorldRegistry(opts = {}) {
           ).get(hostId)
           if (currentRow && currentRow.visibility === 'private') {
             if (!upgradeUserId || upgradeUserId !== row.owner_user_id) {
-              sendHttpResponse(socket, 404, 'Not Found')
+              sendRefusal(request, socket, head)
               return
             }
           }
@@ -442,7 +467,7 @@ export function createWorldRegistry(opts = {}) {
     }
 
     // Fallback: unknown descriptor
-    sendHttpResponse(socket, 404, 'Not Found')
+    sendRefusal(request, socket, head)
   })
 
   // ---------------------------------------------------------------------------
@@ -597,6 +622,9 @@ export function createWorldRegistry(opts = {}) {
       clearTimeout(timer)
     }
     teardownTimers.clear()
+
+    // Close the refusal WebSocketServer — terminates any lingering refusal sockets
+    refusalWss.close()
 
     for (const [, host] of hosts) {
       host.close()

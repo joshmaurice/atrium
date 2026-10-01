@@ -390,27 +390,23 @@ test('anonymous connect to /home/<userId>/home returns 404', async () => {
   })
   const userId = loginRes.body.id
 
-  // Connect WITHOUT cookie (anonymous) — server rejects with HTTP 404 before WS upgrade
+  // Connect WITHOUT cookie (anonymous) — server refuses with WS upgrade + error
   const path = `/home/${userId}/home`
-  let errorCaught = false
   const ws = new WebSocket(`ws://localhost:${PORT}${path}`)
-  ws.on('error', () => { errorCaught = true })
-  ws.on('unexpected-response', (req, res) => {
-    errorCaught = true
-    res.resume() // consume the response body
-  })
-
-  // Wait for the connection to fail
+  const messages = []
+  ws.on('message', (raw) => { try { messages.push(JSON.parse(raw)) } catch {} })
   let opened = false
   ws.once('open', () => { opened = true })
   await new Promise(r => setTimeout(r, 500))
 
-  assert.equal(opened, false, 'anonymous connection did not open')
-  assert.ok(errorCaught, 'anonymous connection got error/404 response')
+  assert.equal(opened, true, 'anonymous connection upgrade succeeded (refusal path)')
+  assert.ok(messages.length >= 1, 'got error message')
+  assert.equal(messages[0].code, 'WORLD_UNAVAILABLE')
+  assert.equal(messages[0].message, 'World not available')
   try { ws.close() } catch {}
 })
 
-test('mismatched user connect to /home/<otherUserId>/home returns 404', async () => {
+test('mismatched user connect to /home/<otherUserId>/home returns refusal', async () => {
   // Register second user
   const res2 = await httpPost('/api/auth/register', {
     username: 'homeworld-bob',
@@ -427,16 +423,18 @@ test('mismatched user connect to /home/<otherUserId>/home returns 404', async ()
   const aliceId = aliceRes.body.id
 
   // Bob tries to connect to /home/<aliceId>/home
-  let bobError = false
   const ws = new WebSocket(`ws://localhost:${PORT}/home/${aliceId}/home`, {
     headers: { Cookie: bobCookie },
   })
-  ws.on('error', () => { bobError = true })
-  ws.on('unexpected-response', (req, res) => { bobError = true; res.resume() })
+  const messages = []
+  ws.on('message', (raw) => { try { messages.push(JSON.parse(raw)) } catch {} })
   let opened = false
   ws.once('open', () => { opened = true })
   await new Promise(r => setTimeout(r, 500))
-  assert.equal(opened, false, 'mismatched user connection did not open')
+  assert.equal(opened, true, 'mismatched user upgrade succeeded (refusal path)')
+  assert.ok(messages.length >= 1, 'got error message')
+  assert.equal(messages[0].code, 'WORLD_UNAVAILABLE')
+  assert.equal(messages[0].message, 'World not available')
   try { ws.close() } catch {}
 
   // Bob CAN connect to his own home
@@ -449,35 +447,36 @@ test('mismatched user connect to /home/<otherUserId>/home returns 404', async ()
 
 // ── Malformed paths ──
 
-test('malformed /home/ paths are rejected', async () => {
+test('malformed /home/ paths are rejected with refusal', async () => {
   const loginRes = await httpPost('/api/auth/login', {
     username: 'homeworld-alice',
     password: 'correct horse battery staple',
   })
   const cookie = cookieFromResponse(loginRes)
 
-  // Helper to check that a WS path is rejected with 404
-  async function assertRejected(path) {
-    let err = false
+  // Helper to check that a WS path gets refusal (upgrade + error message)
+  async function assertRefused(path) {
     const ws = new WebSocket(`ws://localhost:${PORT}${path}`, { headers: { Cookie: cookie } })
-    ws.on('error', () => { err = true })
-    ws.on('unexpected-response', (req, res) => { err = true; res.resume() })
+    const messages = []
+    ws.on('message', (raw) => { try { messages.push(JSON.parse(raw)) } catch {} })
     let opened = false
     ws.once('open', () => { opened = true })
     await new Promise(r => setTimeout(r, 500))
-    assert.equal(opened, false, `${path} rejected`)
+    assert.equal(opened, true, `${path} upgrade succeeded (refusal)`)
+    assert.ok(messages.length >= 1, `${path} got error message`)
+    assert.equal(messages[0].code, 'WORLD_UNAVAILABLE')
     try { ws.close() } catch {}
   }
 
   // Missing /home segment (/home/<uid> instead of /home/<uid>/home)
-  await assertRejected('/home/someuser')
+  await assertRefused('/home/someuser')
 
   // Extra segment (/home/<uid>/home/extra)
   const userId = loginRes.body.id
-  await assertRejected(`/home/${userId}/home/extra`)
+  await assertRefused(`/home/${userId}/home/extra`)
 
   // Non-UUID userId
-  await assertRejected('/home/not-a-uuid/home')
+  await assertRefused('/home/not-a-uuid/home')
 })
 
 // ── Trailing-slash variant ──
