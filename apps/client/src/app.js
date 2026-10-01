@@ -217,7 +217,12 @@ function renderWorldList(worlds) {
             avatar: buildAvatarDescriptor(),
             displayName: currentUser.displayName || currentUser.username,
           }, {
-            onError: (msg) => { wbError.textContent = 'Load failed: ' + msg },
+            onError: (msg, err) => {
+              // V8: use code-specific wording when available
+              const loadCode = err?.code || null
+              const reason = codeToReason(loadCode)
+              wbError.textContent = 'Load failed: ' + (reason || msg)
+            },
           })
           if (outcome.status === 'superseded') {
             // Superseded — a newer connect took over; do nothing
@@ -324,6 +329,7 @@ const labels = new LabelOverlay(viewportEl, () => stage.camera)
 // Teleporter trigger (T4)
 let currentWorldUrl = null
 let avatarReady = false
+let readySessionId = null // V8: tracks the session id that reached session:ready for eviction listener
 
 function derivePads() {
   if (!client.som) return []
@@ -352,9 +358,10 @@ const trigger = createTeleportTrigger({
     // Show connecting overlay
     showOverlay('Connecting to world…')
     trackConnect(worldUrl, connectOpts, {
-      onError: (msg) => {
-              // Show the failure panel with teleport failure wording (U2)
-              showTeleportFailurePanel(teleportFailureMessage(worldUrl), { showGoBack: !!prevWorldUrl })
+      onError: (msg, err) => {
+              // V8: pass code to teleportFailureMessage for specific reason
+              const code = err?.code || null
+              showTeleportFailurePanel(teleportFailureMessage(worldUrl, {}, code), { showGoBack: !!prevWorldUrl })
               // Wire Go back — only if a previous world exists
               if (!prevWorldUrl) return
               const panelGoBack = document.getElementById('tp-fail-goback')
@@ -368,9 +375,10 @@ const trigger = createTeleportTrigger({
                     goBackOpts.displayName = client.displayName
                   }
                   trackConnect(prevWorldUrl, goBackOpts, {
-                    onError: (msg2) => {
+                    onError: (msg2, err2) => {
                       // No second Go back — Dismiss only
-                      showTeleportFailurePanel(teleportFailureMessage(prevWorldUrl, { returning: true }), { showGoBack: false })
+                      const code2 = err2?.code || null
+                      showTeleportFailurePanel(teleportFailureMessage(prevWorldUrl, { returning: true }, code2), { showGoBack: false })
                     },
                   }).then((outcome2) => {
                     if (outcome2.status === 'superseded') return
@@ -590,6 +598,8 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) =>
   updateHintText()
   // Hide failure panel on successful session
   hideTeleportFailurePanel()
+  // V8: track ready session id for eviction listener
+  readySessionId = sessionId
   // Sync the connection box with the actual connection URL (pre-brief decision:
   // AtriumClient is source of truth for the connection URL)
   if (connectUrl) {
@@ -617,6 +627,7 @@ client.on('connecting', () => {
   setConnectionState('connecting')
   // Clear teleporter state (T4)
   avatarReady = false
+  readySessionId = null // V8: clear ready session on new connect
   currentWorldUrl = null
   trigger.setReady(false)
   trigger.reset()
@@ -640,6 +651,17 @@ client.on('disconnected', () => {
 
 client.on('error', (err) => {
   console.error(`[app] client error: connected=${client.connected} message="${err.message}"`, err)
+  // V8: eviction listener — WORLD_NOW_PRIVATE after session:ready shows panel
+  if (err.code === 'WORLD_NOW_PRIVATE' && err.sessionId === readySessionId) {
+    const dest = formatDestination(
+      err.url ? new URL(err.url).host : '',
+      err.url ? new URL(err.url).pathname || '/' : '/'
+    )
+    showTeleportFailurePanel(
+      `${dest} was made private by its owner, so you've been disconnected.`,
+      { showGoBack: false }
+    )
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -811,7 +833,7 @@ viewportEl.addEventListener('drop', async (e) => {
  * @param {string} wsUrl — WebSocket URL to connect to
  * @param {object} connectOpts — options passed to client.connect()
  * @param {object} ui — UI callbacks
- * @param {(msg: string) => void} ui.onError — render an error message
+ * @param {(msg: string, err?: object) => void} ui.onError — render error (V8: second arg is the error object)
  * @returns {Promise<{status: string, data?: object}>} resolves on
  *   session:ready ({status:'ready', data}) or superseded
  *   ({status:'superseded'}), rejects on error/disconnect
@@ -860,7 +882,8 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
 
     function settle(ok, value) {
       if (!ok) {
-        if (typeof onError === 'function') onError(value.message || 'Connection failed')
+        // V8: pass the error object as second argument so callers can read err.code
+        if (typeof onError === 'function') onError(value.message || 'Connection failed', value)
         reject(value)
       } else {
         resolve(value)
@@ -951,7 +974,20 @@ function handleConnect() {
 
   showOverlay('Connecting to world…')
   trackConnect(wsUrl, connectOpts, {
-    onError: (msg) => { showOverlay('Connect failed: ' + msg) },
+    onError: (msg, err) => {
+      // V8: use code-specific wording when available
+      const connectCode = err?.code || null
+      const reason = codeToReason(connectCode)
+      if (reason) {
+        const dest = formatDestination(
+          new URL(wsUrl).host,
+          new URL(wsUrl).pathname || '/'
+        )
+        showOverlay(`Connect failed: Couldn't open ${dest}. ${reason}`)
+      } else {
+        showOverlay('Connect failed: ' + msg)
+      }
+    },
   }).then((outcome) => {
     if (outcome.status === 'superseded') {
       // Superseded — a newer connect took over; do nothing
