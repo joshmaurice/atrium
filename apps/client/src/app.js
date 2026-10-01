@@ -354,7 +354,7 @@ const trigger = createTeleportTrigger({
     trackConnect(worldUrl, connectOpts, {
       onError: (msg) => {
               // Show the failure panel with teleport failure wording (U2)
-              showTeleportFailurePanel(teleportFailureMessage(worldUrl), { showGoBack: true })
+              showTeleportFailurePanel(teleportFailureMessage(worldUrl), { showGoBack: !!prevWorldUrl })
               // Wire Go back — only if a previous world exists
               if (!prevWorldUrl) return
               const panelGoBack = document.getElementById('tp-fail-goback')
@@ -1308,7 +1308,7 @@ client.on('error', (err) => {
   }
   if (pendingDeleteSeq != null && err.seq === pendingDeleteSeq) {
     // Delete error
-    showOverlay(`Couldn't delete teleporter: ${err.message || 'refused'}`)
+    showTeleporterOverlay(`Couldn't delete teleporter: ${err.message || 'refused'}`)
     pendingDeleteSeq = null
     deleteTargetName = null
   }
@@ -1373,7 +1373,7 @@ viewportEl.addEventListener('click', (e) => {
     pendingDeleteSeq = client.removeNode(somNode.name)
     showTeleporterOverlay('Deleting teleporter...')
   } catch (err) {
-    showOverlay('Delete failed: ' + err.message)
+    showTeleporterOverlay('Delete failed: ' + err.message)
     deleteTargetName = null
     pendingDeleteSeq = null
   }
