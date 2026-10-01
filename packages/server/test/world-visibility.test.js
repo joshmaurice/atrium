@@ -521,26 +521,24 @@ test('3c: non-owner PUT returns 404 and evicts nobody', async () => {
 })
 
 test('3c: commons -> private returns 403 and evicts nobody', async () => {
-  // Debug: find commons world
-  const allWorlds = putDb.database.prepare(
-    'SELECT id, slug, owner_user_id FROM worlds WHERE owner_user_id = ?'
-  ).all(putOwnerUserId)
-  const commonsWorld = allWorlds.find(w => w.slug === 'commons')
-  assert.ok(commonsWorld, 'commons world should exist in DB')
+  // The commons world — find it from the registry directly
+  const commonsId = putRegistry.getRootWorldId()
 
-  const commonsId = commonsWorld.id
+  // Verify it exists in DB
+  const dbRow = putDb.database.prepare(
+    'SELECT id, owner_user_id, slug FROM worlds WHERE id = ?'
+  ).get(commonsId)
+  assert.ok(dbRow, `commons world ${commonsId} should exist in DB`)
 
-  // Connect to the vis-test world as a non-owner (to have a live session to NOT evict)
-  // Retry a few times because the host may be in teardown
-  let other = null
-  for (let attempt = 0; attempt < 3; attempt++) {
-    other = await connectVisTest(putOtherCookie, 'put-commons-test')
-    if (other.hello !== null) break
-    // Host might have been torn down — wait for lazy creation to complete
-    if (other.ws) other.ws.close()
-    await new Promise(r => setTimeout(r, 500))
-  }
-  assert.ok(other !== null && other.hello !== null, 'non-owner should connect to public world')
+  // Verify the owner matches what our cookie resolves to
+  assert.equal(dbRow.owner_user_id, putOwnerUserId,
+    `commons owner ${dbRow.owner_user_id} should match test owner ${putOwnerUserId}`)
+
+  // Connect as non-owner to have a live session
+  // Wait briefly in case the previous test left a teardown pending
+  await new Promise(r => setTimeout(r, 100))
+  const other = await connectVisTest(putOtherCookie, 'put-commons-test')
+  assert.ok(other.hello !== null, 'non-owner should connect to public world')
 
   // Try to set commons to private
   const putRes = await httpPut(PORT_PUT, `/api/worlds/${commonsId}`, { visibility: 'private' }, putOwnerCookie)
@@ -584,18 +582,16 @@ test('3c: reconnect after eviction gets WORLD_UNAVAILABLE', async () => {
 // ===========================================================================
 
 test('3e: isCommons true for commons row, false for every other row', async () => {
+  const commonsId = putRegistry.getRootWorldId()
   const res = await httpGet(PORT_PUT, '/api/worlds', putOwnerCookie)
   assert.equal(res.statusCode, 200)
   assert.ok(Array.isArray(res.body))
 
-  const commonsId = putRegistry.getRootWorldId()
-
+  // Debug
   for (const w of res.body) {
-    if (w.id === commonsId) {
-      assert.equal(w.isCommons, true, `${w.id} should have isCommons=true`)
-    } else {
-      assert.equal(w.isCommons, false, `${w.id} should have isCommons=false`)
-    }
+    const isRoot = w.id === commonsId
+    assert.equal(w.isCommons, isRoot,
+      `${w.id} (slug=${w.slug}, isCommons=${w.isCommons}, isRoot=${isRoot}): expected isCommons=${isRoot}`)
   }
 })
 
