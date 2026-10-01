@@ -5,8 +5,28 @@
 // Teleport failure message helpers — pure functions, no DOM.
 //
 // formatDestination(host, pathname, maxLen) — format a destination for display
-// teleportFailureMessage(resolvedUrl, { returning }) — build failure message
+// teleportFailureMessage(resolvedUrl, { returning }, code) — build failure msg
+// codeToReason(code) — map error code to human-readable reason (V8)
 // ---------------------------------------------------------------------------
+
+/**
+ * Map an error code to a human-readable reason sentence (V8).
+ * Returns empty string for unknown or missing codes, so callers fall back
+ * to today's generic text.
+ *
+ * @param {string|null|undefined} code
+ * @returns {string}
+ */
+export function codeToReason(code) {
+  switch (code) {
+    case 'WORLD_UNAVAILABLE':
+      return "That world doesn't exist, or it isn't public."
+    case 'WORLD_NOW_PRIVATE':
+      return 'Its owner has just made it private.'
+    default:
+      return ''
+  }
+}
 
 /**
  * Format a destination string for display in a teleport failure message.
@@ -66,13 +86,16 @@ export function formatDestination(host, pathname, maxLen = 64) {
 
 /**
  * Build a human-readable message for a teleport or Go-back failure.
+ * When a known error code is provided (V8), appends the code-specific
+ * reason sentence. Without one, keeps today's generic text.
  *
  * @param {string|null|undefined} resolvedUrl — the full WS URL that failed
  * @param {object} [opts]
  * @param {boolean} [opts.returning=false] — true for a Go-back failure
+ * @param {string|null|undefined} [code] — error code from the server (V8)
  * @returns {string} — the message, never throws
  */
-export function teleportFailureMessage(resolvedUrl, opts = {}) {
+export function teleportFailureMessage(resolvedUrl, opts = {}, code) {
   const { returning = false } = opts || {}
   let host = ''
   let pathname = '/'
@@ -90,8 +113,16 @@ export function teleportFailureMessage(resolvedUrl, opts = {}) {
     }
   }
 
+  // V8: append code-specific reason when available
+  const reason = codeToReason(code)
+  const reasonSuffix = reason ? ' ' + reason : ''
+
   if (returning) {
-    return `Couldn't return to ${dest}.`
+    return `Couldn't return to ${dest}.` + reasonSuffix
+  }
+
+  if (reason) {
+    return `Couldn't open ${dest}. ${reason}`
   }
 
   return `Couldn't open ${dest}. The world may not exist, or the server may not be reachable right now.`

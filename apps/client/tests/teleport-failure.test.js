@@ -6,7 +6,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDestination, teleportFailureMessage } from '../src/teleport-failure.js'
+import { formatDestination, teleportFailureMessage, codeToReason } from '../src/teleport-failure.js'
 
 describe('formatDestination', () => {
 
@@ -111,6 +111,53 @@ describe('formatDestination', () => {
     assert.equal(result.length, 11)
     assert.ok(result.startsWith(host))
     assert.ok(result.includes('\u2026'))
+  })
+})
+
+test('codeToReason maps WORLD_UNAVAILABLE to correct sentence', () => {
+  assert.equal(codeToReason('WORLD_UNAVAILABLE'), "That world doesn't exist, or it isn't public.")
+})
+
+test('codeToReason maps WORLD_NOW_PRIVATE to correct sentence', () => {
+  assert.equal(codeToReason('WORLD_NOW_PRIVATE'), 'Its owner has just made it private.')
+})
+
+test('codeToReason returns empty string for unknown code', () => {
+  assert.equal(codeToReason('MADE_UP_CODE'), '')
+})
+
+test('codeToReason returns empty string for null/undefined', () => {
+  assert.equal(codeToReason(null), '')
+  assert.equal(codeToReason(undefined), '')
+})
+
+describe('teleportFailureMessage with code', () => {
+
+  test('WORLD_UNAVAILABLE code adds reason sentence', () => {
+    const msg = teleportFailureMessage('ws://atrium.example/worlds/private-world', {}, 'WORLD_UNAVAILABLE')
+    assert.ok(msg.includes("That world doesn't exist, or it isn't public."))
+  })
+
+  test('WORLD_NOW_PRIVATE code uses connect surface wording', () => {
+    const msg = teleportFailureMessage('ws://atrium.example/worlds/just-switched', {}, 'WORLD_NOW_PRIVATE')
+    assert.ok(msg.includes('Its owner has just made it private.'))
+  })
+
+  test('unknown code keeps today text unchanged', () => {
+    const msg = teleportFailureMessage('ws://atrium.example/worlds/test', {}, 'MADE_UP')
+    assert.ok(msg.includes("The world may not exist"))
+    assert.ok(!msg.includes('doesn\'t exist'))
+  })
+
+  test('null code keeps today text unchanged', () => {
+    const msg = teleportFailureMessage('ws://atrium.example/worlds/test', {}, null)
+    assert.ok(msg.includes("The world may not exist"))
+  })
+
+  test('returning + code still uses returning prefix', () => {
+    const msg = teleportFailureMessage('ws://atrium.example/worlds/test', { returning: true }, 'WORLD_UNAVAILABLE')
+    assert.ok(msg.startsWith("Couldn't return to "))
+    assert.ok(msg.includes("That world doesn't exist"))
   })
 })
 
