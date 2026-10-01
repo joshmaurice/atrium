@@ -6,6 +6,9 @@
   "author": "Tony Parisi / Metatron Studio",
   "type": "module",
   "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
   "dependencies": {
     "@atrium/client": "workspace:*"
   }
