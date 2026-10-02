@@ -79,6 +79,7 @@ open apps/playground/index.html        # pointer-event test bench
 - 3016: `rate-limit.test.js`
 - 3017: `world-crud.test.js`
 - 3018: `session.test.js` keepalive grace counter test (normal-pong case)
+- 3050–3052, 3055, 3056: `world-visibility.test.js` (refusal server, PUT/eviction server, no-root server, close-terminates test, teardown test)
 
 ## Key Files
 
