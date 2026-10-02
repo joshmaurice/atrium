@@ -21,9 +21,8 @@ function parseImportLine(line) {
   const match = line.match(/import\s*\{\s*([^}]+)\s*\}\s+from\s+'\.\/([^']+)'/)
   if (!match) return null
   const names = match[1].split(',').map(s => s.trim())
-  // Some imports include .js in the path, some don't. Normalize: strip if present.
-  let modulePath = match[2]
-  if (modulePath.endsWith('.js')) modulePath = modulePath.slice(0, -3)
+  // Preserve the import specifier exactly as written — app.js uses .js suffix
+  const modulePath = match[2]
   return { modulePath, names }
 }
 
@@ -49,9 +48,9 @@ function getExportNames(source) {
 }
 
 // True if `name` appears as a standalone identifier anywhere in `lines`
-// after the given import line offset.
+// after the given import line offset. Excludes member access (X.name).
 function isUsedAfterImport(lines, name, importLineIdx) {
-  const re = new RegExp(`\\b${name}\\b`)
+  const re = new RegExp(`(?<!\\.)\\b${name}\\b`)
   for (let i = importLineIdx + 1; i < lines.length; i++) {
     if (re.test(lines[i])) return true
   }
@@ -67,21 +66,25 @@ const appJsLines = appJsSource.split('\n')
 const imports = getLocalImports(appJsSource)
 
 for (const imp of imports) {
-  const fullPath = resolve(SRC_DIR, imp.modulePath + '.js')
+  const fullPath = resolve(SRC_DIR, imp.modulePath)
   const moduleSource = readFileSync(fullPath, 'utf-8')
   const exportNames = getExportNames(moduleSource)
 
   // Find the import line index for this module
   const importLineIdx = appJsLines.findIndex(l => l.includes(`'./${imp.modulePath}'`))
 
-  describe(`app.js imports from ./${imp.modulePath}.js`, () => {
+  if (importLineIdx < 0) {
+    assert.fail(`Import line for './${imp.modulePath}' not found in app.js`)
+  }
+
+  describe(`app.js imports from ./${imp.modulePath}`, () => {
     for (const exportName of exportNames) {
       test(`${exportName} is imported if used in app.js`, () => {
-        const isUsed = importLineIdx >= 0 && isUsedAfterImport(appJsLines, exportName, importLineIdx)
+        const isUsed = isUsedAfterImport(appJsLines, exportName, importLineIdx)
         if (isUsed) {
           assert.ok(
             imp.names.includes(exportName),
-            `"${exportName}" from ./${imp.modulePath}.js is referenced in app.js code but missing from import`
+            `"${exportName}" from ./${imp.modulePath} is referenced in app.js code but missing from import`
           )
         }
       })
