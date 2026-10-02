@@ -530,7 +530,7 @@ export function createWorldRegistry(opts = {}) {
     if (worldId === getRootWorldId()) return
     const host = hosts.get(worldId)
     if (!host) return
-    if (host.sessions.size > 0) return // reconnected, skip
+    if (host.sessions.size > 0 || host.getPreHelloSocketCount() > 0) return // reconnected or pre-hello present, skip
 
     console.log(`[world-registry] Tearing down world "${worldId}" (no sessions left)`)
 
@@ -565,6 +565,14 @@ export function createWorldRegistry(opts = {}) {
       mutationPolicy,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
       onSaveableMutation: () => coordinator.markDirty(worldId, host),
+      onPreHelloClosed: () => {
+        const host = hosts.get(worldId)
+        if (!host) return
+        if (worldId === getRootWorldId()) return
+        if (host.sessions.size === 0 && host.getPreHelloSocketCount() === 0) {
+          scheduleTeardown(worldId)
+        }
+      },
     })
 
     hosts.set(worldId, host)
@@ -600,6 +608,14 @@ export function createWorldRegistry(opts = {}) {
       mutationPolicy,
       onSessionRemoved: (session) => onSessionRemoved(worldId, session),
       onSaveableMutation: () => coordinator.markDirty(worldId, host),
+      onPreHelloClosed: () => {
+        const h = hosts.get(worldId)
+        if (!host) return
+        if (worldId === getRootWorldId()) return
+        if (host.sessions.size === 0 && host.getPreHelloSocketCount() === 0) {
+          scheduleTeardown(worldId)
+        }
+      },
     })
 
     hosts.set(worldId, host)

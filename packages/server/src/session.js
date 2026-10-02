@@ -144,6 +144,7 @@ export function attachSessionHandlers({
   onSessionRemoved = null,
   onSaveableMutation = null,
   keepaliveInterval = KEEPALIVE_INTERVAL,
+  onPreHelloClosed = null,
 } = {}) {
 
   // Track pre-hello connections by WebSocket instance so eviction (V5)
@@ -687,6 +688,9 @@ export function attachSessionHandlers({
       if (session) {
         cleanupSession(session)
         session = null
+      } else {
+        // Pre-hello socket closed without sending hello — notify registry
+        onPreHelloClosed?.()
       }
     })
 
@@ -709,7 +713,7 @@ export function attachSessionHandlers({
 
   return { closeKeepalive() {
     clearInterval(keepaliveTimer)
-  }, evictNonOwners: doEvictNonOwners }
+  }, evictNonOwners: doEvictNonOwners, getPreHelloSocketCount: () => preHelloSockets.size }
 }
 
 // ---------------------------------------------------------------------------

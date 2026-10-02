@@ -38,6 +38,7 @@ export function createWorldHost(opts = {}) {
     mutationPolicy,
     onSessionRemoved = null,
     onSaveableMutation = null,
+    onPreHelloClosed = null,
   } = opts
 
   const sessions = new Map()
@@ -45,7 +46,7 @@ export function createWorldHost(opts = {}) {
   const wss = new WebSocketServer({ noServer: true })
 
   // Wire up the session handlers for this host's wss
-  const { closeKeepalive, evictNonOwners } = attachSessionHandlers({
+  const { closeKeepalive, evictNonOwners, getPreHelloSocketCount } = attachSessionHandlers({
     wss,
     world,
     db,
@@ -56,6 +57,7 @@ export function createWorldHost(opts = {}) {
     mutationPolicy,
     onSessionRemoved,
     onSaveableMutation,
+    onPreHelloClosed,
   })
 
   /**
@@ -95,6 +97,7 @@ export function createWorldHost(opts = {}) {
     mutationPolicy,
     handleUpgrade,
     evictNonOwners,
+    getPreHelloSocketCount,
     close,
   }
 }
