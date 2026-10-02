@@ -286,20 +286,58 @@ test('3b: refusal socket receives no hello reply', async () => {
 // 3d: Server failure paths get HTTP status
 // ===========================================================================
 
-test('3d: unresolvable path gets HTTP 404 before WebSocket upgrade', async () => {
-  const res = await new Promise((resolve, reject) => {
-    const req = request(
-      { hostname: 'localhost', port: PORT_REFUSAL, path: '/this-is-garbage', method: 'GET' },
-      (incoming) => {
-        let body = ''
-        incoming.on('data', (c) => { body += c })
-        incoming.on('end', () => resolve({ statusCode: incoming.statusCode, body }))
-      }
-    )
-    req.on('error', reject)
-    req.end()
+// ===========================================================================
+// 3d: V4 creation-failure refusal (HTTP 404 on failed lazy creation)
+// ===========================================================================
+
+test('3d: world creation failure returns HTTP 404 before WebSocket upgrade', async () => {
+  // Insert a public world row with document='{}' — this is a truthy but invalid
+  // glTF document (no asset.version), so createWorldFromDocument will throw.
+  const failWorldId = 'wv-fail-create-id'
+  const now = new Date().toISOString()
+  db.database.prepare(
+    `INSERT INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    failWorldId, ownerUserId, 'fail-create', 'Fail Create', 'public',
+    '{}', now, now
+  )
+
+  // Connect via /worlds/WorldOwner/fail-create — triggers lazy creation
+  const ws = new WebSocket(`ws://localhost:${PORT_REFUSAL}/worlds/WorldOwner/fail-create`)
+
+  // Expect 'unexpected-response' with HTTP 404 (the upgrade handler sends
+  // sendHttpResponse(socket, 404, 'Not Found') on creation failure)
+  let gotOpen = false
+  let errMsgs = []
+  let unexpectedResponse = null
+  ws.on('open', () => { gotOpen = true })
+  ws.on('error', (err) => { errMsgs.push(err.message) })
+  ws.on('unexpected-response', (req, res) => {
+    unexpectedResponse = { statusCode: res.statusCode }
+    res.resume() // consume the response body
   })
-  assert.equal(res.statusCode, 404)
+
+  await new Promise((resolve) => {
+    ws.once('unexpected-response', resolve)
+    // Timeout if neither event fires
+    setTimeout(resolve, 5000)
+  })
+
+  assert.equal(gotOpen, false, 'should NOT get open event on failed creation')
+  assert.ok(unexpectedResponse !== null, 'should get unexpected-response event')
+  assert.equal(unexpectedResponse.statusCode, 404,
+    `unexpected-response status should be 404, got ${unexpectedResponse.statusCode}`)
+
+  // No host should exist for this world
+  assert.equal(registry.getWorldHost(failWorldId), null,
+    'no host should exist after failed creation')
+
+  // Clean up: no ws.close() needed — the upgrade never completed
+  // Remove the test row so subsequent tests don't see it
+  if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+    ws.close()
+  }
 })
 
 // ===========================================================================
@@ -553,21 +591,23 @@ test('3c: commons -> private returns 403 and evicts nobody', async () => {
   assert.equal(dbRow.owner_user_id, putOwnerUserId,
     `commons owner ${dbRow.owner_user_id} should match test owner ${putOwnerUserId}`)
 
-  // Connect as non-owner to have a live session
-  // Wait briefly in case the previous test left a teardown pending
-  await new Promise(r => setTimeout(r, 100))
-  const other = await connectVisTest(putOtherCookie, 'put-commons-test')
-  assert.ok(other.hello !== null, 'non-owner should connect to public world')
+  // Connect non-owner IN THE COMMONS via /worlds/PutOwner/commons
+  // The commons is public so non-owner can join
+  const common = await wsOpen(PORT_PUT, '/worlds/PutOwner/commons', null)
+  const commonQ = makeMessageQueue(common)
+  sendHello(common, 'put-commons-session')
+  const commonHello = await commonQ.waitForType('hello', 5000)
+  assert.ok(commonHello !== null, 'non-owner should connect to commons world')
 
   // Try to set commons to private
   const putRes = await httpPut(PORT_PUT, `/api/worlds/${commonsId}`, { visibility: 'private' }, putOwnerCookie)
   assert.equal(putRes.statusCode, 403, `commons->private should be 403, got ${putRes.statusCode} body=${JSON.stringify(putRes.body)}`)
 
-  // Nobody gets evicted
-  const errMsg = await other.q.waitForType('error', 2000)
+  // Nobody gets evicted — the commons session should receive NO error
+  const errMsg = await commonQ.waitForType('error', 2000)
   assert.equal(errMsg, null, 'nobody evicted after rejected commons->private')
 
-  other.ws.close()
+  common.close()
 })
 
 test('3c: reconnect after eviction gets WORLD_UNAVAILABLE', async () => {
@@ -607,6 +647,10 @@ test('3e: isCommons true for commons row, false for every other row', async () =
   assert.ok(Array.isArray(res.body))
 
   // Debug
+  // Assert exactly one row has isCommons === true
+  assert.equal(res.body.filter(w => w.isCommons === true).length, 1,
+    'exactly one row should have isCommons === true')
+
   for (const w of res.body) {
     const isRoot = w.id === commonsId
     assert.equal(w.isCommons, isRoot,
@@ -763,10 +807,29 @@ test('3b: refusal does not cancel a pending teardown', async () => {
   const TD_PORT = 3056
 
   const now = new Date().toISOString()
+  const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
   const tdOwnerId = 'td-owner-uuid'
   tdDb.database.prepare(
     'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
   ).run(tdOwnerId, 'TdOwner', 'TD Owner', now)
+
+  // Create auth session for owner
+  const tdOwnerSess = 'td-owner-auth-sess'
+  tdDb.database.prepare(
+    'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(tdOwnerSess, tdOwnerId, now, farFuture)
+  const tdOwnerCookie = `atrium_auth_session=${tdOwnerSess}`
+
+  // Create a non-owner user for the /ws/<id> refusal test
+  const tdOtherId = 'td-other-uuid'
+  tdDb.database.prepare(
+    'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+  ).run(tdOtherId, 'TdOther', 'TD Other', now)
+  const tdOtherSess = 'td-other-auth-sess'
+  tdDb.database.prepare(
+    'INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(tdOtherSess, tdOtherId, now, farFuture)
+  const tdOtherCookie = `atrium_auth_session=${tdOtherSess}`
 
   process.env.ATRIUM_COMMONS_OWNER = 'TdOwner'
   process.env.ATRIUM_COMMONS_SLUG = 'commons'
@@ -780,7 +843,7 @@ test('3b: refusal does not cancel a pending teardown', async () => {
     `INSERT INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    tdWorldId, tdOwnerId, 'td-world', 'TD World', 'public',
+    tdWorldId, tdOwnerId, 'td-world', 'TD World', 'private',
     JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, nodes: [{ name: 'root', translation: [0, 0, 0] }] }),
     now, now
   )
@@ -794,35 +857,51 @@ test('3b: refusal does not cancel a pending teardown', async () => {
   tdHttp.on('request', tdHandler)
   tdHttp.listen(TD_PORT)
 
-  // Connect owner to create a host for tdWorldId
-  const owner = await wsOpen(TD_PORT, '/worlds/TdOwner/td-world', null)
+  // Connect owner (with cookie) to create a host for tdWorldId
+  // Private world admits owner via /worlds/ path with auth cookie
+  const owner = await wsOpen(TD_PORT, '/worlds/TdOwner/td-world', tdOwnerCookie)
   const ownerQ = makeMessageQueue(owner)
   sendHello(owner, 'td-owner-session')
   const hello = await ownerQ.waitForType('hello', 5000)
-  assert.ok(hello !== null, 'owner should connect')
+  assert.ok(hello !== null, 'owner should connect to private world')
   assert.ok(tdRegistry.getWorldHost(tdWorldId) !== null, 'host should exist after connect')
 
   // Disconnect owner — triggers scheduleTeardown
   owner.close()
   await new Promise(r => setTimeout(r, 300))
 
-  // Quickly connect via a refusal path on the same server
-  const refWs = new WebSocket(`ws://localhost:${TD_PORT}/worlds/UnknownNobody/bogus`)
-  const refQ = makeMessageQueue(refWs)
+  // Attempt A: anonymous connection via /worlds/ — private world + no cookie → WORLD_UNAVAILABLE
+  const anon = new WebSocket(`ws://localhost:${TD_PORT}/worlds/TdOwner/td-world`)
+  const anonQ = makeMessageQueue(anon)
   await new Promise((resolve, reject) => {
-    refWs.once('open', resolve)
-    refWs.once('error', reject)
+    anon.once('open', resolve)
+    anon.once('error', reject)
   })
-  const refMsg = await refQ.waitForType('error', 4000)
-  assert.ok(refMsg !== null, 'refusal should work during pending teardown')
-  refWs.close()
+  const anonMsg = await anonQ.waitForType('error', 4000)
+  assert.ok(anonMsg !== null, 'anonymous should get refusal for private world')
+  assert.equal(anonMsg.code, 'WORLD_UNAVAILABLE',
+    `anonymous refusal code should be WORLD_UNAVAILABLE, got ${anonMsg.code}`)
+  anon.close()
+
+  // Attempt B: non-owner via /ws/<tdWorldId> — private world + non-owner → WORLD_UNAVAILABLE
+  const nonOwner = new WebSocket(`ws://localhost:${TD_PORT}/ws/${tdWorldId}`, { headers: { Cookie: tdOtherCookie } })
+  const nonOwnerQ = makeMessageQueue(nonOwner)
+  await new Promise((resolve, reject) => {
+    nonOwner.once('open', resolve)
+    nonOwner.once('error', reject)
+  })
+  const nonOwnerMsg = await nonOwnerQ.waitForType('error', 4000)
+  assert.ok(nonOwnerMsg !== null, 'non-owner should get refusal for private world')
+  assert.equal(nonOwnerMsg.code, 'WORLD_UNAVAILABLE',
+    `non-owner refusal code should be WORLD_UNAVAILABLE, got ${nonOwnerMsg.code}`)
+  nonOwner.close()
 
   // Wait for teardown delay (3s) + buffer
   await new Promise(r => setTimeout(r, 3500))
 
-  // Host should have been torn down despite the refusal
+  // Host should have been torn down despite both refusals
   assert.equal(tdRegistry.getWorldHost(tdWorldId), null,
-    'host should be torn down after delay even though refusal was attempted')
+    'host should be torn down after delay even though refusals were attempted')
 
   tdRegistry.close()
   tdHttp.close()
@@ -913,4 +992,167 @@ test('Finding 2b: raw unmasked frame on live session does not crash server', asy
   check.close()
   peer.close()
   target.close()
+})
+
+// ===========================================================================
+// Finding 5: Pre-hello socket teardown fix
+// Each test uses its own fresh public world row on the PUT server (PORT_PUT)
+// ===========================================================================
+
+test('Finding 5a: fresh-host pre-hello close schedules teardown', async () => {
+  const now = new Date().toISOString()
+  const rowId = 'f5a-world-id'
+  putDb.database.prepare(
+    `INSERT OR IGNORE INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    rowId, putOwnerUserId, 'f5a-world', 'F5A', 'public',
+    JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, nodes: [{ name: 'root', translation: [0, 0, 0] }] }),
+    now, now
+  )
+
+  // Connect to a never-loaded world via /worlds/PutOwner/f5a-world
+  const ws = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/PutOwner/f5a-world`)
+  await new Promise((resolve) => { ws.once('open', resolve); ws.once('error', resolve) })
+  // Host now exists from lazy creation
+  assert.ok(putRegistry.getWorldHost(rowId) !== null, 'host should exist after open')
+
+  // Close WITHOUT hello — this is a pre-hello close
+  ws.close()
+
+  // Wait teardown delay (3s) + buffer
+  await new Promise(r => setTimeout(r, 3500))
+
+  // Host should have been torn down
+  assert.equal(putRegistry.getWorldHost(rowId), null,
+    'host should be null after pre-hello close + delay')
+
+  // Clean up
+  putDb.database.prepare('DELETE FROM worlds WHERE id = ?').run(rowId)
+})
+
+test('Finding 5b: pre-hello close cancels then reschedules teardown', async () => {
+  const now = new Date().toISOString()
+  const rowId = 'f5b-world-id'
+  putDb.database.prepare(
+    `INSERT OR IGNORE INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    rowId, putOwnerUserId, 'f5b-world', 'F5B', 'public',
+    JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, nodes: [{ name: 'root', translation: [0, 0, 0] }] }),
+    now, now
+  )
+
+  // Owner connects + hello to f5b-world (creates host with a session)
+  const owner = await wsOpen(PORT_PUT, '/worlds/PutOwner/f5b-world', putOwnerCookie)
+  const ownerQ = makeMessageQueue(owner)
+  sendHello(owner, 'f5b-owner')
+  const hello = await ownerQ.waitForType('hello', 5000)
+  assert.ok(hello !== null, 'owner should connect')
+  assert.ok(putRegistry.getWorldHost(rowId) !== null, 'host should exist after connect')
+
+  // Owner disconnects — teardown scheduled (pending)
+  owner.close()
+  await new Promise(r => setTimeout(r, 300))
+
+  // Second socket connects (cancels pending teardown) and closes without hello
+  const preHello = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/PutOwner/f5b-world`)
+  await new Promise((resolve) => { preHello.once('open', resolve); preHello.once('error', resolve) })
+  preHello.close() // pre-hello close — should reschedule teardown
+
+  // Wait teardown delay + buffer
+  await new Promise(r => setTimeout(r, 3500))
+
+  // Host should have been torn down
+  assert.equal(putRegistry.getWorldHost(rowId), null,
+    'host should be null after pre-hello close + delay')
+
+  // Clean up
+  putDb.database.prepare('DELETE FROM worlds WHERE id = ?').run(rowId)
+})
+
+test('Finding 5c: pre-hello close with live session leaves host up', async () => {
+  const now = new Date().toISOString()
+  const rowId = 'f5c-world-id'
+  putDb.database.prepare(
+    `INSERT OR IGNORE INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    rowId, putOwnerUserId, 'f5c-world', 'F5C', 'public',
+    JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, nodes: [{ name: 'root', translation: [0, 0, 0] }] }),
+    now, now
+  )
+
+  // Owner connects + hello (live session)
+  const owner = await wsOpen(PORT_PUT, '/worlds/PutOwner/f5c-world', putOwnerCookie)
+  const ownerQ = makeMessageQueue(owner)
+  sendHello(owner, 'f5c-owner')
+  const ownerHello = await ownerQ.waitForType('hello', 5000)
+  assert.ok(ownerHello !== null, 'owner should connect')
+  assert.ok(putRegistry.getWorldHost(rowId) !== null, 'host should exist')
+
+  // Second socket connects and closes without hello
+  const preHello = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/PutOwner/f5c-world`)
+  await new Promise((resolve) => { preHello.once('open', resolve); preHello.once('error', resolve) })
+  preHello.close()
+
+  // Wait past teardown delay
+  await new Promise(r => setTimeout(r, 3500))
+
+  // Host should still be up because the owner session is live
+  assert.ok(putRegistry.getWorldHost(rowId) !== null,
+    'host should still be up after delay (owner session is live)')
+
+  // Close owner session so teardown can happen and file exits cleanly
+  owner.close()
+  await new Promise(r => setTimeout(r, 3500))
+
+  putDb.database.prepare('DELETE FROM worlds WHERE id = ?').run(rowId)
+})
+
+test('Finding 5d: pre-hello close with second pre-hello socket open leaves host up; second can complete hello', async () => {
+  const now = new Date().toISOString()
+  const rowId = 'f5d-world-id'
+  putDb.database.prepare(
+    `INSERT OR IGNORE INTO worlds (id, owner_user_id, slug, name, visibility, document, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    rowId, putOwnerUserId, 'f5d-world', 'F5D', 'public',
+    JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, nodes: [{ name: 'root', translation: [0, 0, 0] }] }),
+    now, now
+  )
+
+  // Two pre-hello sockets connect to the fresh world
+  const pre1 = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/PutOwner/f5d-world`)
+  await new Promise((resolve) => { pre1.once('open', resolve); pre1.once('error', resolve) })
+  const pre2 = new WebSocket(`ws://localhost:${PORT_PUT}/worlds/PutOwner/f5d-world`)
+  await new Promise((resolve) => { pre2.once('open', resolve); pre2.once('error', resolve) })
+
+  assert.ok(putRegistry.getWorldHost(rowId) !== null, 'host should exist')
+
+  // First pre-hello socket closes
+  pre1.close()
+
+  // Wait past teardown delay
+  await new Promise(r => setTimeout(r, 3500))
+
+  // Host should still be up (second pre-hello socket is still open)
+  assert.ok(putRegistry.getWorldHost(rowId) !== null,
+    'host should be up after delay (second pre-hello socket still open)')
+
+  // Second socket completes hello successfully
+  const pre2Q = makeMessageQueue(pre2)
+  sendHello(pre2, 'f5d-session')
+  const helloReply = await pre2Q.waitForType('hello', 5000)
+  assert.ok(helloReply !== null, 'second socket should receive hello reply')
+
+  // Host must still be up after hello completes
+  assert.ok(putRegistry.getWorldHost(rowId) !== null,
+    'host should be up after hello completes')
+
+  // Close the session so teardown can happen and file exits cleanly
+  pre2.close()
+  await new Promise(r => setTimeout(r, 3500))
+
+  putDb.database.prepare('DELETE FROM worlds WHERE id = ?').run(rowId)
 })
