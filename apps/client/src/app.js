@@ -10,7 +10,7 @@ import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination,
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
 import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
-import { teleportFailureMessage, evictionMessage } from './teleport-failure.js'
+import { teleportFailureMessage, evictionMessage, codeToReason, formatDestination } from './teleport-failure.js'
 import { projectRayToPlane } from '@atrium/renderer-three'
 
 // ---------------------------------------------------------------------------
