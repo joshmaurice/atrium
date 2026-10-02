@@ -211,7 +211,15 @@ function renderWorldList(worlds) {
           body: JSON.stringify({ visibility: newVis }),
         })
         if (res.ok) {
-          refreshWorldList()
+          const data = await res.json()
+          // Update in-place instead of refreshWorldList()
+          toggle.checked = data.visibility === 'public'
+          toggleText.textContent = ' ' + (data.visibility === 'public' ? 'Public' : 'Private')
+          const metaEl = info.querySelector('.wb-meta')
+          if (metaEl) {
+            metaEl.textContent = `${data.slug || w.slug} · ${formatTime(data.updated_at || w.updated_at)}`
+          }
+          wbError.textContent = ''
           return
         }
         // Failure: restore and show error
