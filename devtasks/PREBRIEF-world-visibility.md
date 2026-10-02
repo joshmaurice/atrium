@@ -1,19 +1,13 @@
 # Pre-brief: world visibility toggle + server-sent failure reasons (Step 9)
 
-Status: **DRAFT, Revision 1 (2026-10-01).** For outside review before
-upload to `devtasks/`.
+Status: **FINAL, Revision 1 (2026-10-01). All decisions (V1–V9) are
+confirmed by the human,** including the proposals in V3, V4, V6, V7, V8
+and V9. §5's open questions go to the brief author with their stated
+recommendations. Ready for the brief/critic pipeline once this file is
+uploaded to `devtasks/`.
 
-**Decision status:**
-- **Confirmed by the human on 2026-10-01:** V2 (one leak-free reason),
-  V5 (evict non-owners on a switch to private), V8's set of surfaces (Load
-  and manual Connect included), and §4's exclusion of strict destination
-  resolution.
-- **Fixed by code that already shipped (Step 4):** V1. It's restated here,
-  not re-decided.
-- **Proposed by Claude, for confirmation in review:** V3 (the delivery
-  channel), V4 (which refusals carry the reason), V6 (the toggle's
-  behaviour), V7 (the commons flag), the exact wording in V8, and V9 (commit
-  order).
+V1 restates code that already shipped in Step 4; it isn't a new decision.
+Strict destination resolution is confirmed out of scope (§4).
 
 **Correction to the Step 8 passdown (§7.1):**
 - **What the passdown says:** `worlds.visibility` is still locked by
@@ -246,7 +240,7 @@ This is input for the brief-writing step. It is not the brief itself.
 - **Admission rules aren't changed in this task.** Only how a refusal is
   delivered changes (V3), and the new eviction (V5).
 
-**V2. One reason for every admission refusal (confirmed).**
+**V2. One reason for every admission refusal.**
 - **Every refusal decided by admission gets the same reason:**
   - an unresolvable path;
   - an unknown user or slug;
@@ -266,7 +260,7 @@ This is input for the brief-writing step. It is not the brief itself.
   exist today too, and are out of scope.
 
 **V3. Delivery channel: complete the upgrade, send an `error` message, then
-close (proposed).**
+close.**
 - **A refusal socket:** for each V2 refusal, the registry completes the
   WebSocket handshake on **its own** `WebSocketServer({ noServer: true })`,
   never on any world host's `wss`. It then:
@@ -303,7 +297,7 @@ close (proposed).**
     `"... WORLD_UNAVAILABLE: World not available"` through its existing
     `msg` paths. That's acceptable.
 
-**V4. Server-side failures keep their HTTP status (proposed).**
+**V4. Server-side failures keep their HTTP status.**
 - **Which ones:** commons host missing (~L184), host creation failure
   (~L316, ~L439), host missing after creation (~L283, ~L393), and the
   degraded-mode 503 (~L377). These keep `sendHttpResponse` and their
@@ -316,8 +310,7 @@ close (proposed).**
     distinction leaks nothing.
 - **What the client shows:** today's generic message.
 
-**V5. Switching a world to private disconnects non-owners already inside
-(confirmed).**
+**V5. Switching a world to private disconnects non-owners already inside.**
 - **When:** after a successful `PUT` that sets `visibility: 'private'`,
   and only after the DB write. That way any reconnect hits the new row,
   through admission and the existing re-check (~L396–406).
@@ -342,8 +335,8 @@ close (proposed).**
 - **The PUT response is unchanged.** Whether to report how many visitors
   were disconnected is Q-evict-count.
 
-**V6. The toggle in My Worlds (proposed details; placement, scope and
-default confirmed in Step 7 §6.3).**
+**V6. The toggle in My Worlds (placement, scope and default from Step 7
+§6.3).**
 - **Markup:** one switch per `.wb-item`, between `.wb-info` and Load. It's
   a real `<input type="checkbox" role="switch">` inside a `<label>`, with
   visible text **"Public"** or **"Private"** showing the current state.
@@ -365,7 +358,7 @@ default confirmed in Step 7 §6.3).**
 - **Text** is set with `textContent`. World names already go through
   `escHtml`.
 
-**V7. `GET /api/worlds` marks the commons (proposed).**
+**V7. `GET /api/worlds` marks the commons.**
 - **The field:** each row gains `isCommons: true` or `false`, true exactly
   when `row.id === getRootWorldId()`. It's computed in the route, not
   stored.
@@ -375,7 +368,7 @@ default confirmed in Step 7 §6.3).**
   (`world-crud.test.js` ~L236), so an added field breaks nothing. Confirm
   that against every list test.
 
-**V8. Client wording and surfaces (surfaces confirmed; wording proposed).**
+**V8. Client wording and surfaces.**
 - **One pure, tested helper** in `apps/client/src/teleport-failure.js`
   maps a code to a reason sentence:
   - `WORLD_UNAVAILABLE` → **"That world doesn't exist, or it isn't
@@ -433,8 +426,7 @@ default confirmed in Step 7 §6.3).**
 
 ## 4. Out of scope
 
-- **Strict destination resolution** (Step 7 §6.4, third bullet; confirmed
-  out). Typo pads like `hi` now say "doesn't exist, or it isn't public",
+- **Strict destination resolution** (Step 7 §6.4, third bullet). Typo pads like `hi` now say "doesn't exist, or it isn't public",
   which is accurate.
 - **Connect-before-leave** (Step 7 §6.4, second bullet).
 - **Fixing `AtriumClient`'s browser close-code handling** (§2.4). Record it
