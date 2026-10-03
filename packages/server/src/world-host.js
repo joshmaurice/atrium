@@ -80,6 +80,9 @@ export function createWorldHost(opts = {}) {
     }
     sessions.clear()
 
+    // Terminate pre-hello sockets (those that completed upgrade but never sent hello)
+    for (const ws of wss.clients) ws.terminate()
+
     // Stop the keepalive interval
     closeKeepalive()
 
