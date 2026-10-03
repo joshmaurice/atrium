@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { test, after } from 'node:test'
+import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'http'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -31,8 +31,7 @@ function waitForWsOpen(clientWs) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared WS package server — created once, accepts connections and passes
-// them to a per-test handler set by the test itself.
+// Shared WS package server — created once in before(), closed in after()
 // ---------------------------------------------------------------------------
 
 let sharedHttp
@@ -41,7 +40,7 @@ let sharedPort
 /** @type {(ws: WebSocket) => void|null} */
 let connectionHandler = null
 
-async function setupSharedServer() {
+before(async () => {
   sharedHttp = createServer()
   sharedWss = new WebSocketServer({ noServer: true })
   sharedHttp.on('upgrade', (req, socket, head) => {
@@ -51,16 +50,17 @@ async function setupSharedServer() {
   })
   await new Promise(resolve => sharedHttp.listen(0, resolve))
   sharedPort = sharedHttp.address().port
-}
-
-function cleanupSharedServer() {
-  connectionHandler = null
-  if (sharedWss) sharedWss.close()
-  if (sharedHttp) sharedHttp.close()
-}
+})
 
 after(() => {
-  cleanupSharedServer()
+  connectionHandler = null
+  if (sharedWss) {
+    for (const client of sharedWss.clients) {
+      try { client.terminate() } catch {}
+    }
+    sharedWss.close()
+  }
+  if (sharedHttp) sharedHttp.close()
 })
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,6 @@ after(() => {
 // ---------------------------------------------------------------------------
 
 test('close-code: ws package 1008 with reason', async () => {
-  await setupSharedServer()
 
   connectionHandler = (serverWs) => {
     // After the client connects, close with 1008 + reason
@@ -82,8 +81,6 @@ test('close-code: ws package 1008 with reason', async () => {
   const data = await disconnected
   assert.equal(data.code, 1008, 'code should be 1008')
   assert.equal(data.closeReason, 'policy', 'closeReason should be "policy"')
-
-  cleanupSharedServer()
 })
 
 // ---------------------------------------------------------------------------
@@ -91,7 +88,6 @@ test('close-code: ws package 1008 with reason', async () => {
 // ---------------------------------------------------------------------------
 
 test('close-code: ws package 1008 no reason', async () => {
-  await setupSharedServer()
 
   connectionHandler = (serverWs) => {
     serverWs.close(1008)
@@ -104,22 +100,15 @@ test('close-code: ws package 1008 no reason', async () => {
   const data = await disconnected
   assert.equal(data.code, 1008, 'code should be 1008')
   assert.strictEqual(data.closeReason, undefined, 'closeReason should be undefined')
-
-  cleanupSharedServer()
 })
 
 // ---------------------------------------------------------------------------
 // Test 3: globalThis.WebSocket — 1008 with reason (skip if undefined)
 // ---------------------------------------------------------------------------
 
-test('close-code: globalThis.WebSocket 1008 with reason', { skip: () => {
-  if (typeof globalThis.WebSocket === 'undefined') return 'globalThis.WebSocket is undefined'
-  return false
-}}, async () => {
+test('close-code: globalThis.WebSocket 1008 with reason', { skip: typeof globalThis.WebSocket === 'undefined' ? 'globalThis.WebSocket is undefined' : false }, async () => {
   assert.ok(typeof globalThis.WebSocket !== 'undefined', 'globalThis.WebSocket is defined')
   assert.ok(typeof globalThis.WebSocket.on !== 'function', 'globalThis.WebSocket has no .on method (EventTarget shape)')
-
-  await setupSharedServer()
 
   connectionHandler = (serverWs) => {
     serverWs.close(1008, 'policy')
@@ -132,22 +121,15 @@ test('close-code: globalThis.WebSocket 1008 with reason', { skip: () => {
   const data = await disconnected
   assert.equal(data.code, 1008, 'code should be 1008')
   assert.equal(data.closeReason, 'policy', 'closeReason should be "policy"')
-
-  cleanupSharedServer()
 })
 
 // ---------------------------------------------------------------------------
 // Test 4: globalThis.WebSocket — 1008 no reason (skip if undefined)
 // ---------------------------------------------------------------------------
 
-test('close-code: globalThis.WebSocket 1008 no reason', { skip: () => {
-  if (typeof globalThis.WebSocket === 'undefined') return 'globalThis.WebSocket is undefined'
-  return false
-}}, async () => {
+test('close-code: globalThis.WebSocket 1008 no reason', { skip: typeof globalThis.WebSocket === 'undefined' ? 'globalThis.WebSocket is undefined' : false }, async () => {
   assert.ok(typeof globalThis.WebSocket !== 'undefined', 'globalThis.WebSocket is defined')
   assert.ok(typeof globalThis.WebSocket.on !== 'function', 'globalThis.WebSocket has no .on method (EventTarget shape)')
-
-  await setupSharedServer()
 
   connectionHandler = (serverWs) => {
     serverWs.close(1008)
@@ -160,8 +142,6 @@ test('close-code: globalThis.WebSocket 1008 no reason', { skip: () => {
   const data = await disconnected
   assert.equal(data.code, 1008, 'code should be 1008')
   assert.strictEqual(data.closeReason, undefined, 'closeReason should be undefined')
-
-  cleanupSharedServer()
 })
 
 // ---------------------------------------------------------------------------
@@ -187,11 +167,6 @@ test('close-code: EventTarget fake dispatch close event with code and reason', a
   const disconnected = waitForEvent(client, 'disconnected')
 
   client.connect('ws://fake')
-
-  // Manually set connected state (bypass server handshake)
-  client._connectionRecord.sessionId = 'test-session-id'
-  client._sessionId = 'test-session-id'
-  client._connected = true
 
   // Dispatch a close event carrying code and reason
   const evt = new Event('close')
