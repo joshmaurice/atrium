@@ -13,6 +13,7 @@ import { dirname, resolve } from 'path'
 import { mkdtempSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { connect } from 'node:net'
 import { join } from 'node:path'
 import WebSocket from 'ws'
 
@@ -143,6 +144,53 @@ async function registerUser(port, username, password) {
     ? res.headers['set-cookie'].join('; ')
     : res.headers['set-cookie']
   return { userId: res.body.id, cookie: setCookie }
+}
+
+// ---------------------------------------------------------------------------
+// Raw socket helpers (for test 4)
+// ---------------------------------------------------------------------------
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms))
+}
+
+// Connect a raw TCP socket and perform a WebSocket upgrade handshake.
+// Returns the socket once the 101 Switching Protocols response is received.
+function rawConnect(port, path) {
+  return new Promise((resolve, reject) => {
+    const request = [
+      `GET ${path} HTTP/1.1`,
+      'Host: localhost',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      'Sec-WebSocket-Key: dGhlkhsadkghlkadsfghab==',
+      'Sec-WebSocket-Version: 13',
+      '',
+      '',
+    ].join('\r\n')
+
+    const sock = connect({ port, host: '127.0.0.1' })
+    sock.write(request)
+
+    let response = ''
+    sock.on('data', (chunk) => {
+      response += chunk.toString()
+      if (response.includes('\r\n\r\n') && response.includes('101')) {
+        resolve(sock)
+      }
+    })
+    sock.on('error', reject)
+  })
+}
+
+// Wait for a raw socket to close (TCP FIN/RST).
+async function waitForRawClose(sock, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!sock.readable && !sock.writable) return
+    await sleep(20)
+  }
+  throw new Error('raw socket close timeout')
 }
 
 // ---------------------------------------------------------------------------
@@ -661,58 +709,102 @@ test('3e: isCommons true for commons row, false for every other row', async () =
 test('3e: isCommons false for all rows when getRootWorldId not provided', async () => {
   // Create a separate server WITHOUT getRootWorldId in the handler
   const norootHttp = createServer()
-  const norootHandler = createRequestHandler({
-    db: putDb, auth,
-  })
-  norootHttp.on('request', norootHandler)
-  norootHttp.listen(PORT_NO_ROOT)
+  try {
+    const norootHandler = createRequestHandler({
+      db: putDb, auth,
+    })
+    norootHttp.on('request', norootHandler)
+    norootHttp.listen(PORT_NO_ROOT)
 
-  const res = await httpGet(PORT_NO_ROOT, '/api/worlds', putOwnerCookie)
-  assert.equal(res.statusCode, 200)
-  assert.ok(Array.isArray(res.body))
+    const res = await httpGet(PORT_NO_ROOT, '/api/worlds', putOwnerCookie)
+    assert.equal(res.statusCode, 200)
+    assert.ok(Array.isArray(res.body))
 
-  for (const w of res.body) {
-    assert.equal(w.isCommons, false, `without getRootWorldId, isCommons should be false for all, got true for ${w.id}`)
+    for (const w of res.body) {
+      assert.equal(w.isCommons, false, `without getRootWorldId, isCommons should be false for all, got true for ${w.id}`)
+    }
+  } finally {
+    norootHttp.close()
   }
-
-  norootHttp.close()
 })
 
 // ===========================================================================
-// 4: registry.close() terminates all refusal connections
+// 4: registry.close() terminates refusal and pre-hello sockets
 // ===========================================================================
 
-test('4: registry close terminates refusal sockets', async () => {
-  // Create an isolated server for this test, use a path that triggers sendRefusal
+test('4: registry close terminates refusal and pre-hello sockets', async () => {
+  // Create an isolated server for this test
   const tempDir4 = mkdtempSync(join(tmpdir(), 'atrium-wv-close-test-'))
-  const dbPath4 = join(tempDir4, 'test.db')
-  const db4 = createDb(dbPath4)
-  const http4 = createServer()
-  const registry4 = createWorldRegistry({ httpServer: http4, db: db4 })
-  const PORT4 = 3055
-  http4.listen(PORT4)
+  let db4, http4, registry4
+  const sockets4 = []
+  try {
+    const dbPath4 = join(tempDir4, 'test.db')
+    db4 = createDb(dbPath4)
+    http4 = createServer()
+    registry4 = createWorldRegistry({ httpServer: http4, db: db4 })
+    const PORT4 = 3055
+    http4.listen(PORT4)
 
-  // Connect via unresolved paths to trigger sendRefusal
-  const ws1 = new WebSocket(`ws://localhost:${PORT4}/bad/path`)
-  await new Promise((resolve) => { ws1.once('open', resolve); setTimeout(() => resolve(), 2000) })
-  const ws2 = new WebSocket(`ws://localhost:${PORT4}/another/bad`)
-  await new Promise((resolve) => { ws2.once('open', resolve); setTimeout(() => resolve(), 2000) })
+    const now = new Date().toISOString()
+    const testUserId = 'wv-test4-user'
+    const testWorldId = 'wv-test4-world-id'
+    db4.database.prepare(
+      'INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)'
+    ).run(testUserId, 'Test4User', 'Test4 User', now)
+    db4.database.prepare(
+      `INSERT INTO worlds (id, owner_user_id, slug, name, visibility, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(testWorldId, testUserId, 'test4-world', 'Test4', 'public', now, now)
 
-  // Give them time to register in refusalWss.clients
-  await new Promise(r => setTimeout(r, 300))
+    // Part A — Two raw refusal sockets that complete upgrade by hand
+    const raw1 = await rawConnect(PORT4, '/bad/path1')
+    sockets4.push(raw1)
+    const raw2 = await rawConnect(PORT4, '/bad/path2')
+    sockets4.push(raw2)
 
-  // Close the registry — should terminate refusal clients
-  registry4.close()
+    // Wait 300ms — raw sockets should still be open (no close frame reply)
+    await sleep(300)
 
-  // Verify both sockets were terminated (readyState becomes CLOSED)
-  assert.ok(ws1.readyState === WebSocket.CLOSED || ws1.readyState === WebSocket.CLOSING,
-    `ws1 should be CLOSED or CLOSING after registry.close(), got readyState=${ws1.readyState}`)
-  assert.ok(ws2.readyState === WebSocket.CLOSED || ws2.readyState === WebSocket.CLOSING,
-    `ws2 should be CLOSED or CLOSING after registry.close(), got readyState=${ws2.readyState}`)
+    // Part B — Pre-hello ws client to a public world path
+    const preWs = new WebSocket(`ws://localhost:${PORT4}/worlds/Test4User/test4-world`)
+    await new Promise((resolve, reject) => {
+      preWs.once('open', resolve)
+      preWs.once('error', reject)
+    })
+    assert.equal(
+      registry4.getWorldHost(testWorldId).getPreHelloSocketCount(), 1,
+      'pre-hello socket count should be 1 before close'
+    )
+    assert.ok(preWs.readyState === WebSocket.OPEN, 'pre-hello ws should be OPEN before close')
 
-  http4.close()
-  db4.close()
-  await rm(tempDir4, { recursive: true, force: true })
+    // Register close handler BEFORE calling registry4.close()
+    const preWsClosed = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('pre-hello ws close timeout')), 500)
+      preWs.once('close', () => { clearTimeout(timer); resolve() })
+    })
+
+    // Close the registry — terminates refusal clients + all hosts' clients
+    registry4.close()
+
+    // Assert raw sockets close within 500ms
+    await waitForRawClose(raw1, 500)
+    await waitForRawClose(raw2, 500)
+
+    // Assert ws client reaches CLOSED within 500ms
+    await preWsClosed
+    assert.ok(
+      preWs.readyState === WebSocket.CLOSED || preWs.readyState === WebSocket.CLOSING,
+      `pre-hello ws should be CLOSED or CLOSING after registry.close(), got readyState=${preWs.readyState}`
+    )
+  } finally {
+    for (const s of sockets4) {
+      try { s.destroy() } catch { /* ignore */ }
+    }
+    if (registry4) registry4?.close()
+    if (http4) http4.close()
+    if (db4) db4.close()
+    await rm(tempDir4, { recursive: true, force: true })
+  }
 })
 
 // ===========================================================================
@@ -857,56 +949,67 @@ test('3b: refusal does not cancel a pending teardown', async () => {
   tdHttp.on('request', tdHandler)
   tdHttp.listen(TD_PORT)
 
-  // Connect owner (with cookie) to create a host for tdWorldId
-  // Private world admits owner via /worlds/ path with auth cookie
-  const owner = await wsOpen(TD_PORT, '/worlds/TdOwner/td-world', tdOwnerCookie)
-  const ownerQ = makeMessageQueue(owner)
-  sendHello(owner, 'td-owner-session')
-  const hello = await ownerQ.waitForType('hello', 5000)
-  assert.ok(hello !== null, 'owner should connect to private world')
-  assert.ok(tdRegistry.getWorldHost(tdWorldId) !== null, 'host should exist after connect')
+  // Track client sockets for teardown
+  const clients = []
 
-  // Disconnect owner — triggers scheduleTeardown
-  owner.close()
-  await new Promise(r => setTimeout(r, 300))
+  try {
+    // Connect owner (with cookie) to create a host for tdWorldId
+    // Private world admits owner via /worlds/ path with auth cookie
+    const owner = await wsOpen(TD_PORT, '/worlds/TdOwner/td-world', tdOwnerCookie)
+    clients.push(owner)
+    const ownerQ = makeMessageQueue(owner)
+    sendHello(owner, 'td-owner-session')
+    const hello = await ownerQ.waitForType('hello', 5000)
+    assert.ok(hello !== null, 'owner should connect to private world')
+    assert.ok(tdRegistry.getWorldHost(tdWorldId) !== null, 'host should exist after connect')
 
-  // Attempt A: anonymous connection via /worlds/ — private world + no cookie → WORLD_UNAVAILABLE
-  const anon = new WebSocket(`ws://localhost:${TD_PORT}/worlds/TdOwner/td-world`)
-  const anonQ = makeMessageQueue(anon)
-  await new Promise((resolve, reject) => {
-    anon.once('open', resolve)
-    anon.once('error', reject)
-  })
-  const anonMsg = await anonQ.waitForType('error', 4000)
-  assert.ok(anonMsg !== null, 'anonymous should get refusal for private world')
-  assert.equal(anonMsg.code, 'WORLD_UNAVAILABLE',
-    `anonymous refusal code should be WORLD_UNAVAILABLE, got ${anonMsg.code}`)
-  anon.close()
+    // Disconnect owner — triggers scheduleTeardown
+    owner.close()
+    await new Promise(r => setTimeout(r, 300))
 
-  // Attempt B: non-owner via /ws/<tdWorldId> — private world + non-owner → WORLD_UNAVAILABLE
-  const nonOwner = new WebSocket(`ws://localhost:${TD_PORT}/ws/${tdWorldId}`, { headers: { Cookie: tdOtherCookie } })
-  const nonOwnerQ = makeMessageQueue(nonOwner)
-  await new Promise((resolve, reject) => {
-    nonOwner.once('open', resolve)
-    nonOwner.once('error', reject)
-  })
-  const nonOwnerMsg = await nonOwnerQ.waitForType('error', 4000)
-  assert.ok(nonOwnerMsg !== null, 'non-owner should get refusal for private world')
-  assert.equal(nonOwnerMsg.code, 'WORLD_UNAVAILABLE',
-    `non-owner refusal code should be WORLD_UNAVAILABLE, got ${nonOwnerMsg.code}`)
-  nonOwner.close()
+    // Attempt A: anonymous connection via /worlds/ — private world + no cookie → WORLD_UNAVAILABLE
+    const anon = new WebSocket(`ws://localhost:${TD_PORT}/worlds/TdOwner/td-world`)
+    clients.push(anon)
+    const anonQ = makeMessageQueue(anon)
+    await new Promise((resolve, reject) => {
+      anon.once('open', resolve)
+      anon.once('error', reject)
+    })
+    const anonMsg = await anonQ.waitForType('error', 4000)
+    assert.ok(anonMsg !== null, 'anonymous should get refusal for private world')
+    assert.equal(anonMsg.code, 'WORLD_UNAVAILABLE',
+      `anonymous refusal code should be WORLD_UNAVAILABLE, got ${anonMsg.code}`)
+    anon.close()
 
-  // Wait for teardown delay (3s) + buffer
-  await new Promise(r => setTimeout(r, 3500))
+    // Attempt B: non-owner via /ws/<tdWorldId> — private world + non-owner → WORLD_UNAVAILABLE
+    const nonOwner = new WebSocket(`ws://localhost:${TD_PORT}/ws/${tdWorldId}`, { headers: { Cookie: tdOtherCookie } })
+    clients.push(nonOwner)
+    const nonOwnerQ = makeMessageQueue(nonOwner)
+    await new Promise((resolve, reject) => {
+      nonOwner.once('open', resolve)
+      nonOwner.once('error', reject)
+    })
+    const nonOwnerMsg = await nonOwnerQ.waitForType('error', 4000)
+    assert.ok(nonOwnerMsg !== null, 'non-owner should get refusal for private world')
+    assert.equal(nonOwnerMsg.code, 'WORLD_UNAVAILABLE',
+      `non-owner refusal code should be WORLD_UNAVAILABLE, got ${nonOwnerMsg.code}`)
+    nonOwner.close()
 
-  // Host should have been torn down despite both refusals
-  assert.equal(tdRegistry.getWorldHost(tdWorldId), null,
-    'host should be torn down after delay even though refusals were attempted')
+    // Wait for teardown delay (3s) + buffer
+    await new Promise(r => setTimeout(r, 3500))
 
-  tdRegistry.close()
-  tdHttp.close()
-  tdDb.close()
-  await rm(tdDir, { recursive: true, force: true })
+    // Host should have been torn down despite both refusals
+    assert.equal(tdRegistry.getWorldHost(tdWorldId), null,
+      'host should be torn down after delay even though refusals were attempted')
+  } finally {
+    for (const ws of clients) {
+      try { ws.terminate() } catch { /* ignore */ }
+    }
+    tdRegistry.close()
+    tdHttp.close()
+    tdDb.close()
+    await rm(tdDir, { recursive: true, force: true })
+  }
 })
 
 // ===========================================================================
