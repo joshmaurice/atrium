@@ -442,12 +442,23 @@ export class AtriumClient extends EventEmitter {
       }
     }
 
-    const onClose = (code, reason) => {
+    const onClose = (codeOrEvent, reason) => {
       if (record !== this._connectionRecord) return
       this._clearConnectTimeout(record)
       record.closing = true
       if (record.stale) return
       this._log('Connection closed')
+
+      // Handle both call shapes:
+      //   ws package:  onClose(code: number, reason: string)
+      //   browser:     onClose(CloseEvent) via EventTarget
+      let code = codeOrEvent
+      let closeReason = reason
+      if (codeOrEvent && typeof codeOrEvent === 'object') {
+        code = codeOrEvent.code
+        closeReason = codeOrEvent.reason
+      }
+
       this._connectionRecord = null
       this._connected = false
       this._wsUrl = null
@@ -459,7 +470,7 @@ export class AtriumClient extends EventEmitter {
         url: wsUrl,
         reason: 'closed',
         code: typeof code === 'number' ? code : undefined,
-        closeReason: reason || undefined,
+        closeReason: (typeof closeReason === 'string' && closeReason.length > 0) ? closeReason : undefined,
       })
     }
 
@@ -476,7 +487,7 @@ export class AtriumClient extends EventEmitter {
     if (typeof ws.on === 'function') {
       ws.on('open',    onOpen)
       ws.on('message', (data) => dispatch(data))   // ws passes data directly
-      ws.on('close',   onClose)
+      ws.on('close',   (c, r) => onClose(c, r ? r.toString() : undefined))
       ws.on('error',   onError)
     } else {
       ws.addEventListener('open',    onOpen)
