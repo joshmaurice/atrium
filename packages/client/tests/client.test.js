@@ -40,8 +40,8 @@ function waitForEvent(emitter, event, timeoutMs = 3000) {
 function closeServer(server) {
   for (const ws of server.wss.clients) ws.terminate()
   return new Promise(resolve => {
-    server.wss.close()
-    server.httpServer.close(resolve)
+    server.close()                  // clears keepalive interval, terminates sessions
+    server.httpServer.once('close', resolve)
   })
 }
 
