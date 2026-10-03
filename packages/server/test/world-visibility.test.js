@@ -183,16 +183,6 @@ function rawConnect(port, path) {
   })
 }
 
-// Wait for a raw socket to close (TCP FIN/RST).
-async function waitForRawClose(sock, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (!sock.readable && !sock.writable) return
-    await sleep(20)
-  }
-  throw new Error('raw socket close timeout')
-}
-
 // ---------------------------------------------------------------------------
 // Server 1: Refusal tests (3a, 3b, 3d)
 // ---------------------------------------------------------------------------
@@ -736,6 +726,7 @@ test('4: registry close terminates refusal and pre-hello sockets', async () => {
   // Create an isolated server for this test
   const tempDir4 = mkdtempSync(join(tmpdir(), 'atrium-wv-close-test-'))
   let db4, http4, registry4
+  let preWs
   const sockets4 = []
   try {
     const dbPath4 = join(tempDir4, 'test.db')
@@ -765,8 +756,18 @@ test('4: registry close terminates refusal and pre-hello sockets', async () => {
     // Wait 300ms — raw sockets should still be open (no close frame reply)
     await sleep(300)
 
+    // Register 'close' listeners on raw sockets (before registry4.close())
+    const raw1Closed = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('raw1 close timeout')), 500)
+      raw1.once('close', () => { clearTimeout(timer); resolve() })
+    })
+    const raw2Closed = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('raw2 close timeout')), 500)
+      raw2.once('close', () => { clearTimeout(timer); resolve() })
+    })
+
     // Part B — Pre-hello ws client to a public world path
-    const preWs = new WebSocket(`ws://localhost:${PORT4}/worlds/Test4User/test4-world`)
+    preWs = new WebSocket(`ws://localhost:${PORT4}/worlds/Test4User/test4-world`)
     await new Promise((resolve, reject) => {
       preWs.once('open', resolve)
       preWs.once('error', reject)
@@ -787,8 +788,8 @@ test('4: registry close terminates refusal and pre-hello sockets', async () => {
     registry4.close()
 
     // Assert raw sockets close within 500ms
-    await waitForRawClose(raw1, 500)
-    await waitForRawClose(raw2, 500)
+    await raw1Closed
+    await raw2Closed
 
     // Assert ws client reaches CLOSED within 500ms
     await preWsClosed
@@ -796,7 +797,12 @@ test('4: registry close terminates refusal and pre-hello sockets', async () => {
       preWs.readyState === WebSocket.CLOSED || preWs.readyState === WebSocket.CLOSING,
       `pre-hello ws should be CLOSED or CLOSING after registry.close(), got readyState=${preWs.readyState}`
     )
+
+    // Assert host is null after registry close
+    assert.equal(registry4.getWorldHost(testWorldId), null,
+      'host should be null after registry.close()')
   } finally {
+    if (preWs) { try { preWs.terminate() } catch { /* ignore */ } }
     for (const s of sockets4) {
       try { s.destroy() } catch { /* ignore */ }
     }
