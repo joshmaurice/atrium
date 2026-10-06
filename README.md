@@ -4,7 +4,8 @@ _____________________________
 Based on [tparisi/atrium](https://github.com/tparisi/atrium)
 _____________________________
 Phase 1 of this fork added a user account option; phase 2 added user home worlds & teleporters.
-Try Atrium (with these added features): [https://5.78.232.73.sslip.io/](https://5.78.232.73.sslip.io/)
+
+Deployed at [https://5.78.232.73.sslip.io/](https://5.78.232.73.sslip.io/)
 _____________________________
 [Phase 2](https://github.com/joshmaurice/atrium/blob/main/devtasks/ADDENDUM-user-accounts-phase2.md) deployed as of 2026-10-1.
 _____________________________
