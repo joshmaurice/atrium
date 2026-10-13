@@ -103,8 +103,10 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
     // A8 — the explicit rename path. `world.setField` handles `field === 'name'`
     // itself through SOMDocument.renameNode's return value, so a duplicate or
     // invalid name comes back INVALID_VALUE instead of setPath's INVALID_FIELD.
+    // R3 — hand renameNode the object resolved above, so the rename can only
+    // touch the object that was authorized.
     if (field === 'name') {
-      const result = som.renameNode(nodeName, value)
+      const result = som.renameNode(nodeName, value, target)
       if (!result.ok) return { ok: false, code: result.code, message: result.message }
       return { ok: true }
     }
@@ -268,9 +270,10 @@ export async function createWorldFromDocument(documentJson) {
   function setField(nodeName, field, value) {
     const target = som.getObjectByName(nodeName)
     if (!target) return { ok: false, code: 'NODE_NOT_FOUND' }
-    // A8 — explicit rename path (see createWorld's setField).
+    // A8 — explicit rename path (see createWorld's setField). R3 — the resolved
+    // target is handed to renameNode so only the authorized object is renamed.
     if (field === 'name') {
-      const result = som.renameNode(nodeName, value)
+      const result = som.renameNode(nodeName, value, target)
       if (!result.ok) return { ok: false, code: result.code, message: result.message }
       return { ok: true }
     }

@@ -738,6 +738,40 @@ test('A8: a rename of a light host is INVALID_VALUE (D4)', async () => {
   }
 })
 
+// ===========================================================================
+// R3 revision — a rename acts only on the object that was authorized
+// ===========================================================================
+
+test('R3: a rename whose resolved target is not the named node is INVALID_VALUE', async () => {
+  const { world, port } = await startOpenWorld(SPACE)
+  const { ws, messages } = await connect(port)
+  try {
+    await hello(ws, messages, 'rename-r3')
+
+    // Two nodes sharing a name, built through the SOM (not the wire).
+    // `_objectsByName` keeps the FIRST — the global namespace refuses the
+    // duplicate — while `_nodesByName` keeps the LAST. So `getObjectByName`,
+    // which `world.setField` resolves through, and `_nodesByName`, which
+    // `renameNode` looks up, name different objects.
+    const first  = world.som.ingestNode({ name: 'r3-dup' })
+    const second = world.som.ingestNode({ name: 'r3-dup' })
+    assert.notEqual(first, second)
+    assert.equal(world.som.getObjectByName('r3-dup'), first, 'the namespace keeps the first')
+    assert.equal(world.som.getNodeByName('r3-dup'), second, 'the node map keeps the last')
+
+    const err = await expectError(ws, messages,
+      { type: 'send', seq: 69, node: 'r3-dup', field: 'name', value: 'r3-renamed' }, 'INVALID_VALUE')
+    assert.match(err.message, /not the named node/)
+
+    assert.equal(second.name, 'r3-dup', 'the node renameNode would have renamed is untouched')
+    assert.equal(first.name, 'r3-dup', 'the authorized object is untouched too')
+    assert.equal(world.som.getNodeByName('r3-renamed'), null, 'no node took the new name')
+    assert.equal(world.som.getObjectByName('r3-renamed'), null)
+  } finally {
+    ws.close(); await waitForClose(ws)
+  }
+})
+
 test('A8: a non-string rename value is INVALID_VALUE', async () => {
   const { port } = await startOpenWorld(SPACE)
   const { ws, messages } = await connect(port)

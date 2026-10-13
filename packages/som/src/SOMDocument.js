@@ -291,9 +291,14 @@ export class SOMDocument extends SOMObject {
    *
    * @param {string} oldName
    * @param {string} newName
+   * @param {SOMObject} [target] — the object the caller resolved and authorized
+   *   (world.setField resolves via `getObjectByName`). R3: the global namespace
+   *   and the node map can disagree when two nodes share a name, so when a
+   *   target is given the rename is refused INVALID_VALUE unless it names the
+   *   very node this method would rename.
    * @returns {{ok: boolean, code: string|null}}
    */
-  renameNode(oldName, newName) {
+  renameNode(oldName, newName, target = null) {
     const somNode = this._nodesByName.get(oldName)
     if (!somNode) {
       // Not a node: the document, a camera, a light or an animation.
@@ -302,6 +307,11 @@ export class SOMDocument extends SOMObject {
         code: this._objectsByName.has(oldName) ? 'INVALID_FIELD' : 'NODE_NOT_FOUND',
         message: null,
       }
+    }
+
+    // R3 — rename only the object that was authorized.
+    if (target && target !== somNode) {
+      return { ok: false, code: 'INVALID_VALUE', message: 'rename target is not the named node' }
     }
 
     // D4 — a node hosting a camera or a light cannot be renamed in step 1.
