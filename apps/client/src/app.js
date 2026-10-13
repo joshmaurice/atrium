@@ -10,6 +10,7 @@ import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination,
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
 import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
+import { syncPadLabels } from './pad-labels.js'
 import { teleportFailureMessage, evictionMessage, codeToReason, formatDestination } from './teleport-failure.js'
 import { projectRayToPlane } from '@atrium/renderer-three'
 
@@ -454,20 +455,20 @@ const trigger = createTeleportTrigger({
   },
 })
 
+// The pad label keys currently on screen. rebuildPads() removes exactly these,
+// rather than matching a 'teleporter-' prefix, so a renamed pad's label goes too
+// (see pad-labels.js). teardownWorld() resets it along with the labels.
+let padLabelNames = new Set()
+
 function rebuildPads() {
   const newPads = derivePads()
   trigger.setPads(newPads)
   // Update pad labels (T13)
-  // Remove all existing pad labels
-  labels.removeLabelsByPrefix('teleporter-')
-  // Add labels for current pads
-  for (const pad of newPads) {
-    const label = teleporterLabel(pad.destination, currentWorldUrl)
-    labels.addLabel(pad.name, '\u21B3 ' + label, { name: pad.name, translation: pad.position }, {
-      heightOffset: 1.2,
-      className: 'pad-label',
-    })
-  }
+  padLabelNames = syncPadLabels(labels, padLabelNames, newPads, (pad) => ({
+    text: '\u21B3 ' + teleporterLabel(pad.destination, currentWorldUrl),
+    target: { name: pad.name, translation: pad.position },
+    options: { heightOffset: 1.2, className: 'pad-label' },
+  }))
 }
 
 function onResize() {
@@ -670,6 +671,7 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) =>
 
 function teardownWorld() {
   labels.clear()
+  padLabelNames = new Set()
   firstPerson = false   // reset to third-person for next session
   updateHud()
   updateHintText()

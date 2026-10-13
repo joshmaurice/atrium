@@ -24,6 +24,10 @@ export class LabelOverlay {
    * @param {string} [opts.className] — optional CSS class for styling
    */
   addLabel(nodeName, text, somNode, { heightOffset = LABEL_HEIGHT_OFFSET, className } = {}) {
+    // Adding a key that already exists replaces its label. Overwriting the map
+    // entry alone would orphan the old element: untracked, frozen on screen,
+    // and out of reach of clear() until a page reload.
+    this.removeLabel(nodeName)
     const div = document.createElement('div')
     div.textContent = text
     Object.assign(div.style, {
