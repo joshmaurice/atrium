@@ -12,13 +12,6 @@ import { SOMDocument } from '@atrium/som'
  * Fetch a file by URL. Uses fs.readFile for file:// URLs, globalThis.fetch for
  * http(s)://. Returns the raw text content.
  */
-/** Names of every node in a subtree, the root included (A6/C8). */
-function collectSubtreeNames(somNode) {
-  const names = [somNode.name]
-  for (const child of somNode.children) names.push(...collectSubtreeNames(child))
-  return names
-}
-
 async function fetchText(url) {
   if (url.startsWith('file://')) {
     const path = new URL(url).pathname
@@ -27,6 +20,13 @@ async function fetchText(url) {
   const resp = await fetch(url)
   if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching "${url}"`)
   return resp.text()
+}
+
+/** Names of every node in a subtree, the root included (A6/C8). */
+function collectSubtreeNames(somNode) {
+  const names = [somNode.name]
+  for (const child of somNode.children) names.push(...collectSubtreeNames(child))
+  return names
 }
 
 async function fetchBinary(url) {
