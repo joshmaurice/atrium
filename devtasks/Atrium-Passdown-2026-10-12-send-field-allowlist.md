@@ -216,8 +216,23 @@ change, a `send` named a target (`msg.node`) and a path (`msg.field`), and
 ## 6. Follow-ups
 
 ### 6.1 New
-- **Make operator gates hold (pipeline, before the next round).** Two
-  changes through the front door, in the atrium-workflows skill:
+- **Make operator gates hold: DONE 2026-10-12 ~23:35 PT** (no repo change).
+  Applied after release:
+  - **`atrium-workflows/SKILL.md`:**
+    - an explicit "durable-block the acceptance gate" step in the review
+      gate;
+    - "Operator block gate" item 10.
+  - **`references/worker-card-requirements.md`:** §4 rewritten as an
+    explicit step.
+  - **`devops/kanban/SKILL.md`:** a new section, "Operator-owned cards".
+  - **Operator-owned-cards rule** appended to all five
+    `/root/.hermes/profiles/atrium-*/SOUL.md`, with backups
+    `SOUL.md.bak-2026-10-12`.
+  - **The incident text** in the skills was corrected so it doesn't claim
+    MAIN was blocked: the host approvals worked.
+
+  The original plan was two changes through the front door, in the
+  atrium-workflows skill:
   1. **The review gate's instructions** must say that, in the same run, it
      calls `kanban_block` on the DEV-acceptance gate right after creating it,
      then reads it back, as rule §4 already requires. This round it didn't.
