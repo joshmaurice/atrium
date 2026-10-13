@@ -35,6 +35,28 @@ export const DEFAULT_HOME_DOCUMENT = JSON.stringify({
 })
 
 /**
+ * Build the initial glTF document for a newly created (non-home) world.
+ *
+ * New worlds start from a fixed template rather than a copy of the live
+ * world: in registry mode the live world is the commons, so copying it made
+ * every commons edit the starting content of every world created afterwards
+ * (step 0b). The template is the same content as DEFAULT_HOME_DOCUMENT, with
+ * the generator identified as an Atrium world and the world's own name in
+ * extras.atrium.name (the client shows that as "World: <name>").
+ *
+ * DEFAULT_HOME_DOCUMENT itself is never modified — this parses a copy.
+ *
+ * @param {string} name - the world's display name (resolved by the caller)
+ * @returns {string} serialized glTF 2.0 JSON
+ */
+export function newWorldDocument(name) {
+  const doc = JSON.parse(DEFAULT_HOME_DOCUMENT)
+  doc.asset.generator = 'Atrium World'
+  doc.extras.atrium.name = name
+  return JSON.stringify(doc)
+}
+
+/**
  * Ensure the given user has a home world row.
  * If it doesn't exist, creates one with slug 'home', visibility 'private',
  * and the DEFAULT_HOME_DOCUMENT. Uses INSERT OR IGNORE so concurrent calls
