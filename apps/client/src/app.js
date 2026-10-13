@@ -13,6 +13,13 @@ import { teleporterLabel } from './teleporter-label.js'
 import { syncPadLabels } from './pad-labels.js'
 import { teleportFailureMessage, evictionMessage, codeToReason, formatDestination } from './teleport-failure.js'
 import { projectRayToPlane } from '@atrium/renderer-three'
+import { TransformControls } from 'three/addons/controls/TransformControls.js'
+import { resolveSelectionRoot } from '@atrium/interaction'
+import { createEditModes } from './edit-modes.js'
+import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
+import { pickEditSelection, isSelectClick } from './edit-selection.js'
+import { worldPosition, subtreeSome } from './world-position.js'
+import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -371,7 +378,7 @@ window.stage = stage
 // Navigation / camera mode state
 // ---------------------------------------------------------------------------
 
-let usePointerLock = false   // default: drag-to-look; M key toggles
+// Pointer lock (M key) lives in `modes` (edit-modes.js): off while editing.
 let firstPerson    = false   // default: third-person when connected; V key toggles
 
 // ---------------------------------------------------------------------------
@@ -392,7 +399,8 @@ function derivePads() {
     if (isTeleporter(node)) {
       result.push({
         name: node.name,
-        position: node.translation ?? [0, 0, 0],
+        // B7/G13 — world position, so a pad inside a moved group follows it.
+        position: worldPosition(node),
         destination: teleporterDestination(node),
       })
     }
@@ -455,6 +463,11 @@ const trigger = createTeleportTrigger({
   },
 })
 
+// B1/E6 — one place decides whether teleport triggers are active: only when no
+// editing mode (Edit, teleporter place, teleporter delete) is on. Handlers
+// change modes through `modes`; none of them call trigger.setActive directly.
+const modes = createEditModes({ setTriggerActive: (active) => trigger.setActive(active) })
+
 // The pad label keys currently on screen. rebuildPads() removes exactly these,
 // rather than matching a 'teleporter-' prefix, so a renamed pad's label goes too
 // (see pad-labels.js). teardownWorld() resets it along with the labels.
@@ -506,9 +519,14 @@ function updateHintText() {
     return
   }
 
+  if (modes.edit) {
+    hudHintEl.textContent = `Edit mode · Click to select · Alt-click selects a part · Esc to deselect · Drag to look · WASD to move${camSuffix}`
+    return
+  }
+
   const hasAvatar   = !!avatar.localNode
-  const mouseMode   = usePointerLock ? 'Click to look' : 'Drag to look'
-  const mouseToggle = usePointerLock ? '[M] drag mode'  : '[M] mouse lock'
+  const mouseMode   = modes.usePointerLock ? 'Click to look' : 'Drag to look'
+  const mouseToggle = modes.usePointerLock ? '[M] drag mode'  : '[M] mouse lock'
 
   if (hasAvatar) {
     const cameraToggle = firstPerson ? '[V] third person' : '[V] first person'
@@ -605,6 +623,9 @@ client.on('world:loaded', ({ name, description, author }) => {
   threeScene.background = null
   threeScene.environment = null
 
+  // B1 — the old sceneGroup (and anything attached to it) is about to go.
+  endEditSession()
+
   ;({ docView, sceneGroup } = initDocumentView(renderer, threeScene, client.som, { prevDocView: docView, prevSceneGroup: sceneGroup }))
   stage.setSceneGroup(sceneGroup)
 
@@ -678,6 +699,7 @@ function teardownWorld() {
 }
 
 client.on('connecting', () => {
+  endEditSession()
   teardownWorld()
   setConnectionState('connecting')
   // Clear teleporter state (T4)
@@ -693,6 +715,7 @@ client.on('connecting', () => {
 })
 
 client.on('disconnected', () => {
+  endEditSession()
   teardownWorld()
   setConnectionState('disconnected')
   // Reset teleporter UI (abandons pendings, closes form, guarded overlay)
@@ -741,18 +764,20 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 })
 
 // Live property updates on the selected node, and world-info panel for document extras
-client.on('som:set', ({ nodeName }) => {
+client.on('som:set', ({ nodeName, path }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
     loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
     return
   }
-  // Rebuild pads if a teleporter node was modified (T4)
-  if (nodeName && client.som.getNodeByName(nodeName)) {
-    const node = client.som.getNodeByName(nodeName)
-    if (isTeleporter(node)) {
+  // Rebuild pads if a teleporter node was modified (T4), or a transform of a
+  // node holding one (B7: a moved group moves its pads' zones)
+  const node = nodeName ? client.som.getNodeByName(nodeName) : null
+  if (node) {
+    if (isTeleporter(node) || (TRANSFORM_FIELDS.includes(path) && subtreeSome(node, isTeleporter))) {
       rebuildPads()
     }
+    if (node === selected) refreshEditPanel()
   }
 })
 
@@ -1091,7 +1116,7 @@ connectBtn.addEventListener('click', handleConnect)
 // ---------------------------------------------------------------------------
 
 function resetTeleporterUi() {
-  const isActive = placementMode || deleteMode || tpForm.style.display !== 'none' ||
+  const isActive = modes.placement || modes.delete || tpForm.style.display !== 'none' ||
     pendingSeq != null || pendingDeleteSeq != null
 
   if (isActive) {
@@ -1101,15 +1126,13 @@ function resetTeleporterUi() {
     pendingDeleteSeq = null
     deleteTargetName = null
     pendingPosition = null
-    // Close form and mode
-    placementMode = false
-    deleteMode = false
+    // Close form and mode (triggers follow from the modes, B1)
+    modes.setTeleporterMode(null)
     tpForm.style.display = 'none'
     tpCancelBtn.style.display = 'none'
     tpPlaceBtn.style.display = ''
     tpDeleteBtn.style.display = ''
     viewportEl.style.cursor = ''
-    trigger.setActive(true)
     // Restore Save button and re-enable cancels
     tpSaveBtn.textContent = 'Save'
     tpSaveBtn.disabled = true
@@ -1138,8 +1161,7 @@ const tpFormError = document.getElementById('tp-form-error')
 const tpSaveBtn = document.getElementById('tp-save-btn')
 const tpFormCancel = document.getElementById('tp-form-cancel')
 
-let placementMode = false
-let deleteMode = false
+// placementMode / deleteMode live in `modes` (edit-modes.js), B1.
 let pendingPosition = null
 let pendingName = null
 let pendingSeq = null
@@ -1189,20 +1211,27 @@ function showTeleportFailurePanel(msg, { showGoBack = true } = {}) {
 }
 
 function updateTeleporterControls() {
-  const canEdit = client.canPlaceTeleporters && avatarReady && client.connected
-  tpPlaceBtn.disabled = !canEdit || placementMode
-  tpDeleteBtn.disabled = !canEdit || deleteMode
-  if (!canEdit && (placementMode || deleteMode)) {
+  const allowed = canEditNow()
+  // While Edit mode is on, the teleporter modes are unavailable (E6)
+  tpPlaceBtn.disabled = !allowed || modes.placement || modes.edit
+  tpDeleteBtn.disabled = !allowed || modes.delete || modes.edit
+  if (!allowed && (modes.placement || modes.delete)) {
     exitTeleporterMode()
   }
+  updateEditControls()
+}
+
+// One capability gate for teleporters and Edit mode (A1: canEdit replaces
+// canPlaceTeleporters, which stays on the wire for one release).
+function canEditNow() {
+  return client.canEdit && avatarReady && client.connected
 }
 
 // Wire teleporter control updates into avatar:local-ready (already has a handler)
 // We extend the existing handler below — updateTeleporterControls is called there
 
 function exitTeleporterMode() {
-  placementMode = false
-  deleteMode = false
+  modes.setTeleporterMode(null)
   pendingPosition = null
   pendingName = null
   pendingSeq = null
@@ -1213,7 +1242,6 @@ function exitTeleporterMode() {
   tpPlaceBtn.style.display = ''
   tpDeleteBtn.style.display = ''
   viewportEl.style.cursor = ''
-  trigger.setActive(true)
   // Restore Save button and re-enable both Cancels
   tpSaveBtn.textContent = 'Save'
   tpSaveBtn.disabled = true
@@ -1239,8 +1267,15 @@ document.addEventListener('keydown', (e) => {
     }
     // Ignore Escape while a save is pending
     if (pendingSeq != null) return
-    if (placementMode || deleteMode || tpForm.style.display !== 'none') {
+    if (modes.placement || modes.delete || tpForm.style.display !== 'none') {
       exitTeleporterMode()
+      return
+    }
+    // Edit mode (B2): first Escape deselects, a second leaves Edit mode.
+    // An Escape inside a panel field never gets here (B5).
+    if (modes.edit) {
+      if (selected) selectForEdit(null)
+      else setEditMode(false)
     }
   }
 })
@@ -1248,10 +1283,8 @@ document.addEventListener('keydown', (e) => {
 // ── Placement mode ──────────────────────────────────────────────────────
 
 tpPlaceBtn.addEventListener('click', () => {
-  if (!client.canPlaceTeleporters || !avatarReady) return
-  placementMode = true
-  deleteMode = false
-  trigger.setActive(false)
+  if (!canEditNow()) return
+  if (!modes.setTeleporterMode('placement')) return
   tpCancelBtn.style.display = ''
   tpPlaceBtn.disabled = true
   tpDeleteBtn.style.display = 'none'
@@ -1261,7 +1294,7 @@ tpPlaceBtn.addEventListener('click', () => {
 
 // Handle viewport click in placement mode
 viewportEl.addEventListener('click', (e) => {
-  if (!placementMode) return
+  if (!modes.placement) return
   // Act only on canvas clicks — overlay/form/panel clicks pass through
   if (e.target !== canvas) return
   if (tpForm.style.display !== 'none') return
@@ -1433,10 +1466,8 @@ client.on('error', (err) => {
 // ── Delete mode ─────────────────────────────────────────────────────────
 
 tpDeleteBtn.addEventListener('click', () => {
-  if (!client.canPlaceTeleporters || !avatarReady) return
-  deleteMode = true
-  placementMode = false
-  trigger.setActive(false)
+  if (!canEditNow()) return
+  if (!modes.setTeleporterMode('delete')) return
   tpCancelBtn.style.display = ''
   tpDeleteBtn.disabled = true
   tpPlaceBtn.style.display = 'none'
@@ -1446,7 +1477,7 @@ tpDeleteBtn.addEventListener('click', () => {
 
 // Handle viewport click in delete mode — raycast to find teleporter
 viewportEl.addEventListener('click', (e) => {
-  if (!deleteMode) return
+  if (!modes.delete) return
   // Act only on canvas clicks — overlay/form/panel clicks pass through
   if (e.target !== canvas) return
 
@@ -1502,6 +1533,404 @@ client.on('som:remove', ({ nodeName }) => {
     deleteTargetName = null
     exitTeleporterMode()
   }
+})
+
+// ---------------------------------------------------------------------------
+// Edit mode (Phase 3 step 1b-1) — devtasks/PREBRIEF-edit-mode-ui-1.md
+//
+// Owner-only: select a world node, move/rotate/scale it with handles, edit its
+// transform and name in a panel. The logic that needs tests lives in pure
+// modules (edit-modes, edit-gesture, edit-selection, rotation-degrees,
+// world-position); this section wires them to the DOM, three.js and the client.
+// ---------------------------------------------------------------------------
+
+const editToggleBtn  = document.getElementById('edit-toggle-btn')
+const editPanel      = document.getElementById('edit-panel')
+const epModes        = document.getElementById('ep-modes')
+const epSpaceBtn     = document.getElementById('ep-space')
+const epSnapGrid     = document.getElementById('ep-snap-grid')
+const epSnapAngle    = document.getElementById('ep-snap-angle')
+const epSnapScale    = document.getElementById('ep-snap-scale')
+const epEmpty        = document.getElementById('ep-empty')
+const epFields       = document.getElementById('ep-fields')
+const epName         = document.getElementById('ep-name')
+const epNameStatus   = document.getElementById('ep-name-status')
+const epError        = document.getElementById('ep-error')
+const epVectorInputs = [...epFields.querySelectorAll('input[data-field]')]
+
+let selected      = null   // the selected SOMNode, held by object (B2)
+let selectedObj   = null   // its three.js object, owned by DocumentView
+let gizmo         = null   // TransformControls (r163: an Object3D in the scene)
+let outline       = null   // BoxHelper on selectedObj
+let activeGesture = null   // the handle drag under way (B4)
+let pressDown     = null   // { x, y, onHandle } at the last viewport mousedown
+let pendingRename = null   // { seq, node } while a rename is unanswered
+
+const editTracker = createEditTracker({
+  read: (node, field) => node[field],
+  // Local only: DocumentView renders it, nothing is sent (G2).
+  writeLocal: (node, field, value) => client.applyLocally(() => { node[field] = value }),
+  // Assigning outside applyLocally sends; lastSendSeq moves only if it did.
+  writeSend: (node, field, value) => {
+    const before = client.lastSendSeq
+    node[field] = value
+    return client.lastSendSeq !== before ? client.lastSendSeq : null
+  },
+  onMessage: (text) => showEditError(text),
+  onReverted: (node) => {
+    if (node === selected) refreshEditVectors()
+    if (subtreeSome(node, isTeleporter)) rebuildPads()
+  },
+})
+
+// E4 — the local avatar and peers' avatars are never selectable. The server
+// refuses edits to live avatars anyway; this is for the UI.
+function isEditExcluded(node) {
+  return node === avatar.localNode || !!avatar.getPeerNode(node.name)
+}
+
+function updateEditControls() {
+  const allowed = canEditNow()
+  editToggleBtn.style.display = allowed ? '' : 'none'
+  if (!allowed && modes.edit) setEditMode(false)
+}
+
+function setEditMode(on) {
+  if (on) {
+    if (!canEditNow() || modes.edit) return
+    // E6 — Edit mode closes the teleporter modes; triggers follow from `modes`.
+    if (modes.placement || modes.delete || tpForm.style.display !== 'none') exitTeleporterMode()
+    modes.setEdit(true)
+    if (document.pointerLockElement) document.exitPointerLock()
+    ensureGizmo()
+    editPanel.style.display = ''
+    editToggleBtn.classList.add('active')
+  } else {
+    if (!modes.edit) return
+    selectForEdit(null)          // ends a drag with its final send
+    modes.setEdit(false)
+    editPanel.style.display = 'none'
+    editToggleBtn.classList.remove('active')
+  }
+  clearEditError()
+  refreshEditPanel()
+  updateTeleporterControls()
+  updateHintText()
+}
+
+// Connection lifecycle and world reloads (B1): Edit mode off, and every
+// unanswered edit forgotten — the next som-dump is the truth.
+function endEditSession() {
+  setEditMode(false)
+  editTracker.reset()
+  pendingRename = null
+}
+
+editToggleBtn.addEventListener('click', () => setEditMode(!modes.edit))
+
+// ── Handles (B3) ────────────────────────────────────────────────────────
+
+function ensureGizmo() {
+  if (gizmo) return
+  gizmo = new TransformControls(stage.camera, canvas)
+  gizmo.addEventListener('dragging-changed', (e) => onHandleDragging(e.value))
+  gizmo.addEventListener('objectChange', onHandleChange)
+  threeScene.add(gizmo)          // the scene, not sceneGroup (replaced on reload)
+  applySnaps()
+}
+
+function onHandleDragging(isDragging) {
+  if (isDragging) {
+    if (selected) activeGesture = editTracker.begin(selected)
+  } else if (activeGesture) {
+    activeGesture.end()
+    activeGesture = null
+  }
+}
+
+function onHandleChange() {
+  if (!activeGesture || !selectedObj) return
+  activeGesture.update({
+    translation: selectedObj.position.toArray(),
+    rotation:    selectedObj.quaternion.toArray(),
+    scale:       selectedObj.scale.toArray(),
+  })
+  refreshEditVectors()
+}
+
+function applySnaps() {
+  if (!gizmo) return
+  gizmo.setTranslationSnap(epSnapGrid.checked ? 0.25 : null)
+  gizmo.setRotationSnap(epSnapAngle.checked ? THREE.MathUtils.degToRad(15) : null)
+  gizmo.setScaleSnap(epSnapScale.checked ? 0.1 : null)
+}
+for (const cb of [epSnapGrid, epSnapAngle, epSnapScale]) cb.addEventListener('change', applySnaps)
+
+epModes.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-mode]')
+  if (!btn || !gizmo) return
+  gizmo.setMode(btn.dataset.mode)
+  for (const b of epModes.querySelectorAll('button[data-mode]')) b.classList.toggle('active', b === btn)
+})
+
+epSpaceBtn.addEventListener('click', () => {
+  if (!gizmo) return
+  const next = gizmo.space === 'world' ? 'local' : 'world'
+  gizmo.setSpace(next)
+  epSpaceBtn.textContent = next === 'world' ? 'World' : 'Local'
+})
+
+// Every frame: the handles follow the active camera (Space cycles cameras),
+// and the outline follows the object.
+function tickEditMode() {
+  if (!modes.edit) return
+  if (gizmo && gizmo.camera !== stage.camera) gizmo.camera = stage.camera
+  if (outline) outline.update()
+}
+
+// ── Selection (B2) ──────────────────────────────────────────────────────
+
+function selectForEdit(node) {
+  if (node === selected) return
+  if (activeGesture) { activeGesture.end(); activeGesture = null }
+  selected = node
+  attachSelected()
+  clearEditError()
+  refreshEditPanel()
+}
+
+// Look the selected node's three.js object up by name (G4), and put the
+// handles and outline on it. Called again after a rename and a reload.
+function attachSelected() {
+  selectedObj = selected && sceneGroup ? (sceneGroup.getObjectByName(selected.name) ?? null) : null
+  if (selected && !selectedObj) selected = null
+  if (gizmo) {
+    if (selectedObj) gizmo.attach(selectedObj)
+    else gizmo.detach()
+  }
+  if (outline) {
+    threeScene.remove(outline)
+    outline.geometry.dispose()
+    outline.material.dispose()
+    outline = null
+  }
+  if (selectedObj) {
+    outline = new THREE.BoxHelper(selectedObj, 0xa78bfa)
+    threeScene.add(outline)
+  }
+}
+
+// The SOM node an Edit-mode click lands on, resolved per B2.
+function pickEditTarget(e) {
+  if (!sceneGroup || !client.som) return null
+  const rect = viewportEl.getBoundingClientRect()
+  const ndc = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1,
+  )
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(ndc, stage.camera)
+  // Each hit → the nearest SOM node above the three.js object (as delete mode).
+  const hits = []
+  for (const hit of raycaster.intersectObjects(sceneGroup.children, true)) {
+    for (let obj = hit.object; obj; obj = obj.parent) {
+      const node = obj.name ? client.som.getNodeByName(obj.name) : null
+      if (node) { hits.push(node); break }
+    }
+  }
+  return pickEditSelection(hits, {
+    isSeeThrough: (node) => node === avatar.localNode,   // third person: it sits mid-view
+    isExcluded: isEditExcluded,
+    resolveRoot: resolveSelectionRoot,
+    descend: e.altKey,
+  })
+}
+
+// Capture phase, so the press is recorded before anything else handles it.
+viewportEl.addEventListener('mousedown', (e) => {
+  pressDown = { x: e.clientX, y: e.clientY, onHandle: !!gizmo?.dragging }
+}, true)
+
+viewportEl.addEventListener('click', (e) => {
+  if (!modes.edit) return
+  if (e.target !== canvas) return
+  const down = pressDown
+  pressDown = null
+  // A look-drag, or a press on a handle, is not a selection.
+  if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
+  selectForEdit(pickEditTarget(e))
+})
+
+// ── Property panel (B5) ─────────────────────────────────────────────────
+
+function fmt(v) {
+  return String(Number(v.toFixed(3)))
+}
+
+function refreshEditPanel() {
+  if (!selected) {
+    epEmpty.style.display = ''
+    epFields.style.display = 'none'
+    return
+  }
+  epEmpty.style.display = 'none'
+  epFields.style.display = ''
+  refreshEditVectors()
+  refreshNameField()
+}
+
+// Position, rotation (degrees) and scale. A field being typed in is left alone.
+function refreshEditVectors() {
+  if (!selected) return
+  const values = {
+    translation: selected.translation ?? [0, 0, 0],
+    rotation:    quatToEulerDeg(selected.rotation ?? [0, 0, 0, 1]),
+    scale:       selected.scale ?? [1, 1, 1],
+  }
+  for (const input of epVectorInputs) {
+    if (document.activeElement === input) continue
+    input.value = fmt(values[input.dataset.field][Number(input.dataset.i)])
+    input.dataset.shown = input.value
+  }
+}
+
+function refreshNameField() {
+  if (!selected) return
+  const renaming = !!pendingRename && pendingRename.node === selected
+  let reason = ''
+  if (selected.camera || selected.light) {
+    reason = 'Renaming a node with a camera or light is not supported yet'
+  } else if (client.som && client.som.nodes.filter(n => n.name === selected.name).length > 1) {
+    // E7 — until the server cleanup round fixes the name setter
+    reason = 'Another node has the same name, so this one can’t be renamed yet'
+  }
+  epName.disabled = !!reason || renaming
+  epName.title = reason
+  if (document.activeElement !== epName) {
+    epName.value = selected.name
+    epName.dataset.shown = selected.name
+  }
+  epNameStatus.textContent = renaming ? 'Renaming…' : ''
+}
+
+// Enter commits (via blur → change). Escape restores the field and keeps the
+// selection: it never reaches the document-level Escape handler (B5).
+function onEditFieldKey(e) {
+  if (e.key === 'Enter') {
+    e.target.blur()
+  } else if (e.key === 'Escape') {
+    e.stopPropagation()
+    e.target.value = e.target.dataset.shown ?? ''
+    e.target.blur()
+  }
+}
+
+function commitVectorField(field) {
+  if (!selected) return
+  const inputs = epVectorInputs.filter(i => i.dataset.field === field)
+  const nums = inputs.map(i => Number(i.value.trim()))
+  if (inputs.some(i => i.value.trim() === '') || nums.some(n => !Number.isFinite(n))) {
+    for (const i of inputs) i.value = i.dataset.shown ?? ''
+    return
+  }
+  const value = field === 'rotation' ? eulerDegToQuat(nums) : nums
+  editTracker.commit(selected, field, value)
+  refreshEditVectors()
+}
+
+for (const input of epVectorInputs) {
+  input.addEventListener('keydown', onEditFieldKey)
+  input.addEventListener('change', () => commitVectorField(input.dataset.field))
+}
+
+epName.addEventListener('keydown', onEditFieldKey)
+epName.addEventListener('change', () => {
+  if (!selected) return
+  const node = selected
+  const value = epName.value
+  if (value === node.name) return
+  // Instant check against the D3 rules; the server still decides.
+  const check = client.som?.checkNewName(value, node)
+  if (check && !check.ok) {
+    showEditError(check.message)
+    epName.value = node.name
+    return
+  }
+  try {
+    pendingRename = { seq: client.renameNode(node.name, value), node }
+    clearEditError()
+  } catch (err) {
+    showEditError(err.message)
+    epName.value = node.name
+  }
+  refreshNameField()
+})
+
+function showEditError(text) {
+  epError.textContent = text || ''
+}
+
+function clearEditError() {
+  epError.textContent = ''
+}
+
+// ── Answers from the server (B4, B6, B7) ────────────────────────────────
+
+client.on('edit:accepted', ({ seq }) => {
+  const mine = editTracker.accepted(seq)
+  if (mine) {
+    clearEditError()
+    // F14 / B7 — the editor's own move of a pad, or of a group holding one
+    if (subtreeSome(mine.node, isTeleporter)) rebuildPads()
+  }
+  if (pendingRename && seq === pendingRename.seq) {
+    pendingRename = null
+    refreshNameField()
+  }
+})
+
+client.on('edit:rejected', ({ seq, code, message }) => {
+  editTracker.rejected(seq, { code, message })
+  if (pendingRename && seq === pendingRename.seq) {
+    pendingRename = null
+    showEditError(`Couldn’t rename: ${message || code}`)
+    refreshNameField()
+  }
+})
+
+client.on('edit:unknown', ({ seq }) => {
+  editTracker.unknown(seq)
+  if (pendingRename && seq === pendingRename.seq) {
+    pendingRename = null
+    refreshNameField()
+  }
+})
+
+// The three.js object is renamed before som:rename fires (G4); attach again.
+client.on('som:rename', () => {
+  if (!selected) return
+  attachSelected()
+  refreshEditPanel()
+})
+
+// A removed node (or one under a removed ancestor): cancel its gestures, never
+// write to it again, and drop it from the selection (B2, B4).
+client.on('som:remove', () => {
+  if (!client.som) return
+  const alive = (n) => client.som.getNodeByName(n.name) === n
+  editTracker.pruneRemoved(alive)
+  if (pendingRename && !alive(pendingRename.node)) pendingRename = null
+  if (selected && !alive(selected)) {
+    activeGesture = null           // already cancelled by pruneRemoved
+    selectForEdit(null)
+    showEditError(REMOVED_MESSAGE)
+  } else if (selected) {
+    refreshNameField()             // a duplicate name may have gone
+  }
+})
+
+client.on('som:add', () => {
+  if (selected) refreshNameField()
 })
 
 // ---------------------------------------------------------------------------
@@ -1585,19 +2014,23 @@ document.addEventListener('pointerlockchange', () => {
 })
 
 viewportEl.addEventListener('click', () => {
-  if (usePointerLock) viewportEl.requestPointerLock()
+  if (modes.usePointerLock) viewportEl.requestPointerLock()
 })
 
 viewportEl.addEventListener('mousedown', () => {
-  if (!usePointerLock) dragging = true
+  // B3 — a press that grabbed a handle drags the handle, not the camera.
+  // TransformControls sets `dragging` on pointerdown, before mousedown fires.
+  if (gizmo?.dragging) return
+  if (!modes.usePointerLock) dragging = true
 })
 
 document.addEventListener('mouseup', () => { dragging = false })
 
 document.addEventListener('mousemove', (e) => {
-  if (usePointerLock && pointerLocked) {
+  if (gizmo?.dragging) return
+  if (modes.usePointerLock && pointerLocked) {
     nav.onMouseMove(e.movementX, e.movementY)
-  } else if (!usePointerLock && dragging) {
+  } else if (!modes.usePointerLock && dragging) {
     nav.onMouseMove(e.movementX, e.movementY)
   }
 })
@@ -1607,8 +2040,9 @@ document.addEventListener('keydown', (e) => {
 
   // M / V — mode-specific hot keys, ignored in ORBIT
   if (e.code === 'KeyM' && nav.mode !== 'ORBIT') {
-    usePointerLock = !usePointerLock
-    if (!usePointerLock && document.pointerLockElement) {
+    // E6 — ignored while editing (the lock would put every click at the centre)
+    if (!modes.togglePointerLock()) return
+    if (!modes.usePointerLock && document.pointerLockElement) {
       document.exitPointerLock()
     }
     updateHintText()
@@ -1670,6 +2104,7 @@ function tick(now) {
 
   stage.tick(dt)
   labels.update()
+  tickEditMode()
   // Teleporter trigger update (T4): feed avatar position every frame
   if (avatarReady && avatar.localNode) {
     trigger.update(avatar.localNode.translation ?? [0, 0, 0])

@@ -394,6 +394,47 @@
     outline-offset: -3px;
   }
 
+  /* ── Edit mode (Phase 3 step 1b-1) ─────────────────── */
+  #edit-toggle-btn.active { background: #5b21b6; border-color: #7c3aed; }
+  #edit-panel {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 250px;
+    background: rgba(0,0,0,0.85);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 12px;
+    z-index: 10;
+  }
+  #edit-panel .ep-title { color: #a78bfa; font-weight: 600; margin-bottom: 8px; }
+  #edit-panel .ep-buttons { display: flex; gap: 4px; margin-bottom: 6px; }
+  #edit-panel .ep-buttons button { padding: 3px 8px; font-size: 11px; }
+  #edit-panel .ep-buttons button.active { background: #5b21b6; border-color: #7c3aed; }
+  #edit-panel .ep-snaps { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 8px; color: #94a3b8; font-size: 11px; }
+  #edit-panel .ep-snaps label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+  #edit-panel .ep-empty { color: #64748b; font-style: italic; }
+  #edit-panel .ep-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+  #edit-panel .ep-row > span { width: 58px; color: #94a3b8; flex-shrink: 0; }
+  #edit-panel input[type="text"] {
+    min-width: 0;
+    flex: 1;
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e2e8f0;
+    padding: 3px 5px;
+    font-size: 11px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+  #edit-panel input[type="text"]:focus { outline: none; border-color: #a78bfa; }
+  #edit-panel input[type="text"]:disabled { opacity: 0.5; }
+  #edit-panel .ep-status { color: #94a3b8; font-size: 11px; min-height: 0; }
+  #edit-panel .ep-status:empty { display: none; }
+  #edit-panel .ep-error { color: #f87171; font-size: 11px; margin-top: 6px; }
+  #edit-panel .ep-error:empty { display: none; }
+
   /* Pad label style (T13) */
   .pad-label {
     border-left: 2px solid #33d9b2 !important;
@@ -470,6 +511,7 @@
     <button id="tp-place-btn" disabled title="Place a teleporter pad">Place Teleporter</button>
     <button id="tp-delete-btn" disabled title="Delete a teleporter pad">Delete</button>
     <button id="tp-cancel-btn" style="display:none">Cancel</button>
+    <button id="edit-toggle-btn" style="display:none" title="Move, rotate, scale and rename this world's objects">Edit</button>
   </div>
 </div>
 
@@ -502,6 +544,43 @@
       <button id="tp-save-btn" class="primary" disabled>Save</button>
       <button id="tp-form-cancel">Cancel</button>
     </div>
+  </div>
+
+  <!-- Edit mode panel (Phase 3 step 1b-1) -->
+  <div id="edit-panel" style="display:none">
+    <div class="ep-title">Edit</div>
+    <div class="ep-buttons" id="ep-modes">
+      <button data-mode="translate" class="active" title="Move">Move</button>
+      <button data-mode="rotate" title="Rotate">Rotate</button>
+      <button data-mode="scale" title="Scale">Scale</button>
+      <button id="ep-space" title="Handle orientation for Move and Rotate">World</button>
+    </div>
+    <div class="ep-snaps">
+      <label><input type="checkbox" id="ep-snap-grid" /> Grid 0.25 m</label>
+      <label><input type="checkbox" id="ep-snap-angle" /> 15°</label>
+      <label><input type="checkbox" id="ep-snap-scale" /> Scale 0.1</label>
+    </div>
+    <div class="ep-empty" id="ep-empty">Click an object to select it.</div>
+    <div id="ep-fields" style="display:none">
+      <div class="ep-row"><span>Name</span><input type="text" id="ep-name" spellcheck="false" autocomplete="off" /></div>
+      <div class="ep-status" id="ep-name-status"></div>
+      <div class="ep-row"><span>Position</span>
+        <input type="text" data-field="translation" data-i="0" aria-label="Position x" />
+        <input type="text" data-field="translation" data-i="1" aria-label="Position y" />
+        <input type="text" data-field="translation" data-i="2" aria-label="Position z" />
+      </div>
+      <div class="ep-row"><span>Rotation°</span>
+        <input type="text" data-field="rotation" data-i="0" aria-label="Rotation x, degrees" />
+        <input type="text" data-field="rotation" data-i="1" aria-label="Rotation y, degrees" />
+        <input type="text" data-field="rotation" data-i="2" aria-label="Rotation z, degrees" />
+      </div>
+      <div class="ep-row"><span>Scale</span>
+        <input type="text" data-field="scale" data-i="0" aria-label="Scale x" />
+        <input type="text" data-field="scale" data-i="1" aria-label="Scale y" />
+        <input type="text" data-field="scale" data-i="2" aria-label="Scale z" />
+      </div>
+    </div>
+    <div class="ep-error" id="ep-error"></div>
   </div>
 
   <!-- Teleporter failure panel (U2) -->
