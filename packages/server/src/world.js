@@ -228,41 +228,20 @@ export async function createWorldFromDocument(documentJson) {
   // Names of nodes created by ingestExternalScene — filtered from som-dump
   const externalNodeNames = new Set()
 
-  // Base URL for resolving external refs — document worlds typically have none
-  const worldBaseUrl = 'file:///'
-
+  // Document worlds never fetch external references on the server (S1).
+  // extras.atrium.source names a glTF URL; resolving it server-side was a
+  // blind request forgery / memory-exhaustion vector (any owner could plant a
+  // URL via add/send and have PROD fetch it on the next load). Clients resolve
+  // references themselves (AtriumClient.resolveExternalReferences), so nothing
+  // a visitor sees depends on this. We warn with a COUNT ONLY — never node
+  // names or the owner-supplied URL — to keep attacker strings out of the log.
   async function resolveExternalReferences() {
-    const tasks = som.nodes
-      .filter(n => n.extras?.atrium?.source)
-      .map(n => _loadExternalRef(n.name, n.extras.atrium.source))
-    await Promise.all(tasks)
-  }
-
-  async function _loadExternalRef(containerName, source) {
-    const resolvedUrl = new URL(source, worldBaseUrl).href
-    try {
-      let doc
-      if (resolvedUrl.endsWith('.glb')) {
-        const resp = await fetch(resolvedUrl)
-        const buffer = await resp.arrayBuffer()
-        doc = await io.readBinary(new Uint8Array(buffer))
-      } else {
-        const resp = await fetch(resolvedUrl)
-        const text = await resp.text()
-        doc = await io.readJSON({ json: JSON.parse(text), resources: {} })
-      }
-      const newNodes = som.ingestExternalScene(containerName, doc)
-      _registerExternal(newNodes)
-      console.log(`[world] External ref loaded: "${containerName}" ← ${resolvedUrl} (${newNodes.length} top-level node(s))`)
-    } catch (err) {
-      console.warn(`[world] Failed to load external ref "${resolvedUrl}" for container "${containerName}":`, err.message)
-    }
-  }
-
-  function _registerExternal(somNodes) {
-    for (const node of somNodes) {
-      externalNodeNames.add(node.name)
-      _registerExternal(node.children)
+    const count = som.nodes.filter(n => n.extras?.atrium?.source).length
+    if (count > 0) {
+      console.warn(
+        `[world] Document world has ${count} node(s) with extras.atrium.source — ` +
+        'server does not resolve external refs; clients resolve them client-side'
+      )
     }
   }
 
