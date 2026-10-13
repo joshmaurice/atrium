@@ -99,11 +99,16 @@ export class AtriumClient extends EventEmitter {
     // setView rate-limiting state
     this._pendingView    = null
     this._lastSentAt     = 0
-    this._viewSeq        = 0
     this._viewFlushTimer = null
 
-    // Outbound send sequence counter
+    // Outbound message counter — one counter for every outgoing message
+    // (A3/D7): send, add, remove and view.
     this._sendSeq = 0
+
+    // The seq of the most recent `send` (A3). Callers that need it (the
+    // teleporter form) read it here; sends originate inside SOM mutation
+    // listeners, so there is no return value to catch.
+    this.lastSendSeq = null
 
     // Loopback prevention flag — true while applying a remote set
     this._applyingRemote = false
@@ -116,6 +121,7 @@ export class AtriumClient extends EventEmitter {
     // Teleporter support (Step 7)
     this._worldReady = false
     this.canPlaceTeleporters = false
+    this.canEdit = false
     this._transmitName = null
   }
 
@@ -313,6 +319,11 @@ export class AtriumClient extends EventEmitter {
     // ---- Close previous socket ----
     const prevRecord = this._connectionRecord
     if (prevRecord) {
+      // A3 — every pending edit on the outgoing connection becomes
+      // `edit:unknown` at once. connect() replaces the record and closes its
+      // socket without emitting 'disconnected', so this cannot hang off that
+      // event; it happens here, before the new socket opens.
+      this._resolveAllPendingAsUnknown(prevRecord)
       // Mark previous record stale
       prevRecord.stale = true
       // Close the old socket so avatar leaves old world
@@ -329,6 +340,7 @@ export class AtriumClient extends EventEmitter {
     this._clearPointerState()
     this._worldReady = false
     this.canPlaceTeleporters = false
+    this.canEdit = false
 
     // ---- Create new session identity ----
     const sessionId      = globalThis.crypto.randomUUID()
@@ -372,6 +384,10 @@ export class AtriumClient extends EventEmitter {
       stale: false,
       closing: false,
       peerSessions: new Map(),
+      // A3 — pending edits live on the connection record, so they belong to
+      // one server session and a late answer from a superseded connection is
+      // dropped by the existing `dispatch` guard.
+      pendingEdits: new Map(),
       gen,
     }
     this._connectionRecord = record
@@ -453,6 +469,8 @@ export class AtriumClient extends EventEmitter {
           err.url = wsUrl
           err.code = msg.code
           err.seq = msg.seq
+          // A3 — an error whose seq matches a pending edit resolves it.
+          this._resolveRejected(msg, record)
           this.emit('error', err)
           break
         }
@@ -482,6 +500,9 @@ export class AtriumClient extends EventEmitter {
       this._ws = null
       this._worldReady = false
       this.canPlaceTeleporters = false
+      this.canEdit = false
+      // A3 — a socket close ends the connection with any pending edit.
+      this._resolveAllPendingAsUnknown(record)
       this.emit('disconnected', {
         sessionId,
         url: wsUrl,
@@ -529,6 +550,9 @@ export class AtriumClient extends EventEmitter {
         this._connectionRecord = null
         this._connected = false
         this._wsUrl = null
+        this.canEdit = false
+        // A3 — a connect timeout ends the connection with any pending edit.
+        this._resolveAllPendingAsUnknown(record)
         // 4) Close the socket (which may fire error/close later)
         try { ws.close() } catch { /* ignore */ }
         // 5) Emit error first, naming the target host
@@ -580,7 +604,11 @@ export class AtriumClient extends EventEmitter {
     this._wsUrl = null
     this._worldReady = false
     this.canPlaceTeleporters = false
+    this.canEdit = false
     this._clearPointerState()
+
+    // A3 — every pending edit on this connection becomes edit:unknown at once.
+    this._resolveAllPendingAsUnknown(record)
 
     // Emit disconnected asynchronously so tests using waitForEvent still work
     // (existing code registers the listener after calling disconnect).
@@ -688,8 +716,10 @@ export class AtriumClient extends EventEmitter {
         this._avatarDescriptor.extras.displayName = msg.displayName
       }
     }
-    // Set canPlaceTeleporters from server hello (T2)
+    // Set canPlaceTeleporters from server hello (T2). A1: `canEdit` carries the
+    // same value; the old name stays as an alias for one release.
     this.canPlaceTeleporters = msg.canPlaceTeleporters === true
+    this.canEdit = msg.canEdit === true
     this._connected = true
     console.log(`[AtriumClient] Session ${this._sessionId} (${this._displayName})`)
     this.emit('session:ready', {
@@ -697,6 +727,7 @@ export class AtriumClient extends EventEmitter {
       displayName: this._displayName,
       url:         this._wsUrl,
       canPlaceTeleporters: this.canPlaceTeleporters,
+      canEdit:     this.canEdit,
     })
   }
 
@@ -724,12 +755,14 @@ export class AtriumClient extends EventEmitter {
       if (this._debug) this._log(`Local avatar "${this._avatarNodeName}" added to SOM`)
     }
 
-    // Announce avatar to server
+    // Announce avatar to server. A3 — the avatar announcement is NOT tracked:
+    // the server sends avatar adds to everyone EXCEPT their sender, so it would
+    // never resolve.
     if (this._avatarDescriptor && this._ws) {
       this._wsSend({
         type: 'add',
         id:   this._sessionId,
-        seq:  ++this._viewSeq,
+        seq:  ++this._sendSeq,
         node: this._avatarDescriptor,
       })
     }
@@ -749,7 +782,8 @@ export class AtriumClient extends EventEmitter {
    */
   addNode(descriptor) {
     if (!this._worldReady) throw new Error('World not loaded')
-    const seq = ++this._viewSeq
+    const seq = ++this._sendSeq
+    this._trackEdit(seq, { type: 'add', node: descriptor?.name ?? null })
     this._wsSend({
       type: 'add',
       seq,
@@ -766,7 +800,8 @@ export class AtriumClient extends EventEmitter {
    */
   removeNode(name) {
     if (!this._worldReady) throw new Error('World not loaded')
-    const seq = ++this._viewSeq
+    const seq = ++this._sendSeq
+    this._trackEdit(seq, { type: 'remove', node: name })
     this._wsSend({
       type: 'remove',
       seq,
@@ -775,12 +810,108 @@ export class AtriumClient extends EventEmitter {
     return seq
   }
 
+  /**
+   * Ask the server to rename a node (A8). Sends `{type:'send', node: oldName,
+   * field: 'name', value: newName}` and returns the request seq.
+   *
+   * Nothing changes locally until the server accepts: on `edit:accepted` for
+   * that seq the client applies the rename through `SOMDocument.renameNode` and
+   * emits `som:rename`. On `edit:rejected` or `edit:unknown` there is nothing
+   * to undo — local names and maps never changed.
+   *
+   * @param {string} oldName
+   * @param {string} newName
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  renameNode(oldName, newName) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._sendSeq
+    this.lastSendSeq = seq
+    this._trackEdit(seq, { type: 'send', node: oldName, field: 'name', value: newName })
+    this._wsSend({
+      type: 'send',
+      seq,
+      node: oldName,
+      field: 'name',
+      value: newName,
+    })
+    return seq
+  }
+
+  // ---------------------------------------------------------------------------
+  // Edit tracking (A3) — one pending map per connection record
+  // ---------------------------------------------------------------------------
+
+  /** Record a pending edit on the current connection record. */
+  _trackEdit(seq, edit) {
+    const record = this._connectionRecord
+    if (!record || !record.pendingEdits) return
+    record.pendingEdits.set(seq, edit)
+  }
+
+  /** Resolve a pending edit as accepted (a broadcast answering our request). */
+  _resolveAccepted(msg, record) {
+    const pending = record?.pendingEdits
+    const requestSeq = msg?.requestSeq
+    if (!pending || requestSeq == null) return
+    if (msg.session !== this._sessionId) return
+    if (!pending.has(requestSeq)) return
+    const edit = pending.get(requestSeq)
+    pending.delete(requestSeq)
+    this.emit('edit:accepted', { seq: requestSeq, requestSeq, ...edit })
+  }
+
+  /** Resolve a pending edit as rejected (an error echoing our seq). */
+  _resolveRejected(msg, record) {
+    const pending = record?.pendingEdits
+    if (!pending || msg?.seq == null) return
+    if (!pending.has(msg.seq)) return
+    const edit = pending.get(msg.seq)
+    pending.delete(msg.seq)
+    this.emit('edit:rejected', {
+      seq: msg.seq, requestSeq: msg.seq, code: msg.code, message: msg.message, ...edit,
+    })
+  }
+
+  /**
+   * Resolve every pending edit on a record as `edit:unknown`. Called wherever a
+   * connection ends: disconnect(), a socket close, a timeout, and connect()
+   * replacing the connection.
+   */
+  _resolveAllPendingAsUnknown(record) {
+    const pending = record?.pendingEdits
+    if (!pending || pending.size === 0) return
+    const entries = [...pending.entries()]
+    pending.clear()
+    for (const [seq, edit] of entries) {
+      this.emit('edit:unknown', { seq, requestSeq: seq, ...edit })
+    }
+  }
+
   _onAdd(msg, record) {
     if (record.stale || record.closing) return
     if (!this._som) return
 
+    // A7 — honour add.parent. A parent that is missing locally means this
+    // client has missed state: do not insert the node anywhere, ask the app
+    // layer to resync (it reconnects through trackConnect and gets a fresh
+    // som-dump). The server adds the parent before any child and messages
+    // arrive in order on one socket, so this is a recovery path.
+    const parentName = msg.parent
+    let parentNode = null
+    if (parentName != null) {
+      parentNode = this._som.getNodeByName(parentName)
+      if (!parentNode) {
+        if (this._debug) this._log(`som:desync — parent "${parentName}" not found for "${msg.node.name}"`)
+        this.emit('som:desync', { reason: 'parent-not-found', node: msg.node.name, parent: parentName })
+        return
+      }
+    }
+
     const node = this._som.ingestNode(msg.node)
-    this._som.scene.addChild(node)
+    if (parentNode) parentNode.addChild(node)
+    else this._som.scene.addChild(node)
     this._attachNodeListeners(node)
 
     const nodeName = msg.node.name
@@ -794,6 +925,9 @@ export class AtriumClient extends EventEmitter {
     }
 
     this.emit('som:add', { nodeName })
+
+    // A3/C5 — our own add broadcast resolves the pending add.
+    this._resolveAccepted(msg, record)
 
     if (peerSessionId !== null) {
       this.emit('peer:join', { sessionId: peerSessionId, displayName: peerDisplayName, nodeName })
@@ -814,12 +948,17 @@ export class AtriumClient extends EventEmitter {
     const nodeName = isPeerRemove ? peerMeta.nodeName : msg.node
 
     if (nodeName && this._som) {
+      // A6 — the SOM dispose path removes the whole subtree, so clients drop
+      // the same nodes the server did. `som:remove` fires for the root only.
       const node = this._som.getNodeByName(nodeName)
       if (node) node.dispose()
     }
 
     if (this._debug) this._log(`som:remove "${nodeName}"`)
     this.emit('som:remove', { nodeName })
+
+    // A3/C5 — our own remove broadcast resolves the pending remove.
+    this._resolveAccepted(msg, record)
 
     if (isPeerRemove) {
       const displayName = peerMeta ? peerMeta.displayName : nodeName
@@ -830,8 +969,38 @@ export class AtriumClient extends EventEmitter {
   _onSet(msg, record) {
     if (record.stale || record.closing) return
     if (!this._som) return
-    // Case 1: own echo — server reflected our send back; skip
-    if (msg.session === this._sessionId) return
+
+    // Case 1: own echo — the server reflected our send back. It is still not
+    // re-applied (the local SOM already has it), but it now resolves the
+    // pending edit (A3) and applies an accepted rename (A8).
+    if (msg.session === this._sessionId) {
+      this._resolveOwnSetEcho(msg, record)
+      return
+    }
+
+    // Case 2 — A8/C6: another client's rename is applied through the name
+    // setter, which goes through SOMDocument.renameNode. A thrown rename error
+    // is logged and changes nothing.
+    if (msg.field === 'name') {
+      let renamed = false
+      this._applyingRemote = true
+      try {
+        const target = this._som.getObjectByName(msg.node)
+        if (target) {
+          this._som.setPath(target, 'name', msg.value)
+          renamed = true
+        }
+      } catch (err) {
+        console.warn(`[AtriumClient] remote rename of "${msg.node}" failed: ${err.message}`)
+      } finally {
+        this._applyingRemote = false
+      }
+
+      if (renamed) this.emit('som:rename', { from: msg.node, to: msg.value })
+      if (this._debug) this._log(`som:set ${msg.node}.name`)
+      this.emit('som:set', { nodeName: msg.node, path: 'name', value: msg.value })
+      return
+    }
 
     this._applyingRemote = true
     try {
@@ -843,6 +1012,32 @@ export class AtriumClient extends EventEmitter {
 
     if (this._debug) this._log(`som:set ${msg.node}.${msg.field}`)
     this.emit('som:set', { nodeName: msg.node, path: msg.field, value: msg.value })
+  }
+
+  /**
+   * An echo of our own `set`. The value is already in the local SOM, but the
+   * echo resolves the pending edit (A3) and, for a rename, applies it locally
+   * and emits `som:rename` (A8).
+   */
+  _resolveOwnSetEcho(msg, record) {
+    const pending = record?.pendingEdits
+    if (!pending || msg.requestSeq == null || !pending.has(msg.requestSeq)) return
+    const edit = pending.get(msg.requestSeq)
+    pending.delete(msg.requestSeq)
+
+    if (edit.type === 'send' && edit.field === 'name') {
+      let applied = false
+      this.applyLocally(() => {
+        const result = this._som?.renameNode?.(edit.node, edit.value)
+        applied = result?.ok === true
+      })
+      if (applied) this.emit('som:rename', { from: edit.node, to: edit.value })
+      // A8 — som:set is still emitted for the `name` field, with nodeName set
+      // to the old name, for compatibility.
+      this.emit('som:set', { nodeName: edit.node, path: 'name', value: edit.value })
+    }
+
+    this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit })
   }
 
   _onView(msg, record) {
@@ -933,22 +1128,27 @@ export class AtriumClient extends EventEmitter {
 
     if (nodeName === this._avatarNodeName) return
 
+    // A8 — listeners read the node's CURRENT name when they send, never a name
+    // captured at attach time, so the first edit after a rename goes out under
+    // the new name. The generic node listener never sends `name`; renames go
+    // only through client.renameNode.
     node.addEventListener('mutation', (event) => {
-      this._onLocalMutation(nodeName, event.detail.property, event.detail.value)
+      if (event.detail.property === 'name') return
+      this._onLocalMutation(node.name, event.detail.property, event.detail.value)
     })
 
     const mesh = node.mesh
     if (mesh) {
       mesh.addEventListener('mutation', (event) => {
         if (!event.detail.property) return
-        this._onLocalMutation(nodeName, `mesh.${event.detail.property}`, event.detail.value)
+        this._onLocalMutation(node.name, `mesh.${event.detail.property}`, event.detail.value)
       })
 
       mesh.primitives.forEach((prim, i) => {
         prim.addEventListener('mutation', (event) => {
           if (!event.detail.property) return
           this._onLocalMutation(
-            nodeName,
+            node.name,
             `mesh.primitives[${i}].${event.detail.property}`,
             event.detail.value
           )
@@ -959,7 +1159,7 @@ export class AtriumClient extends EventEmitter {
           material.addEventListener('mutation', (event) => {
             if (!event.detail.property) return
             this._onLocalMutation(
-              nodeName,
+              node.name,
               `mesh.primitives[${i}].material.${event.detail.property}`,
               event.detail.value
             )
@@ -1001,7 +1201,12 @@ export class AtriumClient extends EventEmitter {
   _onLocalMutation(nodeName, path, value) {
     if (this._applyingRemote) return
     if (!this._connected) return
-    this._wsSend({ type: 'send', seq: ++this._sendSeq, node: nodeName, field: path, value })
+    const seq = ++this._sendSeq
+    // A3 — record the seq where the caller can read it. Sends originate inside
+    // SOM mutation listeners, so there is no return value to catch.
+    this.lastSendSeq = seq
+    this._trackEdit(seq, { type: 'send', node: nodeName, field: path, value })
+    this._wsSend({ type: 'send', seq, node: nodeName, field: path, value })
   }
 
   // ---------------------------------------------------------------------------
@@ -1034,7 +1239,8 @@ export class AtriumClient extends EventEmitter {
 
     const msg = {
       type:     'view',
-      seq:      ++this._viewSeq,
+      // D7 — one counter for every outgoing message, `view` included.
+      seq:      ++this._sendSeq,
       position: v.position ?? [0, 0, 0],
       ...(v.look               && { look:     v.look }),
       ...(v.move               && { move:     v.move }),
@@ -1128,9 +1334,9 @@ export class AtriumClient extends EventEmitter {
   _clearViewState() {
     this._pendingView    = null
     this._lastSentAt     = 0
-    this._viewSeq        = 0
     this._viewFlushTimer = null
     this._sendSeq        = 0
+    this.lastSendSeq     = null
   }
 
   _clearPointerState() {
