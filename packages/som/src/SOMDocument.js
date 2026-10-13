@@ -238,12 +238,182 @@ export class SOMDocument extends SOMObject {
 
   /** Register a dispose callback so the node removes itself from caches when disposed. */
   _registerNodeDispose(gltfNode, somNode) {
-    const name = gltfNode.getName()
-    somNode._onDispose = () => {
-      this._nodeMap.delete(gltfNode)
-      this._nodesByName.delete(name)
-      this._objectsByName.delete(name)
+    somNode._onDispose = () => this._disposeNode(gltfNode, somNode)
+  }
+
+  // ---------------------------------------------------------------------------
+  // A5 — name rules for new names (decision D3)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check a proposed new name against the D3 rules. Shared by `add`
+   * (non-avatar) and by rename. Uniqueness is checked against the global
+   * namespace (`_objectsByName`), not just nodes (F7).
+   *
+   * @param {*} name              the proposed name
+   * @param {object|null} [self]  the object being renamed — a name that already
+   *                              points at `self` is not a duplicate
+   * @returns {{ok: boolean, code: string|null, message: string|null}}
+   */
+  checkNewName(name, self = null) {
+    if (typeof name !== 'string' || name.length === 0) {
+      return { ok: false, code: 'INVALID_VALUE', message: 'name must be a non-empty string' }
     }
+    if (name.length > 256) {
+      return { ok: false, code: 'INVALID_VALUE', message: 'name must be at most 256 characters' }
+    }
+    if (name === '__document__') {
+      return { ok: false, code: 'INVALID_VALUE', message: 'name "__document__" is reserved' }
+    }
+    if (name.endsWith('.camera') || name.endsWith('.light')) {
+      return { ok: false, code: 'INVALID_VALUE', message: 'name may not end in ".camera" or ".light"' }
+    }
+    if (name.includes('/')) {
+      return { ok: false, code: 'INVALID_VALUE', message: 'name may not contain "/"' }
+    }
+    const existing = this._objectsByName.get(name)
+    if (existing !== undefined && existing !== self) {
+      return { ok: false, code: 'INVALID_VALUE', message: `name "${name}" is already in use` }
+    }
+    return { ok: true, code: null, message: null }
+  }
+
+  // ---------------------------------------------------------------------------
+  // A8 — atomic rename (design §4.8)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Rename a node. Atomic: on failure nothing changes.
+   *
+   * The wire request names the node by its OLD name; the caller resolves it
+   * here, checks the D3 rules, refuses camera/light hosts (D4), renames the
+   * glTF node and moves the name-map entries.
+   *
+   * @param {string} oldName
+   * @param {string} newName
+   * @returns {{ok: boolean, code: string|null}}
+   */
+  renameNode(oldName, newName) {
+    const somNode = this._nodesByName.get(oldName)
+    if (!somNode) {
+      // Not a node: the document, a camera, a light or an animation.
+      return { ok: false, code: this._objectsByName.has(oldName) ? 'INVALID_FIELD' : 'NODE_NOT_FOUND' }
+    }
+
+    // D4 — a node hosting a camera or a light cannot be renamed in step 1.
+    if (somNode._node.getCamera() || somNode._node.getExtension('KHR_lights_punctual')) {
+      return { ok: false, code: 'INVALID_VALUE' }
+    }
+
+    const check = this.checkNewName(newName, somNode)
+    if (!check.ok) return { ok: false, code: check.code }
+
+    if (newName === oldName) return { ok: true, code: null }
+
+    somNode._node.setName(newName)
+
+    if (this._nodesByName.get(oldName) === somNode)   this._nodesByName.delete(oldName)
+    if (this._objectsByName.get(oldName) === somNode) this._objectsByName.delete(oldName)
+    this._nodesByName.set(newName, somNode)
+    this._objectsByName.set(newName, somNode)
+
+    return { ok: true, code: null }
+  }
+
+  // ---------------------------------------------------------------------------
+  // A6 — subtree dispose (decision D2)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Remove a node and its whole subtree, children first. Every map deletion is
+   * guarded by object identity, so a reused name or a rename cannot unregister
+   * a different object (F7). A hosted camera or light is cleaned up completely;
+   * a camera shared with a surviving node keeps its bare name and its place in
+   * `cameras` — only the deleted host's own alias goes.
+   *
+   * @param {SOMNode} somNode
+   */
+  removeSubtree(somNode) {
+    if (!somNode) return
+    for (const child of somNode.children.slice()) {
+      this.removeSubtree(child)
+    }
+    this._disposeNode(somNode._node, somNode)
+  }
+
+  /**
+   * Dispose one glTF node and drop every cache entry that still points at it.
+   * @param {object} gltfNode
+   * @param {SOMNode} somNode
+   */
+  _disposeNode(gltfNode, somNode) {
+    if (!gltfNode) return
+
+    // Capture attachments before the node's edges are torn down: after
+    // dispose(), gltfNode.getCamera() returns null.
+    const gltfCamera = gltfNode.getCamera()
+    const gltfLight  = gltfNode.getExtension?.('KHR_lights_punctual')
+    const name       = gltfNode.getName()
+
+    gltfNode.dispose()
+
+    if (this._nodeMap.get(gltfNode) === somNode)   this._nodeMap.delete(gltfNode)
+    if (this._nodesByName.get(name) === somNode)   this._nodesByName.delete(name)
+    if (this._objectsByName.get(name) === somNode) this._objectsByName.delete(name)
+
+    if (gltfCamera) this._disposeHostedCamera(name, gltfCamera)
+    if (gltfLight)  this._disposeHostedLight(name, gltfLight)
+  }
+
+  /**
+   * Clean up a camera hosted by a disposed node. The host's own alias always
+   * goes; the camera object, its bare name and its `cameras` slot go only when
+   * no surviving node still references the glTF camera.
+   */
+  _disposeHostedCamera(hostName, gltfCamera) {
+    const somCamera = this._cameraMap.get(gltfCamera)
+    if (!somCamera) return
+
+    const alias = hostName + '.camera'
+    if (this._objectsByName.get(alias) === somCamera) this._objectsByName.delete(alias)
+
+    const stillReferenced = this._root.listNodes().some(n => n.getCamera() === gltfCamera)
+    if (stillReferenced) return
+
+    const bareName = gltfCamera.getName?.() ?? null
+    if (bareName && this._objectsByName.get(bareName) === somCamera) {
+      this._objectsByName.delete(bareName)
+    }
+    if (this._cameraMap.get(gltfCamera) === somCamera) this._cameraMap.delete(gltfCamera)
+    const idx = this._cameras.indexOf(somCamera)
+    if (idx >= 0) this._cameras.splice(idx, 1)
+    somCamera._qualifiedName = null
+    somCamera._hostNode      = null
+  }
+
+  /**
+   * Clean up a light hosted by a disposed node — same rules as a camera.
+   */
+  _disposeHostedLight(hostName, gltfLight) {
+    const somLight = this._lightMap.get(gltfLight)
+    if (!somLight) return
+
+    const alias = hostName + '.light'
+    if (this._objectsByName.get(alias) === somLight) this._objectsByName.delete(alias)
+
+    const stillReferenced = this._root.listNodes().some(
+      n => n.getExtension?.('KHR_lights_punctual') === gltfLight
+    )
+    if (stillReferenced) return
+
+    const bareName = gltfLight.getName?.() ?? null
+    if (bareName && this._objectsByName.get(bareName) === somLight) {
+      this._objectsByName.delete(bareName)
+    }
+    if (this._lightMap.get(gltfLight) === somLight) this._lightMap.delete(gltfLight)
+    const idx = this._lights.indexOf(somLight)
+    if (idx >= 0) this._lights.splice(idx, 1)
+    somLight._qualifiedName = null
   }
 
   // ---------------------------------------------------------------------------

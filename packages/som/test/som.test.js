@@ -335,8 +335,9 @@ test('mutation — SOMNode.scale fires mutation event', () => {
 })
 
 test('mutation — SOMNode.name fires mutation event', () => {
+  // D4: renaming a camera/light host is refused, so use a plain node (A8).
   const som  = makeSOM()
-  const node = som.getNodeByName('Crate')
+  const node = som.createNode({ name: 'RenameMe' })
   expectMutationEvent(node, 'name', () => { node.name = 'NewName' })
   assert.strictEqual(node.name, 'NewName')
 })

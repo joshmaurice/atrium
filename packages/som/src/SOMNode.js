@@ -21,6 +21,21 @@ export class SOMNode extends SOMObject {
   // Identity
   get name()    { return this._node.getName() }
   set name(v)   {
+    // A8 — a rename goes through the document's atomic renameNode, which
+    // enforces the D3 name rules and refuses camera/light hosts (D4). On
+    // failure it throws a typed error and changes nothing.
+    if (this._document) {
+      const result = this._document.renameNode(this.name, v)
+      if (!result.ok) {
+        const err = new Error(`Cannot rename "${this.name}" to "${v}": ${result.code}`)
+        err.code = result.code
+        throw err
+      }
+      if (this._hasListeners('mutation')) {
+        this._dispatchEvent(new SOMEvent('mutation', { target: this, property: 'name', value: v }))
+      }
+      return
+    }
     this._node.setName(v)
     if (this._hasListeners('mutation')) {
       this._dispatchEvent(new SOMEvent('mutation', { target: this, property: 'name', value: v }))
@@ -142,7 +157,16 @@ export class SOMNode extends SOMObject {
   }
 
   clone()   { return new SOMNode(this._node.clone()) }
+
+  /**
+   * Remove this node and its whole subtree (A6/D2). Goes through the
+   * document's single dispose path so the server and clients share it.
+   */
   dispose() {
+    if (this._document && typeof this._document.removeSubtree === 'function') {
+      this._document.removeSubtree(this)
+      return
+    }
     this._node.dispose()
     this._onDispose?.()
   }
