@@ -869,17 +869,23 @@ test('D8: a 2049-character destination gets the length message on send', async (
   }
 })
 
-test('D8: the add path splits the two destination messages too', async () => {
+test('C4: a non-string destination on add is accepted (D8 covers send only)', async () => {
   const { port } = await startOpenWorld(SPACE)
   const { ws, messages } = await connect(port)
   try {
     await hello(ws, messages, 'd8-add')
-    const bad = await expectError(ws, messages, {
+    // C4 — the add path's destination check is unchanged in 1a. A non-string
+    // destination on `add` is not refused here (the D8 message split applies to
+    // `send` only); it is carried through as today.
+    ws.send(JSON.stringify({
       type: 'add', seq: 92,
       node: { name: 'pad-a', extras: { atrium: { teleporter: { destination: 42 } } } },
-    }, 'INVALID_VALUE')
-    assert.match(bad.message, /must be a string/)
+    }))
+    const added = await waitFor(messages, m => m.type === 'add' && m.node?.name === 'pad-a')
+    assert.ok(added, 'a non-string destination on add is accepted (unchanged in 1a)')
 
+    // The length cap on the add path is unchanged: a 2049-char destination is
+    // still refused with the same message as before.
     const long = await expectError(ws, messages, {
       type: 'add', seq: 93,
       node: { name: 'pad-b', extras: { atrium: { teleporter: { destination: 'x'.repeat(2049) } } } },

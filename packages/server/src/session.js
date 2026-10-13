@@ -734,16 +734,13 @@ export function attachSessionHandlers({
             msg.node.extras.displayName = session.displayName
           }
 
-          // --- DESTINATION VALUE CHECK (T10, D8) ---
-          // The 2048-char cap on extras.atrium.teleporter.destination, with a
-          // distinct message for a non-string value (D8).
+          // --- DESTINATION LENGTH CAP (T10) ---
+          // Enforce 2048-char limit on extras.atrium.teleporter.destination.
+          // C4 — this add-path check is unchanged in 1a: the D8 message split
+          // for a non-string value applies to `send` only.
           if (!isAvatar && msg.node.extras?.atrium?.teleporter?.destination != null) {
             const dest = msg.node.extras.atrium.teleporter.destination
-            if (typeof dest !== 'string') {
-              sendError(ws, msg.seq, 'INVALID_VALUE', 'destination must be a string')
-              break
-            }
-            if (dest.length > 2048) {
+            if (typeof dest === 'string' && dest.length > 2048) {
               sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
               break
             }
