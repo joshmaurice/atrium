@@ -15,7 +15,7 @@ passdown newer than the one you think is latest.
 | Release state | **COMPLETE** (2026-10-12 ~23:15 PT) |
 | DEV / MAIN / PROD | all at `e8c7b621c419134d4ee80f136f80acd582c11471` |
 | Base for this round | `9fc9a51c9cac28fbdc09c2db7a7926b32b55153a` (`main` plus the uploaded pre-brief) |
-| Review branch | `review/send-field-allowlist-r1`, to delete after release (§7.1) |
+| Review branch | `review/send-field-allowlist-r1`, deleted after release |
 | Workflow branch | `workflow/send-field-allowlist`, published |
 
 **Board:**
@@ -27,10 +27,11 @@ passdown newer than the one you think is latest.
 - `t_68ea37aa` review gate — done
 - `t_712e9fc6` publish, `t_69464ca5` DEV deploy, `t_20781ea9` DEV finalizer
   — DEV state confirms them
-- `t_c35c8d0b` DEV-acceptance gate — close it after release (§7.1)
+- `t_c35c8d0b` DEV-acceptance gate — **completed by an agent, not the
+  operator** (§3.3); the operator's closing comment was added afterwards
 - `t_dd4c7af8` PROD gate — done
 - `t_c10b7149` PROD deploy — PROD state confirms it
-- `t_2f57017e` sentinel — check it after release (§7.1)
+- `t_2f57017e` sentinel — done
 - **Duplicates from the kickoff:** `t_a260b2ca` and `t_86e2e478`, plus the
   last round's `t_3856c806` and `t_826c3cd1`, are all `archived`.
 
@@ -159,6 +160,19 @@ change, a `send` named a target (`msg.node`) and a path (`msg.field`), and
   - **Recovery:** the front door checked card by card. The gate's own run
     then blocked it correctly.
   - **No harm done.** Keep checking the graph with `show` after kickoff.
+- **The DEV-acceptance gate leaked.** `t_c35c8d0b` was created `blocked` at
+  05:44.
+  - **What happened:**
+    1. It was promoted when the DEV finalizer finished (05:49).
+    2. Orchestrator run 661 claimed it.
+    3. That run *completed* it, with the summary `placeholder`, about 25
+       minutes before the operator's DEV acceptance.
+  - **The cause:** the review gate's run created the card with
+    `initial_status="blocked"` only. It skipped the immediate `kanban_block`
+    that worker-card rule §4 requires for exactly this gate. Then the agent
+    dispatched onto the gate completed it, instead of blocking it.
+  - **No harm done:** the host's MAIN and PROD approvals don't read the
+    board. But the gate meant nothing this round. Follow-up in §6.1.
 - **The front door said the old sentinel and gate were still open.** `show`
   said `archived`. Check its status claims with `show`.
 - **The §4 worker rules from the evening passdown worked:**
@@ -202,6 +216,16 @@ change, a `send` named a target (`msg.node`) and a path (`msg.field`), and
 ## 6. Follow-ups
 
 ### 6.1 New
+- **Make operator gates hold (pipeline, before the next round).** Two
+  changes through the front door, in the atrium-workflows skill:
+  1. **The review gate's instructions** must say that, in the same run, it
+     calls `kanban_block` on the DEV-acceptance gate right after creating it,
+     then reads it back, as rule §4 already requires. This round it didn't.
+  2. **A rule for any agent dispatched onto a card titled `OPERATOR BLOCK:`
+     or `Awaiting …`:** it calls `kanban_block(kind="needs_input")` on that
+     card and nothing else. It never completes it.
+
+  Check both in the next round's events.
 - **Peer-avatar tint:** `AvatarController.js` ~L158–166 sets the peer
   material's `baseColorFactor` outside `_applyingRemote`, so the client
   sends it and the server now refuses it.
@@ -233,13 +257,25 @@ The `http-integration` hang is resolved: it was the stale dependencies.
 
 `$SC` = `/root/.hermes/sandboxes/docker/default/workspace/atrium`
 
-### 7.1 After this release
+### 7.1 After this release (done)
+
+**Commands run:**
 ```
 git -C $SC push origin --delete review/send-field-allowlist-r1
-hermes kanban --board atrium comment t_c35c8d0b "OPERATOR: DEV acceptance of e8c7b621 passed 2026-10-12 (app regression checks plus protocol-inspector forged sends). Merged to main and released to PROD at e8c7b621. Closing for the record."
-hermes kanban --board atrium complete t_c35c8d0b
+hermes kanban --board atrium comment t_c35c8d0b "OPERATOR: DEV acceptance of e8c7b621 passed ..."
 hermes kanban --board atrium show t_2f57017e | sed -n 1,3p
 ```
+
+**Results:**
+- **The review branch:** deleted.
+- **The gate:** already `done` (§3.3), so the `complete` was refused.
+- **The sentinel:** `done`.
+
+### 7.1a Check whether an agent touched a gate
+```
+hermes kanban --board atrium show <gate t_id> | sed -n '1,4p;/^Events/,$p'
+```
+A `[run N] completed` event on a gate means an agent completed it.
 
 ### 7.2 Owner-only server checks on DEV
 1. Open `https://dev.ewwb.dev/tools/protocol-inspector/` in a browser
