@@ -51,6 +51,13 @@ export class TreeView {
   }
 
   /**
+   * Name of the current selection as the TREE stores it. This is the tree's own
+   * key, so it is still the OLD name right after the SOM node was renamed —
+   * unlike `selectedNode`, which resolves the stored name against the SOM.
+   */
+  get selectedName() { return this._selectedName }
+
+  /**
    * Programmatically select a SOM node, mirroring the tree-click behavior.
    * Updates the visual highlight, internal selected-name state, and calls
    * onSelect so the property sheet stays in sync.

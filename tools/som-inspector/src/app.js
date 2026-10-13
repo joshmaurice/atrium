@@ -305,7 +305,10 @@ client.on('som:remove', ({ nodeName }) => {
 // matches by name). Re-select the renamed node so the sheet follows it.
 client.on('som:rename', ({ from, to }) => {
   if (!client.som) return
-  const wasSelected = treeView.selectedNode?.name === from
+  // R2 — the SOM node is already renamed when this fires, so
+  // `treeView.selectedNode` (which resolves the stored name against the SOM)
+  // is null. Compare the tree's STORED name instead.
+  const wasSelected = treeView.selectedName === from
   treeView.rebuild(client.som)
   if (wasSelected) {
     const node = client.som.getNodeByName(to)
