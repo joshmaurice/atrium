@@ -909,9 +909,15 @@ export class AtriumClient extends EventEmitter {
       }
     }
 
-    const node = this._som.ingestNode(msg.node)
-    if (parentNode) parentNode.addChild(node)
-    else this._som.scene.addChild(node)
+    // R1 — the whole remote apply runs inside applyLocally: addChild dispatches
+    // a childList mutation on the parent, and that must stay local (it is not
+    // an edit anybody made and has no field to send).
+    const node = this.applyLocally(() => {
+      const somNode = this._som.ingestNode(msg.node)
+      if (parentNode) parentNode.addChild(somNode)
+      else this._som.scene.addChild(somNode)
+      return somNode
+    })
     this._attachNodeListeners(node)
 
     const nodeName = msg.node.name
@@ -1134,6 +1140,9 @@ export class AtriumClient extends EventEmitter {
     // only through client.renameNode.
     node.addEventListener('mutation', (event) => {
       if (event.detail.property === 'name') return
+      // R1 — a property-less mutation (a childList change) has no field to
+      // send; forwarding it would put a malformed `send` on the wire.
+      if (!event.detail.property) return
       this._onLocalMutation(node.name, event.detail.property, event.detail.value)
     })
 

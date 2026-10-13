@@ -217,3 +217,68 @@ test('e2e: the avatar announcement is never tracked; a later edit still resolves
     await delay(50)
   }
 })
+
+// ---------------------------------------------------------------------------
+// R1 revision — a parented add must not make the receiving client send
+// ---------------------------------------------------------------------------
+
+/**
+ * Record every frame a connected client puts on its socket (the real wire, not
+ * a mock). `ws.send` is a prototype method; the spy shadows it per instance.
+ */
+function spySends(client) {
+  const sent = []
+  const ws  = client._ws
+  const realSend = ws.send.bind(ws)
+  ws.send = (data) => {
+    sent.push(JSON.parse(data))
+    realSend(data)
+  }
+  return sent
+}
+
+test('R1: a client receiving a parented add sends nothing and emits no edit:*', async () => {
+  const { port } = await startOpenWorld(SPACE)
+  const a = await connectClient(port, 'avatar-a')
+  const b = await connectClient(port, 'avatar-b')
+  try {
+    const bSent  = spySends(b)
+    const bEdits = record(b, ['edit:accepted', 'edit:rejected', 'edit:unknown'])
+
+    // A adds a parent, then a child under it, over the real wire. B receives
+    // both adds; the second is parented, so the server names the parent in it.
+    a.addNode({ name: 'R1-parent' })
+    assert.ok(await waitUntil(() => b.som.getNodeByName('R1-parent')), 'B has the parent')
+
+    a._wsSend({ type: 'add', seq: ++a._sendSeq, parent: 'R1-parent', node: { name: 'R1-child' } })
+    assert.ok(await waitUntil(() => b.som.getNodeByName('R1-child')), 'B applies the parented add')
+    assert.equal(
+      b.som.getNodeByName('R1-parent').children.some(c => c.name === 'R1-child'),
+      true,
+      'the child landed under its parent'
+    )
+
+    await delay(150)
+
+    const sends = bSent.filter(m => m.type === 'send')
+    assert.deepEqual(sends, [], `B must send nothing, but sent ${JSON.stringify(sends)}`)
+    assert.deepEqual(bEdits, [], 'B must emit no edit:* event')
+
+    // Second half of R1 — the generic node listener must ignore property-less
+    // mutations, which needs its own trigger: a childList change raised OUTSIDE
+    // applyLocally (app-layer code attaching a node locally). `send` requires a
+    // field, so forwarding this would put the same malformed frame on the wire.
+    const localParent = b.som.getNodeByName('R1-parent')
+    const localChild  = b.som.ingestNode({ name: 'R1-local' })
+    localParent.addChild(localChild)
+    await delay(150)
+
+    const sends2 = bSent.filter(m => m.type === 'send')
+    assert.deepEqual(sends2, [], `B must still send nothing, but sent ${JSON.stringify(sends2)}`)
+    assert.deepEqual(bEdits, [], 'B must still emit no edit:* event')
+  } finally {
+    a.disconnect()
+    b.disconnect()
+    await delay(50)
+  }
+})
