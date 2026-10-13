@@ -267,3 +267,78 @@ test('AvatarController — ephemeral flag set on avatar descriptor', () => {
   assert.ok(client._avatarDescriptor, 'avatarDescriptor should be set')
   assert.strictEqual(client._avatarDescriptor.extras?.atrium?.ephemeral, true)
 })
+
+// ---------------------------------------------------------------------------
+// Peer-avatar tint stays local (send-field-allowlist follow-up, 2026-10-12)
+// The server refuses every send to a live avatar node, so the per-viewer tint
+// must never reach the wire. These use the real AtriumClient and its real
+// mutation listeners; only the WebSocket is mocked.
+// ---------------------------------------------------------------------------
+
+function makeWiredTintClient() {
+  class MockWebSocket {
+    constructor() { this.readyState = 1; this.sent = []; this._handlers = {} }
+    on(event, fn) { (this._handlers[event] ??= []).push(fn); return this }
+    send(data)    { this.sent.push(JSON.parse(data)) }
+    close()       {}
+  }
+  let mockWs
+  const client = new AtriumClient({
+    WebSocket: class { constructor() { mockWs = new MockWebSocket(); return mockWs } },
+  })
+  client.connect('ws://mock')
+
+  const doc = new Document()
+  for (const [name, color] of [['User-test', [1, 1, 1, 1]], ['User-peer', [0.5, 0.5, 0.5, 1]]]) {
+    const mat  = doc.createMaterial(`${name}-mat`).setBaseColorFactor(color)
+    const prim = doc.createPrimitive().setMaterial(mat)
+    const mesh = doc.createMesh(`${name}-mesh`).addPrimitive(prim)
+    doc.createNode(name).setMesh(mesh).setExtras({ displayName: name })
+  }
+  const scene = doc.createScene('Scene')
+  for (const n of doc.getRoot().listNodes()) scene.addChild(n)
+
+  client._displayName    = 'User-test'
+  client._avatarNodeName = 'User-test'
+  client._connected      = true
+  client._som            = new SOMDocument(doc)
+  client._attachMutationListeners()
+  mockWs.sent.length = 0   // clear connect-phase messages
+  return { client, mockWs }
+}
+
+const peerColor = (client) =>
+  Array.from(client.som.getNodeByName('User-peer').mesh.primitives[0].material.baseColorFactor)
+
+test('AvatarController — peer tint from peer:join is applied but not sent', () => {
+  const { client, mockWs } = makeWiredTintClient()
+  const avatar = new AvatarController(client)
+  client.emit('peer:join', { displayName: 'User-peer', nodeName: 'User-peer' })
+
+  assert.strictEqual(avatar.peerCount, 1)
+  assert.notDeepStrictEqual(peerColor(client), [0.5, 0.5, 0.5, 1], 'tint applied locally')
+  assert.deepStrictEqual(mockWs.sent.filter(m => m.type === 'send'), [], 'no send emitted')
+})
+
+test('AvatarController — peer tint from the som-dump scan is applied but not sent', () => {
+  const { client, mockWs } = makeWiredTintClient()
+  const avatar = new AvatarController(client)
+  client.emit('world:loaded')
+
+  assert.strictEqual(avatar.peerCount, 1)
+  assert.notDeepStrictEqual(peerColor(client), [0.5, 0.5, 0.5, 1], 'tint applied locally')
+  assert.deepStrictEqual(mockWs.sent.filter(m => m.type === 'send'), [], 'no send emitted')
+})
+
+test('AvatarController — control: a direct edit to a peer material is still sent', () => {
+  // Proves the listener is live, so the tint tests above are not vacuous, and
+  // that other edits (e.g. the SOM inspector) still reach the server, which
+  // decides. Only the tint is local.
+  const { client, mockWs } = makeWiredTintClient()
+  client.som.getNodeByName('User-peer').mesh.primitives[0].material.baseColorFactor = [1, 0, 0, 1]
+
+  const sends = mockWs.sent.filter(m => m.type === 'send')
+  assert.strictEqual(sends.length, 1)
+  assert.strictEqual(sends[0].node,  'User-peer')
+  assert.strictEqual(sends[0].field, 'mesh.primitives[0].material.baseColorFactor')
+})

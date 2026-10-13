@@ -154,7 +154,10 @@ export class AvatarController extends EventEmitter {
   }
 
   _addPeer(displayName, node) {
-    try {
+    // Per-viewer tint: each viewer picks its own random color for each peer.
+    // It must stay local — live avatar nodes are server-controlled, and the
+    // server refuses any send to them (send-policy.js).
+    const tint = () => {
       const mesh = node.mesh
       if (mesh) {
         const prim = mesh.primitives[0]
@@ -165,6 +168,10 @@ export class AvatarController extends EventEmitter {
           prim.material.baseColorFactor = [r, g, b, 1]
         }
       }
+    }
+    try {
+      if (typeof this._client.applyLocally === 'function') this._client.applyLocally(tint)
+      else tint()
     } catch {}
     this._peers.set(node.name, node)
     this.emit('avatar:peer-added', { displayName, node, nodeName: node.name })

@@ -219,6 +219,23 @@ export class AtriumClient extends EventEmitter {
   }
 
   /**
+   * Run `fn` with outbound sends suppressed. SOM changes made inside it still
+   * dispatch mutation events (so renderers update), but stay on this client
+   * and are never sent to the server. For presentation-only changes, such as
+   * the per-viewer tint AvatarController gives peer avatars. Restores the
+   * previous state on exit, so calls may nest. Returns fn's result.
+   */
+  applyLocally(fn) {
+    const prev = this._applyingRemote
+    this._applyingRemote = true
+    try {
+      return fn()
+    } finally {
+      this._applyingRemote = prev
+    }
+  }
+
+  /**
    * HTTP base URL used to resolve relative `extras.atrium.source` paths.
    * Set automatically by loadWorld(). Can be set manually by the app layer
    * for connect-only flows where loadWorld() is not called.

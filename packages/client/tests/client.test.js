@@ -1033,3 +1033,34 @@ test('protocol error — UNKNOWN_MESSAGE does not set client._connected=false', 
   assert.ok(client._connected, 'client._connected remains true after UNKNOWN_MESSAGE error')
   assert.ok(mock.readyState === 1, 'WebSocket still OPEN after UNKNOWN_MESSAGE error')
 })
+
+// ---------------------------------------------------------------------------
+// applyLocally — local-only SOM changes
+// ---------------------------------------------------------------------------
+
+test('applyLocally — suppresses the send, keeps the change, returns fn result', () => {
+  const { client, mock } = makeWiredLightClient()
+  const light = client.som.getObjectByName('Sun.light')
+  const result = client.applyLocally(() => { light.intensity = 0.25; return 'ok' })
+
+  assert.equal(result, 'ok')
+  assert.equal(light.intensity, 0.25, 'change applied')
+  assert.equal(mock.sent.filter(m => m.type === 'send').length, 0, 'nothing sent')
+})
+
+test('applyLocally — sends resume afterwards, including after nesting and a throw', () => {
+  const { client, mock } = makeWiredLightClient()
+  const light = client.som.getObjectByName('Sun.light')
+
+  client.applyLocally(() => {
+    client.applyLocally(() => { light.intensity = 0.1 })
+    light.intensity = 0.2   // still inside the outer call: must stay local
+  })
+  assert.throws(() => client.applyLocally(() => { throw new Error('boom') }), /boom/)
+  assert.equal(mock.sent.filter(m => m.type === 'send').length, 0, 'nothing sent inside')
+
+  light.intensity = 0.3
+  const sends = mock.sent.filter(m => m.type === 'send')
+  assert.equal(sends.length, 1, 'normal edit sent after applyLocally')
+  assert.equal(sends[0].value, 0.3)
+})
