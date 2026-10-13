@@ -43,6 +43,9 @@ export const SEND_NODE_MISSING = 'NODE_NOT_FOUND'
 /** Node fields allowed by D1/A2. `extras` is deliberately not here (D2). */
 const NODE_FIELDS = new Set(['translation', 'rotation', 'scale', 'visible'])
 
+/** A new name may not be longer than this (A5/D3). */
+const NAME_MAX = 256
+
 /** The material chain, exactly as the client listeners spell it (A2). */
 const MATERIAL_PATH_RE = /^mesh\.primitives\[(0|[1-9][0-9]*)\]\.material\.([A-Za-z]+)$/
 
@@ -268,6 +271,22 @@ function isLiveAvatarName(name, avatarNames) {
 }
 
 /**
+ * True when the resolved target is an externally loaded node (A4).
+ *
+ * The set holds the names `<container>/<child>` the server registered when it
+ * ingested an external scene. The check reads the RESOLVED object's own name.
+ *
+ * @param {object|null} target
+ * @param {Set<string>|null} externalNames
+ * @returns {boolean}
+ */
+function isExternallyLoaded(target, externalNames) {
+  if (!externalNames || typeof externalNames.has !== 'function') return false
+  const name = typeof target?.name === 'string' ? target.name : null
+  return name !== null && externalNames.has(name)
+}
+
+/**
  * Decide whether a `send` may be applied.
  *
  * Pure: nothing is read from or written to the world beyond the target's own
@@ -282,12 +301,19 @@ function isLiveAvatarName(name, avatarNames) {
  * @param {object}  [args.currentExtras]   the document's current root extras (A3)
  * @returns {{ok: boolean, code: string|null, message: string|null}}
  */
-export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null } = {}) {
+export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null } = {}) {
   if (!target) {
     return deny(SEND_NODE_MISSING, `${SEND_NODE_MISSING}: ${nodeName}`)
   }
   if (typeof field !== 'string' || field.length === 0) {
     return deny(SEND_DENIED, 'field must be a non-empty string')
+  }
+
+  // A4/A9 — an externally loaded node is never writable through `send`,
+  // whatever the field. Closes the item carried from step 0c §6.1. The check
+  // names the RESOLVED node, never the addressed string.
+  if (isExternallyLoaded(target, externalNames)) {
+    return deny(SEND_DENIED, 'externally loaded nodes cannot be edited')
   }
 
   if (target instanceof SOMDocument) {
@@ -332,9 +358,22 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar }) {
     return isVec3(value) ? allow() : deny(SEND_INVALID, `${field} must be 3 finite numbers`)
   }
 
+  // A8/A9 — the one new node field: a rename. The value must be a string; the
+  // D3 rules (length, reserved forms, uniqueness) are enforced by the server's
+  // rename branch in world.setField, which returns INVALID_VALUE.
+  if (field === 'name') {
+    return typeof value === 'string'
+      ? allow()
+      : deny(SEND_INVALID, `name must be a non-empty string of at most ${NAME_MAX} characters`)
+  }
+
   // The single node extras leaf (D2): the teleporter destination.
   if (field === TELEPORTER_LEAF) {
-    return isBoundedString(value)
+    // D8: a non-string destination gets its own message.
+    if (typeof value !== 'string') {
+      return deny(SEND_INVALID, 'destination must be a string')
+    }
+    return value.length <= DESTINATION_MAX
       ? allow()
       : deny(SEND_INVALID, `destination exceeds ${DESTINATION_MAX} characters`)
   }

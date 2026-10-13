@@ -12,6 +12,13 @@ import { SOMDocument } from '@atrium/som'
  * Fetch a file by URL. Uses fs.readFile for file:// URLs, globalThis.fetch for
  * http(s)://. Returns the raw text content.
  */
+/** Names of every node in a subtree, the root included (A6/C8). */
+function collectSubtreeNames(somNode) {
+  const names = [somNode.name]
+  for (const child of somNode.children) names.push(...collectSubtreeNames(child))
+  return names
+}
+
 async function fetchText(url) {
   if (url.startsWith('file://')) {
     const path = new URL(url).pathname
@@ -93,6 +100,14 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
   function setField(nodeName, field, value) {
     const target = som.getObjectByName(nodeName)
     if (!target) return { ok: false, code: 'NODE_NOT_FOUND' }
+    // A8 — the explicit rename path. `world.setField` handles `field === 'name'`
+    // itself through SOMDocument.renameNode's return value, so a duplicate or
+    // invalid name comes back INVALID_VALUE instead of setPath's INVALID_FIELD.
+    if (field === 'name') {
+      const result = som.renameNode(nodeName, value)
+      if (!result.ok) return { ok: false, code: result.code }
+      return { ok: true }
+    }
     try {
       som.setPath(target, field, value)
     } catch {
@@ -191,6 +206,9 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
   function removeNode(nodeName) {
     const node = som.getNodeByName(nodeName)
     if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
+    // A6/C8 — the whole subtree goes, and the names it contributed to
+    // externalNodeNames are dropped with it.
+    for (const name of collectSubtreeNames(node)) externalNodeNames.delete(name)
     node.dispose()
     return { ok: true }
   }
@@ -250,6 +268,12 @@ export async function createWorldFromDocument(documentJson) {
   function setField(nodeName, field, value) {
     const target = som.getObjectByName(nodeName)
     if (!target) return { ok: false, code: 'NODE_NOT_FOUND' }
+    // A8 — explicit rename path (see createWorld's setField).
+    if (field === 'name') {
+      const result = som.renameNode(nodeName, value)
+      if (!result.ok) return { ok: false, code: result.code }
+      return { ok: true }
+    }
     try { som.setPath(target, field, value) } catch { return { ok: false, code: 'INVALID_FIELD' } }
     return { ok: true }
   }
@@ -319,6 +343,9 @@ export async function createWorldFromDocument(documentJson) {
   function removeNode(nodeName) {
     const node = som.getNodeByName(nodeName)
     if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
+    // A6/C8 — the whole subtree goes, and the names it contributed to
+    // externalNodeNames are dropped with it.
+    for (const name of collectSubtreeNames(node)) externalNodeNames.delete(name)
     node.dispose()
     return { ok: true }
   }

@@ -265,12 +265,17 @@ test('policy A1/A2: a node allows only its four fields and the teleporter leaf',
   assert.equal(decide('visible', false).ok, true)
   assert.equal(decide('extras.atrium.teleporter.destination', '#').ok, true)
 
-  for (const field of ['extras', 'extras.atrium', 'name', 'parent', 'children', 'mesh',
+  for (const field of ['extras', 'extras.atrium', 'parent', 'children', 'mesh',
                        'mesh.name', 'mesh.weights', 'mesh.extras', 'skin', 'extensions', 'intensity']) {
     const d = decide(field, field === 'extras' || field === 'extras.atrium' ? { a: 1 } : 'x')
     assert.equal(d.ok, false, `field "${field}" must be refused`)
     assert.equal(d.code, 'PERMISSION_DENIED', `field "${field}" must be PERMISSION_DENIED`)
   }
+
+  // A8/A9: `name` is now allowed on a node — but only with a string value.
+  // The D3 rules themselves are enforced by the server's rename branch.
+  assert.equal(decide('name', 'Box').ok, true, 'a rename is allowed on a node')
+  assert.equal(decide('name', 42).code, 'INVALID_VALUE', 'a non-string name is INVALID_VALUE')
 })
 
 test('policy A1: cameras, lights and animations are refused outside their own field sets', async () => {
@@ -896,7 +901,6 @@ test('open world: whole extras replacement on a node and wrong target types are 
       ['extras.atrium', { flower: 1 }, 'PERMISSION_DENIED'],
       ['intensity', 5, 'PERMISSION_DENIED'],
       ['yfov', 1, 'PERMISSION_DENIED'],
-      ['name', 'renamed', 'PERMISSION_DENIED'],
       ['mesh.primitives[0].material.extras', {}, 'PERMISSION_DENIED'],
       ['mesh.primitives[5].material.baseColorFactor', [1, 0, 0, 1], 'INVALID_FIELD'],
       ['mesh.primitives[0].material.nope', 1, 'PERMISSION_DENIED'],
@@ -914,14 +918,21 @@ test('open world: whole extras replacement on a node and wrong target types are 
       seq: seq++, node: '__document__', field: 'translation', value: [0, 0, 0],
     }, 'PERMISSION_DENIED')
 
-    // A node that merely LOOKS like a light alias is classified by its class.
-    ws.send(JSON.stringify({ type: 'add', seq: 500, node: { name: 'X.light', translation: [0, 0, 0] } }))
-    const added = await waitFor(messages, m => m.type === 'add' && m.node?.name === 'X.light')
-    assert.ok(added, 'the node named X.light must be added')
+    // D3 refuses a new name ending in ".light" over the wire, so build the node
+    // through the SOM directly and keep the classification check: a node that
+    // merely LOOKS like a light alias is classified by its class.
+    world.som.createNode({ name: 'X.light', translation: [0, 0, 0] })
     await expectRefusal(ws, messages, { seq: seq++, node: 'X.light', field: 'color', value: [1, 1, 1] }, 'PERMISSION_DENIED')
 
-    assert.deepEqual(world.getNode('crate-01').extras, {}, 'no extras may have been written')
-    assert.equal(world.getNode('crate-01').name, 'crate-01', 'no rename may have happened')
+    // A8 — a rename is now accepted (it used to be PERMISSION_DENIED). Done
+    // last, because the rows above address the node by its old name.
+    const renamed = await expectAccepted(ws, messages, { seq: seq++, node: 'crate-01', field: 'name', value: 'renamed' })
+    assert.equal(renamed.requestSeq, seq - 1, 'the set broadcast echoes the request seq')
+    assert.equal(renamed.session, 'refuse-extra-and-type', 'the set broadcast names the requester')
+    assert.equal(world.getNode('crate-01'), null, 'the old name no longer resolves')
+    assert.equal(world.getNode('renamed').name, 'renamed', 'the node was renamed')
+
+    assert.deepEqual(world.getNode('renamed').extras, {}, 'no extras may have been written')
   } finally {
     ws.close()
     await waitForClose(ws)

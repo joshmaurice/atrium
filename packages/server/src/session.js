@@ -24,6 +24,35 @@ function sendError(ws, seq, code, message) {
   ws.send(JSON.stringify({ type: 'error', code, message, ...(seq != null ? { seq } : {}) }))
 }
 
+/**
+ * True when any node in `somNode`'s subtree is a live avatar node (A4).
+ * Defence in depth once the `add`-under-avatar rule exists.
+ */
+function subtreeHasLiveAvatar(somNode, avatarNames) {
+  if (!somNode) return false
+  if (avatarNames.has(somNode.name)) return true
+  for (const child of somNode.children) {
+    if (subtreeHasLiveAvatar(child, avatarNames)) return true
+  }
+  return false
+}
+
+/**
+ * True when `parentName` is, or has an ancestor that is, a live avatar node or
+ * an externally loaded node (A4, non-avatar adds). The ancestor walk is cheap
+ * and defence in depth: after the avatar-`add` rule nothing can be under an
+ * avatar.
+ */
+function isBlockedParent(parentName, world, avatarNames) {
+  let node = world.som.getNodeByName(parentName)
+  while (node) {
+    if (avatarNames.has(node.name)) return true
+    if (world.externalNodeNames.has(node.name)) return true
+    node = node.parent
+  }
+  return false
+}
+
 // ---------------------------------------------------------------------------
 // S2 source guards — no client may set extras.atrium.source, in any world
 // (owner included, avatars included). These are pure predicates so they can be
@@ -431,10 +460,13 @@ export function attachSessionHandlers({
           // Pre-hello tracking: hello is complete, clean up
           preHelloSockets.delete(ws)
 
-          // Compute canPlaceTeleporters at hello time (T2)
-          const canPlaceTeleporters = session.userId !== null &&
+          // Compute canPlaceTeleporters at hello time (T2). A1: `canEdit` is
+          // the same computation; the old name stays as an alias with the same
+          // value for one release.
+          const canEdit = session.userId !== null &&
             session.userId === worldOwnerUserId &&
             isMutator(session, false)
+          const canPlaceTeleporters = canEdit
 
           ws.send(JSON.stringify({
             type: 'hello',
@@ -444,6 +476,7 @@ export function attachSessionHandlers({
             avatarNodeName: session.avatarNodeName,
             displayName: session.displayName,
             canPlaceTeleporters,
+            canEdit,
             capabilities: {
               tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
             },
@@ -599,6 +632,7 @@ export function attachSessionHandlers({
             value: msg.value,
             avatarNames: liveAvatarNames(sessions.values()),
             currentExtras: world.som.extras,
+            externalNames: world.externalNodeNames,
           })
           if (!decision.ok) {
             sendError(ws, msg.seq, decision.code, decision.message)
@@ -618,6 +652,7 @@ export function attachSessionHandlers({
             value: msg.value,
             serverTime: Date.now(),
             session: session.id,
+            requestSeq: msg.seq,
           })
 
           // Notify autosave coordinator of a saveable mutation
@@ -648,6 +683,16 @@ export function attachSessionHandlers({
             break
           }
 
+          // --- A4: an avatar add may not carry a parent ---
+          // Avatar adds skip the mutation gate, so without this check any
+          // visitor could attach their avatar under a world node. Runs before
+          // the gate, with the other avatar-add checks. The first-party client
+          // never sends one (its avatar add has no parent).
+          if (msg.id && msg.parent != null) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'avatar nodes cannot have a parent')
+            break
+          }
+
           // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
           // Runs before the mutation gate so it covers avatar adds (which
           // bypass the gate) and the world owner alike.
@@ -664,6 +709,24 @@ export function attachSessionHandlers({
             break
           }
 
+          // --- A4/A5 (non-avatar adds only) ---
+          // The parent must not be, or descend from, a live avatar or an
+          // externally loaded node, and the new name must pass the D3 rules.
+          // Runs after the gate, as 0c ended up (its §3.1).
+          if (!isAvatar) {
+            const liveAvatars = liveAvatarNames(sessions.values())
+            if (msg.parent != null && isBlockedParent(msg.parent, world, liveAvatars)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED',
+                'a node may not be added under a live avatar or an externally loaded node')
+              break
+            }
+            const nameCheck = world.som.checkNewName(msg.node.name)
+            if (!nameCheck.ok) {
+              sendError(ws, msg.seq, nameCheck.code, nameCheck.message)
+              break
+            }
+          }
+
           // Overwrite avatar extras.displayName with the server-assigned
           // displayName (pre-brief #9).
           if (isAvatar && session.displayName) {
@@ -671,11 +734,16 @@ export function attachSessionHandlers({
             msg.node.extras.displayName = session.displayName
           }
 
-          // --- DESTINATION LENGTH CAP (T10) ---
-          // Enforce 2048-char limit on extras.atrium.teleporter.destination
+          // --- DESTINATION VALUE CHECK (T10, D8) ---
+          // The 2048-char cap on extras.atrium.teleporter.destination, with a
+          // distinct message for a non-string value (D8).
           if (!isAvatar && msg.node.extras?.atrium?.teleporter?.destination != null) {
             const dest = msg.node.extras.atrium.teleporter.destination
-            if (typeof dest === 'string' && dest.length > 2048) {
+            if (typeof dest !== 'string') {
+              sendError(ws, msg.seq, 'INVALID_VALUE', 'destination must be a string')
+              break
+            }
+            if (dest.length > 2048) {
               sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
               break
             }
@@ -706,6 +774,8 @@ export function attachSessionHandlers({
               format: msg.format ?? 'gltf',
               ...(msg.parent != null ? { parent: msg.parent } : {}),
               node: msg.node,
+              requestSeq: msg.seq,
+              session: session.id,
             })
           }
 
@@ -756,6 +826,32 @@ export function attachSessionHandlers({
             sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate nodes in this world')
             break
           }
+
+          // --- A4: avatar and external-node protection (after the gate) ---
+          // A live avatar, an externally loaded node, or a subtree holding a
+          // live avatar is never removable — for everyone, the owner included.
+          // An unknown node falls through to world.removeNode's NODE_NOT_FOUND.
+          {
+            const liveAvatars = liveAvatarNames(sessions.values())
+            const targetNode = world.som.getNodeByName(msg.node)
+            if (targetNode) {
+              const resolvedName = targetNode.name
+              if (liveAvatars.has(resolvedName)) {
+                sendError(ws, msg.seq, 'PERMISSION_DENIED', 'live avatar nodes cannot be removed')
+                break
+              }
+              if (world.externalNodeNames.has(resolvedName)) {
+                sendError(ws, msg.seq, 'PERMISSION_DENIED', 'externally loaded nodes cannot be removed')
+                break
+              }
+              if (subtreeHasLiveAvatar(targetNode, liveAvatars)) {
+                sendError(ws, msg.seq, 'PERMISSION_DENIED',
+                  'a subtree containing a live avatar cannot be removed')
+                break
+              }
+            }
+          }
+
           const result = world.removeNode(msg.node)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
@@ -765,6 +861,8 @@ export function attachSessionHandlers({
             type: 'remove',
             seq: nextSeq(),
             node: msg.node,
+            requestSeq: msg.seq,
+            session: session.id,
           })
 
           // Notify autosave coordinator of a saveable mutation
