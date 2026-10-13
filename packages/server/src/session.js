@@ -8,6 +8,7 @@ import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeUserId } from './http-routes.js'
 import { parsePath } from '@atrium/som'
+import { authorizeSend, resolveSendTarget, liveAvatarNames } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -574,31 +575,36 @@ export function attachSessionHandlers({
             break
           }
 
-          // --- DESTINATION LENGTH CAP (T10) ---
-          // Enforce 2048-char limit when setting extras.atrium.teleporter.destination
-          // or when setting extras/extras.atrium to an object containing a destination
-          function checkDestinationLength(field, value) {
-            // Direct set on the destination field
-            if (field === 'extras.atrium.teleporter.destination' &&
-                typeof value === 'string' && value.length > 2048) {
-              return true
-            }
-            // Set extras object that contains teleporter.destination
-            if (field === 'extras' && typeof value === 'object' && value !== null) {
-              const dest = value.atrium?.teleporter?.destination
-              if (typeof dest === 'string' && dest.length > 2048) return true
-            }
-            // Set extras.atrium object that contains teleporter.destination
-            if (field === 'extras.atrium' && typeof value === 'object' && value !== null) {
-              const dest = value.teleporter?.destination
-              if (typeof dest === 'string' && dest.length > 2048) return true
-            }
-            return false
-          }
-          if (checkDestinationLength(msg.field, msg.value)) {
-            sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
+          // --- SEND FIELD ALLOWLIST (Phase 3 step 0c) ---
+          // Default deny. Resolve the target the same way world.setField does,
+          // then classify the RESOLVED object by its class — never by its name
+          // — and allow only the exact operations that class permits
+          // (pre-brief §3 A1–A5).
+          //
+          // Order: this runs AFTER the mutation gate, so a forbidden edit is
+          // refused the same way for everyone; a non-mutator keeps the gate's
+          // PERMISSION_DENIED exactly as before, and an unknown target reached
+          // by a permitted session still gets NODE_NOT_FOUND. It runs BEFORE
+          // world.setField, so a refusal applies nothing, broadcasts nothing
+          // and triggers no save callback.
+          //
+          // The raw-string destination cap is gone: the 2048-character limit is
+          // the A4 value check on the teleporter destination leaf, and its code
+          // stays INVALID_VALUE.
+          const sendTarget = resolveSendTarget(world.som, msg.node)
+          const decision = authorizeSend({
+            target: sendTarget,
+            nodeName: msg.node,
+            field: msg.field,
+            value: msg.value,
+            avatarNames: liveAvatarNames(sessions.values()),
+            currentExtras: world.som.extras,
+          })
+          if (!decision.ok) {
+            sendError(ws, msg.seq, decision.code, decision.message)
             break
           }
+
           const result = world.setField(msg.node, msg.field, msg.value)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
