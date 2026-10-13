@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebSocket from 'ws'
 import { createSessionServer } from '../src/session.js'
-import { createWorld } from '../src/world.js'
+import { createWorld, createWorldFromDocument } from '../src/world.js'
 import { createRequestHandler, parseAuthSessionCookie } from '../src/http-routes.js'
 import { createDb } from '../src/db.js'
 import * as auth from '../src/auth.js'
@@ -211,7 +211,7 @@ after(async () => {
 // Tests: World CRUD happy paths
 // =========================================================================
 
-test('POST /api/worlds creates a world with the live world as initial document', async () => {
+test('POST /api/worlds creates a world', async () => {
   const res = await httpPost('/api/worlds', { slug: 'my-world', name: 'My World' }, userA.cookie)
 
   assert.equal(res.statusCode, 201)
@@ -221,6 +221,62 @@ test('POST /api/worlds creates a world with the live world as initial document',
   assert.equal(res.body.visibility, 'private')
   assert.ok(res.body.created_at)
   assert.ok(res.body.updated_at)
+})
+
+test('POST /api/worlds uses the fixed template, not the live world (step 0b)', async () => {
+  // Put content into the live world. In registry mode the live world is the
+  // commons, so anything here used to become the initial document of every
+  // world created afterwards.
+  const added = world.addNode({ name: 'commons-only-pad', translation: [0, 1, 0] }, null)
+  assert.equal(added.ok, true, 'fixture content added to the live world')
+
+  try {
+    const createRes = await httpPost(
+      '/api/worlds',
+      { slug: 'template-world', name: 'Template World' },
+      userA.cookie
+    )
+    assert.equal(createRes.statusCode, 201)
+
+    const getRes = await httpGet(`/api/worlds/${createRes.body.id}`, userA.cookie)
+    assert.equal(getRes.statusCode, 200)
+
+    const doc = getRes.body
+    assert.deepEqual(doc.nodes.map(n => n.name), ['Ground'], 'only the template ground')
+    assert.ok(
+      !JSON.stringify(doc).includes('commons-only-pad'),
+      'live world content does not leak into a new world'
+    )
+    assert.equal(doc.extras.atrium.name, 'Template World')
+    assert.equal(doc.asset.generator, 'Atrium World')
+  } finally {
+    world.removeNode('commons-only-pad')
+  }
+})
+
+test('POST /api/worlds falls back to the slug when no name is given', async () => {
+  const createRes = await httpPost('/api/worlds', { slug: 'slug-named-world' }, userA.cookie)
+  assert.equal(createRes.statusCode, 201)
+
+  const getRes = await httpGet(`/api/worlds/${createRes.body.id}`, userA.cookie)
+  assert.equal(getRes.statusCode, 200)
+  assert.equal(getRes.body.extras.atrium.name, 'slug-named-world')
+})
+
+test('POST /api/worlds stores a document that loads', async () => {
+  const createRes = await httpPost(
+    '/api/worlds',
+    { slug: 'loadable-world', name: 'Loadable World' },
+    userA.cookie
+  )
+  assert.equal(createRes.statusCode, 201)
+
+  const row = worldStore.getWorld(db.database, createRes.body.id, userA.userId)
+  assert.ok(row, 'created world row exists')
+
+  const loaded = await createWorldFromDocument(row.document)
+  assert.ok(loaded.getNode('Ground'), 'the template ground node loads')
+  assert.equal(loaded.meta.name, 'Loadable World')
 })
 
 test('POST /api/worlds rejects slug . (dot) with 400 (pre-brief #10)', async () => {
