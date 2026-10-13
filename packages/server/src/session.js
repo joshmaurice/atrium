@@ -23,6 +23,80 @@ function sendError(ws, seq, code, message) {
   ws.send(JSON.stringify({ type: 'error', code, message, ...(seq != null ? { seq } : {}) }))
 }
 
+// ---------------------------------------------------------------------------
+// S2 source guards — no client may set extras.atrium.source, in any world
+// (owner included, avatars included). These are pure predicates so they can be
+// unit-tested; the add/send cases below call exactly these functions.
+//
+// extras.atrium.source names a glTF file to load into a node. The server used
+// to fetch these URLs for document worlds (request forgery / memory DoS); S1
+// removed that fetch and S2+these guards stop new ones being planted. The
+// field is reserved for operator-controlled file worlds.
+// ---------------------------------------------------------------------------
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
+const isNonNullObject = (v) => typeof v === 'object' && v !== null
+
+/**
+ * True if an `add` descriptor carries extras.atrium.source as an own property
+ * (any value, including null — a null value is still a set attempt).
+ *
+ * @param {{extras?: {atrium?: object}}} node
+ * @returns {boolean}
+ */
+export function addSetsAtriumSource(node) {
+  const atrium = node?.extras?.atrium
+  if (!isNonNullObject(atrium)) return false
+  return hasOwn(atrium, 'source')
+}
+
+/**
+ * True if a `send` of (field, value) would write extras.atrium.source.
+ *
+ * Works on parsed path segments (the same parsePath that setPath uses, which
+ * ignores leading/extra dots and allows walking through parent/children[n]/
+ * scene), and looks for the protected shape at ANY depth, not just at the
+ * start. Segment comparison, so extras.atrium.sourceCount is allowed.
+ *
+ *   1. direct write: <...>.extras.atrium.source (or anything beneath it);
+ *   2. whole-object write of <...>.extras.atrium whose value has own source;
+ *   3. whole-object write of <...>.extras whose value.atrium has own source.
+ *
+ * @param {string} field
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function sendSetsAtriumSource(field, value) {
+  let segments
+  try {
+    segments = parsePath(field)
+  } catch {
+    // Unparseable path — setPath will reject it, nothing can be written.
+    return false
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] !== 'extras') continue
+
+    // 1. Direct write to source, or anything beneath it.
+    if (segments[i + 1] === 'atrium' && segments[i + 2] === 'source') return true
+
+    // 2. Replacing the extras.atrium object itself (extras is second-to-last).
+    if (i === segments.length - 2 && segments[i + 1] === 'atrium' &&
+        isNonNullObject(value) && hasOwn(value, 'source')) {
+      return true
+    }
+
+    // 3. Replacing the extras object itself (extras is the last segment).
+    if (i === segments.length - 1 && isNonNullObject(value) &&
+        isNonNullObject(value.atrium) && hasOwn(value.atrium, 'source')) {
+      return true
+    }
+  }
+
+  return false
+}
+
 // Compute a quaternion that rotates the glTF default forward [0,0,-1] to `look`.
 function lookToQuaternion(look) {
   const [lx, ly, lz] = look
@@ -485,6 +559,15 @@ export function attachSessionHandlers({
             }
           }
 
+          // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
+          // Runs after the avatar display-name guard and before the mutation
+          // gate, so it applies to the world owner too. Nothing is applied,
+          // broadcast or saved when it refuses.
+          if (sendSetsAtriumSource(msg.field, msg.value)) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
+            break
+          }
+
           // --- MUTATION GATE: only world owner may set fields ---
           if (!isMutator(session, false)) {
             sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate this message')
@@ -556,6 +639,14 @@ export function attachSessionHandlers({
           // matches the server-assigned avatarNodeName
           if (msg.id && msg.node.name !== session.avatarNodeName) {
             sendError(ws, msg.seq, 'PERMISSION_DENIED', `node.name "${msg.node.name}" does not match assigned avatarNodeName "${session.avatarNodeName}"`)
+            break
+          }
+
+          // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
+          // Runs before the mutation gate so it covers avatar adds (which
+          // bypass the gate) and the world owner alike.
+          if (addSetsAtriumSource(msg.node)) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
             break
           }
 
