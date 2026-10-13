@@ -372,6 +372,11 @@ const stage = new Stage(viewportEl, {
 const { renderer, nav, animCtrl, scene: threeScene } = stage
 const avatar = stage.avatar
 const canvas  = renderer.domElement
+// Firefox can start a native drag of a <canvas> as an image (seen once Edit
+// mode's TransformControls had pointer capture): the viewport's drop outline
+// appears and look-drags stop. The canvas is never something to drag.
+canvas.draggable = false
+canvas.addEventListener('dragstart', (e) => e.preventDefault())
 window.stage = stage
 
 // ---------------------------------------------------------------------------
@@ -1615,12 +1620,14 @@ function setEditMode(on) {
     modes.setEdit(true)
     if (document.pointerLockElement) document.exitPointerLock()
     ensureGizmo()
+    syncGizmoEnabled()
     editPanel.style.display = ''
     editToggleBtn.classList.add('active')
   } else {
     if (!modes.edit) return
     selectForEdit(null)          // ends a drag with its final send
     modes.setEdit(false)
+    syncGizmoEnabled()
     editPanel.style.display = 'none'
     editToggleBtn.classList.remove('active')
   }
@@ -1641,6 +1648,15 @@ function endEditSession() {
 editToggleBtn.addEventListener('click', () => setEditMode(!modes.edit))
 
 // ── Handles (B3) ────────────────────────────────────────────────────────
+
+// TransformControls captures the pointer on every press while enabled, even
+// with nothing attached. Enable it only in Edit mode, with an object selected,
+// and not while that object's rename is unanswered.
+function syncGizmoEnabled() {
+  if (!gizmo) return
+  const renaming = !!pendingRename && pendingRename.node === selected
+  gizmo.enabled = modes.edit && !!selectedObj && !renaming
+}
 
 function ensureGizmo() {
   if (gizmo) return
@@ -1720,6 +1736,7 @@ function attachSelected() {
     if (selectedObj) gizmo.attach(selectedObj)
     else gizmo.detach()
   }
+  syncGizmoEnabled()
   if (outline) {
     threeScene.remove(outline)
     outline.geometry.dispose()
@@ -1833,7 +1850,7 @@ function refreshNameField() {
   }
   // A move sent before the rename is answered would name the node by its old
   // name and be refused; hold the handles and fields until the answer.
-  if (gizmo) gizmo.enabled = !renaming
+  syncGizmoEnabled()
   for (const input of epVectorInputs) input.disabled = renaming
   epName.disabled = !!reason || renaming
   epName.title = reason
