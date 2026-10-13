@@ -60,6 +60,16 @@ export function createTeleportTrigger({ onTrigger, resolveDestination }) {
   }
 
   function setActive(val) {
+    // Coming back from an editing mode (Edit, place, delete): update() hasn't
+    // run meanwhile, so `wasInside` is stale — the avatar may have walked onto
+    // a pad. Disarm every pad, as on a fresh load: a pad fires only after the
+    // avatar has been outside it again (Phase 3 step 1b-1, review finding 4).
+    if (val && !active) {
+      for (const pad of pads.values()) {
+        pad.armed = false
+        pad.wasInside = false
+      }
+    }
     active = val
   }
 

@@ -305,6 +305,41 @@ describe('createTeleportTrigger', () => {
     assert.equal(triggered.length, 1, 'pad fires on a real re-entry')
   })
 
+  test('reactivated while standing on a pad — it does not fire until left and re-entered', () => {
+    const triggered = []
+    const trigger = createTeleportTrigger({
+      onTrigger: (ev) => triggered.push(ev),
+      resolveDestination: (d) => d,
+    })
+    trigger.setReady(true)
+    trigger.setActive(true)
+    trigger.setPads([{ name: 'pad-1', position: [0, 0, 0], destination: 'ws://dest.com' }])
+    trigger.update([5, 0, 5])                 // outside: arms
+    trigger.setActive(false)                  // Edit mode on
+    trigger.update([0, 0, 0])                 // walks onto the pad while editing (ignored)
+    trigger.setActive(true)                   // Edit mode off, standing on the pad
+    trigger.update([0, 0, 0])
+    assert.equal(triggered.length, 0, 'no teleport on the first frame after editing')
+    trigger.update([5, 0, 5])                 // walks off
+    trigger.update([0, 0, 0])                 // and back on
+    assert.equal(triggered.length, 1, 'fires normally afterwards')
+  })
+
+  test('setActive(true) while already active changes nothing', () => {
+    const triggered = []
+    const trigger = createTeleportTrigger({
+      onTrigger: (ev) => triggered.push(ev),
+      resolveDestination: (d) => d,
+    })
+    trigger.setReady(true)
+    trigger.setActive(true)
+    trigger.setPads([{ name: 'pad-1', position: [0, 0, 0], destination: 'ws://dest.com' }])
+    trigger.update([5, 0, 5])                 // armed
+    trigger.setActive(true)                   // no-op
+    trigger.update([0, 0, 0])
+    assert.equal(triggered.length, 1)
+  })
+
   test('reset drops pads — nothing fires until pads are set again', () => {
     const triggered = []
     const trigger = createTeleportTrigger({

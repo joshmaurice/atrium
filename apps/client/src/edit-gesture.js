@@ -48,6 +48,9 @@ export function sanitizeTransform(field, value) {
   if (field === 'rotation') {
     const len = Math.hypot(...value)
     if (!Number.isFinite(len) || len === 0) return [0, 0, 0, 1]
+    // Leave a stored quaternion that is unit to within rounding untouched, so
+    // a plain Move drag doesn't look like a rotation change and send one.
+    if (Math.abs(len - 1) <= 1e-9) return [...value]
     return value.map(v => v / len)
   }
   return [...value]
@@ -254,13 +257,12 @@ export function createEditTracker({
 
   /** The node (or an ancestor) was removed: cancel and never write to it again. */
   function nodeRemoved(node) {
+    // Dead first: cancelling a gesture reconciles its records, and a record
+    // with a rejection would otherwise write to the removed node right there.
+    const recs = [...(records.get(node)?.values() ?? [])]
+    for (const rec of recs) rec.dead = true
     for (const g of [...gestures]) if (g.node === node) g.cancel()
-    const byField = records.get(node)
-    if (!byField) return
-    for (const rec of [...byField.values()]) {
-      rec.dead = true
-      reconcile(rec)
-    }
+    for (const rec of recs) reconcile(rec)
   }
 
   /**
@@ -276,6 +278,8 @@ export function createEditTracker({
 
   /** Reconnect or world change: drop everything; the som-dump is the truth. */
   function reset() {
+    // Dead first, as in nodeRemoved: nothing from the old connection writes.
+    for (const byField of records.values()) for (const rec of byField.values()) rec.dead = true
     for (const g of [...gestures]) g.cancel()
     records.clear()
     sends.clear()

@@ -17,7 +17,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { resolveSelectionRoot } from '@atrium/interaction'
 import { createEditModes } from './edit-modes.js'
 import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
-import { pickEditSelection, isSelectClick } from './edit-selection.js'
+import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 
@@ -1273,7 +1273,8 @@ document.addEventListener('keydown', (e) => {
     }
     // Edit mode (B2): first Escape deselects, a second leaves Edit mode.
     // An Escape inside a panel field never gets here (B5).
-    if (modes.edit) {
+    // Escape typed in another text field (sign-in, world browser) is theirs.
+    if (modes.edit && !e.target.closest?.('input, textarea, select')) {
       if (selected) selectForEdit(null)
       else setEditMode(false)
     }
@@ -1415,6 +1416,7 @@ tpSaveBtn.addEventListener('click', () => {
     })
     pendingName = name
     pendingSeq = client.addNode(descriptor)
+    updateEditControls()
     tpSaveBtn.textContent = 'Saving...'
   } catch (err) {
     tpFormError.textContent = 'Failed to place teleporter: ' + err.message
@@ -1454,12 +1456,14 @@ client.on('error', (err) => {
     tpCancelBtn.disabled = false
     pendingSeq = null
     pendingName = null
+    updateEditControls()
   }
   if (pendingDeleteSeq != null && err.seq === pendingDeleteSeq) {
     // Delete error
     showTeleporterOverlay(`Couldn't delete teleporter: ${err.message || 'refused'}`)
     pendingDeleteSeq = null
     deleteTargetName = null
+    updateEditControls()
   }
 })
 
@@ -1518,6 +1522,7 @@ viewportEl.addEventListener('click', (e) => {
 
   try {
     pendingDeleteSeq = client.removeNode(somNode.name)
+    updateEditControls()
     showTeleporterOverlay('Deleting teleporter...')
   } catch (err) {
     showTeleporterOverlay('Delete failed: ' + err.message)
@@ -1592,12 +1597,19 @@ function isEditExcluded(node) {
 function updateEditControls() {
   const allowed = canEditNow()
   editToggleBtn.style.display = allowed ? '' : 'none'
+  // Entering Edit mode closes the teleporter modes; don't let it abandon a
+  // save or delete whose answer (or refusal message) is still to come.
+  editToggleBtn.disabled = teleporterRequestPending()
   if (!allowed && modes.edit) setEditMode(false)
+}
+
+function teleporterRequestPending() {
+  return pendingSeq != null || pendingDeleteSeq != null
 }
 
 function setEditMode(on) {
   if (on) {
-    if (!canEditNow() || modes.edit) return
+    if (!canEditNow() || modes.edit || teleporterRequestPending()) return
     // E6 — Edit mode closes the teleporter modes; triggers follow from `modes`.
     if (modes.placement || modes.delete || tpForm.style.display !== 'none') exitTeleporterMode()
     modes.setEdit(true)
@@ -1702,7 +1714,7 @@ function selectForEdit(node) {
 // Look the selected node's three.js object up by name (G4), and put the
 // handles and outline on it. Called again after a rename and a reload.
 function attachSelected() {
-  selectedObj = selected && sceneGroup ? (sceneGroup.getObjectByName(selected.name) ?? null) : null
+  selectedObj = selected && sceneGroup ? findNodeObject(sceneGroup, selected.name) : null
   if (selected && !selectedObj) selected = null
   if (gizmo) {
     if (selectedObj) gizmo.attach(selectedObj)
@@ -1730,20 +1742,33 @@ function pickEditTarget(e) {
   )
   const raycaster = new THREE.Raycaster()
   raycaster.setFromCamera(ndc, stage.camera)
-  // Each hit → the nearest SOM node above the three.js object (as delete mode).
+  // Each hit → the SOM node of the nearest node object above it. Mesh and
+  // primitive objects are skipped: a mesh is often named like another node.
+  const lookup = { getNodeByName: (n) => client.som.getNodeByName(n), isDuplicatedName }
   const hits = []
   for (const hit of raycaster.intersectObjects(sceneGroup.children, true)) {
-    for (let obj = hit.object; obj; obj = obj.parent) {
-      const node = obj.name ? client.som.getNodeByName(obj.name) : null
-      if (node) { hits.push(node); break }
-    }
+    const node = nodeForHitObject(hit.object, lookup)
+    if (node) hits.push(node)
   }
   return pickEditSelection(hits, {
     isSeeThrough: (node) => node === avatar.localNode,   // third person: it sits mid-view
     isExcluded: isEditExcluded,
+    isDuplicatedName,
     resolveRoot: resolveSelectionRoot,
     descend: e.altKey,
   })
+}
+
+// E7 — a name shared by more than one glTF node. som.nodes can't show this:
+// it is built from a name-keyed map, so duplicates collapse into one entry.
+function isDuplicatedName(name) {
+  const doc = client.som?.document
+  if (!doc) return false
+  let count = 0
+  for (const n of doc.getRoot().listNodes()) {
+    if (n.getName() === name && ++count > 1) return true
+  }
+  return false
 }
 
 // Capture phase, so the press is recorded before anything else handles it.
@@ -1758,7 +1783,9 @@ viewportEl.addEventListener('click', (e) => {
   pressDown = null
   // A look-drag, or a press on a handle, is not a selection.
   if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
-  selectForEdit(pickEditTarget(e))
+  const { node, refused } = pickEditTarget(e) ?? { node: null, refused: null }
+  selectForEdit(node)
+  if (refused) showEditError(refused)
 })
 
 // ── Property panel (B5) ─────────────────────────────────────────────────
@@ -1800,10 +1827,14 @@ function refreshNameField() {
   let reason = ''
   if (selected.camera || selected.light) {
     reason = 'Renaming a node with a camera or light is not supported yet'
-  } else if (client.som && client.som.nodes.filter(n => n.name === selected.name).length > 1) {
+  } else if (isDuplicatedName(selected.name)) {
     // E7 — until the server cleanup round fixes the name setter
     reason = 'Another node has the same name, so this one can’t be renamed yet'
   }
+  // A move sent before the rename is answered would name the node by its old
+  // name and be refused; hold the handles and fields until the answer.
+  if (gizmo) gizmo.enabled = !renaming
+  for (const input of epVectorInputs) input.disabled = renaming
   epName.disabled = !!reason || renaming
   epName.title = reason
   if (document.activeElement !== epName) {
@@ -1833,7 +1864,15 @@ function commitVectorField(field) {
     for (const i of inputs) i.value = i.dataset.shown ?? ''
     return
   }
-  const value = field === 'rotation' ? eulerDegToQuat(nums) : nums
+  // Start from the node's full-precision value and replace only the axes whose
+  // text changed, so the other axes aren't re-sent rounded to the display.
+  const current = field === 'rotation'
+    ? quatToEulerDeg(selected.rotation ?? [0, 0, 0, 1])
+    : [...(selected[field] ?? (field === 'scale' ? [1, 1, 1] : [0, 0, 0]))]
+  inputs.forEach((input, i) => {
+    if (input.value.trim() !== input.dataset.shown) current[i] = nums[i]
+  })
+  const value = field === 'rotation' ? eulerDegToQuat(current) : current
   editTracker.commit(selected, field, value)
   refreshEditVectors()
 }
@@ -2017,7 +2056,10 @@ viewportEl.addEventListener('click', () => {
   if (modes.usePointerLock) viewportEl.requestPointerLock()
 })
 
-viewportEl.addEventListener('mousedown', () => {
+viewportEl.addEventListener('mousedown', (e) => {
+  // Presses on panels and forms over the viewport (the Edit panel's fields,
+  // the teleporter form) aren't look-drags.
+  if (e.target !== canvas) return
   // B3 — a press that grabbed a handle drags the handle, not the camera.
   // TransformControls sets `dragging` on pointerdown, before mousedown fires.
   if (gizmo?.dragging) return
@@ -2086,6 +2128,7 @@ modeSwitcher.addEventListener('change', (e) => {
 })
 
 viewportEl.addEventListener('wheel', (e) => {
+  if (e.target !== canvas) return     // scrolling over a panel doesn't zoom
   e.preventDefault()
   nav.onWheel(e.deltaY)
 }, { passive: false })

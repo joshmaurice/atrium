@@ -7,7 +7,10 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveEditSelection, pickEditSelection, isSelectClick } from '../src/edit-selection.js'
+import {
+  resolveEditSelection, pickEditSelection, isSelectClick,
+  isNodeObject, findNodeObject, nodeForHitObject, DUPLICATE_NAME_MESSAGE,
+} from '../src/edit-selection.js'
 import { resolveSelectionRoot } from '../../../packages/interaction/src/selectionModel.js'
 
 function n(name, { parent = null, mesh = null, extras = {} } = {}) {
@@ -62,7 +65,7 @@ describe('edit-selection: resolveEditSelection', () => {
 
 describe('edit-selection: pickEditSelection', () => {
   const seeThrough = (node) => node === me
-  const pick = (hits, descend = false) => pickEditSelection(hits, { ...opts(descend), isSeeThrough: seeThrough })
+  const pick = (hits, descend = false) => pickEditSelection(hits, { ...opts(descend), isSeeThrough: seeThrough }).node
 
   test('the local avatar in front is skipped: the crate behind it is selected', () => {
     assert.equal(pick([me, crate]), crate)
@@ -81,6 +84,74 @@ describe('edit-selection: pickEditSelection', () => {
   test('the nearest hit decides', () => {
     assert.equal(pick([crate, shade]), crate)
     assert.equal(pick([shade, crate], true), shade)
+  })
+})
+
+describe('edit-selection: duplicated names are refused', () => {
+  const dupNames = new Set(['crate'])
+  const isDuplicatedName = (name) => dupNames.has(name)
+
+  test('a hit on a node whose name is duplicated is refused with a reason', () => {
+    const r = pickEditSelection([{ duplicateName: 'crate' }], { ...opts(), isDuplicatedName })
+    assert.equal(r.node, null)
+    assert.equal(r.refused, DUPLICATE_NAME_MESSAGE)
+  })
+
+  test('a selection that resolves to a duplicated name is refused', () => {
+    const r = pickEditSelection([crate], { ...opts(), isDuplicatedName })
+    assert.equal(r.node, null)
+    assert.equal(r.refused, DUPLICATE_NAME_MESSAGE)
+  })
+
+  test('unique names select as usual', () => {
+    const r = pickEditSelection([shade], { ...opts(), isDuplicatedName })
+    assert.equal(r.node, group)
+    assert.equal(r.refused, null)
+  })
+})
+
+// Stand-ins for DocumentView's three.js objects: nodes are 'Object3D' (or
+// Bone), meshes are 'Group', primitives are 'Mesh'.
+function obj(type, name, parent = null, extra = {}) {
+  const o = { type, name, parent, children: [], ...extra }
+  if (parent) parent.children.push(o)
+  return o
+}
+
+describe('edit-selection: three.js object ↔ SOM node', () => {
+  // Chair (node) holds a mesh called "Table"; Table is a separate node.
+  const sceneGroup = obj('Group', '')
+  const chairObj   = obj('Object3D', 'Chair', sceneGroup)
+  const chairMesh  = obj('Group', 'Table', chairObj)
+  const chairPrim  = obj('Mesh', '', chairMesh)
+  const tableObj   = obj('Object3D', 'Table', sceneGroup)
+  const tableMesh  = obj('Group', 'Table', tableObj)
+  const tablePrim  = obj('Mesh', '', tableMesh)
+  const joint      = obj('Bone', 'Hip', sceneGroup, { isBone: true })
+  const somNodes   = { Chair: { name: 'Chair' }, Table: { name: 'Table' }, Hip: { name: 'Hip' } }
+  const lookup = { getNodeByName: (n) => somNodes[n] ?? null, isDuplicatedName: () => false }
+
+  test('only node objects count', () => {
+    assert.equal(isNodeObject(chairObj), true)
+    assert.equal(isNodeObject(joint), true)
+    assert.equal(isNodeObject(chairMesh), false)
+    assert.equal(isNodeObject(chairPrim), false)
+  })
+
+  test('a hit on a mesh named like another node maps to its own node', () => {
+    assert.equal(nodeForHitObject(chairPrim, lookup), somNodes.Chair)
+    assert.equal(nodeForHitObject(tablePrim, lookup), somNodes.Table)
+  })
+
+  test('findNodeObject skips a mesh group with the same name', () => {
+    assert.equal(findNodeObject(sceneGroup, 'Table'), tableObj)
+    assert.equal(findNodeObject(sceneGroup, 'Hip'), joint)
+    assert.equal(findNodeObject(sceneGroup, 'Nope'), null)
+  })
+
+  test('a hit on a duplicated name maps to a duplicate marker', () => {
+    const dup = { ...lookup, isDuplicatedName: (n) => n === 'Chair' }
+    assert.deepEqual(nodeForHitObject(chairPrim, dup), { duplicateName: 'Chair' })
   })
 })
 

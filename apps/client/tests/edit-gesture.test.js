@@ -294,6 +294,32 @@ describe('edit-gesture: node removed', () => {
     assert.equal(w.tracker.hasRecord(n, 'translation'), false)
   })
 
+  test('rejected mid-drag, then removed: the cancel writes nothing to the removed node', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })   // seq 1
+    w.tracker.rejected(1, { code: 'PERMISSION_DENIED', message: 'no' })
+    const locals = w.locals.length
+    w.tracker.nodeRemoved(n)                              // cancels the drag, which reconciles
+    assert.equal(w.locals.length, locals, 'no write to the removed node')
+    assert.equal(w.reverts.length, 0)
+    g.end()
+    assert.equal(w.locals.length, locals)
+  })
+
+  test('reset after a rejection mid-drag writes nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })   // seq 1
+    w.tracker.rejected(1, { message: 'no' })
+    const locals = w.locals.length
+    w.tracker.reset()
+    assert.equal(w.locals.length, locals)
+    assert.equal(w.reverts.length, 0)
+  })
+
   test('pruneRemoved: a removed node that is not being dragged still never gets written', () => {
     const w = makeWorld()
     const kept = node('kept')
@@ -335,6 +361,17 @@ describe('edit-gesture: values', () => {
     const q = sanitizeTransform('rotation', [0, 0, 2, 0])
     assert.deepEqual(q, [0, 0, 1, 0])
     assert.deepEqual(sanitizeTransform('rotation', [0, 0, 0, 0]), [0, 0, 0, 1])
+  })
+
+  test('a Move drag on a node whose stored quaternion is unit only to rounding sends no rotation', () => {
+    const w = makeWorld()
+    const n = node()
+    n.rotation = [0, Math.SQRT1_2, 0, Math.SQRT1_2]       // length 1.0000000000000002
+    const g = w.tracker.begin(n)
+    w.advance(200)
+    g.update({ translation: [1, 0, 0], rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2], scale: [1, 1, 1] })
+    g.end()
+    assert.deepEqual(w.sent.map(s => s.field), ['translation'])
   })
 
   test('accepted() reports the node and field, so the app can rebuild pads', () => {
