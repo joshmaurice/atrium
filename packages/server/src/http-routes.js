@@ -3,7 +3,7 @@
 
 import { randomUUID } from 'node:crypto'
 import * as worldStore from './world-store.js'
-import { ensureHomeWorld } from './home-world.js'
+import { ensureHomeWorld, newWorldDocument } from './home-world.js'
 
 /**
  * Validate the Origin header for CSRF / cross-origin protection.
@@ -120,15 +120,10 @@ export function createRateLimiter({ maxRequests = 10, windowMs = 60_000 } = {}) 
  * dependencies (db, auth) without changing the call signature.
  */
 export function createRequestHandler(opts = {}) {
+  // `world`, `sessionsRef` and `defaultHostRef` stay accepted for backward
+  // compatibility (existing callers and tests pass them), but creating a
+  // world no longer reads the live world, so nothing here uses them any more.
   const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef, getWorldHost, getRootWorldId } = opts
-
-  // Resolve the live world reference: prefer the default host's world when
-  // running in registry mode (index.js), fall back to legacy direct world
-  // for backward compatibility with tests.
-  function getLiveWorld() {
-    if (defaultHostRef?.current?.world) return defaultHostRef.current.world
-    return legacyWorld
-  }
 
   /**
    * Get the correct live world for a specific worldId (D4 fix).
@@ -153,26 +148,6 @@ export function createRequestHandler(opts = {}) {
     const forwarded = req.headers['x-forwarded-for']
     if (forwarded) return forwarded.split(',')[0].trim()
     return req.socket.remoteAddress || '127.0.0.1'
-  }
-
-  /**
-   * Get the set of avatar node names currently live on the server.
-   * Reads from the sessionsRef closure, populated/cleared dynamically
-   * as WebSocket sessions are established and torn down.
-   * @returns {string[]}
-   */
-  function getLiveAvatarNodeNames() {
-    // In registry mode (multi-world), sessions live in the default host.
-    // Fall back to the legacy sessionsRef for backward compat with tests.
-    const sessions = defaultHostRef?.current?.sessions || sessionsRef?.current
-    if (!sessions) return []
-    const names = []
-    for (const [, session] of sessions) {
-      if (session.avatarNodeName) {
-        names.push(session.avatarNodeName)
-      }
-    }
-    return names
   }
 
   return async (req, res) => {
@@ -593,20 +568,13 @@ export function createRequestHandler(opts = {}) {
         return
       }
 
-      // Serialize the current live world as the initial document
-      // so a created world is always valid glTF from the moment it exists.
-      let initialDocument = ''
-      const liveWorld = getLiveWorld()
-      if (liveWorld) {
-        try {
-          const excludeNodes = getLiveAvatarNodeNames()
-          initialDocument = JSON.stringify(await liveWorld.serialize({ excludeNodes }))
-        } catch (err) {
-          console.error('Initial world serialize failed for create:', err.message)
-          // If serialization fails, create with empty document — still
-          // loadable, just empty
-        }
-      }
+      // Start the new world from the fixed template (step 0b) so a created
+      // world is valid glTF from the moment it exists and never inherits
+      // content from the live world (the commons in registry mode).
+      const worldName = (typeof body.name === 'string' && body.name.trim() !== '')
+        ? body.name.trim()
+        : body.slug.trim()
+      const initialDocument = newWorldDocument(worldName)
 
       try {
         const result = worldStore.createWorld(db.database, {
