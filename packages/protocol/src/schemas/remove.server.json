@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Remove (Server)",
+  "description": "Server remove broadcast. Two forms: a request-caused removal of a node (node + requestSeq + session), and the disconnect broadcast that names a departing session (id).",
+  "type": "object",
+  "oneOf": [
+    {
+      "required": ["type", "seq", "node"],
+      "properties": {
+        "type": { "const": "remove" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "node": { "type": "string", "minLength": 1 },
+        "requestSeq": { "type": "integer", "minimum": 0, "description": "The seq of the client request this broadcast answers" },
+        "session": { "type": "string", "minLength": 1, "description": "The requesting session's id" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "required": ["type", "seq", "id"],
+      "properties": {
+        "type": { "const": "remove" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "id": { "type": "string", "minLength": 1, "description": "The departing session's id" }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

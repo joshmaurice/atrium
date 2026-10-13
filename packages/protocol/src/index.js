@@ -11,8 +11,10 @@ import tick from './schemas/tick.json' with { type: 'json' }
 import errorMsg from './schemas/error.json' with { type: 'json' }
 import send from './schemas/send.json' with { type: 'json' }
 import set from './schemas/set.json' with { type: 'json' }
-import add from './schemas/add.json' with { type: 'json' }
-import remove from './schemas/remove.json' with { type: 'json' }
+import addClient from './schemas/add.client.json' with { type: 'json' }
+import addServer from './schemas/add.server.json' with { type: 'json' }
+import removeClient from './schemas/remove.client.json' with { type: 'json' }
+import removeServer from './schemas/remove.server.json' with { type: 'json' }
 import join from './schemas/join.json' with { type: 'json' }
 import leave from './schemas/leave.json' with { type: 'json' }
 import viewClient from './schemas/view-client.json' with { type: 'json' }
@@ -30,8 +32,10 @@ const validators = {
   'error':        ajv.compile(errorMsg),
   'send':         ajv.compile(send),
   'set':          ajv.compile(set),
-  'add':          ajv.compile(add),
-  'remove':       ajv.compile(remove),
+  'add:client':   ajv.compile(addClient),
+  'add:server':   ajv.compile(addServer),
+  'remove:client': ajv.compile(removeClient),
+  'remove:server': ajv.compile(removeServer),
   'join':         ajv.compile(join),
   'leave':        ajv.compile(leave),
   'view:client':  ajv.compile(viewClient),
@@ -50,9 +54,9 @@ export function validate(direction, message) {
     return { valid: false, errors: [{ message: 'Message must have a type field' }] }
   }
 
-  const key = (message.type === 'hello' || message.type === 'view')
-    ? `${message.type}:${direction}`
-    : message.type
+  const directional = message.type === 'hello' || message.type === 'view' ||
+    message.type === 'add' || message.type === 'remove'
+  const key = directional ? `${message.type}:${direction}` : message.type
 
   const validator = validators[key]
 

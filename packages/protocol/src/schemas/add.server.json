@@ -1,15 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema",
-  "title": "Add",
-  "description": "Add a node to the scene graph",
+  "title": "Add (Server)",
+  "description": "Server add broadcast. A request-caused add carries requestSeq and session; an avatar add carries id and neither.",
   "type": "object",
   "required": ["type", "seq", "node"],
   "properties": {
     "type": { "const": "add" },
     "seq": { "type": "integer", "minimum": 0 },
-    "id": { "type": "string", "description": "Session UUID — identifies the sender when adding an avatar node" },
+    "id": { "type": "string", "description": "Session UUID — present on an avatar add broadcast" },
     "format": { "type": "string", "default": "gltf" },
     "parent": { "type": ["string", "null"] },
+    "requestSeq": { "type": "integer", "minimum": 0, "description": "The seq of the client request this broadcast answers" },
+    "session": { "type": "string", "minLength": 1, "description": "The requesting session's id" },
     "node": {
       "type": "object",
       "required": ["name"],

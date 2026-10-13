@@ -11,7 +11,8 @@
     "field": { "type": "string", "minLength": 1 },
     "value": {},
     "serverTime": { "type": "integer", "minimum": 0 },
-    "session": { "type": "string", "minLength": 1 }
+    "session": { "type": "string", "minLength": 1 },
+    "requestSeq": { "type": "integer", "minimum": 0, "description": "The seq of the client request this broadcast answers" }
   },
   "additionalProperties": false
 }

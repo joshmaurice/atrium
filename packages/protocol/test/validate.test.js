@@ -530,3 +530,98 @@ describe('unknown message type', () => {
     assert.equal(valid, false)
   })
 })
+
+// ─── direction-specific add / remove (Phase 3 step 1a, A2) ─────────
+
+describe('add direction forms (A2)', () => {
+  it('accepts a server add with requestSeq and session', () => {
+    const { valid } = validate('server', {
+      type: 'add', seq: 9, format: 'gltf',
+      requestSeq: 4, session: 'client-01',
+      node: { name: 'crate-02' },
+    })
+    assert.equal(valid, true)
+  })
+
+  it('accepts a server avatar add carrying id and neither requestSeq nor session', () => {
+    const { valid } = validate('server', {
+      type: 'add', seq: 9, format: 'gltf', id: 'client-01',
+      node: { name: 'avatar-aaaaaaaa' },
+    })
+    assert.equal(valid, true)
+  })
+
+  it('refuses a client add that carries requestSeq', () => {
+    const { valid } = validate('client', {
+      type: 'add', seq: 9, requestSeq: 4,
+      node: { name: 'crate-02' },
+    })
+    assert.equal(valid, false)
+  })
+
+  it('refuses a client add that carries session', () => {
+    const { valid } = validate('client', {
+      type: 'add', seq: 9, session: 'client-01',
+      node: { name: 'crate-02' },
+    })
+    assert.equal(valid, false)
+  })
+})
+
+describe('remove direction forms (A2)', () => {
+  it('accepts a server remove with requestSeq and session', () => {
+    const { valid } = validate('server', {
+      type: 'remove', seq: 9, node: 'crate-01', requestSeq: 4, session: 'client-01',
+    })
+    assert.equal(valid, true)
+  })
+
+  it('accepts the disconnect remove {id} as a server message', () => {
+    const { valid } = validate('server', { type: 'remove', seq: 9, id: 'client-01' })
+    assert.equal(valid, true)
+  })
+
+  it('refuses a server remove that carries both node and id', () => {
+    const { valid } = validate('server', {
+      type: 'remove', seq: 9, node: 'crate-01', id: 'client-01',
+    })
+    assert.equal(valid, false)
+  })
+
+  it('refuses a client remove that carries requestSeq', () => {
+    const { valid } = validate('client', {
+      type: 'remove', seq: 9, node: 'crate-01', requestSeq: 4,
+    })
+    assert.equal(valid, false)
+  })
+})
+
+describe('set with requestSeq (A2)', () => {
+  it('accepts a server set carrying requestSeq', () => {
+    const { valid } = validate('server', {
+      type: 'set', seq: 12, node: 'crate-01', field: 'translation',
+      value: [1, 0, 0], serverTime: Date.now(), session: 'client-01', requestSeq: 3,
+    })
+    assert.equal(valid, true)
+  })
+})
+
+describe('hello (server) canEdit (A1)', () => {
+  it('accepts a server hello carrying canEdit', () => {
+    const { valid } = validate('server', {
+      type: 'hello', id: 'server-01', seq: 0, serverTime: Date.now(),
+      canPlaceTeleporters: true, canEdit: true,
+      capabilities: { tick: { interval: 1000, minInterval: 50 } },
+    })
+    assert.equal(valid, true)
+  })
+
+  it('refuses a non-boolean canEdit', () => {
+    const { valid } = validate('server', {
+      type: 'hello', id: 'server-01', seq: 0, serverTime: Date.now(),
+      canEdit: 'yes',
+      capabilities: { tick: { interval: 1000, minInterval: 50 } },
+    })
+    assert.equal(valid, false)
+  })
+})
