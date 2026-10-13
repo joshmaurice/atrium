@@ -301,6 +301,23 @@ client.on('som:remove', ({ nodeName }) => {
   if (!sel || sel.name === nodeName) propSheet.clear()
 })
 
+// A10 — a rename re-keys the tree and the property sheet (PropertySheet
+// matches by name). Re-select the renamed node so the sheet follows it.
+client.on('som:rename', ({ from, to }) => {
+  if (!client.som) return
+  const wasSelected = treeView.selectedNode?.name === from
+  treeView.rebuild(client.som)
+  if (wasSelected) {
+    const node = client.som.getNodeByName(to)
+    if (node) setSelected(node)
+  }
+})
+
+// A7 — the client missed state. The inspector is a developer tool: log it.
+client.on('som:desync', ({ reason, node, parent }) => {
+  console.warn(`[inspector] som:desync (${reason}) — "${node}" under missing parent "${parent}"`)
+})
+
 // Live property updates on the selected node, and world-info panel for document extras
 client.on('som:set', ({ nodeName }) => {
   if (!client.som) return

@@ -777,6 +777,34 @@ client.on('som:remove', ({ nodeName }) => {
   }
 })
 
+// A10 — a rename re-keys everything that is keyed by node name. rebuildPads()
+// is the one that matters here: the som:set handler above re-resolves by the
+// OLD name and misses the pad.
+client.on('som:rename', () => {
+  if (!client.som) return
+  rebuildPads()
+})
+
+// A7/C7 — the client missed state: an `add` named a parent this client does
+// not have. Reconnect to the same world through trackConnect (as Go Back
+// does), which brings a fresh som-dump.
+client.on('som:desync', ({ reason, node, parent }) => {
+  console.warn(`[app] som:desync (${reason}) — "${node}" under missing parent "${parent}"; resyncing`)
+  const url = currentWorldUrl
+  if (!url) return
+  const connectOpts = { avatar: buildAvatarDescriptor() }
+  if (sameOriginAsAccount(url, accountWsBase)) {
+    connectOpts.displayName = client.displayName
+  }
+  trackConnect(url, connectOpts, {
+    onError: (msg) => {
+      console.warn(`[app] som:desync resync failed: ${msg}`)
+    },
+  }).then((outcome) => {
+    if (outcome.status !== 'superseded') rebuildPads()
+  }).catch(() => {})
+})
+
 // ---------------------------------------------------------------------------
 // .atrium.json config loading
 // ---------------------------------------------------------------------------
