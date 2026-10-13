@@ -210,7 +210,10 @@ test('length cap — set extras object with long destination rejects', async () 
   }))
   const err = await q.waitForType('error', 1000)
   assert.ok(err !== null, 'should receive error for extras object with long destination')
-  assert.equal(err.code, 'INVALID_VALUE')
+  // Phase 3 step 0c: a whole `extras` replacement on a node is refused by the
+  // send-field allowlist (D2 — only the teleporter destination leaf is
+  // writable), so the refusal is PERMISSION_DENIED before any value check.
+  assert.equal(err.code, 'PERMISSION_DENIED')
 
   ws.close()
   await waitForClose(ws)
@@ -229,7 +232,10 @@ test('length cap — set extras.atrium object with long destination rejects', as
   }))
   const err = await q.waitForType('error', 1000)
   assert.ok(err !== null, 'should receive error for extras.atrium object with long destination')
-  assert.equal(err.code, 'INVALID_VALUE')
+  // Phase 3 step 0c: a whole `extras.atrium` replacement on a node is refused
+  // by the send-field allowlist (D2), so the refusal is PERMISSION_DENIED
+  // before any destination value check.
+  assert.equal(err.code, 'PERMISSION_DENIED')
 
   ws.close()
   await waitForClose(ws)
