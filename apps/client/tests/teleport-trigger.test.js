@@ -205,9 +205,9 @@ describe('createTeleportTrigger', () => {
       trigger.update([0, 0, 0])
       assert.equal(warns.length, 1, 'should warn once on first unresolvable trigger')
 
-      // Reset pads and try again — should NOT warn again (same pad name)
+      // New connection: reset, then pads rebuilt (the order app.js uses)
+      trigger.reset() // reset clears inFlight, warned set and pads
       trigger.setPads([{ name: 'bad-pad', position: [0, 0, 0], destination: 'ws://bad.com' }])
-      trigger.reset() // reset clears inFlight and warned set
       // Re-arm and re-enter
       trigger.update([0, 0, 0]) // enter (disarmed)
       trigger.update([10, 0, 10]) // leave (armed)
@@ -271,5 +271,53 @@ describe('createTeleportTrigger', () => {
     trigger.update([10, 0, 10]) // leave (shouldn't change anything while in flight)
     trigger.update([0, 0, 0]) // re-enter (should not trigger — in-flight)
     assert.equal(triggered.length, 1, 'should not trigger again while in flight')
+  })
+
+  test('reconnect to the same world — spawn pad starts disarmed again', () => {
+    const triggered = []
+    const trigger = createTeleportTrigger({
+      onTrigger: (ev) => triggered.push(ev),
+      resolveDestination: (d) => d,
+    })
+    const spawnPad = [{ name: 'spawn-pad', position: [0, 0, 0], destination: 'ws://dest.com' }]
+    trigger.setReady(true)
+    trigger.setActive(true)
+
+    // First connection: spawn on the pad, walk away (pad arms)
+    trigger.setPads(spawnPad)
+    trigger.update([0, 0, 0])
+    trigger.update([10, 0, 10])
+
+    // Reconnect to the same world (e.g. Go Back after a failed teleport),
+    // in app.js order: reset on 'connecting', not ready, pads rebuilt identical
+    trigger.setReady(false)
+    trigger.reset()
+    trigger.setPads(spawnPad)
+    trigger.setReady(true)
+
+    // Spawn at the origin, on the pad — must not fire
+    trigger.update([0, 0, 0])
+    assert.equal(triggered.length, 0, 'spawn pad must not fire after reconnect')
+
+    // Normal behavior still works: walk off, walk back on, it fires
+    trigger.update([10, 0, 10])
+    trigger.update([0, 0, 0])
+    assert.equal(triggered.length, 1, 'pad fires on a real re-entry')
+  })
+
+  test('reset drops pads — nothing fires until pads are set again', () => {
+    const triggered = []
+    const trigger = createTeleportTrigger({
+      onTrigger: (ev) => triggered.push(ev),
+      resolveDestination: (d) => d,
+    })
+    trigger.setReady(true)
+    trigger.setActive(true)
+    trigger.setPads([{ name: 'pad-1', position: [0, 0, 0], destination: 'ws://dest.com' }])
+    trigger.update([10, 0, 10]) // outside, arms
+
+    trigger.reset()
+    trigger.update([0, 0, 0]) // stale pad position — must not fire
+    assert.equal(triggered.length, 0, 'no pads after reset')
   })
 })

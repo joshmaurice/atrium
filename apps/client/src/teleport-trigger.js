@@ -67,9 +67,14 @@ export function createTeleportTrigger({ onTrigger, resolveDestination }) {
     ready = val
   }
 
+  // Called on every new connection. Drops the pads too, so a reconnect to the
+  // same world starts disarmed like a fresh load. Otherwise setPads would carry
+  // over "armed, outside" for identical pads, and spawning on a pad at the
+  // origin would fire it.
   function reset() {
     inFlight = false
     warned.clear()
+    pads = new Map()
   }
 
   /**
