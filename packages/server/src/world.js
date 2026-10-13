@@ -105,7 +105,7 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
     // invalid name comes back INVALID_VALUE instead of setPath's INVALID_FIELD.
     if (field === 'name') {
       const result = som.renameNode(nodeName, value)
-      if (!result.ok) return { ok: false, code: result.code }
+      if (!result.ok) return { ok: false, code: result.code, message: result.message }
       return { ok: true }
     }
     try {
@@ -271,7 +271,7 @@ export async function createWorldFromDocument(documentJson) {
     // A8 — explicit rename path (see createWorld's setField).
     if (field === 'name') {
       const result = som.renameNode(nodeName, value)
-      if (!result.ok) return { ok: false, code: result.code }
+      if (!result.ok) return { ok: false, code: result.code, message: result.message }
       return { ok: true }
     }
     try { som.setPath(target, field, value) } catch { return { ok: false, code: 'INVALID_FIELD' } }

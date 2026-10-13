@@ -641,7 +641,7 @@ export function attachSessionHandlers({
 
           const result = world.setField(msg.node, msg.field, msg.value)
           if (!result.ok) {
-            sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
+            sendError(ws, msg.seq, result.code, result.message ?? `${result.code}: ${msg.node}`)
             break
           }
           broadcast({

@@ -297,18 +297,22 @@ export class SOMDocument extends SOMObject {
     const somNode = this._nodesByName.get(oldName)
     if (!somNode) {
       // Not a node: the document, a camera, a light or an animation.
-      return { ok: false, code: this._objectsByName.has(oldName) ? 'INVALID_FIELD' : 'NODE_NOT_FOUND' }
+      return {
+        ok: false,
+        code: this._objectsByName.has(oldName) ? 'INVALID_FIELD' : 'NODE_NOT_FOUND',
+        message: null,
+      }
     }
 
     // D4 — a node hosting a camera or a light cannot be renamed in step 1.
     if (somNode._node.getCamera() || somNode._node.getExtension('KHR_lights_punctual')) {
-      return { ok: false, code: 'INVALID_VALUE' }
+      return { ok: false, code: 'INVALID_VALUE', message: 'rename not supported for camera or light hosts' }
     }
 
     const check = this.checkNewName(newName, somNode)
-    if (!check.ok) return { ok: false, code: check.code }
+    if (!check.ok) return { ok: false, code: check.code, message: check.message }
 
-    if (newName === oldName) return { ok: true, code: null }
+    if (newName === oldName) return { ok: true, code: null, message: null }
 
     somNode._node.setName(newName)
 
@@ -317,7 +321,7 @@ export class SOMDocument extends SOMObject {
     this._nodesByName.set(newName, somNode)
     this._objectsByName.set(newName, somNode)
 
-    return { ok: true, code: null }
+    return { ok: true, code: null, message: null }
   }
 
   // ---------------------------------------------------------------------------
