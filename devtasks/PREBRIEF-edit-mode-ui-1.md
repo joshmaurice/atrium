@@ -1,9 +1,7 @@
 # Pre-brief: Edit mode UI, part 1 (Phase 3 step 1b-1) — select, handles, property panel
 
-Status: **FINAL, Revision 2 (2026-10-13)**, with implementation notes (§12).
-The operator approved decisions E1–E7 (§4) as recommended, on 2026-10-13.
-§12 records where the build differs from Rev 2 and why; the contract text
-below is otherwise unchanged.
+Status: **FINAL, Revision 2 (2026-10-13).** The operator approved decisions
+E1–E7 (§4) as recommended, on 2026-10-13. No other changes since Rev 1.
 - **Rev 0** was drafted by Claude from a clone of `main` at `dec8cc4`
   (runtime code identical to the released `a40d01a9`; `git diff a40d01a9
   dec8cc4` is only the edit-plumbing passdown).
@@ -305,8 +303,6 @@ All seven were approved as recommended in Rev 1.
 - **Excluded** (the click selects nothing):
   - the hit node or any ancestor is `avatar.localNode`, or a peer avatar
     (`avatar.getPeerNode(name)`), per E4.
-  - *Built differently (§12.1):* the local avatar is see-through instead;
-    the click selects what is behind it.
 - **External nodes:** if the hit node or an ancestor carries
   `extras.atrium.source`, select the outermost such ancestor (G8).
 - **Otherwise** `resolveSelectionRoot(hit, { descend: altKey })` from
@@ -562,9 +558,8 @@ pad inside it: the handoff supplies the console snippet that creates one
 1. **Gate:** the owner sees Edit; the visitor and a logged-out window
    don't.
 2. **Select:** click a world node → outline. Alt-click a part of a group →
-   the part. Click the visitor's avatar → nothing. Click your own avatar →
-   whatever is behind it (or nothing), never the avatar (§12.1). Look
-   around with a drag → selection unchanged.
+   the part. Click the visitor's avatar → nothing. Look around with a
+   drag → selection unchanged.
 3. **Handles:** move, rotate and scale a node. The camera doesn't turn
    during a handle drag. The visitor sees the node move smoothly enough
    and land exactly where the owner left it.
@@ -635,34 +630,3 @@ Each finding was checked against `dec8cc4`.
 | 5 | M can re-enable pointer lock during Edit mode; Escape in a text field would deselect | Confirmed: M ~L1609, click lock ~L1587, Escape handler on `document` ~L1232. Typing doesn't reach `nav` (canvas-only keydown, ~L1605) | E6 and B5: M ignored and the preference saved and restored; Escape in a field restores and blurs. Tests and DEV steps 4, 7 |
 | 6 | The three object might not be renamed yet inside a `som:rename` listener | Checked in the libraries: the rename reaches the three object synchronously, before `som:rename` (G4). The review says the prototype confirmed the lookup; no prototype has run yet, Rev 0 said the prototype *would* confirm it | G4 records the timing; B3 re-looks up in the listener; DEV step 4 (rename, then move at once) |
 | — | E7: test renaming in worlds with legacy duplicate names | Accepted | E7: rename disabled in the panel for a duplicated name until the cleanup round's fix, which carries the duplicate-name test (§10) |
-
-## 12. Implementation notes (prototype, 2026-10-13)
-
-What the build does differently from Rev 2, or adds, and why.
-
-### 12.1 The local avatar is see-through (B2)
-In third person the avatar sits in the middle of the view, so "selects
-nothing" blocked a large part of the scene (found in the headless browser
-run). Clicks pass through the local avatar to the next hit. Peer avatars in
-front still select nothing, and the local avatar itself can never be
-selected. The outside review accepted this.
-
-### 12.2 Outside review of the prototype (`ccad2704`, 2026-10-13)
-Fixed in the next commit:
-
-| # | Finding | Fix |
-|---|---|---|
-| 1 | The E7 duplicate-name guard could never fire: `som.nodes` comes from a name-keyed map | Names are counted in the glTF node list (`isDuplicatedName`) |
-| 2 | Name lookups could reach a mesh `Group` named like another node, or the wrong one of two duplicates, so handles could drive a different object | Lookups consider only DocumentView node objects (`Object3D`/`Bone`), both for clicks and for attaching handles; a node whose name is duplicated can't be selected yet (message shown) |
-| 3 | `nodeRemoved` (and `reset`) cancelled gestures before marking records dead, so a rejected drag could write to a removed node | Records are marked dead first; two tests |
-| 4 | Turning Edit off while standing on an armed pad teleported at once (`wasInside` was stale) | `trigger.setActive(true)` after inactivity disarms every pad, as on a fresh load; a pad fires only after the avatar has been outside it |
-| 5 | A press or wheel over the Edit panel turned or zoomed the camera | Look-drag and wheel act only on the canvas |
-| 6 | Entering Edit mode could abandon a pending teleporter save | The Edit button is disabled while a teleporter save or delete is unanswered |
-| nit | A Move drag sent a stray rotation when the stored quaternion was unit only to rounding | Quaternions within 1e-9 of unit length aren't renormalized |
-| nit | A panel commit re-sent the other axes rounded to the display | Only the axes whose text changed are replaced, from full-precision values |
-| nit | Escape typed in the sign-in or world-browser fields affected Edit mode | The Edit-mode Escape ignores keys typed in text fields |
-| nit | A move sent before a rename's answer used the old name and was refused | Handles and transform fields are held while a rename of the selected node is unanswered |
-
-Not changed: delete mode's own name walk (pre-existing; it only deletes
-teleporters) is left as it was.
-
