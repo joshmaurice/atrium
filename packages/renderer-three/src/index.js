@@ -8,4 +8,7 @@ export { initDocumentView } from './document-view.js'
 export { loadBackground } from './load-background.js'
 export { AnimationBridge } from './AnimationBridge.js'
 export { Stage } from './Stage.js'
-export { threeGeometryToGltfPrimitive, buildAvatarDescriptor, buildTeleporterDescriptor } from './geometry-utils.js'
+export {
+  threeGeometryToGltfPrimitive, buildAvatarDescriptor, buildTeleporterDescriptor,
+  buildPrimitiveDescriptor, PRIMITIVE_KINDS, PRIMITIVE_REST_Y, PRIMITIVE_MATERIAL,
+} from './geometry-utils.js'
