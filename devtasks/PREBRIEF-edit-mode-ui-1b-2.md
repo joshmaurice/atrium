@@ -1,8 +1,10 @@
 # Pre-brief: Edit mode UI, part 2 (Phase 3 step 1b-2) — add palette, delete, duplicate
 
-Status: **DRAFT, Revision 0 (2026-10-16).** Decisions J2–J9 (§4) are open for
-the operator. J1 (the lane) was set by the operator when the round was
-started.
+Status: **Revision 1 (2026-10-16).**
+- **Rev 0:** drafted; J1 (the lane) set by the operator when the round was
+  started.
+- **Rev 1:** the operator approved decisions J2–J9 (§4) as recommended, on
+  2026-10-16. No other changes.
 - **Drafted by Claude from a clone of `main` at `4f798eb`.** Its runtime code
   is identical to the released `27486bdf` (DEV, MAIN record and PROD); the
   only later commits are the 10-16 passdown and its connector note
@@ -228,7 +230,9 @@ renderer-three's tests do import three.js.
   §4.1 (confirm deletes, warn about children), §4.2 (five primitives through
   `add`), §4.5 (no undo yet).
 
-## 4. Decisions (open)
+## 4. Decisions (operator, 2026-10-16)
+
+All eight were approved as recommended in Rev 0.
 
 - **J2 — Where the primitive builders live. Recommended: `renderer-three`,**
   as `buildPrimitiveDescriptor({ kind, name, position, rotation })` beside
@@ -551,5 +555,6 @@ after step 5; the audit shows no orphan meshes.
    only for a childless node, design §4.5).
 
 ## 11. Review log
-None yet. An outside review of Rev 0 is recommended before J2–J9 are
-approved, as for 1b-1 and the cleanup round.
+None yet. J2–J9 were approved without an outside review of the pre-brief.
+The outside review of the prototype (J1) is still mandatory; a review of
+this file before the base fetch remains optional.
