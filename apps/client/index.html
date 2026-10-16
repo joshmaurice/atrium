@@ -432,6 +432,11 @@
   #edit-panel input[type="text"]:disabled { opacity: 0.5; }
   #edit-panel .ep-status { color: #94a3b8; font-size: 11px; min-height: 0; }
   #edit-panel .ep-status:empty { display: none; }
+  #edit-panel .ep-label { color: #94a3b8; font-size: 11px; margin-bottom: 3px; }
+  #edit-panel #ep-palette { flex-wrap: wrap; margin-bottom: 8px; }
+  #edit-panel .ep-actions { margin-top: 6px; margin-bottom: 0; }
+  #edit-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
+  #edit-panel .ep-buttons button.ep-danger:not(:disabled) { border-color: #7f1d1d; color: #fca5a5; }
   #edit-panel .ep-error { color: #f87171; font-size: 11px; margin-top: 6px; }
   #edit-panel .ep-error:empty { display: none; }
 
@@ -560,6 +565,14 @@
       <label><input type="checkbox" id="ep-snap-angle" /> 15°</label>
       <label><input type="checkbox" id="ep-snap-scale" /> Scale 0.1</label>
     </div>
+    <div class="ep-label">Add</div>
+    <div class="ep-buttons" id="ep-palette">
+      <button data-kind="cube" title="Add a 1 m cube in front of you">Cube</button>
+      <button data-kind="plane" title="Add a 2 m × 2 m flat plane in front of you">Plane</button>
+      <button data-kind="sphere" title="Add a 1 m sphere in front of you">Sphere</button>
+      <button data-kind="cylinder" title="Add a 1 m cylinder in front of you">Cylinder</button>
+      <button data-kind="ramp" title="Add a ramp in front of you, rising away from you">Ramp</button>
+    </div>
     <div class="ep-empty" id="ep-empty">Click an object to select it.</div>
     <div id="ep-fields" style="display:none">
       <div class="ep-row"><span>Name</span><input type="text" id="ep-name" spellcheck="false" autocomplete="off" /></div>
@@ -578,6 +591,10 @@
         <input type="text" data-field="scale" data-i="0" aria-label="Scale x" />
         <input type="text" data-field="scale" data-i="1" aria-label="Scale y" />
         <input type="text" data-field="scale" data-i="2" aria-label="Scale z" />
+      </div>
+      <div class="ep-buttons ep-actions" id="ep-actions">
+        <button id="ep-duplicate" title="Duplicate the selected object">Duplicate</button>
+        <button id="ep-delete" class="ep-danger" title="Delete the selected object">Delete</button>
       </div>
     </div>
     <div class="ep-error" id="ep-error"></div>

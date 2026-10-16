@@ -4,7 +4,7 @@
 import * as THREE from 'three'
 import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
-import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor, buildTeleporterDescriptor } from '@atrium/renderer-three'
+import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor, buildTeleporterDescriptor, buildPrimitiveDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
 import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
@@ -20,6 +20,9 @@ import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-ges
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
+import { palettePlacement, paletteName, copyName } from './edit-palette.js'
+import { prepareDuplicate } from './edit-duplicate.js'
+import { createStructureTracker, countDescendants, structuralBlockReason, isActiveCameraStale } from './edit-structure.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -1567,6 +1570,10 @@ const epName         = document.getElementById('ep-name')
 const epNameStatus   = document.getElementById('ep-name-status')
 const epError        = document.getElementById('ep-error')
 const epVectorInputs = [...epFields.querySelectorAll('input[data-field]')]
+const epPalette      = document.getElementById('ep-palette')        // 1b-2 N1
+const epPaletteBtns  = [...epPalette.querySelectorAll('button[data-kind]')]
+const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
+const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 
 let selected      = null   // the selected SOMNode, held by object (B2)
 let selectedObj   = null   // its three.js object, owned by DocumentView
@@ -1592,6 +1599,9 @@ const editTracker = createEditTracker({
     if (subtreeSome(node, isTeleporter)) rebuildPads()
   },
 })
+
+// 1b-2 N4 — the pending add, duplicate or delete (one at a time).
+const structure = createStructureTracker()
 
 // E4 — the local avatar and peers' avatars are never selectable. The server
 // refuses edits to live avatars anyway; this is for the UI.
@@ -1626,6 +1636,7 @@ function setEditMode(on) {
   } else {
     if (!modes.edit) return
     selectForEdit(null)          // ends a drag with its final send
+    structure.reset()            // N4 — a late answer is no longer the panel's
     modes.setEdit(false)
     syncGizmoEnabled()
     editPanel.style.display = 'none'
@@ -1642,6 +1653,7 @@ function setEditMode(on) {
 function endEditSession() {
   setEditMode(false)
   editTracker.reset()
+  structure.reset()
   pendingRename = null
 }
 
@@ -1674,6 +1686,7 @@ function onHandleDragging(isDragging) {
     activeGesture.end()
     activeGesture = null
   }
+  refreshEditActions()
 }
 
 function onHandleChange() {
@@ -1815,6 +1828,7 @@ function refreshEditPanel() {
   if (!selected) {
     epEmpty.style.display = ''
     epFields.style.display = 'none'
+    refreshEditActions()
     return
   }
   epEmpty.style.display = 'none'
@@ -1859,6 +1873,7 @@ function refreshNameField() {
     epName.dataset.shown = selected.name
   }
   epNameStatus.textContent = renaming ? 'Renaming…' : ''
+  refreshEditActions()
 }
 
 // Enter commits (via blur → change). Escape restores the field and keeps the
@@ -1976,18 +1991,191 @@ client.on('som:remove', () => {
   const alive = (n) => client.som.getNodeByName(n.name) === n
   editTracker.pruneRemoved(alive)
   if (pendingRename && !alive(pendingRename.node)) pendingRename = null
+  // N2 (1b-2) — this tab's own pending delete: the removal may be ours or
+  // another tab's that reached the server first. Hold the message until our
+  // own answer says which (it always arrives after this broadcast).
+  const pendingDelete = structure.pending?.kind === 'delete' ? structure.pending.node : null
+  if (pendingDelete && !alive(pendingDelete)) structure.removalSeen(pendingDelete)
   if (selected && !alive(selected)) {
+    const gone = selected
     activeGesture = null           // already cancelled by pruneRemoved
     selectForEdit(null)
-    showEditError(REMOVED_MESSAGE)
+    if (structure.removalSeen(gone) === 'show') showEditError(REMOVED_MESSAGE)
   } else if (selected) {
     refreshNameField()             // a duplicate name may have gone
   }
+  resetStaleWorldCamera()
 })
 
 client.on('som:add', () => {
   if (selected) refreshNameField()
 })
+
+// ── Add palette, Duplicate, Delete (Phase 3 step 1b-2) ──────────────────
+// devtasks/PREBRIEF-edit-mode-ui-1b-2.md N1–N4. One structural request at a
+// time (edit-structure.js); the server's answer decides what the panel shows.
+
+function isNameFree(name) {
+  return !!client.som?.checkNewName(name).ok
+}
+
+// N3 — read at click time, from current values (I14: an own edit emits no
+// som:set, so nothing computed earlier is trusted). J4: the SOM wrappers don't
+// expose geometry, so this reads the glTF-Transform node behind SOMNode.
+function checkDuplicate(node) {
+  const gltfNode = node?._node
+  if (!gltfNode) return { ok: false, reason: 'Select an object first' }
+  const name = copyName(node.name, isNameFree)
+  if (!name) return { ok: false, reason: 'No free name for a copy' }
+  return prepareDuplicate(gltfNode, { name })
+}
+
+function structuralBlock() {
+  return structuralBlockReason({
+    hasSelection: !!selected,
+    pending:      !!structure.pending,
+    dragging:     !!activeGesture || !!gizmo?.dragging,
+    renaming:     !!pendingRename && pendingRename.node === selected,
+  })
+}
+
+// Enabled state and tooltips. A hint only: every click checks again.
+function refreshEditActions() {
+  const pending = !!structure.pending
+  for (const b of epPaletteBtns) b.disabled = pending || !modes.edit
+  const block = structuralBlock()
+  epDelete.disabled = !!block
+  epDelete.title = block ?? 'Delete the selected object'
+  let dupReason = block
+  if (!dupReason) {
+    const check = checkDuplicate(selected)
+    dupReason = check.ok ? null : check.reason
+  }
+  epDuplicate.disabled = !!dupReason
+  epDuplicate.title = dupReason ?? 'Duplicate the selected object'
+}
+
+// N1 — a palette primitive, along the view, resting on y = 0.
+epPalette.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-kind]')
+  if (!btn || !modes.edit || structure.pending) return
+  const kind = btn.dataset.kind
+  const name = paletteName(kind, isNameFree)
+  if (!name) { showEditError('No free name for a new object'); return }
+  const origin = avatar.localNode?.translation ?? [0, 0, 0]
+  const forward = new THREE.Vector3()
+  stage.camera.getWorldDirection(forward)
+  const { position, rotation } = palettePlacement(origin, forward.toArray())
+  let seq
+  try {
+    seq = client.addNode(buildPrimitiveDescriptor({ kind, name, position, rotation }))
+  } catch (err) {
+    showEditError(`Couldn’t add: ${err.message}`)
+    return
+  }
+  // The answer can't be handled before this handler returns (one thread).
+  structure.begin('add', seq, { name })
+  clearEditError()
+  refreshEditActions()
+})
+
+// N3 — the copy is built from the node as it is now.
+epDuplicate.addEventListener('click', () => {
+  if (!modes.edit || !selected || structuralBlock()) return
+  const node = selected
+  const check = checkDuplicate(node)
+  if (!check.ok) {
+    showEditError(check.reason)
+    refreshEditActions()
+    return
+  }
+  let seq
+  try {
+    seq = client.addNode(check.descriptor)
+  } catch (err) {
+    showEditError(`Couldn’t duplicate: ${err.message}`)
+    return
+  }
+  structure.begin('duplicate', seq, { name: check.descriptor.name, node })
+  clearEditError()
+  refreshEditActions()
+})
+
+// N2 — confirm every delete; say how many objects go with it.
+epDelete.addEventListener('click', () => {
+  if (!modes.edit || !selected || structuralBlock()) return
+  const node = selected
+  const n = countDescendants(node)
+  const question = n > 0
+    ? `Delete "${node.name}" and ${n} object${n === 1 ? '' : 's'} inside it? This can’t be undone.`
+    : `Delete "${node.name}"? This can’t be undone.`
+  if (!window.confirm(question)) return
+  // The dialog paused this page; messages that arrived meanwhile are still
+  // queued, so the node is as it was. A session that ended throws here.
+  if (!modes.edit || selected !== node) return
+  let seq
+  try {
+    seq = client.removeNode(node.name)
+  } catch (err) {
+    showEditError(`Couldn’t delete: ${err.message}`)
+    return
+  }
+  structure.begin('delete', seq, { name: node.name, node })
+  clearEditError()
+  refreshEditActions()
+})
+
+const STRUCTURE_VERB = { add: 'add', duplicate: 'duplicate', delete: 'delete' }
+
+function onStructureAnswer(seq, status, message) {
+  const result = structure.settle(seq, status)
+  if (!result) return
+  const { request, removedMessage } = result
+  if (removedMessage === 'show') {
+    showEditError(REMOVED_MESSAGE)             // another tab's delete won
+  } else if (removedMessage === null && status === 'rejected' && modes.edit) {
+    showEditError(`Couldn’t ${STRUCTURE_VERB[request.kind]}: ${message}`)
+  } else if (status === 'accepted' && request.kind !== 'delete' && modes.edit) {
+    selectAdded(request.name)                  // J6
+  }
+  refreshEditActions()
+}
+
+// J6 — select the new node once the server has it. The node is in the SOM
+// before edit:accepted (I1); its DocumentView object should be too.
+function selectAdded(name) {
+  const node = client.som?.getNodeByName(name)
+  if (!node) return
+  selectForEdit(node)
+  if (selected === node) return
+  // Not attachable yet: try once more on the next frame.
+  requestAnimationFrame(() => {
+    if (modes.edit && !selected && client.som?.getNodeByName(name) === node) selectForEdit(node)
+  })
+}
+
+client.on('edit:accepted', ({ seq }) => onStructureAnswer(seq, 'accepted'))
+client.on('edit:rejected', ({ seq, code, message }) => onStructureAnswer(seq, 'rejected', message || code))
+client.on('edit:unknown',  ({ seq }) => onStructureAnswer(seq, 'unknown'))
+
+// A remote change to the selection, or to a material it shares, can change
+// whether it may be duplicated.
+client.on('som:set', () => { if (modes.edit) refreshEditActions() })
+client.on('som:rename', () => { if (modes.edit) refreshEditActions() })
+
+// J8 — the world camera being rendered from is stale once its host is gone,
+// or once its three.js camera no longer hangs under the scene (a shared
+// camera whose wrapper moved to a surviving host).
+function resetStaleWorldCamera() {
+  const cam = nav.activeCamera
+  if (!cam) return
+  const host = cam.node
+  const hostAlive = !!host && client.som?.getNodeByName(host.name) === host
+  if (isActiveCameraStale({ active: true, hostAlive, rendered: stage.camera, sceneRoot: sceneGroup })) {
+    stage.setActiveCamera(null)
+    updateHintText()
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Auth UI actions
