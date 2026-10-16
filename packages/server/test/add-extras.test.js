@@ -333,6 +333,30 @@ test('K4: an avatar add carrying any own extras.atrium is PERMISSION_DENIED, and
   }
 })
 
+test('K4: the first-party ephemeral marker on an avatar add is accepted', async () => {
+  // Deviation from the pre-brief, covered by a test: `AtriumClient.connect`
+  // injects `extras.atrium.ephemeral = true` on every real avatar add, so the
+  // avatar refusal must exempt exactly that one shape (and still refuse `{}`,
+  // `{ behavior }`, `{ teleporter }`).
+  const { world, port } = await startOwnerWorld()
+  const { ws, messages } = await connect(port)
+  try {
+    await hello(ws, messages, '55555555')
+    ws.send(JSON.stringify({
+      type: 'add', id: '55555555', seq: 430,
+      node: {
+        name: 'avatar-55555555', translation: [0, 0.7, 0],
+        extras: { displayName: 'User-5555', atrium: { ephemeral: true } },
+      },
+    }))
+    const node = await waitForNode(world, 'avatar-55555555')
+    assert.ok(node, 'the first-party ephemeral marker is accepted')
+    assert.equal(await waitFor(messages, (m) => m.type === 'error' && m.seq === 430), null, 'no error was sent')
+  } finally {
+    ws.close(); await waitForClose(ws)
+  }
+})
+
 test('K4: a first-party-shaped avatar add (extras: { displayName }) is accepted', async () => {
   const { world, port } = await startOwnerWorld()
   const { ws, messages } = await connect(port)
