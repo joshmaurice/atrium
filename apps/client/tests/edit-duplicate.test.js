@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  prepareDuplicate, addMessageBytes, DUPLICATE_REASONS, DUPLICATE_OFFSET_X, MAX_ADD_BYTES,
+  prepareDuplicate, duplicateRuleProblem, addMessageBytes, DUPLICATE_REASONS, DUPLICATE_OFFSET_X, MAX_ADD_BYTES,
 } from '../src/edit-duplicate.js'
 
 // ── glTF-Transform stand-ins ────────────────────────────────────────────────
@@ -19,8 +19,9 @@ import {
 const ext = (n) => Array.from({ length: n }, () => ({}))
 
 function accessor(array, { type = 'VEC3', componentType = 5126, normalized = false, sparse = false,
-  name = '', extras = {}, extensions = 0 } = {}) {
+  name = '', extras = {}, extensions = 0, buffer = null } = {}) {
   return {
+    getBuffer: () => buffer,
     getArray: () => array, getType: () => type, getComponentType: () => componentType,
     getNormalized: () => normalized, getSparse: () => sparse,
     getName: () => name, getExtras: () => extras, listExtensions: () => ext(extensions),
@@ -78,7 +79,7 @@ function node(o = {}) {
     getTranslation: () => n.translation, getRotation: () => n.rotation, getScale: () => n.scale,
     getExtras: () => n.extras, getMesh: () => n.mesh, listChildren: () => n.children,
     listParents: () => n.parents.map((t) => ({ propertyType: t })),
-    getCamera: () => n.camera, getSkin: () => n.skin,
+    getCamera: () => n.camera, getSkin: () => n.skin, getWeights: () => n.weights ?? [],
     getExtension: (e) => (e === 'KHR_lights_punctual' ? n.light : null),
     listExtensions: () => ext(n.extensions),
     _n: n,
@@ -130,6 +131,62 @@ test('rule 4 (review #2): a skin joint is refused', () => {
 
 test('rule 5: externally loaded content is refused', () => {
   expectRule(node({ extras: { atrium: { source: 'https://example.com/a.gltf' } } }), 'external')
+})
+
+test('rule 5 (outside review nit): any own `source` key, null included, as the server refuses', () => {
+  expectRule(node({ extras: { atrium: { source: null } } }), 'external')
+  expectRule(node({ extras: { atrium: { source: '' } } }), 'external')
+})
+
+test('rule 5 (outside review nit): extras.atrium the server’s L5 check would refuse', () => {
+  const r1 = expectRule(node({ extras: { atrium: [] } }), 'atrium')
+  assert.match(r1.reason, /not an object/)
+  expectRule(node({ extras: { atrium: null } }), 'atrium')
+  expectRule(node({ extras: { atrium: { teleporter: 'x' } } }), 'atrium')
+  expectRule(node({ extras: { atrium: { teleporter: {} } } }), 'atrium')
+  expectRule(node({ extras: { atrium: { teleporter: { destination: 42 } } } }), 'atrium')
+  const long = expectRule(node({ extras: { atrium: { teleporter: { destination: 'x'.repeat(3000) } } } }), 'atrium')
+  assert.match(long.reason, /2048/)
+  // what the server accepts is accepted here
+  assert.equal(prepareDuplicate(node({ extras: { atrium: { teleporter: { destination: 'x'.repeat(2048) } } } }), { name: NAME }).ok, true)
+  assert.equal(prepareDuplicate(node({ extras: { atrium: { teleporter: { destination: '' } } } }), { name: NAME }).ok, true)
+  assert.equal(prepareDuplicate(node({ extras: { atrium: { other: 1 } } }), { name: NAME }).ok, true)
+})
+
+test('rule 6 (outside review nit): node morph weights are refused', () => {
+  assert.match(expectRule(node({ mesh: cubeMesh(), weights: [0.5] }), 'mesh').reason, /node morph weights/)
+})
+
+test('rule 6 (outside review nit): a buffer with a name, extras or extensions', () => {
+  for (const buffer of [
+    { getName: () => 'geo.bin', getExtras: () => ({}), listExtensions: () => [] },
+    { getName: () => '', getExtras: () => ({ a: 1 }), listExtensions: () => [] },
+    { getName: () => '', getExtras: () => ({}), listExtensions: () => [{}] },
+  ]) {
+    const p = primitive({ attrs: { POSITION: accessor(new Float32Array(9), { buffer }) } })
+    assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /buffer has a name, extras or extensions/)
+  }
+  const plain = { getName: () => '', getExtras: () => ({}), listExtensions: () => [] }
+  const p = primitive({ attrs: { POSITION: accessor(new Float32Array(9), { buffer: plain }) } })
+  assert.equal(prepareDuplicate(node({ mesh: mesh([p]) }), { name: NAME }).ok, true)
+})
+
+test('rule 9 (outside review S2): far over the cap is refused by a lower bound, without building the copy', () => {
+  // 600 000 numbers can't fit: each is at least a digit and a comma.
+  const zeros = new Float32Array(600_000)
+  let built = 0
+  const pos = accessor(zeros)
+  const counting = { ...pos, getArray: () => { built++; return zeros } }
+  const n = node({ mesh: mesh([primitive({ attrs: { POSITION: counting } })]) })
+  const r = expectRule(n, 'size')
+  assert.match(r.reason, /at least 1,200,000 bytes/)
+  assert.equal(duplicateRuleProblem(n).rule, 'size', 'the cheap check refuses it too')
+  assert.ok(built <= 2, `the arrays were only measured, not copied (${built} reads)`)
+})
+
+test('duplicateRuleProblem: null for an eligible node; never builds the copy', () => {
+  assert.equal(duplicateRuleProblem(node({ mesh: cubeMesh() })), null)
+  assert.equal(duplicateRuleProblem(node({ children: [{}] })).rule, 'children')
 })
 
 test('rule 6: primitive mode other than triangles', () => {

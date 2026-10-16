@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  createStructureTracker, countDescendants, structuralBlockReason, isActiveCameraStale, isAttachedUnder,
+  createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, isActiveCameraStale, isAttachedUnder,
 } from '../src/edit-structure.js'
 
 const nodeA = { name: 'Crate', children: [] }
@@ -83,6 +83,61 @@ test('reset clears the pending request', () => {
   assert.equal(t.pending, null)
   assert.equal(t.removalSeen(nodeA), 'show')
   assert.equal(t.settle(1, 'accepted'), null)
+})
+
+test('(outside review S1) held, a newer node with the name arrives, then accepted → replaced', () => {
+  // A's dialog was open: B deleted "Sphere" and made a new "Sphere"; A's
+  // delete-by-name then removed B's new one.
+  const t = createStructureTracker()
+  t.begin('delete', 9, { name: 'Sphere', node: nodeA })
+  assert.equal(t.removalSeen(nodeA), 'hold')
+  t.addSeen('Sphere')
+  assert.equal(t.settle(9, 'accepted').removedMessage, 'replaced')
+})
+
+test('(S1) a newer node with another name, or before any removal, changes nothing', () => {
+  const t = createStructureTracker()
+  t.begin('delete', 9, { name: 'Sphere', node: nodeA })
+  t.addSeen('Sphere')                       // not held yet: our node is still there
+  t.removalSeen(nodeA)
+  t.addSeen('Cube')                         // another name
+  assert.equal(t.settle(9, 'accepted').removedMessage, 'quiet')
+  const u = createStructureTracker()
+  u.begin('add', 3, { name: 'Sphere' })
+  u.addSeen('Sphere')
+  assert.equal(u.settle(3, 'accepted').removedMessage, null)
+})
+
+test('(S1) replaced but rejected is still "show"', () => {
+  const t = createStructureTracker()
+  t.begin('delete', 9, { name: 'Sphere', node: nodeA })
+  t.removalSeen(nodeA)
+  t.addSeen('Sphere')
+  assert.equal(t.settle(9, 'rejected').removedMessage, 'show')
+})
+
+test('(outside review nit) a descendant of the pending delete is held too', () => {
+  const child = { name: 'leg', children: [] }
+  const parent = { name: 'Table', children: [child] }
+  const t = createStructureTracker()
+  t.begin('delete', 4, { name: 'Table', node: parent, subtree: collectSubtree(parent) })
+  assert.equal(t.removalSeen(child), 'hold', 'the owner had Alt-selected the child')
+  assert.equal(t.removalSeen({ name: 'leg', children: [] }), 'show', 'another object named like the child')
+  assert.equal(t.settle(4, 'accepted').removedMessage, 'quiet')
+})
+
+test('collectSubtree: the node and every descendant, as objects', () => {
+  const b = { children: [] }, a = { children: [b] }, c = { children: [] }, root = { children: [a, c] }
+  assert.deepStrictEqual(collectSubtree(root), [root, a, b, c])
+  assert.deepStrictEqual(collectSubtree(null), [])
+})
+
+test('begin keeps extra fields (the palette retry carries its descriptor)', () => {
+  const t = createStructureTracker()
+  t.begin('add', 1, { name: 'Cube', primitive: 'cube', descriptor: { name: 'Cube' } })
+  assert.equal(t.pending.kind, 'add', 'extra fields never override kind')
+  assert.equal(t.pending.primitive, 'cube')
+  assert.deepStrictEqual(t.pending.descriptor, { name: 'Cube' })
 })
 
 test('countDescendants: every node below, not just children', () => {

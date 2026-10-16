@@ -36,6 +36,7 @@ export const DUPLICATE_REASONS = Object.freeze({
   attached:   'Objects with a camera, light or skin can’t be duplicated',
   referenced: 'This object is animated or part of a skin; a copy would lose that',
   external:   'Externally loaded content can’t be duplicated',
+  atrium:     'This object’s Atrium data would be refused by the server',
   mesh:       'This object’s mesh has data a copy would lose',
   extensions: 'This object has extensions a copy would lose',
   transform:  'Fix this object’s rotation or scale before duplicating it',
@@ -55,11 +56,38 @@ function hasExtensions(prop) {
   return (prop.listExtensions?.() ?? []).length > 0
 }
 
+function isPlainObject(v) {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const proto = Object.getPrototypeOf(v)
+  return proto === Object.prototype || proto === null
+}
+
+const DESTINATION_MAX = 2048    // send-policy.js checkTeleporterDestination
+
+// The server's L5 checks on a non-avatar `add` (send-policy.js
+// checkAtriumExtras), so a legacy value is refused here, not by the server.
+function atriumProblem(extras) {
+  if (extras == null || typeof extras !== 'object') return null
+  if (!Object.hasOwn(extras, 'atrium')) return null
+  const atrium = extras.atrium
+  if (!isPlainObject(atrium)) return 'extras.atrium is not an object'
+  if (!Object.hasOwn(atrium, 'teleporter')) return null
+  const tp = atrium.teleporter
+  if (!isPlainObject(tp)) return 'its teleporter data is not an object'
+  if (typeof tp.destination !== 'string') return 'its teleporter destination is not text'
+  if (tp.destination.length > DESTINATION_MAX) return `its teleporter destination is over ${DESTINATION_MAX} characters`
+  return null
+}
+
 // An accessor carries only what ingestNode rebuilds: values, nothing else.
 function accessorProblem(acc, label, { vec3 }) {
   if (acc.getName() !== '') return `${label} accessor has a name`
   if (!isEmptyObject(acc.getExtras())) return `${label} accessor has extras`
   if (hasExtensions(acc)) return `${label} accessor has extensions`
+  const buf = acc.getBuffer?.()
+  if (buf && (buf.getName() !== '' || !isEmptyObject(buf.getExtras()) || hasExtensions(buf))) {
+    return `${label} buffer has a name, extras or extensions`
+  }
   if (acc.getSparse?.()) return `${label} accessor is sparse`
   if (vec3) {
     if (acc.getType() !== 'VEC3') return `${label} is not VEC3`
@@ -166,6 +194,59 @@ export function addMessageBytes(descriptor) {
 }
 
 /**
+ * A lower bound on the copy's geometry in JSON: every number is at least one
+ * digit plus a comma. Cheap, so a mesh far over the cap is refused without
+ * building megabytes of JSON (outside review S2).
+ */
+function minGeometryBytes(mesh) {
+  let elements = 0
+  for (const prim of mesh.listPrimitives()) {
+    for (const sem of prim.listSemantics()) elements += prim.getAttribute(sem).getArray().length
+    const idx = prim.getIndices()
+    if (idx) elements += idx.getArray().length
+  }
+  return elements * 2
+}
+
+/**
+ * Rules 1–8 of N3, and rule 9's lower bound, without building the copy.
+ * Cheap enough for the button's hint, which runs on many events (S2); the
+ * click runs prepareDuplicate, which measures the real size.
+ *
+ * @param {object} node  the glTF-Transform Node
+ * @returns {null | {ok: false, rule: string, reason: string}}  null when no rule refuses it
+ */
+export function duplicateRuleProblem(node) {
+  if (node.listChildren().length > 0) return deny('children')
+  const parents = node.listParents().map((p) => p.propertyType)
+  if (parents.includes('Node')) return deny('parent')
+  if (node.getCamera() || node.getSkin() || node.getExtension?.('KHR_lights_punctual')) return deny('attached')
+  if (parents.some((t) => !SCENE_GRAPH_PARENTS.has(t))) return deny('referenced')
+  const extras = node.getExtras()
+  // The server refuses any own `source` key, `null` included (S2 in session.js).
+  const atrium = extras?.atrium
+  if (atrium !== null && typeof atrium === 'object' && Object.hasOwn(atrium, 'source')) return deny('external')
+  const a = atriumProblem(extras)
+  if (a) return deny('atrium', a)
+  if ((node.getWeights?.() ?? []).length > 0) return deny('mesh', 'node morph weights')
+  const mesh = node.getMesh()
+  if (mesh) {
+    const p = meshProblem(mesh)
+    if (p) return deny('mesh', p)
+  }
+  if (hasExtensions(node)) return deny('extensions')
+  const t = transformProblem(node.getRotation(), node.getScale())
+  if (t) return deny('transform', t)
+  if (mesh) {
+    const min = minGeometryBytes(mesh)
+    if (min > MAX_ADD_BYTES) {
+      return deny('size', `at least ${min.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
+    }
+  }
+  return null
+}
+
+/**
  * Can this node be duplicated, and if so, what does the copy look like?
  * Rules 1–9 of N3, in order; the first that fails is reported.
  *
@@ -175,20 +256,8 @@ export function addMessageBytes(descriptor) {
  * @returns {{ok: true, descriptor: object, bytes: number} | {ok: false, rule: string, reason: string}}
  */
 export function prepareDuplicate(node, { name }) {
-  if (node.listChildren().length > 0) return deny('children')
-  const parents = node.listParents().map((p) => p.propertyType)
-  if (parents.includes('Node')) return deny('parent')
-  if (node.getCamera() || node.getSkin() || node.getExtension?.('KHR_lights_punctual')) return deny('attached')
-  if (parents.some((t) => !SCENE_GRAPH_PARENTS.has(t))) return deny('referenced')
-  if (node.getExtras()?.atrium?.source != null) return deny('external')
-  const mesh = node.getMesh()
-  if (mesh) {
-    const p = meshProblem(mesh)
-    if (p) return deny('mesh', p)
-  }
-  if (hasExtensions(node)) return deny('extensions')
-  const t = transformProblem(node.getRotation(), node.getScale())
-  if (t) return deny('transform', t)
+  const problem = duplicateRuleProblem(node)
+  if (problem) return problem
   const descriptor = buildCopy(node, name)
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)

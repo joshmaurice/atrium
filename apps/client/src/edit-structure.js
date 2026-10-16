@@ -32,6 +32,14 @@ export function countDescendants(node) {
   return n
 }
 
+/** `node` and every node below it, as objects (for a delete's held removals). */
+export function collectSubtree(node) {
+  const out = []
+  const walk = (n) => { out.push(n); for (const c of n?.children ?? []) walk(c) }
+  if (node) walk(node)
+  return out
+}
+
 /**
  * @returns {{
  *   begin(kind: 'add'|'duplicate'|'delete', seq: number, opts?: {name?: string, node?: object}): boolean,
@@ -43,13 +51,18 @@ export function countDescendants(node) {
  * }}
  */
 export function createStructureTracker() {
-  let pending = null      // { kind, seq, name, node, held }
+  let pending = null      // { kind, seq, name, node, subtree, held, replaced, ...extra }
 
   return {
-    /** Start a request. Refused (false) while another is pending. */
-    begin(kind, seq, { name = null, node = null } = {}) {
+    /**
+     * Start a request. Refused (false) while another is pending. A delete
+     * passes `subtree`: the node objects it removes (the node and every
+     * descendant, collected at the click). Extra fields (a palette add's
+     * descriptor, for its one retry) are kept but never override these.
+     */
+    begin(kind, seq, { name = null, node = null, subtree = null, ...extra } = {}) {
       if (pending) return false
-      pending = { kind, seq, name, node, held: false }
+      pending = { ...extra, kind, seq, name, node, subtree: subtree ?? (node ? [node] : []), held: false, replaced: false }
       return true
     },
 
@@ -57,11 +70,12 @@ export function createStructureTracker() {
 
     /**
      * A `som:remove` took `node` away. 'hold' when this tab's pending delete
-     * is of that very object (identity, not name): the message waits for the
-     * delete's own answer. 'show' otherwise: someone else removed it.
+     * covers that very object — the node or one of its descendants, by
+     * identity, not name: the message waits for the delete's own answer.
+     * 'show' otherwise: someone else removed it.
      */
     removalSeen(node) {
-      if (pending && pending.kind === 'delete' && pending.node === node) {
+      if (pending && pending.kind === 'delete' && pending.subtree.includes(node)) {
         pending.held = true
         return 'hold'
       }
@@ -69,15 +83,32 @@ export function createStructureTracker() {
     },
 
     /**
+     * A `som:add` of `name` arrived (outside review S1). While a removal of
+     * our pending delete is held, a new node with its name means someone
+     * removed ours and made another: our delete-by-name, if the server
+     * accepts it, removes that newer object.
+     */
+    addSeen(name) {
+      if (pending && pending.kind === 'delete' && pending.held && name === pending.name) pending.replaced = true
+    },
+
+    /**
      * The answer to a request. Another seq is ignored (null). For a held
-     * removal: accepted or unknown → 'quiet' (it was this tab's delete, or
-     * the session is ending); rejected → 'show' (another tab's delete won).
+     * removal: unknown → 'quiet' (the session is ending); rejected → 'show'
+     * (another tab's delete won); accepted → 'quiet' (it was ours), or
+     * 'replaced' when a newer node with the name had arrived (S1: ours was
+     * already gone, and the server removed the newer one).
      */
     settle(seq, status) {
       if (!pending || pending.seq !== seq) return null
       const request = pending
       pending = null
-      const removedMessage = request.held ? (status === 'rejected' ? 'show' : 'quiet') : null
+      let removedMessage = null
+      if (request.held) {
+        if (status === 'rejected') removedMessage = 'show'
+        else if (status === 'accepted' && request.replaced) removedMessage = 'replaced'
+        else removedMessage = 'quiet'
+      }
       return { request, status, removedMessage }
     },
 

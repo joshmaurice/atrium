@@ -21,8 +21,8 @@ import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } fr
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 import { palettePlacement, paletteName, copyName } from './edit-palette.js'
-import { prepareDuplicate } from './edit-duplicate.js'
-import { createStructureTracker, countDescendants, structuralBlockReason, isActiveCameraStale } from './edit-structure.js'
+import { prepareDuplicate, duplicateRuleProblem } from './edit-duplicate.js'
+import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, isActiveCameraStale } from './edit-structure.js'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -2039,6 +2039,20 @@ function structuralBlock() {
   })
 }
 
+// The hint runs on many events (remote sets, avatars joining), so it checks
+// rules 1–8 each time but measures the copy's real size (rule 9) once per
+// selected node (outside review S2). The click measures again.
+let dupSize = { node: null, result: null }
+
+function duplicateHint(node) {
+  const gltfNode = node?._node
+  if (!gltfNode) return 'Select an object first'
+  const problem = duplicateRuleProblem(gltfNode)
+  if (problem) return problem.reason
+  if (dupSize.node !== node) dupSize = { node, result: checkDuplicate(node) }
+  return dupSize.result.ok ? null : dupSize.result.reason
+}
+
 // Enabled state and tooltips. A hint only: every click checks again.
 function refreshEditActions() {
   const pending = !!structure.pending
@@ -2047,10 +2061,7 @@ function refreshEditActions() {
   epDelete.disabled = !!block
   epDelete.title = block ?? 'Delete the selected object'
   let dupReason = block
-  if (!dupReason) {
-    const check = checkDuplicate(selected)
-    dupReason = check.ok ? null : check.reason
-  }
+  if (!dupReason) dupReason = duplicateHint(selected)
   epDuplicate.disabled = !!dupReason
   epDuplicate.title = dupReason ?? 'Duplicate the selected object'
 }
@@ -2066,15 +2077,16 @@ epPalette.addEventListener('click', (e) => {
   const forward = new THREE.Vector3()
   stage.camera.getWorldDirection(forward)
   const { position, rotation } = palettePlacement(origin, forward.toArray())
+  const descriptor = buildPrimitiveDescriptor({ kind, name, position, rotation })
   let seq
   try {
-    seq = client.addNode(buildPrimitiveDescriptor({ kind, name, position, rotation }))
+    seq = client.addNode(descriptor)
   } catch (err) {
     showEditError(`Couldn’t add: ${err.message}`)
     return
   }
   // The answer can't be handled before this handler returns (one thread).
-  structure.begin('add', seq, { name })
+  structure.begin('add', seq, { name, primitive: kind, descriptor })
   clearEditError()
   refreshEditActions()
 })
@@ -2102,7 +2114,9 @@ epDuplicate.addEventListener('click', () => {
 })
 
 // N2 — confirm every delete; say how many objects go with it.
-epDelete.addEventListener('click', () => {
+// The pause after the dialog lets messages that arrived meanwhile be handled.
+const AFTER_DIALOG_MS = 50
+epDelete.addEventListener('click', async () => {
   if (!modes.edit || !selected || structuralBlock()) return
   const node = selected
   const n = countDescendants(node)
@@ -2110,9 +2124,14 @@ epDelete.addEventListener('click', () => {
     ? `Delete "${node.name}" and ${n} object${n === 1 ? '' : 's'} inside it? This can’t be undone.`
     : `Delete "${node.name}"? This can’t be undone.`
   if (!window.confirm(question)) return
-  // The dialog paused this page; messages that arrived meanwhile are still
-  // queued, so the node is as it was. A session that ended throws here.
-  if (!modes.edit || selected !== node) return
+  // Outside review S1: the dialog paused this page, so messages that arrived
+  // meanwhile are still queued. Let them land before sending: if another tab
+  // removed this object (and perhaps made a new one with its name), the
+  // delete-by-name would hit the wrong object. Re-check by identity.
+  await new Promise((r) => setTimeout(r, AFTER_DIALOG_MS))
+  if (!modes.edit || selected !== node || structuralBlock()) return
+  if (client.som?.getNodeByName(node.name) !== node) return
+  const subtree = collectSubtree(node)
   let seq
   try {
     seq = client.removeNode(node.name)
@@ -2120,7 +2139,7 @@ epDelete.addEventListener('click', () => {
     showEditError(`Couldn’t delete: ${err.message}`)
     return
   }
-  structure.begin('delete', seq, { name: node.name, node })
+  structure.begin('delete', seq, { name: node.name, node, subtree })
   clearEditError()
   refreshEditActions()
 })
@@ -2133,12 +2152,34 @@ function onStructureAnswer(seq, status, message) {
   const { request, removedMessage } = result
   if (removedMessage === 'show') {
     showEditError(REMOVED_MESSAGE)             // another tab's delete won
+  } else if (removedMessage === 'replaced') {
+    // S1: ours was already gone; the server removed a newer object of that name.
+    showEditError(`This object was removed elsewhere, and a newer “${request.name}” was deleted instead.`)
+  } else if (request.kind === 'add' && status === 'rejected' && !request.retried && modes.edit &&
+             /already in use/.test(message ?? '')) {
+    // Another tab took the name first: try once more with the next free one.
+    const name = request.primitive ? paletteName(request.primitive, isNameFree) : null
+    if (name && retryAdd(request, name)) { refreshEditActions(); return }
+    showEditError(`Couldn’t add: ${message}`)
   } else if (removedMessage === null && status === 'rejected' && modes.edit) {
     showEditError(`Couldn’t ${STRUCTURE_VERB[request.kind]}: ${message}`)
   } else if (status === 'accepted' && request.kind !== 'delete' && modes.edit) {
     selectAdded(request.name)                  // J6
   }
   refreshEditActions()
+}
+
+// One retry of a palette add whose name another tab took first (outside
+// review nit). Same shape and place, the next free name; never retried twice.
+function retryAdd(request, name) {
+  const descriptor = { ...request.descriptor, name }
+  let seq
+  try {
+    seq = client.addNode(descriptor)
+  } catch {
+    return false
+  }
+  return structure.begin('add', seq, { name, primitive: request.primitive, descriptor, retried: true })
 }
 
 // J6 — select the new node once the server has it. The node is in the SOM
@@ -2153,6 +2194,9 @@ function selectAdded(name) {
     if (modes.edit && !selected && client.som?.getNodeByName(name) === node) selectForEdit(node)
   })
 }
+
+// S1 — a new node named like our held delete: our delete-by-name may hit it.
+client.on('som:add', ({ nodeName }) => structure.addSeen(nodeName))
 
 client.on('edit:accepted', ({ seq }) => onStructureAnswer(seq, 'accepted'))
 client.on('edit:rejected', ({ seq, code, message }) => onStructureAnswer(seq, 'rejected', message || code))
