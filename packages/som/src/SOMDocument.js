@@ -627,6 +627,16 @@ export class SOMDocument extends SOMObject {
   // ---------------------------------------------------------------------------
 
   get nodes()      { return Array.from(this._nodesByName.values()) }
+  /**
+   * L6/H14 — EVERY node in the document, in document order, one wrapper each.
+   *
+   * `nodes` is the addressable set (first-registered wins per name), so a
+   * legacy world's shadowed duplicate is absent from it. Clients attach their
+   * mutation listeners to `allNodes` so an edit to a shadowed node is still
+   * seen (and correctly not sent), and starts being sent once it takes the
+   * name over.
+   */
+  get allNodes()   { return this._root.listNodes().map((n) => this._nodeMap.get(n)).filter(Boolean) }
   get meshes()     { return Array.from(this._meshMap.values()) }
   get materials()  { return Array.from(this._materialMap.values()) }
   get cameras()    { return [...this._cameras] }

@@ -1034,7 +1034,12 @@ export class AtriumClient extends EventEmitter {
     if (edit.type === 'send' && edit.field === 'name') {
       let applied = false
       this.applyLocally(() => {
-        const result = this._som?.renameNode?.(edit.node, edit.value)
+        // L6(a)/R3 — pass the object THIS client's namespace resolves for the
+        // name as the rename target. If the client's SOM has diverged (the name
+        // resolves to a different node), renameNode refuses with INVALID_VALUE
+        // and changes nothing, rather than renaming whatever the server named.
+        const target = this._som?.getObjectByName?.(edit.node) ?? null
+        const result = this._som?.renameNode?.(edit.node, edit.value, target)
         applied = result?.ok === true
       })
       if (applied) this.emit('som:rename', { from: edit.node, to: edit.value })
@@ -1112,7 +1117,11 @@ export class AtriumClient extends EventEmitter {
       }
     })
 
-    for (const node of this._som.nodes) {
+    // H14/L6 — listeners on EVERY node in the document, not only `som.nodes`:
+    // a legacy world's shadowed duplicate is not in `som.nodes` (first-wins),
+    // and an edit to it must still be seen — and correctly NOT sent — until it
+    // takes the name over.
+    for (const node of this._som.allNodes) {
       this._attachNodeListeners(node)
     }
 
@@ -1120,11 +1129,19 @@ export class AtriumClient extends EventEmitter {
       this._attachAnimationListeners(anim)
     }
 
+    // H14 — one listener per camera / light WRAPPER, not per `som.cameras` /
+    // `som.lights` entry: a shared camera or light appears once per host.
+    const camerasSeen = new Set()
     for (const somCamera of this._som.cameras) {
+      if (camerasSeen.has(somCamera)) continue
+      camerasSeen.add(somCamera)
       this._attachCameraListeners(somCamera)
     }
 
+    const lightsSeen = new Set()
     for (const somLight of this._som.lights) {
+      if (lightsSeen.has(somLight)) continue
+      lightsSeen.add(somLight)
       this._attachLightListeners(somLight)
     }
   }
@@ -1133,6 +1150,18 @@ export class AtriumClient extends EventEmitter {
     const nodeName = node.name
 
     if (nodeName === this._avatarNodeName) return
+
+    // L6 (b)/review 2 #3 — ONE addressability guard for every callback a node
+    // owns (its own listener and its mesh, primitive and material listeners):
+    // send only when the SOM resolves the node's CURRENT name to this very
+    // node. An edit to a shadowed node — or to a node whose name a non-node
+    // object (an animation, a `.camera` alias) holds — is never sent under a
+    // name that reaches something else; a node that takes the name over starts
+    // sending.
+    const send = (path, value) => {
+      if (this._som?.getObjectByName(node.name) !== node) return
+      this._onLocalMutation(node.name, path, value)
+    }
 
     // A8 — listeners read the node's CURRENT name when they send, never a name
     // captured at attach time, so the first edit after a rename goes out under
@@ -1143,35 +1172,27 @@ export class AtriumClient extends EventEmitter {
       // R1 — a property-less mutation (a childList change) has no field to
       // send; forwarding it would put a malformed `send` on the wire.
       if (!event.detail.property) return
-      this._onLocalMutation(node.name, event.detail.property, event.detail.value)
+      send(event.detail.property, event.detail.value)
     })
 
     const mesh = node.mesh
     if (mesh) {
       mesh.addEventListener('mutation', (event) => {
         if (!event.detail.property) return
-        this._onLocalMutation(node.name, `mesh.${event.detail.property}`, event.detail.value)
+        send(`mesh.${event.detail.property}`, event.detail.value)
       })
 
       mesh.primitives.forEach((prim, i) => {
         prim.addEventListener('mutation', (event) => {
           if (!event.detail.property) return
-          this._onLocalMutation(
-            node.name,
-            `mesh.primitives[${i}].${event.detail.property}`,
-            event.detail.value
-          )
+          send(`mesh.primitives[${i}].${event.detail.property}`, event.detail.value)
         })
 
         const material = prim.material
         if (material) {
           material.addEventListener('mutation', (event) => {
             if (!event.detail.property) return
-            this._onLocalMutation(
-              node.name,
-              `mesh.primitives[${i}].material.${event.detail.property}`,
-              event.detail.value
-            )
+            send(`mesh.primitives[${i}].material.${event.detail.property}`, event.detail.value)
           })
         }
       })
@@ -1179,21 +1200,27 @@ export class AtriumClient extends EventEmitter {
   }
 
   _attachLightListeners(somLight) {
-    const alias = somLight.qualifiedName
-    if (!alias) return
+    // review 2 #2 — the qualified name is read when the listener SENDS, not
+    // captured here: a shared camera's or light's host can change when the host
+    // it names goes away.
     somLight.addEventListener('mutation', (event) => {
       if (this._applyingRemote) return
       if (!event.detail.property) return
+      const alias = somLight.qualifiedName
+      if (!alias) return
       this._onLocalMutation(alias, event.detail.property, event.detail.value)
     })
   }
 
   _attachCameraListeners(somCamera) {
-    const alias = somCamera.qualifiedName
-    if (!alias) return
+    // review 2 #2 — the qualified name is read when the listener SENDS, not
+    // captured at attach time, so a camera whose host was removed is sent under
+    // the surviving host's alias.
     somCamera.addEventListener('mutation', (event) => {
       if (this._applyingRemote) return
       if (!event.detail.property) return
+      const alias = somCamera.qualifiedName
+      if (!alias) return
       this._onLocalMutation(alias, event.detail.property, event.detail.value)
     })
   }
