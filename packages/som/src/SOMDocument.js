@@ -44,6 +44,7 @@ import { SOMAnimation } from './SOMAnimation.js'
 import { SOMLight }     from './SOMLight.js'
 import { SOMTexture }   from './SOMTexture.js'
 import { SOMSkin }      from './SOMSkin.js'
+import { pruneCandidateProperties } from './prune.js'
 
 export class SOMDocument extends SOMObject {
   constructor(document) {
@@ -124,7 +125,10 @@ export class SOMDocument extends SOMObject {
       const somNode = new SOMNode(n, this)
       this._nodeMap.set(n, somNode)
       const name = n.getName()
-      this._nodesByName.set(name, somNode)
+      // K5(b) — first-registered wins in _nodesByName, as in _objectsByName, so
+      // `send`, `remove` and rename all reach the same node in a legacy world
+      // that holds duplicates.
+      if (!this._nodesByName.has(name)) this._nodesByName.set(name, somNode)
       this._registerObject(name, somNode)
       this._registerNodeDispose(n, somNode)
       const m = n.getMesh()
@@ -331,7 +335,29 @@ export class SOMDocument extends SOMObject {
     this._nodesByName.set(newName, somNode)
     this._objectsByName.set(newName, somNode)
 
+    // K5(b) take-over — the freed name passes to the next node that holds it
+    // in document order, in both maps (_objectsByName only if the slot is free).
+    this._takeOverName(oldName)
+
     return { ok: true, code: null, message: null }
+  }
+
+  /**
+   * K5(b) — when the addressable node for `name` is removed or renamed, the
+   * next node in document order that still holds that name (and has a SOM
+   * wrapper) takes the name over in `_nodesByName`, and in `_objectsByName`
+   * only where that slot is free.
+   */
+  _takeOverName(name) {
+    if (this._nodesByName.has(name)) return
+    for (const n of this._root.listNodes()) {
+      if (n.getName() !== name) continue
+      const wrapper = this._nodeMap.get(n)
+      if (!wrapper) continue
+      this._nodesByName.set(name, wrapper)
+      if (!this._objectsByName.has(name)) this._objectsByName.set(name, wrapper)
+      return
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -349,10 +375,59 @@ export class SOMDocument extends SOMObject {
    */
   removeSubtree(somNode) {
     if (!somNode) return
-    for (const child of somNode.children.slice()) {
-      this.removeSubtree(child)
+
+    const nodes = this._collectSubtree(somNode)
+
+    // L2 — collect the resources the subtree used BEFORE disposing anything.
+    // Disposal severs edges, so the chain under an orphan mesh would be
+    // invisible afterwards.
+    const candidates = []
+    for (const n of nodes) {
+      const gltfNode = n._node
+      const mesh  = gltfNode.getMesh()
+      const skin  = gltfNode.getSkin()
+      const cam   = gltfNode.getCamera()
+      const light = gltfNode.getExtension?.('KHR_lights_punctual')
+      if (mesh)  candidates.push(mesh)
+      if (skin)  candidates.push(skin)
+      if (cam)   candidates.push(cam)
+      if (light) candidates.push(light)
     }
-    this._disposeNode(somNode._node, somNode)
+
+    // Children first, parent last (glTF's Node.dispose detaches a subtree).
+    for (const n of nodes.slice().reverse()) this._disposeNode(n._node, n)
+
+    // L1 — dispose whatever the subtree used that nothing else still uses.
+    const { disposed } = pruneCandidateProperties(this._root, candidates)
+    this._syncMapsAfterPrune(disposed)
+  }
+
+  /** Every SOMNode in a subtree, the root included, parents before children. */
+  _collectSubtree(somNode) {
+    const out = [somNode]
+    for (const child of somNode.children) out.push(...this._collectSubtree(child))
+    return out
+  }
+
+  /**
+   * L2 — drop this document's cache entries for resources L1 just disposed.
+   * Map entries are keyed by the glTF-Transform property, so the entry for a
+   * disposed property is exactly the entry whose wrapper is now unreachable.
+   */
+  _syncMapsAfterPrune(disposed) {
+    if (!disposed || disposed.length === 0) return
+    const gone = new Set(disposed)
+    for (const gltf of gone) {
+      this._meshMap.delete(gltf)
+      this._primitiveMap.delete(gltf)
+      this._materialMap.delete(gltf)
+      this._textureMap.delete(gltf)
+      this._skinMap.delete(gltf)
+      this._cameraMap.delete(gltf)
+      this._lightMap.delete(gltf)
+    }
+    this._cameras = this._cameras.filter(c => !gone.has(c._camera))
+    this._lights  = this._lights.filter(l => !gone.has(l._light))
   }
 
   /**
@@ -376,13 +451,19 @@ export class SOMDocument extends SOMObject {
     if (this._objectsByName.get(name) === somNode) this._objectsByName.delete(name)
 
     if (gltfCamera) this._disposeHostedCamera(name, gltfCamera)
-    if (gltfLight)  this._disposeHostedLight(name, gltfLight)
+    if (gltfLight)  this._disposeHostedLight(name, gltfLight, somNode)
+
+    // K5(b) — the freed name passes to the next node that holds it.
+    this._takeOverName(name)
   }
 
   /**
-   * Clean up a camera hosted by a disposed node. The host's own alias always
-   * goes; the camera object, its bare name and its `cameras` slot go only when
-   * no surviving node still references the glTF camera.
+   * Clean up a camera hosted by a disposed node (L2/H12). Per host, always: this
+   * host's own alias and its entry in `cameras`. The shared wrapper is one
+   * object for all hosts; its qualified name and host node move to the
+   * surviving host (first in document order). When the last host goes, the bare
+   * name, `_cameraMap` entry and wrapper state go with it — L1 disposes the
+   * glTF camera itself.
    */
   _disposeHostedCamera(hostName, gltfCamera) {
     const somCamera = this._cameraMap.get(gltfCamera)
@@ -391,43 +472,78 @@ export class SOMDocument extends SOMObject {
     const alias = hostName + '.camera'
     if (this._objectsByName.get(alias) === somCamera) this._objectsByName.delete(alias)
 
-    const stillReferenced = this._root.listNodes().some(n => n.getCamera() === gltfCamera)
-    if (stillReferenced) return
+    const idx = this._cameras.indexOf(somCamera)
+    if (idx >= 0) this._cameras.splice(idx, 1)
+
+    const survivingHost = this._findCameraHost(gltfCamera)
+    if (survivingHost) {
+      somCamera._qualifiedName = survivingHost.name + '.camera'
+      somCamera._hostNode      = survivingHost
+      return
+    }
 
     const bareName = gltfCamera.getName?.() ?? null
     if (bareName && this._objectsByName.get(bareName) === somCamera) {
       this._objectsByName.delete(bareName)
     }
     if (this._cameraMap.get(gltfCamera) === somCamera) this._cameraMap.delete(gltfCamera)
-    const idx = this._cameras.indexOf(somCamera)
-    if (idx >= 0) this._cameras.splice(idx, 1)
     somCamera._qualifiedName = null
     somCamera._hostNode      = null
   }
 
+  /** The first surviving host node that still uses `gltfCamera`, or null. */
+  _findCameraHost(gltfCamera) {
+    for (const n of this._root.listNodes()) {
+      if (n.getCamera() === gltfCamera) return this._nodeMap.get(n) ?? null
+    }
+    return null
+  }
+
   /**
-   * Clean up a light hosted by a disposed node — same rules as a camera.
+   * Clean up a light hosted by a disposed node (L2/H12). A light's per-host
+   * wrapper is the host's own (`somNode._light`), not `_lightMap`'s — the map
+   * only ever held the last host's wrapper. The bare name and the `_lightMap`
+   * entry move to the surviving host's wrapper; when the last host goes they
+   * go, and L1 disposes the glTF light.
    */
-  _disposeHostedLight(hostName, gltfLight) {
-    const somLight = this._lightMap.get(gltfLight)
-    if (!somLight) return
+  _disposeHostedLight(hostName, gltfLight, hostSomNode) {
+    const somLight = hostSomNode?._light ?? this._lightMap.get(gltfLight) ?? null
 
-    const alias = hostName + '.light'
-    if (this._objectsByName.get(alias) === somLight) this._objectsByName.delete(alias)
+    if (somLight) {
+      const alias = hostName + '.light'
+      if (this._objectsByName.get(alias) === somLight) this._objectsByName.delete(alias)
+      const idx = this._lights.indexOf(somLight)
+      if (idx >= 0) this._lights.splice(idx, 1)
+      if (somLight._qualifiedName === alias) somLight._qualifiedName = null
+    }
 
-    const stillReferenced = this._root.listNodes().some(
-      n => n.getExtension?.('KHR_lights_punctual') === gltfLight
-    )
-    if (stillReferenced) return
+    const survivingHost = this._findLightHost(gltfLight)
+    if (survivingHost) {
+      const survivorLight = survivingHost._light ?? null
+      if (survivorLight && survivorLight !== somLight) {
+        const bareName = gltfLight.getName?.() ?? null
+        if (bareName && this._objectsByName.get(bareName) === somLight) {
+          this._objectsByName.set(bareName, survivorLight)
+        }
+        if (this._lightMap.get(gltfLight) === somLight) this._lightMap.set(gltfLight, survivorLight)
+        survivorLight._qualifiedName = survivingHost.name + '.light'
+      }
+      return
+    }
 
     const bareName = gltfLight.getName?.() ?? null
-    if (bareName && this._objectsByName.get(bareName) === somLight) {
+    if (bareName && somLight && this._objectsByName.get(bareName) === somLight) {
       this._objectsByName.delete(bareName)
     }
-    if (this._lightMap.get(gltfLight) === somLight) this._lightMap.delete(gltfLight)
-    const idx = this._lights.indexOf(somLight)
-    if (idx >= 0) this._lights.splice(idx, 1)
-    somLight._qualifiedName = null
+    if (somLight && this._lightMap.get(gltfLight) === somLight) this._lightMap.delete(gltfLight)
+  }
+
+  /** The first surviving host node that still uses `gltfLight`, or null. */
+  _findLightHost(gltfLight) {
+    for (const n of this._root.listNodes()) {
+      if (n.getExtension?.('KHR_lights_punctual') === gltfLight) return this._nodeMap.get(n) ?? null
+    }
+    return null
   }
 
   // ---------------------------------------------------------------------------
@@ -546,7 +662,7 @@ export class SOMDocument extends SOMObject {
     const somNode = new SOMNode(node, this)
     this._nodeMap.set(node, somNode)
     const name = node.getName()
-    this._nodesByName.set(name, somNode)
+    if (!this._nodesByName.has(name)) this._nodesByName.set(name, somNode)
     this._registerObject(name, somNode)
     this._registerNodeDispose(node, somNode)
     return somNode
@@ -609,7 +725,7 @@ export class SOMDocument extends SOMObject {
     const somNode = new SOMNode(node, this)
     this._nodeMap.set(node, somNode)
     const name = node.getName()
-    this._nodesByName.set(name, somNode)
+    if (!this._nodesByName.has(name)) this._nodesByName.set(name, somNode)
     this._registerObject(name, somNode)
     this._registerNodeDispose(node, somNode)
 
@@ -773,7 +889,7 @@ export class SOMDocument extends SOMObject {
 
       const somNode = new SOMNode(node, this)
       this._nodeMap.set(node, somNode)
-      this._nodesByName.set(prefixedName, somNode)
+      if (!this._nodesByName.has(prefixedName)) this._nodesByName.set(prefixedName, somNode)
       this._registerObject(prefixedName, somNode)
       this._registerNodeDispose(node, somNode)
 

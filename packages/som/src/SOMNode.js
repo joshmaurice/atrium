@@ -25,7 +25,7 @@ export class SOMNode extends SOMObject {
     // enforces the D3 name rules and refuses camera/light hosts (D4). On
     // failure it throws a typed error and changes nothing.
     if (this._document) {
-      const result = this._document.renameNode(this.name, v)
+      const result = this._document.renameNode(this.name, v, this)
       if (!result.ok) {
         const err = new Error(`Cannot rename "${this.name}" to "${v}": ${result.code}`)
         err.code = result.code

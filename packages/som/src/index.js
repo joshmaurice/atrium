@@ -15,3 +15,16 @@ export { SOMLight }     from './SOMLight.js'
 export { SOMTexture }   from './SOMTexture.js'
 export { SOMSkin }      from './SOMSkin.js'
 export { parsePath }    from './SOMDocument.js'
+export {
+  pruneCandidateProperties,
+  pruneDocumentInPlace,
+  pruneDocumentDryRun,
+  collectWholeDocumentCandidates,
+  collectExtensionLights,
+  countDocumentResources,
+  countByType,
+  emptyCounts,
+  isPrunableType,
+  copyDocument,
+  PRUNE_COUNT_KEYS,
+} from './prune.js'
