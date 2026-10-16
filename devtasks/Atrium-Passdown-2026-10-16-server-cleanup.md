@@ -247,6 +247,11 @@ but don't call `deploy_status` during a deploy.
 - **Workflow branches are invisible** to it until published.
 - `kanban_list` with `status: archived` returned nothing although cards were
   archived; read archived cards with `kanban_show`.
+- **`read_file` for `devtasks/*.md` didn't see a file `git_fetch_mirror` had
+  just fetched** (2026-10-16: the fetch reported `origin/main` at `b41bb29`,
+  and `read_file` of the passdown added in that commit failed with "does not
+  exist in refs/remotes/origin/main"). It may read a different clone or ref
+  than the fetch updates. Check when the connector is next worked on.
 
 ### 5.2 Watching the board
 Claude can't wake itself without a scheduled check-in, which the operator sees.
