@@ -1,6 +1,9 @@
 # Pre-brief: Edit mode UI, part 2 (Phase 3 step 1b-2) — add palette, delete, duplicate
 
-Status: **Revision 1 (2026-10-16).**
+Status: **FINAL, Revision 2 (2026-10-16), with implementation notes (§12).**
+§12 records where the build differs from Rev 2 and why; the contract text
+is otherwise unchanged. (The copy uploaded to `main` at `455ac25` says
+"Revision 1" on this line by mistake; its content is Rev 2.)
 - **Rev 0:** drafted; J1 (the lane) set by the operator when the round was
   started.
 - **Rev 1:** the operator approved decisions J2–J9 (§4) as recommended, on
@@ -762,3 +765,93 @@ change).
 | 9 | Legacy transforms can pass eligibility and fail K6 on the server | Confirmed: L7 doesn't rewrite saved values (I8) | N3 rule 8, no silent changes. Tests, proof (m) |
 | 10 | The proofs miss the integration risks; the e2e can't prove the panel wiring | Accepted | Proofs (i)–(n); a headless browser run of the real page (§7.4); DEV steps 3 and 5b |
 | 11 (nit) | Say unsupported material state is refused even when it doesn't change the look | Accepted | N3's opening paragraph |
+
+## 12. Implementation notes (prototype, 2026-10-16)
+
+Branch `claude/edit-mode-ui-1b-2`, base `455ac25` (`main` with this file at
+Rev 2). Three feature commits: `0f99fb7` renderer-three, `c00bb12` pure
+modules, `d659918` wiring; then this note.
+
+### 12.1 Prototype checks
+- **N1, attachable on acceptance: yes.** In the headless run, a listener
+  added after `app.js`'s saw the panel already showing the new node when
+  `edit:accepted` arrived: the DocumentView object exists by then. The
+  next-frame retry in `selectAdded` stays as a fallback; it never ran.
+- **N2/J8, DocumentView detaching a removed host:** not observed directly.
+  The headless J8 case (tab 2 removes `MainCamera`'s host) takes the
+  "host gone" branch first. The shared-camera branch is covered by the
+  `isActiveCameraStale` unit test only, as §7.4 says.
+
+### 12.2 Where the build differs from Rev 2
+- **N1:** `buildPrimitiveDescriptor({ kind, name, position, rotation })`
+  takes the **ground point** and adds the rest height itself
+  (`PRIMITIVE_REST_Y`), so only renderer-three knows the shapes' heights.
+  `palettePlacement` returns the ground point (y = 0).
+- **N3/J4:** `prepareDuplicate(gltfNode, { name })` reads the glTF-Transform
+  node through its own methods (`getMesh()`, `listPrimitives()`,
+  `listParents()`…) instead of plain values from an adapter. `app.js`'s only
+  private access is `selected._node`. The unit tests use stand-ins with
+  those method names; the end-to-end script ran the same function on real
+  glTF-Transform objects (§12.3).
+- **N3 rule 4** is "every glTF-Transform parent is `Root`, `Scene` or
+  `Node`"; rule 2 is checked first, so a nested node reports rule 2.
+- **N2, "record before sending":** the delete is recorded right after
+  `removeNode` returns, in the same task; no answer can be handled in
+  between. After the confirmation dialog the handler also checks that Edit
+  mode is still on and the selection unchanged.
+- **N2, dialog wording:** `Delete "grp" and 3 objects inside it? This
+  can't be undone.` (`1 object` for one).
+- **J8** lives in `edit-structure.js` (`isActiveCameraStale`,
+  `isAttachedUnder`); `app.js`'s `resetStaleWorldCamera` runs after every
+  `som:remove`.
+- **N3's button refresh** runs from `refreshNameField` (selection, rename,
+  `som:add`, `som:remove`), the end of a handle drag, every structural
+  answer, and `som:set` / `som:rename`. It's a hint; the click checks again.
+- **The race (review #3), one more case:** if the other tab's removal
+  arrives *before* this tab opens its dialog, this tab's selection clears
+  with "This object was removed." and Delete is unavailable, so nothing is
+  sent. While the dialog is open the page processes nothing, which is the
+  case N2 handles.
+
+### 12.3 Verification
+
+| Suite | Command | Count |
+|---|---|---|
+| `apps/client` | `cd apps/client && node --test tests/*.test.js` | **374** (294 + 18 palette + 26 duplicate + 17 structure + 19 import-guard) |
+| renderer-three | `cd packages/renderer-three && node --test tests/*.test.js` | **86** (64 + 22) |
+| `packages/client` | `cd packages/client && node --test --test-force-exit tests/*.test.js` | 169 |
+| interaction | `cd packages/interaction && node --test tests/*.test.js` | 9 |
+| som | `cd packages/som && node --test test/*.test.js` | 224 |
+| protocol | `cd packages/protocol && node --test test/*.test.js` | 71 |
+
+All `fail 0`, `skipped 0`, Node 22.22.0. No file changed in `packages/server`,
+`packages/som`, `packages/protocol` or `packages/client`.
+
+- **Proofs (a)–(n):** each break applied, its test file run, the change
+  reverted. All fourteen exit 1 and fail their named tests ((j) was run as
+  two breaks, one per check). (i), a WeakMap cache in `prepareDuplicate`,
+  fails both review #1 tests.
+- **End to end (§7.4), 48 checks:** a real owned document world, two real
+  `AtriumClient`s. Palette adds seen by B with identical Float32 positions
+  and surviving save and reload; duplicate after an own move and rotate;
+  pad duplicate; a 20 000-vertex node put in the server in-process, refused
+  by rule 9 at 1 290 371 bytes with nothing sent and A still connected; a
+  group delete with B's mesh, accessor and node counts restored; the race,
+  with A's reading paused to stand in for its open dialog.
+- **Headless browser run (§7.4), 42 checks:** the real `apps/client` page
+  (Playwright Chromium 1194) against a real local server; esm.sh served from
+  local copies of the same versions, `three/addons/` refused as esm.sh
+  refuses it. Gate; palette (double click → one node, selection, 2.5 m,
+  resting on y = 0); ORBIT looking along +X places along +X with the avatar
+  rotation unchanged; duplicate after moving and rotating through the panel;
+  rename pending disables both buttons; both ineligible tooltips; delete
+  dialog text, Cancel, own delete without the message, a group of 3; the
+  two-tab race through both panels with tab 1's dialog open; removal from
+  elsewhere; J8 in a commons seeded from `space-cameras.gltf`. Console: only
+  the pre-login 401 and the race's deliberate `NODE_NOT_FOUND`.
+- **Harness lessons:** headless background tabs get no animation frames
+  (bring a tab to the front before view-dependent steps); the home world
+  allows WALK and FLY only, so ORBIT needs `_allowedModes` widened in the
+  harness; the commons seed refuses a fixture whose buffer isn't a data URI.
+- **Not covered here:** Firefox (§8 is Firefox); the shared-camera J8 case
+  on a real scene.
