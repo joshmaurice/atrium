@@ -14,6 +14,11 @@ const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
 const KEEPALIVE_INTERVAL = 30_000
 
+// L9/K7 — the WebSocket payload cap. `ws` closes a connection that exceeds it
+// with 1009, before the message is parsed or ingested. The largest legitimate
+// client message today is an avatar or teleporter `add` of a few KB.
+const MAX_PAYLOAD_BYTES = 1048576
+
 let serverSeq = 0
 
 function nextSeq() {
@@ -158,7 +163,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
   // Attach the WebSocket server to the provided HTTP server using noServer: true
   // and an explicit upgrade handler. This establishes the seam for later cookie
   // and Origin validation at upgrade time.
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
 
   httpServer.on('upgrade', (request, socket, head) => {
     // Only handle WebSocket upgrade requests
