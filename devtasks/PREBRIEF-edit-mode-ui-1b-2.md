@@ -770,17 +770,22 @@ change).
 
 Branch `claude/edit-mode-ui-1b-2`, base `455ac25` (`main` with this file at
 Rev 2). Three feature commits: `0f99fb7` renderer-three, `c00bb12` pure
-modules, `d659918` wiring; then this note.
+modules, `d659918` wiring; `01ef38f` this note (the SHA GLM and the outside
+review reviewed); `ccf789a` the outside-review fixes (§12.4); then this
+update.
 
 ### 12.1 Prototype checks
 - **N1, attachable on acceptance: yes.** In the headless run, a listener
   added after `app.js`'s saw the panel already showing the new node when
   `edit:accepted` arrived: the DocumentView object exists by then. The
   next-frame retry in `selectAdded` stays as a fallback; it never ran.
-- **N2/J8, DocumentView detaching a removed host:** not observed directly.
-  The headless J8 case (tab 2 removes `MainCamera`'s host) takes the
-  "host gone" branch first. The shared-camera branch is covered by the
-  `isActiveCameraStale` unit test only, as §7.4 says.
+- **N2/J8, DocumentView detaching a removed host: observed** by the outside
+  review with a real `SOMDocument`, `@gltf-transform/view` and three.js:
+  removing an unrelated node, a peer-avatar-style node or a child of the
+  host leaves the camera attached (not stale); removing the host detaches it
+  (stale); in the shared-camera case the wrapper moves to the surviving host
+  and the rendered camera is detached (stale). The headless J8 case takes the
+  "host gone" branch.
 
 ### 12.2 Where the build differs from Rev 2
 - **N1:** `buildPrimitiveDescriptor({ kind, name, position, rotation })`
@@ -817,7 +822,7 @@ modules, `d659918` wiring; then this note.
 
 | Suite | Command | Count |
 |---|---|---|
-| `apps/client` | `cd apps/client && node --test tests/*.test.js` | **374** (294 + 18 palette + 26 duplicate + 17 structure + 19 import-guard) |
+| `apps/client` | `cd apps/client && node --test tests/*.test.js` | **388** (294 + 18 palette + 32 duplicate + 23 structure + 21 import-guard); 374 at `01ef38f` |
 | renderer-three | `cd packages/renderer-three && node --test tests/*.test.js` | **86** (64 + 22) |
 | `packages/client` | `cd packages/client && node --test --test-force-exit tests/*.test.js` | 169 |
 | interaction | `cd packages/interaction && node --test tests/*.test.js` | 9 |
@@ -827,10 +832,10 @@ modules, `d659918` wiring; then this note.
 All `fail 0`, `skipped 0`, Node 22.22.0. No file changed in `packages/server`,
 `packages/som`, `packages/protocol` or `packages/client`.
 
-- **Proofs (a)–(n):** each break applied, its test file run, the change
-  reverted. All fourteen exit 1 and fail their named tests ((j) was run as
-  two breaks, one per check). (i), a WeakMap cache in `prepareDuplicate`,
-  fails both review #1 tests.
+- **Proofs (a)–(t):** each break applied, its test file run, the file
+  restored. All exit 1 and fail their named tests ((j) was run as two
+  breaks, one per check). (i), a WeakMap cache in `prepareDuplicate`, fails
+  both review #1 tests. (o)–(t) are §12.4's.
 - **End to end (§7.4), 48 checks:** a real owned document world, two real
   `AtriumClient`s. Palette adds seen by B with identical Float32 positions
   and surviving save and reload; duplicate after an own move and rotate;
@@ -838,7 +843,8 @@ All `fail 0`, `skipped 0`, Node 22.22.0. No file changed in `packages/server`,
   by rule 9 at 1 290 371 bytes with nothing sent and A still connected; a
   group delete with B's mesh, accessor and node counts restored; the race,
   with A's reading paused to stand in for its open dialog.
-- **Headless browser run (§7.4), 42 checks:** the real `apps/client` page
+- **Headless browser run (§7.4), 48 checks at `ccf789a`** (42 at `01ef38f`, plus
+  §12.4's S1 and palette-race cases): the real `apps/client` page
   (Playwright Chromium 1194) against a real local server; esm.sh served from
   local copies of the same versions, `three/addons/` refused as esm.sh
   refuses it. Gate; palette (double click → one node, selection, 2.5 m,
@@ -855,3 +861,35 @@ All `fail 0`, `skipped 0`, Node 22.22.0. No file changed in `packages/server`,
   harness; the commons seed refuses a fixture whose buffer isn't a data URI.
 - **Not covered here:** Firefox (§8 is Firefox); the shared-camera J8 case
   on a real scene.
+
+### 12.4 GLM review and the outside review of `01ef38f`
+**GLM (`t_17130829`): APPROVE.** It reproduced every count and proofs (a),
+(c), (i), (k), with results matching the build's (including (i) also
+failing the UTF-8 size test). Its contract judgment was brief: about 20 s
+and two file reads, with no findings. Run stats: 92 s, 26 terminal calls.
+
+**Outside review (a separate Claude session): APPROVE, two should-fixes.**
+Its counts matched §12.3; it reproduced (a), (c), (i), (k) two ways, (l),
+(n); its end-to-end probe passed the size cap, stale values, group delete,
+the two-tab race and lossless round trips. All findings were accepted and
+fixed in `ccf789a`:
+
+| # | Finding | Fix | Proof / check |
+|---|---|---|---|
+| S1 | During the open-dialog race, tab B deletes the object and makes a new one with the same name (J5 reuses a freed name); tab A's delete-by-name then removes B's new object, and A is told nothing | After the dialog, wait 50 ms so queued messages land, then re-check by identity and send nothing if the object is gone. If a new node with the name still arrives while the removal is held and the delete is accepted, say so: "This object was removed elsewhere, and a newer “X” was deleted instead." The root cause (remove by name) is protocol; noted for step 2 (undo has the same identity problem) | (o); headless: B's new node survives A's OK, A shows "This object was removed." |
+| S2 | The Duplicate hint built and stringified the whole copy on every refresh (18 ms at 14 200 vertices, 443 ms at 300 000) | The hint checks rules 1–8 and a lower bound (two bytes a number) each time, and measures the real size once per selected node; the click measures again | (q) |
+| nit | Rule 5 checked `source != null`; the server refuses any own `source` key | `Object.hasOwn` on a non-null `extras.atrium`, as the server does | (r) |
+| nit | Legacy `extras.atrium` the server's L5 check refuses showed as eligible | Rule 5 now mirrors L5 (`atrium` and `teleporter` plain objects, a string destination of at most 2048) | (s) |
+| nit | Node `weights` and buffer name/extras are dropped by `add` | Refused by rule 6 | (t) |
+| nit | Two tabs pressing the same palette button: the second got "already in use" | One retry with the next free name | headless: two cylinders, no message |
+| nit | A held removal covered only the pending node, not its descendants | The delete records its subtree at the click | (p) |
+| nit | §12.1 could say "observed" | Updated | — |
+
+The N3 rules now read: 5 also refuses an `extras.atrium` the server's L5
+check would refuse; 6 also refuses node morph weights and buffers with a
+name, extras or extensions; 9 refuses early on the lower bound.
+
+**Process note:** the first proof script restored files with
+`git checkout --`, which reverted the uncommitted fixes while they were
+being tested. They were re-applied, committed (`ccf789a`), and the script
+now restores each file from the copy it read. Commit before running proofs.
