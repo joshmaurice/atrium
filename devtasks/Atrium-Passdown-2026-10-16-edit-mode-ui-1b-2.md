@@ -13,7 +13,7 @@ where this file says otherwise.
 
 | Item | State |
 |---|---|
-| Release | PROD deploy `t_391cf11e` running at 11:48 PT, PROD already serving `68a5b2b4` and healthy; **COMPLETE to be confirmed** (see §1.1) |
+| Release | **COMPLETE.** PROD deploy `t_391cf11e` done (DB backed up, health ok, no restart); confirmed through the connector at 14:59 PT |
 | DEV / MAIN / PROD | all at `68a5b2b41a56cb479358287f028661366eb00164` |
 | Base | `455ac25` (`main` with the pre-brief uploaded); runtime code equal to the released `27486bdf` |
 | Spec | `devtasks/PREBRIEF-edit-mode-ui-1b-2.md`, FINAL Rev 2 plus §12 implementation notes (§12.4: the reviews and fixes) |
