@@ -5,6 +5,13 @@ Status: **Revision 1 (2026-10-16).**
   started.
 - **Rev 1:** the operator approved decisions J2–J9 (§4) as recommended, on
   2026-10-16. No other changes.
+- **Rev 2:** applies an outside review of Rev 1 (ChatGPT, 2026-10-16,
+  11 findings, two must-fix). Each was checked against `4f798eb`, two with
+  new probes; §11 lists them. Changes: new I14–I16 and an I11 bullet; J5's
+  and J8's detail (the decisions stand); N1 placement; N2's own-delete and
+  camera rules; N3 rewritten as a lossless contract checked at click time;
+  N4; §7 tests, proofs (i)–(n), the e2e setup and a headless browser run;
+  §8 steps 3, 5b and 6.
 - **Drafted by Claude from a clone of `main` at `4f798eb`.** Its runtime code
   is identical to the released `27486bdf` (DEV, MAIN record and PROD); the
   only later commits are the 10-16 passdown and its connector note
@@ -190,7 +197,46 @@ holds one; values in saved worlds aren't checked, L7).
 - **Nothing resets it when its host node is removed.** Before 1b-2 only a
   crafted `remove` could do that; the Edit-mode delete makes it one click.
   `SOMCamera.node` returns the host (`SOMCamera.js` ~L20).
-- See J8.
+- **Shared cameras (Rev 2, review #6):** `Stage` builds one three.js camera
+  per world load, looping over `som.cameras` (~L159–235). It looks each host
+  object up by name and does `hostObj.add(threeCamera)`, then sets
+  `somCamera._rawCamera`. A glTF camera shared by two hosts has one wrapper
+  (L2), so the loop runs twice and the wrapper ends up with the camera made
+  under the **last** host. If that host is removed and the other survives,
+  L2 moves the SOM wrapper to the survivor, but `rawCamera`, and so
+  `stage.camera`, is still parented under the removed host's object. "Is
+  `nav.activeCamera.node` alive?" would say yes.
+- See J8 and N2.
+
+### I14. An own edit emits no `som:set` (Rev 2, review #1)
+`_onSet` (`AtriumClient.js` ~L975–1020) handles the echo of this client's own
+`send` through `_resolveOwnSetEcho` and returns: that emits `edit:accepted`,
+and `som:set` only for a rename. So after the owner moves, rotates or scales
+the selection, nothing in `som:set` says it changed. Anything computed from
+the node "on selection and on `som:set`" goes stale after the owner's own
+edits.
+
+### I15. Metadata `add` can't carry (Rev 2, review #2, *probe*)
+- After the I3 round trip (an `add` whose descriptor gives the mesh a name,
+  then save and reload): the mesh name is kept (`ingestNode` uses
+  `descriptor.mesh.name`); the material name is `""`; every accessor name is
+  `""`; mesh, primitive, material and accessor `extras` are `{}`; no
+  extensions anywhere.
+- **So a source with a material name, an accessor name, or non-empty
+  `extras` or extensions on its mesh, primitives, materials or accessors
+  would lose them.** Node `extras` are copied whole (this is where
+  `__atrium_visible` lives, 1b-1 G9).
+- **Animation targets and skin joints:** a glTF-Transform node lists what
+  references it. With an animation channel targeting the node,
+  `node.listParents()` gives `Root, Scene, AnimationChannel` (*probe*). An
+  `add` copies no animation, so a duplicate would be a static snapshot.
+
+### I16. ORBIT doesn't turn the avatar (Rev 2, review #7)
+`NavigationController.tick()` in ORBIT (~L96–121) sets the local avatar's
+`translation` to the orbit camera's position and returns, without touching
+its `rotation`. WALK and FLY set `localNode.rotation = yawQuat(this._yaw)`
+(~L127). So in ORBIT the avatar's rotation says nothing about where the
+owner is looking.
 
 ### I12. Peer avatars by `extras.displayName`
 `AvatarController` treats any node in a `som-dump` with `extras.displayName`
@@ -253,7 +299,10 @@ All eight were approved as recommended in Rev 0.
   with the server and so brings a server deploy into the round.
 - **J5 — Generated names. Recommended: readable,** `Cube`, `Cube 2`, `Cube
   3`… for the palette, `<name> copy`, `<name> copy 2`… for a duplicate: the
-  first that passes `checkNewName`, truncated to fit 256 characters. The
+  first that passes `checkNewName`. **(Rev 2, review #8) To fit 256
+  characters, the suffix is reserved first and only the base name is cut**
+  (by code point, never splitting a surrogate pair), so successive copies of
+  a 256-character name still differ. The
   alternative is `cube-<8 hex>` like the pads. Readable names show in the
   panel's name field, and they can be renamed anyway.
 - **J6 — After an add or a duplicate is accepted, select the new node.**
@@ -262,9 +311,11 @@ All eight were approved as recommended in Rev 0.
   Edit mode can delete pads too, but retiring the old mode is a separate,
   visible change; log it for after 1b-2.
 - **J8 — The removed active camera (I11). Recommended: fix it here,** small:
-  on every `som:remove`, if `nav.activeCamera` is set and its host is no
-  longer alive, `stage.setActiveCamera(null)` and update the hint. The
-  alternative is to disable Delete for camera hosts.
+  on every `som:remove`, if a world camera is active and its view is stale
+  (N2 defines it, including the shared-camera case of I11),
+  `stage.setActiveCamera(null)` and update the hint. The alternative is to
+  disable Delete for camera hosts, which wouldn't cover removals from
+  another tab.
 - **J9 — Keys. Recommended: on-screen buttons only;** no Delete or Backspace
   key, and no Ctrl-D. The keys would need focus rules and would make a
   one-way delete easy to hit by accident until undo exists (step 2).
@@ -288,14 +339,21 @@ All eight were approved as recommended in Rev 0.
   roughness 0.8.
 - **Placement** (a pure helper with tests, e.g.
   `apps/client/src/edit-palette.js`):
-  - 2.5 m in front of the local avatar along its horizontal facing (its
-    rotation applied to −Z, Y dropped, normalized; −Z if it has none);
+  - **(Rev 2, review #7) 2.5 m from the local avatar node's translation,
+    along the view's horizontal direction:** the world-space forward of the
+    camera being rendered from (`stage.camera.getWorldDirection`), Y
+    dropped, normalized; −Z if that leaves nothing (looking straight down).
+    This is where the owner is looking in every mode: in WALK and FLY the
+    camera follows the avatar's yaw; in ORBIT the avatar node sits at the
+    orbit camera's position and its rotation is stale (I16); with a world
+    camera active (Space) it's that camera's direction. The helper takes the
+    origin and the forward vector, so it needs no three.js;
   - **resting on y = 0:** the node's translation Y is the shape's half
     height (cube, sphere, cylinder 0.5; ramp 0; plane 0.01 to avoid
     z-fighting with a ground at 0). That matches the teleporter placement,
     which uses the y = 0 plane (`projectRayToPlane(ray, 0)`);
-  - rotated to the avatar's yaw only (a unit quaternion about Y), so the ramp
-    rises away from the owner.
+  - rotated to that horizontal direction's yaw only (a unit quaternion about
+    Y), so the ramp rises away from the owner.
 - **Name:** per J5. The descriptor carries no `extras`.
 - **Request:** `client.addNode(descriptor)`; record it (N4). The palette is
   disabled while any structural request is pending (N4), so a double click
@@ -321,50 +379,102 @@ All eight were approved as recommended in Rev 0.
     (`children`, recursively; the probe's `G → G-a → G-b` gives 2), since
     D2 removes them all.
 - **Request:** `client.removeNode(selected.name)`; record `{ seq, node }`
-  (N4) **before sending**, so the `som:remove` that arrives first (I1) can
-  tell the delete was this tab's.
-- **When the node goes** (`som:remove`): the existing 1b-1 handling runs
-  (gestures cancelled, records dead), but **an own delete clears the
-  selection without "This object was removed."** Pads rebuild as today (I5).
-- **Rejected:** "Couldn't delete: <server message>"; the selection stays.
-  `edit:unknown` (connection lost): the selection and the session end with
-  Edit mode anyway (1b-1 B1).
-- **J8:** after any `som:remove`, own or remote, if the active world camera's
-  host is no longer alive, return to the default camera.
+  (N4) **before sending**.
+- **When the node goes** (`som:remove`) **with this tab's delete of that
+  node object pending (Rev 2, review #3):** the existing 1b-1 handling runs
+  (gestures cancelled, records dead) and the selection clears, but **the
+  "removed" message is held, not shown.** The removal may be this tab's, or
+  another tab's that reached the server first. This tab's own request
+  settles it, and always arrives after that `som:remove` (one socket,
+  answers in order, I1, 1b-1 G3):
+  - `edit:accepted` → it was this tab's delete: show nothing;
+  - `edit:rejected` (typically `NODE_NOT_FOUND`, because the other tab won)
+    → show "This object was removed.", not the server's text;
+  - `edit:unknown` → show nothing (the session is ending).
+  A `som:remove` with **no** own delete pending of that node shows the
+  message at once, as in 1b-1. This needs no `packages/client` change.
+- **Rejected before any removal** (the node is still there): "Couldn't
+  delete: <server message>"; the selection stays. `edit:unknown`
+  (connection lost): the selection and the session end with Edit mode
+  anyway (1b-1 B1).
+- **J8, the stale world camera (Rev 2, review #6):** after any `som:remove`,
+  own or remote, with a world camera active (`nav.activeCamera` set), the
+  view is stale when **either**:
+  - its SOM host is gone: `client.som.getNodeByName(cam.node?.name) !==
+    cam.node`; **or**
+  - **the three.js camera being rendered from is no longer attached under
+    the current `sceneGroup`** (walk `stage.camera.parent` up; the shared
+    case in I11, where the SOM wrapper moved to a surviving host but the
+    rendered camera still hangs under the removed one).
+  Then `stage.setActiveCamera(null)` and update the hint. The decision is a
+  pure function with tests (`isActiveCameraStale`), given the host check
+  and the parent chain as plain values. **Prototype check:** DocumentView
+  detaches a removed node's object from `sceneGroup`, so the second test
+  sees it; the handoff says so, or what it used instead.
 - **Cancel** in the dialog sends nothing and changes nothing.
 
 ### N3. Duplicate
+- **The contract is lossless (D5), not a visual snapshot (Rev 2, review #2,
+  #11):** a node is eligible only if **every** property it has survives an
+  `add` (I2, I15). Unsupported state is refused **whether or not it changes
+  what's rendered today** (a material name, an empty-looking extras key, an
+  animation that isn't playing).
 - **A Duplicate button** in the panel. **Eligibility,** in a pure module with
   tests (e.g. `apps/client/src/edit-duplicate.js`), each failing rule giving
   the button's tooltip and keeping it disabled:
   1. no children;
   2. no parent (J3);
   3. no camera, light or skin on the node;
-  4. no `extras.atrium.source` anywhere in `extras` (the server refuses it,
+  4. **(Rev 2) nothing references the node but the scene graph:** its
+     glTF-Transform parents are only `Root`, `Scene` and `Node` (no
+     `AnimationChannel`, no `Skin` joint or skeleton, I15). An animated
+     node's copy would be static;
+  5. no `extras.atrium.source` anywhere in `extras` (the server refuses it,
      I8);
-  5. either no mesh, or a mesh whose every primitive has:
-     - mode 4 (triangles);
-     - attributes exactly `POSITION`, or `POSITION` and `NORMAL`, both
-       `VEC3` float, not normalized, not sparse;
-     - no morph targets;
-     - indices absent, or with every index ≤ 65 535 (I2);
-     - a material that is absent, or has no textures, no extensions,
-       emissive `[0,0,0]`, `alphaMode` `OPAQUE` and is not double-sided;
-     and the mesh has no morph weights and no extensions;
-  6. no extensions on the node;
-  7. **the whole `add` message, serialized, is at most 1 000 000 bytes**
+  6. either no mesh, or a mesh where:
+     - **the mesh** has no morph weights, no extensions and empty `extras`
+       (its name is copied, so any name is fine);
+     - **every primitive** has mode 4 (triangles); attributes exactly
+       `POSITION`, or `POSITION` and `NORMAL`, both `VEC3` float, not
+       normalized, not sparse; no morph targets; indices absent, or every
+       index ≤ 65 535 (I2); **(Rev 2)** no extensions and empty `extras`;
+     - **every accessor** it uses (attributes and indices) has **(Rev 2)**
+       an empty name, empty `extras` and no extensions;
+     - **every material** is absent, or has no textures, no extensions,
+       emissive `[0,0,0]`, `alphaMode` `OPAQUE`, not double-sided, and
+       **(Rev 2)** an empty name and empty `extras`;
+  7. no extensions on the node;
+  8. **(Rev 2, review #9) the transform the copy would send passes the
+     server's K6 checks:** rotation within 1e-3 of unit length and not zero;
+     every scale component `|s| ≥ 1e-6`. Legacy values in saved worlds can
+     fail this (L7 doesn't rewrite them); the tooltip says the node's
+     rotation or scale must be fixed first. Nothing is normalized or
+     changed silently;
+  9. **the whole `add` message, serialized, is at most 1 000 000 bytes**
      (UTF-8, `TextEncoder`), safely under the 1 MiB cap (I4). This replaces
-     D5's vertex count as the binding limit; the index check in rule 5 stays
+     D5's vertex count as the binding limit; the index check in rule 6 stays
      because it is about correctness, not size.
-- **Eligibility is computed when the selection changes** and after a
-  `som:set` on it, not every frame. Rule 7 needs the descriptor, so it's
-  built once then and reused by the click.
+  - **(Rev 2, review #1)** Duplicate is also disabled during a handle drag
+    and while a rename of the selection is unanswered, as Delete is.
+- **When it's checked (Rev 2, review #1).** The owner's own edits emit no
+  `som:set` (I14), and a shared material can change through another node, so
+  nothing computed earlier is trusted:
+  - **at click time,** eligibility is checked again and the descriptor is
+    built **from the current SOM and glTF values.** That is the only
+    descriptor ever sent; nothing is cached for it. A node that fails now
+    sends nothing and shows the rule's reason;
+  - **the button's enabled state and tooltip** are refreshed on selection
+    change, `som:set`, `som:add`, `som:remove`, `som:rename`, every
+    `edit:accepted`/`edit:rejected`, and the end of a gesture. It's a hint;
+    the click-time check decides.
 - **The descriptor** (built by the module from plain values the J4 adapter
-  supplies): the original's translation **plus 1.5 m on world X** (J3: the
-  parent is the scene), its rotation and scale as they are, a deep copy of
-  its `extras`, and for each primitive `POSITION`, `NORMAL` and `indices` as
-  plain arrays plus the three material factors. A mesh-less node duplicates
-  as a node with no mesh.
+  supplies at click time): the original's **current** translation **plus
+  1.5 m on world X** (J3: the parent is the scene), its current rotation and
+  scale as they are, a deep copy of its `extras`, the mesh name, and for
+  each primitive `POSITION`, `NORMAL` and `indices` as plain arrays plus the
+  three material factors. A mesh-less node duplicates as a node with no
+  mesh. **Everything an eligible node has is in the descriptor**; the tests
+  check that list against rules 1–8.
 - **Name:** per J5, from the original's current name.
 - **Request, acceptance and refusal** as N1 ("Couldn't duplicate: …"); the
   copy is selected on acceptance (J6).
@@ -379,8 +489,11 @@ In a pure module with tests (e.g. `apps/client/src/edit-structure.js`):
   blocked (1b-1 B4 handles those).
 - **Outcomes:** `edit:accepted`, `edit:rejected` and `edit:unknown` with
   that `seq` end it; any other `seq` is ignored.
-- **`isOwnDelete(node)`:** true while the pending request is a delete of that
-  node object (N2).
+- **Removal while an own delete is pending (Rev 2, review #3):**
+  `removalSeen(node)` returns `'hold'` when the pending request is a delete
+  of that node object (by identity), else `'show'`. The outcome of a held
+  request then gives `'quiet'` (accepted, unknown) or `'show'` (rejected),
+  per N2.
 - **Reset** on everything that ends the edit session (1b-1 `endEditSession`):
   disconnect, connecting, `world:loaded`, Edit mode off.
 - **Edit mode can be turned off** with a structural request pending; its
@@ -428,15 +541,41 @@ wiring is DOM code and is accepted on DEV (§8).
   - each kind's whole `add` message is under 100 000 bytes;
   - an unknown kind throws.
 - **`edit-palette`:**
-  - placement at yaw 0, 90°, 180° and a non-axis yaw: 2.5 m along the
-    horizontal facing; a pitched avatar rotation still gives a horizontal
-    offset; no rotation gives −Z;
+  - placement for view directions at yaw 0, 90°, 180° and a non-axis yaw:
+    2.5 m along the horizontal direction from the origin; a pitched view
+    still gives a horizontal offset; straight down gives −Z;
+  - **(Rev 2, review #7) ORBIT:** an origin and view direction as ORBIT
+    leaves them (avatar node at the orbit camera's position, its rotation
+    unchanged at yaw 0, the view direction pointing at +X) → the shape goes
+    along +X, not −Z;
   - the rotation is a unit quaternion about Y;
   - names: `Cube` when free; `Cube 2` when `Cube` is taken; skips taken
     numbers; never returns a name `checkNewName` refuses (a stand-in with the
-    real rules); a 256-character original still yields a valid copy name.
+    real rules);
+  - **(Rev 2, review #8) long names:** a 256-character original gives a
+    valid `… copy`; with that copy taken, the next is a different valid
+    `… copy 2`; every candidate is ≤ 256; a base name ending in a surrogate
+    pair isn't split.
 - **`edit-duplicate`:**
-  - one test per eligibility rule (§N3 1–7), each with the reason text;
+  - one test per eligibility rule (§N3 1–9), each with the reason text;
+  - **(Rev 2, review #2) a visually ordinary cube** with, in turn:
+    non-empty primitive `extras`; non-empty material `extras`; a material
+    name; an accessor name; mesh `extras`; a primitive extension; an
+    animation channel targeting the node; a skin joint reference → each
+    refused with its own reason;
+  - **(Rev 2) an eligible copy preserves everything the contract promises:**
+    current transform (+1.5 m X), node `extras` (including
+    `__atrium_visible`), mesh name, geometry and the three material factors;
+  - **(Rev 2, review #9) legacy transforms:** a rotation of length 0.99, a
+    zero rotation and a scale with a 0 component are each refused by rule
+    8, and the source values are left unchanged;
+  - **(Rev 2, review #1) stale values:** build eligibility for a node, then
+    change its translation, rotation and scale, and a factor of its shared
+    material through another node, the way an own accepted edit does (no
+    event reaches the module); the click-time descriptor has the new values.
+    A node that became ineligible after the first check (a child added) is
+    refused at click time;
+  - Duplicate is refused while a drag is active or a rename is pending;
   - a palette primitive (plain values captured from a real
     `buildPrimitiveDescriptor` output) is eligible, and its duplicate equals
     the original except name and translation;
@@ -444,14 +583,22 @@ wiring is DOM code and is accepted on DEV (§8).
     deep copy (changing the copy doesn't change the original's object);
   - a mesh-less, childless node is eligible and its copy has no mesh;
   - **the size rule:** a synthetic primitive of 9 000 vertices with normals
-    is refused by rule 7; one of 1 000 is accepted; the boundary is measured
+    is refused by rule 9; one of 1 000 is accepted; the boundary is measured
     in UTF-8 bytes (a name of 4-byte characters counts four each);
-  - an index of 65 536 is refused by rule 5.
+  - an index of 65 536 is refused by rule 6.
 - **`edit-structure`:**
   - one pending request; a second is refused while it's pending;
   - accepted, rejected and unknown each end it; another `seq` doesn't;
-  - `isOwnDelete` true only for the pending delete's node object, false
-    after it ends and for another object with the same name;
+  - `removalSeen` gives `'hold'` only for the pending delete's node object;
+    `'show'` after it ends and for another object with the same name;
+  - **(Rev 2, review #3) the race:** a pending own delete, then a
+    `som:remove` of that node (held), then `edit:rejected` for it →
+    `'show'`; the same with `edit:accepted` → `'quiet'`; with
+    `edit:unknown` → `'quiet'`;
+- **`isActiveCameraStale` (J8, Rev 2, review #6):** no active camera →
+  false; host alive and camera attached under `sceneGroup` → false; host
+  gone → true; **host alive (the wrapper moved to a surviving host) but the
+  rendered camera's parent chain doesn't reach `sceneGroup` → true.**
   - reset clears it;
   - `countDescendants` (N2's N): 0 for a leaf; 2 for `G → G-a → G-b`; 3
     for a node with two children, one of which has a child.
@@ -468,14 +615,20 @@ Each must fail the named tests and exit nonzero; restore afterwards.
 
 | Proof | Break | Must fail |
 |---|---|---|
-| (a) | Drop rule 7 (no size check) | the 9 000-vertex test |
+| (a) | Drop rule 9 (no size check) | the 9 000-vertex test |
 | (b) | `countDescendants` counts only direct children | the `G → G-a → G-b` test |
-| (c) | `isOwnDelete` matches by name | the same-name-other-object test |
+| (c) | `removalSeen` matches by name | the same-name-other-object test |
 | (d) | Allow a second pending structural request | the one-at-a-time test |
 | (e) | Duplicate copies `extras` by reference | the deep-copy test |
 | (f) | Allow a double-sided material | its eligibility test |
 | (g) | Palette names skip `checkNewName` (use the bare kind) | the "`Cube` taken" test |
 | (h) | The ramp built with one face's winding reversed | the outward-normal test |
+| (i) | (Rev 2) The click reuses the descriptor built at selection time | the stale-values test |
+| (j) | (Rev 2) Drop the primitive-`extras` and material-name checks | the matching visually-ordinary-cube tests |
+| (k) | (Rev 2) A held removal is shown at once, or treated as own without waiting | the race test |
+| (l) | (Rev 2) `isActiveCameraStale` checks only the SOM host | the shared-camera test |
+| (m) | (Rev 2) Drop rule 8 | the legacy-transform tests |
+| (n) | (Rev 2) Truncate the whole candidate instead of the base name | the second-copy-of-a-256-character-name test |
 
 ### 7.4 End to end (Claude, throwaway script, not committed)
 A real server (owned document world) and two real `AtriumClient`s, A the
@@ -487,12 +640,35 @@ owner:
 - A deletes a group holding two descendants (built with `_wsSend` and
   `parent`); B's SOM no longer has any of the three, and B's mesh and
   accessor counts are back to before the group was built (L2);
-- **A's duplicate of a 20 000-vertex node** (built with `_wsSend`) is
-  refused by the client's rule 7 before anything is sent: A stays
-  connected, B sees nothing;
+- **A's duplicate of a 20 000-vertex node (Rev 2, review #4):** the source
+  is put into the world **in the server process, before either client
+  connects** (`world.addNode` on the server's world, or a document world
+  loaded with it), never sent over a socket, which would hit the 1 MiB cap
+  first. A, after its `som-dump`, runs the click path: rule 9 refuses it, A
+  sends no message (count A's outbound `add`s), stays connected, and B sees
+  nothing;
 - A deletes a node B holds selected with a pending gesture (B is a second
   owner tab): B's selection clears with "This object was removed."; A's
-  doesn't show it.
+  doesn't show it;
+- **(Rev 2, review #3) both owners delete the same node,** B's request
+  first: A's `som:remove` is held, A's own request is rejected
+  (`NODE_NOT_FOUND`), and A then shows "This object was removed."; B shows
+  nothing.
+
+**Headless browser run (Rev 2, review #10).** The script above drives
+`AtriumClient` directly, so it can't prove the panel's wiring. The 1b-1
+headless harness (1b-1 passdown §5) runs the real `apps/client` page against
+a local server and checks: buttons disable while a request is pending, during
+a drag and during a rename; the new node is selected on acceptance;
+**duplicate after moving the source** lands 1.5 m from where the source is
+now; the "removed" message appears or not as N2 says, including the race.
+**J8:** a local open file world with cameras (`tests/fixtures/
+space-cameras.gltf`; in an open world every session may remove): tab 1
+activates a camera with Space, tab 2 removes its host with
+`client.removeNode` → tab 1 returns to the default camera. Its camera hosts
+have no mesh (review #5), so they're removed from the second client, not
+selected. No fixture shares a camera between hosts; that case is covered by
+the `isActiveCameraStale` unit test.
 
 ## 8. DEV acceptance (operator, Firefox)
 
@@ -502,7 +678,7 @@ in the browser console (the handoff confirms the id).
 
 **Setup:** an owned world on `https://dev.ewwb.dev` with at least one pad;
 a second window as a visitor (another account, or `hermes-devcheck`); a
-second owner tab for step 7.
+second owner tab for steps 5b and 7.
 
 1. **Gate:** the visitor and a logged-out window see no palette, Delete or
    Duplicate.
@@ -511,8 +687,12 @@ second owner tab for step 7.
    visitor sees each one. Click Cube twice quickly → one cube at a time
    (the second click waits). Names read `Cube`, `Cube 2`.
 3. **Duplicate:** duplicate a cube → a copy 1.5 m along X, selected. Move
-   the copy → the original stays. Duplicate a pad → the copy teleports to
-   the same place (turn Edit off, walk onto it); labels equal pads.
+   the copy → the original stays. **(Rev 2) Move and rotate the original
+   with the handles, then duplicate it at once without reselecting** → the
+   copy has the new rotation and sits 1.5 m along X from the new position.
+   Duplicate a pad → the copy teleports to the same place (turn Edit off,
+   walk onto it); labels equal pads. In ORBIT mode, add a cube → it appears
+   in the direction you're looking (Rev 2).
 4. **Ineligible:** in a world with nested content (`pad-in-grp` inside
    `grp-test`, from the 1b-1 passdown's §8.3 console snippet), select the pad
    with Alt-click → Duplicate is disabled
@@ -521,8 +701,16 @@ second owner tab for step 7.
    undone; Cancel → nothing happens; OK → it's gone in both windows, with no
    "This object was removed." in your panel. Delete `grp-test` → the dialog
    says 1 object inside; both go; the pad's label goes too.
-6. **Camera (J8):** in a world with a camera, Space to it, select its host
-   and delete it → the view returns to the default camera.
+5b. **(Rev 2) Two owners delete the same node:** select a cube in tab 1 and
+   click Delete, **leaving its dialog open** (the dialog pauses tab 1's
+   scripts). In tab 2, delete the same cube. Back in tab 1, click OK → tab 1
+   shows "This object was removed." (tab 2 won); tab 2 shows nothing; no
+   other error in either panel.
+6. **Camera (J8), only if one of your DEV worlds holds a camera** (none can
+   be added through the UI, I2): Space to it, then delete its host from tab
+   2 (`atriumClient.removeNode('<host name>')` in the console; a camera host
+   with no mesh can't be selected) → tab 1 returns to the default camera.
+   Otherwise skip it; the headless run (§7.4) covers it.
 7. **Removal from elsewhere:** select a node in tab 1, delete it from tab 2 →
    tab 1 shows "This object was removed." (1b-1 behaviour, unchanged).
 8. **Persistence:** wait ~35 s (or close every window), reload → adds,
@@ -555,6 +743,22 @@ after step 5; the audit shows no orphan meshes.
    only for a childless node, design §4.5).
 
 ## 11. Review log
-None yet. J2–J9 were approved without an outside review of the pre-brief.
-The outside review of the prototype (J1) is still mandatory; a review of
-this file before the base fetch remains optional.
+### 11.1 Outside review of Rev 1 (ChatGPT, 2026-10-16)
+Verdict: revision recommended; two must-fixes; J1–J9 stand. Each finding
+was checked against `4f798eb`, two with new probes. All eleven accepted;
+#3 is fixed differently from the review's suggestion (no `packages/client`
+change).
+
+| # | Finding | Check | Disposition |
+|---|---|---|---|
+| 1 (must) | N3 caches the descriptor; an own edit emits no `som:set`, so a duplicate after a move uses stale values | Confirmed: `_onSet` ~L975 returns after `_resolveOwnSetEcho` (I14) | N3: eligibility re-checked and descriptor built at click time from current values, nothing cached; the button's state is only a hint, refreshed on more events; disabled during a drag or rename. Tests, proof (i), DEV step 3 |
+| 2 (must) | Eligibility misses extras and extensions on mesh, primitive, material and accessors, mesh names, and animated nodes | Confirmed by *probe* (I15): mesh name survives through `descriptor.mesh.name`; material and accessor names, all those extras and extensions don't; `listParents()` shows `AnimationChannel` | N3 stated as lossless; rules 4 and 6 extended; mesh name copied. Tests, proof (j) |
+| 3 | An own pending delete can't tell its `som:remove` from another tab's that won the race | Confirmed: `som:remove` carries only `nodeName` (~L964) | **Fixed in `apps/client`:** hold the message until this tab's own request resolves (it always arrives after the broadcast); rejected → show. N2, N4; tests, proof (k), e2e, DEV step 5b |
+| 4 | The 20 000-vertex e2e source can't be sent over the socket | Confirmed (I4) | §7.4: the source is put in the server's world in-process before clients connect |
+| 5 | J8's DEV step assumes a camera host is selectable | Confirmed: `space-cameras.gltf` hosts have no mesh | §7.4 headless run removes the host from a second client; DEV step 6 conditional, via the console |
+| 6 | A shared camera's rendered three.js camera can stay under a removed host | Confirmed: `Stage` ~L159–235 attaches one camera per wrapper under the last host it saw (I11) | N2/J8: stale also when the rendered camera's parent chain no longer reaches `sceneGroup`. Unit test, proof (l) |
+| 7 | Placement uses the avatar's rotation, which ORBIT doesn't update | Confirmed: ORBIT tick ~L97–121 (I16) | N1: the view's horizontal direction from the rendered camera. Test, DEV step 3 |
+| 8 | Truncating the whole name can erase the copy suffix | Accepted | J5: reserve the suffix, cut the base only. Test, proof (n) |
+| 9 | Legacy transforms can pass eligibility and fail K6 on the server | Confirmed: L7 doesn't rewrite saved values (I8) | N3 rule 8, no silent changes. Tests, proof (m) |
+| 10 | The proofs miss the integration risks; the e2e can't prove the panel wiring | Accepted | Proofs (i)–(n); a headless browser run of the real page (§7.4); DEV steps 3 and 5b |
+| 11 (nit) | Say unsupported material state is refused even when it doesn't change the look | Accepted | N3's opening paragraph |
