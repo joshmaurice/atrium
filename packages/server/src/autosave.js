@@ -67,19 +67,19 @@ export function createAutoSaveCoordinator(opts = {}) {
 
     entry.saving = true
 
-    // Build the list of avatar node names to exclude from serialization.
-    // All sessions' avatarNodeName values are ephemeral and must not
-    // appear in persisted documents.
-    const avatarNames = []
+    // L11/K9 — exclude, by IDENTITY, the node each session's accepted avatar
+    // `add` created. These nodes are ephemeral and must not appear in persisted
+    // documents. A session whose avatar add was refused owns nothing to exclude.
+    const excludeNodes = []
     for (const [, session] of host.sessions) {
-      if (session.avatarNodeName) {
-        avatarNames.push(session.avatarNodeName)
+      if (session.avatarNode) {
+        excludeNodes.push(session.avatarNode)
       }
     }
 
     try {
       const document = JSON.stringify(
-        await host.world.serialize({ excludeNodes: avatarNames })
+        await host.world.serialize({ excludeNodes })
       )
       const result = worldStore.updateWorld(
         db.database,

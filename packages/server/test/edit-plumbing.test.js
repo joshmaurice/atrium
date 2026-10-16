@@ -391,8 +391,13 @@ test('A2: every server-emitted broadcast validates against its schema', async ()
       assert.equal(valid, true,
         `server broadcast ${msg.type} must validate: ${JSON.stringify(msg)} — ${JSON.stringify(errors)}`)
     }
-    assert.ok(seen.some(m => m.type === 'remove' && m.id === 'bbbb4444'),
-      'the disconnect remove was part of the sample')
+    // §7.3 change (L11/K9): B never sent an avatar `add`, so its disconnect
+    // sends `leave` only — no `remove` is broadcast for a session that owns no
+    // avatar. (Previously the `remove` was keyed on the hello-assigned name.)
+    assert.ok(seen.some(m => m.type === 'leave' && m.id === 'bbbb4444'),
+      'the disconnect leave for a session without an avatar was part of the sample')
+    assert.equal(seen.some(m => m.type === 'remove' && m.id === 'bbbb4444'), false,
+      'no disconnect remove for a session that never added an avatar (L11/K9)')
   } finally {
     a.ws.close(); await waitForClose(a.ws)
   }

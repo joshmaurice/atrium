@@ -312,6 +312,34 @@ export function attachSessionHandlers({
   }
 
   // ---------------------------------------------------------------------------
+  // L11/K9 — allocate a unique avatar node name at `hello` (H15).
+  //
+  // Keep `avatar-<first 8 of the session id>` when that name is free;
+  // otherwise append `-2`, `-3`, … until it is. Free means: no live session
+  // holds the name, and no object in the world's namespace (`_objectsByName`
+  // or `_nodesByName`) has it. Clients already read the name from
+  // `hello.avatarNodeName`, so a visitor whose random id collides with
+  // another visitor or a permanent node is not refused.
+  // ---------------------------------------------------------------------------
+  function allocateAvatarName(sessionId) {
+    const base = `avatar-${sessionId.slice(0, 8)}`
+    const isFree = (name) => {
+      for (const [, s] of sessions) {
+        if (s.avatarNodeName === name) return false
+      }
+      if (world) {
+        if (world.som.getObjectByName(name)) return false
+        if (world.som.getNodeByName(name)) return false
+      }
+      return true
+    }
+    if (isFree(base)) return base
+    let n = 2
+    while (!isFree(`${base}-${n}`)) n += 1
+    return `${base}-${n}`
+  }
+
+  // ---------------------------------------------------------------------------
   // cleanupSession — stop tick loop, drop from sessions/presence, remove
   // avatar node from SOM, broadcast remove + leave. Idempotent: a second
   // call on an already-cleaned session is a no-op (presence.remove returns
@@ -320,16 +348,18 @@ export function attachSessionHandlers({
   // ---------------------------------------------------------------------------
   function cleanupSession(s) {
     const departedId = s.id
-    const avatarNodeName = s.avatarNodeName
+    const avatarNode = s.avatarNode
     s.tickStop?.()
     sessions.delete(departedId)
     const removed = presence.remove(departedId)
 
     if (removed) {
-      // Remove avatar node from SOM and notify all clients first,
-      // THEN broadcast leave so clients can look up peer metadata before cleanup
-      if (world && avatarNodeName) {
-        world.removeNode(avatarNodeName)
+      // L11/K9 — remove only the node this session's accepted avatar `add`
+      // created, by IDENTITY, never a lookup by name. A session whose avatar
+      // add was refused owns nothing: its disconnect removes nothing and
+      // broadcasts no `remove` (only the `leave` below).
+      if (world && avatarNode) {
+        world.removeNode(avatarNode)
         broadcast({ type: 'remove', seq: nextSeq(), id: departedId })
       }
 
@@ -451,7 +481,10 @@ export function attachSessionHandlers({
             seq: nextSeq(),
             missedPings: 0,
             tickStop: null,
-            avatarNodeName: `avatar-${sessionId.slice(0, 8)}`,
+            // L11/K9 — the hello-allocated name; the avatar node itself is
+            // recorded in `avatarNode` only when the avatar `add` is accepted.
+            avatarNodeName: allocateAvatarName(sessionId),
+            avatarNode: null,
             displayName: userDisplayName,
           }
           // If the upgrade handler resolved a userId from the auth cookie,
@@ -580,6 +613,10 @@ export function attachSessionHandlers({
           // the field is extras.displayName or extras (replacing whole).
           // This runs before the mutation gate and applies to everyone,
           // including the world owner.
+          // L11 note: this guard protects the server-assigned NAME reserved by
+          // a live session (whether or not its avatar `add` has been accepted
+          // yet). Node-level protection of a live avatar uses the avatarNode
+          // identity, via liveAvatarNames() below.
           const isAvatarNode = msg.node && Array.from(sessions.values()).some(
             s => s.avatarNodeName === msg.node
           )
@@ -759,6 +796,8 @@ export function attachSessionHandlers({
             sendError(ws, msg.seq, result.code, detail)
             break
           }
+          // L11/K9 — ownership is recorded only by an accepted avatar `add`.
+          if (isAvatar) session.avatarNode = result.node
           // T3: non-avatar adds echo to sender too; avatar adds keep broadcastExcept
           if (isAvatar) {
             broadcastExcept(session, {
@@ -791,13 +830,12 @@ export function attachSessionHandlers({
         case 'view': {
           presence.setPosition(session.id, msg.position)
 
-          // Update avatar SOM node with latest position and orientation
-          if (world && session.avatarNodeName) {
-            const avatarNode = world.getNode(session.avatarNodeName)
-            if (avatarNode) {
-              avatarNode.translation = msg.position
-              if (msg.look) avatarNode.rotation = lookToQuaternion(msg.look)
-            }
+          // L11/K9 — move only the node this session owns, by IDENTITY. A
+          // session whose avatar `add` was refused owns nothing: its `view`
+          // moves nothing (and never another visitor's avatar).
+          if (world && session.avatarNode) {
+            session.avatarNode.translation = msg.position
+            if (msg.look) session.avatarNode.rotation = lookToQuaternion(msg.look)
           }
 
           const outbound = {

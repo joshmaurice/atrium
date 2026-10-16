@@ -254,13 +254,17 @@ export function resolveSendTarget(som, nodeName) {
  * The server is authoritative over avatar nodes; the names come from the live
  * sessions map, never from a name prefix the client could imitate.
  *
- * @param {Iterable<{avatarNodeName?: string|null}>} sessions
+ * L11/K9 — a session owns an avatar node only after an accepted avatar `add`
+ * (recorded in `session.avatarNode`). A session whose avatar add was refused
+ * owns nothing, so its name is not a live avatar.
+ *
+ * @param {Iterable<{avatarNode?: {name: string}|null, avatarNodeName?: string|null}>} sessions
  * @returns {Set<string>}
  */
 export function liveAvatarNames(sessions) {
   const names = new Set()
   for (const session of sessions ?? []) {
-    if (session?.avatarNodeName) names.add(session.avatarNodeName)
+    if (session?.avatarNode) names.add(session.avatarNode.name)
   }
   return names
 }

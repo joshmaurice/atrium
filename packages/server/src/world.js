@@ -388,8 +388,10 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
     return serializeSomDocument(som, { excludeNodes: exclusions })
   }
 
-  function removeNode(nodeName) {
-    const node = som.getNodeByName(nodeName)
+  function removeNode(nodeOrName) {
+    // Accepts a name (the `remove` message path) or a SOMNode IDENTITY (L11 —
+    // session disconnect cleanup, which must never re-resolve by name).
+    const node = typeof nodeOrName === 'string' ? som.getNodeByName(nodeOrName) : nodeOrName
     if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
     // A6/C8 — the whole subtree goes, and the nodes it contributed to the
     // external sets are dropped with it.
@@ -495,8 +497,9 @@ export async function createWorldFromDocument(documentJson) {
     return serializeSomDocument(som, { excludeNodes })
   }
 
-  function removeNode(nodeName) {
-    const node = som.getNodeByName(nodeName)
+  function removeNode(nodeOrName) {
+    // Name (the `remove` message path) or SOMNode identity (L11 — disconnect).
+    const node = typeof nodeOrName === 'string' ? som.getNodeByName(nodeOrName) : nodeOrName
     if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
     for (const sub of collectSubtreeNodes(node)) {
       externalNodes.delete(sub)

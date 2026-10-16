@@ -678,13 +678,15 @@ export function createRequestHandler(opts = {}) {
         if (worldHost) {
           skipDocument = false
           try {
-            // Collect avatar node names from this host's sessions specifically
-            // (not from the default host — fixes avatar-exclusion for multi-world)
-            const avatarNames = []
+            // L11/K9 — collect, by IDENTITY, the avatar nodes from this host's
+            // sessions specifically (not from the default host — fixes
+            // avatar-exclusion for multi-world). Only an accepted avatar `add`
+            // gives a session an avatarNode.
+            const excludeNodes = []
             for (const [, s] of worldHost.sessions) {
-              if (s.avatarNodeName) avatarNames.push(s.avatarNodeName)
+              if (s.avatarNode) excludeNodes.push(s.avatarNode)
             }
-            document = JSON.stringify(await worldHost.world.serialize({ excludeNodes: avatarNames }))
+            document = JSON.stringify(await worldHost.world.serialize({ excludeNodes }))
           } catch (err) {
             console.error('World serialize failed for save:', err.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
