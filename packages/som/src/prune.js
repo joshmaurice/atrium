@@ -200,6 +200,17 @@ export function pruneCandidateProperties(root, candidates) {
       } catch {
         continue
       }
+      // glTF-Transform's Mesh.dispose() removes a mesh's primitives from the
+      // mesh but leaves the primitives and their morph targets in the graph,
+      // still holding their Accessor/Material edges. Dispose them explicitly so
+      // those edges are severed and the accessors can be pruned in the next
+      // pass; otherwise an orphan mesh's morph-target accessors leak.
+      if (property.propertyType === PropertyType.MESH) {
+        for (const item of cascade) {
+          if (item === property) continue
+          try { item.dispose() } catch { /* already gone */ }
+        }
+      }
       for (const item of cascade) disposed.push(item)
       for (const dep of deps) next.push(dep)
     }
