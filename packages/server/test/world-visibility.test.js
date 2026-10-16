@@ -493,11 +493,12 @@ test('3c: non-owner session gets WORLD_NOW_PRIVATE then 1008 on PUT private', as
   })
   assert.equal(closeInfo.code, 1008)
 
-  // Owner sees remove + leave
-  const removeMsg = await owner.q.waitForType('remove', 3000)
-  assert.ok(removeMsg !== null, 'owner sees remove')
-  const leaveMsg = await owner.q.waitForType('leave', 2000)
+  // Owner sees leave only. §7.3 change (L11/K9): the non-owner session never
+  // sent an avatar `add`, so its disconnect broadcasts `leave` and no `remove`.
+  const leaveMsg = await owner.q.waitForType('leave', 3000)
   assert.ok(leaveMsg !== null, 'owner sees leave')
+  const removeMsg = await owner.q.waitForType('remove', 300)
+  assert.equal(removeMsg, null, 'no remove for a session without an avatar (L11/K9)')
 
   owner.ws.close()
 
@@ -1082,14 +1083,15 @@ test('Finding 2b: raw unmasked frame on live session does not crash server', asy
   }
   await new Promise(r => setTimeout(r, 800))
 
-  // Peer should see remove + leave for the raw session
-  const removeMsg = await peerQ.waitForType('remove', 3000)
-  assert.ok(removeMsg !== null, 'peer should see remove after unmasked frame')
-  assert.equal(removeMsg.id, 'raw-session-wv')
-
-  const leaveMsg = await peerQ.waitForType('leave', 2000)
+  // Peer should see leave for the raw session. §7.3 change (L11/K9): the raw
+  // session never sent an avatar `add`, so its disconnect sends `leave` and
+  // broadcasts no `remove`.
+  const leaveMsg = await peerQ.waitForType('leave', 3000)
   assert.ok(leaveMsg !== null, 'peer should see leave after unmasked frame')
   assert.equal(leaveMsg.id, 'raw-session-wv')
+
+  const removeMsg = await peerQ.waitForType('remove', 400)
+  assert.equal(removeMsg, null, 'no remove for a session without an avatar (L11/K9)')
 
   // Server should still accept new connections
   const check = await wsOpen(PORT_PUT, '/worlds/PutOwner/vis-test-world', putOtherCookie)

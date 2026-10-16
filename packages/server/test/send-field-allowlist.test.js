@@ -603,13 +603,17 @@ test('policy A3: an authorized leaf with a bad value is INVALID_VALUE, not PERMI
 // ===========================================================================
 
 test('policy A1: liveAvatarNames reads the sessions map, never a name prefix', () => {
+  // §7.3 change (L11/K9): a session is a live avatar only after an accepted
+  // avatar `add` recorded `session.avatarNode`; the name alone is not enough.
   const names = liveAvatarNames([
-    { avatarNodeName: 'avatar-12345678' },
-    { avatarNodeName: 'avatar-abcdef01' },
-    { avatarNodeName: null },
+    { avatarNode: { name: 'avatar-12345678' }, avatarNodeName: 'avatar-12345678' },
+    { avatarNode: { name: 'avatar-abcdef01' }, avatarNodeName: 'avatar-abcdef01' },
+    { avatarNode: null, avatarNodeName: 'avatar-deadbeef' },
     {},
   ])
   assert.deepEqual([...names].sort(), ['avatar-12345678', 'avatar-abcdef01'])
+  assert.equal(names.has('avatar-deadbeef'), false,
+    'a session with a reserved name but no accepted avatar is not a live avatar')
 })
 
 test('policy A1: every send to a live avatar node is refused', async () => {
