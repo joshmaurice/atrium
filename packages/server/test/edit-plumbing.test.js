@@ -935,20 +935,20 @@ test('D8: a 2049-character destination gets the length message on send', async (
   }
 })
 
-test('C4: a non-string destination on add is accepted (D8 covers send only)', async () => {
-  const { port } = await startOpenWorld(SPACE)
+test('C4/L5: a non-string destination on add is now refused (K4)', async () => {
+  const { world, port } = await startOpenWorld(SPACE)
   const { ws, messages } = await connect(port)
   try {
     await hello(ws, messages, 'd8-add')
-    // C4 — the add path's destination check is unchanged in 1a. A non-string
-    // destination on `add` is not refused here (the D8 message split applies to
-    // `send` only); it is carried through as today.
-    ws.send(JSON.stringify({
+    // §7.3 — this was "C4: a non-string destination on add is accepted (D8
+    // covers send only)". Under the L5/K4 table it is a refusal: the one
+    // shared destination checker now runs on `add` too, with `send`'s message.
+    const err = await expectError(ws, messages, {
       type: 'add', seq: 92,
       node: { name: 'pad-a', extras: { atrium: { teleporter: { destination: 42 } } } },
-    }))
-    const added = await waitFor(messages, m => m.type === 'add' && m.node?.name === 'pad-a')
-    assert.ok(added, 'a non-string destination on add is accepted (unchanged in 1a)')
+    }, 'INVALID_VALUE')
+    assert.match(err.message, /must be a string/)
+    assert.equal(world.som.getNodeByName('pad-a'), null, 'the refused node was not added')
 
     // The length cap on the add path is unchanged: a 2049-char destination is
     // still refused with the same message as before.
@@ -957,6 +957,7 @@ test('C4: a non-string destination on add is accepted (D8 covers send only)', as
       node: { name: 'pad-b', extras: { atrium: { teleporter: { destination: 'x'.repeat(2049) } } } },
     }, 'INVALID_VALUE')
     assert.match(long.message, /2048/)
+    assert.equal(world.som.getNodeByName('pad-b'), null, 'the over-long node was not added')
   } finally {
     ws.close(); await waitForClose(ws)
   }

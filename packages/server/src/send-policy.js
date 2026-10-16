@@ -22,6 +22,12 @@
 //        container. Only listed leaves may change; unknown keys pass untouched.
 //   A4 — value checks are type / length / enum / finite only. No new ranges.
 //
+// Phase 3 server-cleanup adds K6 (L7): rotation and scale DO get ranges now —
+// a rotation must be a unit quaternion (|‖q‖ − 1| ≤ 1e-3) and every scale
+// component must be non-zero in magnitude (|s| ≥ 1e-6). Negative scale stays
+// allowed (valid glTF; mirroring is legitimate). The checkers below are shared
+// with `case 'add'` so `send` and `add` cannot drift.
+//
 // The module is pure and side-effect free: it decides, it never mutates.
 // ---------------------------------------------------------------------------
 
@@ -72,6 +78,10 @@ const ANIMATION_FIELDS = new Set(['playback'])
 
 const DESTINATION_MAX = 2048
 
+// K6/L7 — the transform-value ranges, named in one place (L7's last bullet).
+export const UNIT_TOLERANCE = 1e-3
+export const MIN_SCALE      = 1e-6
+
 // ---------------------------------------------------------------------------
 // A4 — value predicates (type / length / enum / finite only)
 // ---------------------------------------------------------------------------
@@ -83,6 +93,77 @@ const isVec3         = (v) => isVec(v, 3)
 const isVec4         = (v) => isVec(v, 4)
 const isBoundedString = (v) => typeof v === 'string' && v.length <= DESTINATION_MAX
 const isNullableNumber = (v) => v === null || isFiniteNumber(v)
+
+// K6/L7 — transform-value predicates. Plain IEEE doubles, no extra allowance
+// (L7's numerical policy): a value computed to land exactly on a boundary may
+// fall either side, so tests use values clearly inside or outside.
+const isUnitQuaternion = (v) =>
+  isVec4(v) && Math.abs(Math.hypot(v[0], v[1], v[2], v[3]) - 1) <= UNIT_TOLERANCE
+const isNonZeroScale = (v) => isVec3(v) && v.every((s) => Math.abs(s) >= MIN_SCALE)
+
+/**
+ * K6/L7 — the shared transform-value check for an `add` descriptor.
+ *
+ * `send` checks the same two values inline through the same predicates; `add`
+ * calls this so the two paths cannot drift. Only values that are present are
+ * checked (an omitted rotation/scale keeps today's default).
+ *
+ * @param {{rotation?: *, scale?: *}} node
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkTransformValues(node = {}) {
+  if (node == null) return allow()
+  if (node.rotation !== undefined && !isUnitQuaternion(node.rotation)) {
+    return deny(SEND_INVALID, 'rotation must be a unit quaternion')
+  }
+  if (node.scale !== undefined && !isNonZeroScale(node.scale)) {
+    return deny(SEND_INVALID, 'scale components must be non-zero')
+  }
+  return allow()
+}
+
+/**
+ * L5/K4 — the shared destination checker. One exported checker for the
+ * teleporter destination, used by both `session.js` (`add`) and this module
+ * (`send`), so the two can't drift.
+ *
+ * @param {*} value
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkTeleporterDestination(value) {
+  if (typeof value !== 'string') {
+    return deny(SEND_INVALID, 'destination must be a string')
+  }
+  return value.length <= DESTINATION_MAX
+    ? allow()
+    : deny(SEND_INVALID, `destination exceeds ${DESTINATION_MAX} characters`)
+}
+
+/**
+ * L5/K4 — the `add`-path `extras.atrium` checker, row by row of the L5 table.
+ *
+ * A node that carries no `extras`, no own `atrium`, or no `teleporter` key is
+ * accepted (it is not a teleporter). `extras.atrium` — and `teleporter` —
+ * must be plain objects, and the destination, if the teleporter is present,
+ * must be a string of at most 2048 characters. `""` is accepted, as on `send`.
+ *
+ * @param {object|undefined|null} extras  the descriptor's own `node.extras`
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkAtriumExtras(extras) {
+  if (extras == null || typeof extras !== 'object') return allow()
+  const atrium = extras.atrium
+  if (atrium === undefined) return allow()
+  if (!isPlainObject(atrium)) {
+    return deny(SEND_INVALID, 'extras.atrium must be an object')
+  }
+  const teleporter = atrium.teleporter
+  if (teleporter === undefined) return allow()
+  if (!isPlainObject(teleporter)) {
+    return deny(SEND_INVALID, 'teleporter must be an object')
+  }
+  return checkTeleporterDestination(teleporter.destination)
+}
 
 const PLAYBACK_BOOL_KEYS     = ['playing', 'paused', 'loop', 'autoStart']
 const PLAYBACK_NUMBER_KEYS   = ['timeScale', 'startTime']
@@ -358,7 +439,16 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar }) {
 
   if (NODE_FIELDS.has(field)) {
     if (field === 'visible') return isBool(value) ? allow() : deny(SEND_INVALID, 'visible must be a boolean')
-    if (field === 'rotation') return isVec4(value) ? allow() : deny(SEND_INVALID, 'rotation must be 4 finite numbers')
+    // K6/L7 — rotation and scale now carry ranges. The shape messages are kept
+    // (a wrong-length vector still says so); the value messages are new.
+    if (field === 'rotation') {
+      if (!isVec4(value)) return deny(SEND_INVALID, 'rotation must be 4 finite numbers')
+      return isUnitQuaternion(value) ? allow() : deny(SEND_INVALID, 'rotation must be a unit quaternion')
+    }
+    if (field === 'scale') {
+      if (!isVec3(value)) return deny(SEND_INVALID, `${field} must be 3 finite numbers`)
+      return isNonZeroScale(value) ? allow() : deny(SEND_INVALID, 'scale components must be non-zero')
+    }
     return isVec3(value) ? allow() : deny(SEND_INVALID, `${field} must be 3 finite numbers`)
   }
 
@@ -371,15 +461,10 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar }) {
       : deny(SEND_INVALID, `name must be a non-empty string of at most ${NAME_MAX} characters`)
   }
 
-  // The single node extras leaf (D2): the teleporter destination.
+  // The single node extras leaf (D2): the teleporter destination. L5/K4 — the
+  // same exported checker the `add` path uses.
   if (field === TELEPORTER_LEAF) {
-    // D8: a non-string destination gets its own message.
-    if (typeof value !== 'string') {
-      return deny(SEND_INVALID, 'destination must be a string')
-    }
-    return value.length <= DESTINATION_MAX
-      ? allow()
-      : deny(SEND_INVALID, `destination exceeds ${DESTINATION_MAX} characters`)
+    return checkTeleporterDestination(value)
   }
 
   const materialMatch = MATERIAL_PATH_RE.exec(field)

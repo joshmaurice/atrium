@@ -8,7 +8,10 @@ import { createTickLoop } from './tick.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeUserId } from './http-routes.js'
 import { parsePath } from '@atrium/som'
-import { authorizeSend, resolveSendTarget, liveAvatarNames } from './send-policy.js'
+import {
+  authorizeSend, resolveSendTarget, liveAvatarNames,
+  checkAtriumExtras, checkTransformValues,
+} from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
 const DEFAULT_TICK_INTERVAL = 1000
@@ -83,6 +86,21 @@ export function addSetsAtriumSource(node) {
   const atrium = node?.extras?.atrium
   if (!isNonNullObject(atrium)) return false
   return hasOwn(atrium, 'source')
+}
+
+/**
+ * K4/L5 — true if an avatar `add` descriptor carries its own extras.atrium,
+ * whatever its value (including `{}`). The first-party avatar descriptor
+ * carries only `extras.displayName` (`buildAvatarDescriptor`), so any
+ * extras.atrium on an avatar is refused.
+ *
+ * @param {{extras?: object}} node
+ * @returns {boolean}
+ */
+export function addCarriesAtriumExtras(node) {
+  const extras = node?.extras
+  if (!isNonNullObject(extras)) return false
+  return hasOwn(extras, 'atrium')
 }
 
 /**
@@ -743,6 +761,15 @@ export function attachSessionHandlers({
             break
           }
 
+          // --- K4/L5: an avatar add may not carry its own extras.atrium ---
+          // Runs after S2 (which keeps its own message for `source`) and
+          // before the gate, with the other avatar-add checks. Refuses any
+          // own extras.atrium, including `{}`.
+          if (msg.id && addCarriesAtriumExtras(msg.node)) {
+            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'avatar nodes cannot carry extras.atrium')
+            break
+          }
+
           // --- MUTATION GATE: avatar adds (has msg.id) are always allowed;
           // non-avatar adds require owner permission ---
           const isAvatar = !!msg.id
@@ -769,23 +796,34 @@ export function attachSessionHandlers({
             }
           }
 
+          // --- K6/L7: transform values on `add` (avatar adds included) ---
+          // A non-unit (or zero) rotation and a zero scale component are
+          // refused, never corrected. Runs after the gate, before the first
+          // world change.
+          const transformCheck = checkTransformValues(msg.node)
+          if (!transformCheck.ok) {
+            sendError(ws, msg.seq, transformCheck.code, transformCheck.message)
+            break
+          }
+
+          // --- L5/K4: the non-avatar extras.atrium checks ---
+          // After the gate and the A4/A5 checks, where the length cap was.
+          // One shared checker with `send`, so add and send can't drift.
+          // Every refusal here comes before the first world change (the
+          // displayName overwrite below and addNode).
+          if (!isAvatar) {
+            const extrasCheck = checkAtriumExtras(msg.node.extras)
+            if (!extrasCheck.ok) {
+              sendError(ws, msg.seq, extrasCheck.code, extrasCheck.message)
+              break
+            }
+          }
+
           // Overwrite avatar extras.displayName with the server-assigned
           // displayName (pre-brief #9).
           if (isAvatar && session.displayName) {
             if (!msg.node.extras) msg.node.extras = {}
             msg.node.extras.displayName = session.displayName
-          }
-
-          // --- DESTINATION LENGTH CAP (T10) ---
-          // Enforce 2048-char limit on extras.atrium.teleporter.destination.
-          // C4 — this add-path check is unchanged in 1a: the D8 message split
-          // for a non-string value applies to `send` only.
-          if (!isAvatar && msg.node.extras?.atrium?.teleporter?.destination != null) {
-            const dest = msg.node.extras.atrium.teleporter.destination
-            if (typeof dest === 'string' && dest.length > 2048) {
-              sendError(ws, msg.seq, 'INVALID_VALUE', 'destination exceeds 2048 characters')
-              break
-            }
           }
 
           const result = world.addNode(msg.node, msg.parent)
