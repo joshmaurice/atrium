@@ -60,6 +60,15 @@ function waitForClose(ws) {
   })
 }
 
+/** Bounded wait: true when the socket closes within `timeoutMs`. */
+async function closedWithin(ws, timeoutMs) {
+  if (ws.readyState === WebSocket.CLOSED) return true
+  return Promise.race([
+    waitForClose(ws).then(() => true),
+    delay(timeoutMs).then(() => ws.readyState === WebSocket.CLOSED),
+  ])
+}
+
 function collect(ws) {
   const messages = []
   ws.on('message', (raw) => {
@@ -125,7 +134,8 @@ test('L9/K7: an authorized connection sending 1 MiB + 1 byte is closed with 1009
     owner.ws.once('close', (code) => { closeCode = code })
 
     owner.ws.send(messageOfSize(MAX_PAYLOAD_BYTES + 1))
-    await waitForClose(owner.ws)
+    const closed = await closedWithin(owner.ws, 5000)
+    assert.ok(closed, 'the server closes the connection (1009) — it is still open after 5 s')
     await delay(120)
 
     assert.equal(closeCode, 1009, 'the transport closed with 1009 (message too big)')
