@@ -742,22 +742,49 @@ test('A8: a rename of a light host is INVALID_VALUE (D4)', async () => {
 // R3 revision — a rename acts only on the object that was authorized
 // ===========================================================================
 
+test('K5(b): a legacy duplicate name resolves to one node — rename reaches the first', async () => {
+  const { world, port } = await startOpenWorld(SPACE)
+  const { ws, messages } = await connect(port)
+  try {
+    await hello(ws, messages, 'rename-k5b')
+
+    // Two nodes sharing a name, built through the SOM (not the wire). K5(b) —
+    // both maps keep the FIRST, so send, remove and rename reach one node.
+    const first  = world.som.ingestNode({ name: 'r3-dup' })
+    const second = world.som.ingestNode({ name: 'r3-dup' })
+    assert.notEqual(first, second)
+    assert.equal(world.som.getObjectByName('r3-dup'), first, 'the namespace keeps the first')
+    assert.equal(world.som.getNodeByName('r3-dup'), first, 'the node map keeps the first too')
+
+    ws.send(JSON.stringify({ type: 'send', seq: 69, node: 'r3-dup', field: 'name', value: 'r3-renamed' }))
+    const set = await waitFor(messages, m => m.type === 'set' && m.field === 'name')
+    assert.equal(set.value, 'r3-renamed')
+
+    assert.equal(first.name, 'r3-renamed', 'the first node was renamed')
+    assert.equal(second.name, 'r3-dup', 'the second node is untouched')
+    // K5(b) take-over — the freed name passes to the next node that holds it.
+    assert.equal(world.som.getNodeByName('r3-dup'), second, 'the second node took the name over')
+    assert.equal(world.som.getNodeByName('r3-renamed'), first)
+  } finally {
+    ws.close(); await waitForClose(ws)
+  }
+})
+
 test('R3: a rename whose resolved target is not the named node is INVALID_VALUE', async () => {
   const { world, port } = await startOpenWorld(SPACE)
   const { ws, messages } = await connect(port)
   try {
     await hello(ws, messages, 'rename-r3')
 
-    // Two nodes sharing a name, built through the SOM (not the wire).
-    // `_objectsByName` keeps the FIRST — the global namespace refuses the
-    // duplicate — while `_nodesByName` keeps the LAST. So `getObjectByName`,
-    // which `world.setField` resolves through, and `_nodesByName`, which
-    // `renameNode` looks up, name different objects.
     const first  = world.som.ingestNode({ name: 'r3-dup' })
     const second = world.som.ingestNode({ name: 'r3-dup' })
-    assert.notEqual(first, second)
-    assert.equal(world.som.getObjectByName('r3-dup'), first, 'the namespace keeps the first')
-    assert.equal(world.som.getNodeByName('r3-dup'), second, 'the node map keeps the last')
+
+    // Inject the divergence directly. Under K5(b) the two ingestNode calls
+    // agree, so the disagreement a diverged client's SOM can present is built
+    // here: the global namespace names one node, the node map another.
+    world.som._nodesByName.set('r3-dup', second)
+    assert.equal(world.som.getObjectByName('r3-dup'), first)
+    assert.equal(world.som.getNodeByName('r3-dup'), second)
 
     const err = await expectError(ws, messages,
       { type: 'send', seq: 69, node: 'r3-dup', field: 'name', value: 'r3-renamed' }, 'INVALID_VALUE')

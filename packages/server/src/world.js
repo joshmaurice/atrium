@@ -6,7 +6,21 @@ import { pathToFileURL } from 'node:url'
 import { resolve as resolvePath } from 'node:path'
 import { NodeIO } from '@gltf-transform/core'
 import { KHRLightsPunctual } from '@gltf-transform/extensions'
-import { SOMDocument } from '@atrium/som'
+import { SOMDocument, pruneCandidateProperties, pruneDocumentInPlace } from '@atrium/som'
+
+/** Typed errors L3 throws. Both write nothing. */
+export const SERIALIZE_INDEX_MISMATCH       = 'SERIALIZE_INDEX_MISMATCH'
+export const SERIALIZE_EXCLUDED_REFERENCED  = 'SERIALIZE_EXCLUDED_REFERENCED'
+
+function createIO() {
+  return new NodeIO().registerExtensions([KHRLightsPunctual])
+}
+
+function typedError(code, message) {
+  const err = new Error(`${code}: ${message}`)
+  err.code = code
+  return err
+}
 
 /**
  * Fetch a file by URL. Uses fs.readFile for file:// URLs, globalThis.fetch for
@@ -29,6 +43,13 @@ function collectSubtreeNames(somNode) {
   return names
 }
 
+/** Every SOMNode in a subtree, the root included. */
+function collectSubtreeNodes(somNode) {
+  const out = [somNode]
+  for (const child of somNode.children) out.push(...collectSubtreeNodes(child))
+  return out
+}
+
 async function fetchBinary(url) {
   if (url.startsWith('file://')) {
     const path = new URL(url).pathname
@@ -40,8 +61,225 @@ async function fetchBinary(url) {
   return resp.arrayBuffer()
 }
 
+// ---------------------------------------------------------------------------
+// L3 — the one serialize, shared by both world kinds (H11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Embed every buffer AND every image in the writer's resources map as a data:
+ * URI (H13). glTF-Transform writes images as separate resources, which the old
+ * serialize dropped: a save, a som-dump and the commons seed lost every
+ * texture image.
+ */
+function embedResources(json, resources) {
+  for (const buf of json.buffers ?? []) {
+    if (buf.uri && !buf.uri.startsWith('data:')) {
+      const data = resources[buf.uri]
+      if (data) {
+        buf.uri = 'data:application/octet-stream;base64,' + Buffer.from(data).toString('base64')
+      }
+    }
+  }
+  for (const img of json.images ?? []) {
+    if (img.uri && !img.uri.startsWith('data:')) {
+      const data = resources[img.uri]
+      if (data) {
+        const mime = img.mimeType ?? 'image/png'
+        img.uri = `data:${mime};base64,` + Buffer.from(data).toString('base64')
+      }
+    }
+  }
+}
+
+/**
+ * Resolve an exclusion entry to a glTF node IDENTITY, never a name (H15,
+ * review #8). Accepts a SOMNode or a glTF-Transform Node. A bare name is
+ * resolved through the SOM only as a compatibility path for callers that have
+ * not been moved to identities yet.
+ */
+function toGltfNode(som, entry) {
+  if (!entry) return null
+  if (entry._node) return entry._node                              // SOMNode
+  if (entry.propertyType === 'Node') return entry                   // glTF Node
+  if (typeof entry === 'string') return som.getNodeByName(entry)?._node ?? null
+  return null
+}
+
+/** Add a node and all its descendants to `out`. */
+function collectNodeSubtree(gltfNode, out) {
+  if (!gltfNode || out.has(gltfNode)) return
+  out.add(gltfNode)
+  for (const child of gltfNode.listChildren()) collectNodeSubtree(child, out)
+}
+
+/** The prunable resources a set of glTF nodes uses (read before disposal). */
+function candidatesForNodes(gltfNodes) {
+  const candidates = []
+  for (const node of gltfNodes) {
+    const mesh  = node.getMesh()
+    const skin  = node.getSkin()
+    const cam   = node.getCamera()
+    const light = node.getExtension?.('KHR_lights_punctual')
+    if (mesh)  candidates.push(mesh)
+    if (skin)  candidates.push(skin)
+    if (cam)   candidates.push(cam)
+    if (light) candidates.push(light)
+  }
+  return candidates
+}
+
+/**
+ * L3 — serialize a SOM document, optionally excluding nodes.
+ *
+ * No exclusions: written from the live document, images and buffers embedded.
+ *
+ * With exclusions: the excluded nodes are resolved to IDENTITIES, mapped to
+ * their indices in `root.listNodes()`, and the document is written and read
+ * back with its resources. The index correspondence is checked before anything
+ * is disposed (`SERIALIZE_INDEX_MISMATCH`); a kept animation channel or skin
+ * that references an excluded node is refused
+ * (`SERIALIZE_EXCLUDED_REFERENCED`). The excluded subtrees are then disposed in
+ * the copy, L1 prunes the resources they used, and the copy is written. The
+ * live document is never touched.
+ *
+ * @param {SOMDocument} som
+ * @param {{excludeNodes?: Iterable<object|string>}} [options]
+ * @returns {Promise<object>} glTF JSON
+ */
+export async function serializeSomDocument(som, { excludeNodes } = {}) {
+  const io = createIO()
+  const document = som._document
+  const root = document.getRoot()
+
+  const excludedRoots = new Set()
+  for (const entry of excludeNodes ?? []) {
+    const gltfNode = toGltfNode(som, entry)
+    if (gltfNode) excludedRoots.add(gltfNode)
+  }
+
+  if (excludedRoots.size === 0) {
+    const { json, resources } = await io.writeJSON(document)
+    embedResources(json, resources)
+    return json
+  }
+
+  const excludedNodes = new Set()
+  for (const node of excludedRoots) collectNodeSubtree(node, excludedNodes)
+
+  // 1. exclusions to indices in the live node list.
+  const liveNodes = root.listNodes()
+  const excludedIndices = []
+  for (const node of excludedNodes) {
+    const index = liveNodes.indexOf(node)
+    if (index >= 0) excludedIndices.push(index)
+  }
+
+  // 2. write the live document and read it back WITH its resources.
+  const { json, resources } = await io.writeJSON(document)
+  const copy = await io.readJSON({ json, resources })
+  const copyRoot = copy.getRoot()
+  const copyNodes = copyRoot.listNodes()
+
+  if (copyNodes.length !== liveNodes.length) {
+    throw typedError(SERIALIZE_INDEX_MISMATCH,
+      `copy has ${copyNodes.length} node(s), live document has ${liveNodes.length}`)
+  }
+  for (const index of excludedIndices) {
+    if (copyNodes[index].getName() !== liveNodes[index].getName()) {
+      throw typedError(SERIALIZE_INDEX_MISMATCH,
+        `node ${index} is "${copyNodes[index].getName()}" in the copy, "${liveNodes[index].getName()}" live`)
+    }
+  }
+
+  // 3. refuse a structural break: a kept channel or skin that uses an excluded node.
+  const excludedCopy = new Set(excludedIndices.map(i => copyNodes[i]))
+  for (const animation of copyRoot.listAnimations()) {
+    for (const channel of animation.listChannels()) {
+      const target = channel.getTargetNode?.()
+      if (target && excludedCopy.has(target)) {
+        throw typedError(SERIALIZE_EXCLUDED_REFERENCED,
+          `animation "${animation.getName()}" targets an excluded node`)
+      }
+    }
+  }
+  for (const skin of copyRoot.listSkins()) {
+    for (const joint of skin.listJoints()) {
+      if (excludedCopy.has(joint)) {
+        throw typedError(SERIALIZE_EXCLUDED_REFERENCED, 'a skin joint is an excluded node')
+      }
+    }
+    const skeleton = skin.getSkeleton()
+    if (skeleton && excludedCopy.has(skeleton)) {
+      throw typedError(SERIALIZE_EXCLUDED_REFERENCED, 'a skin skeleton is an excluded node')
+    }
+  }
+
+  // 4. dispose the excluded subtrees in the copy, prune what they used, write.
+  const candidates = candidatesForNodes(excludedCopy)
+  for (const node of excludedCopy) {
+    try { node.dispose() } catch { /* already detached */ }
+  }
+  pruneCandidateProperties(copyRoot, candidates)
+
+  const { json: outJson, resources: outResources } = await io.writeJSON(copy)
+  embedResources(outJson, outResources)
+  return outJson
+}
+
+// ---------------------------------------------------------------------------
+// L4 — heal on load (K2, as narrowed in Rev 2): no node is removed.
+// ---------------------------------------------------------------------------
+
+/** Every node reachable from a scene. */
+function sceneNodeSet(root) {
+  const inScene = new Set()
+  const walk = (node) => {
+    if (inScene.has(node)) return
+    inScene.add(node)
+    for (const child of node.listChildren()) walk(child)
+  }
+  for (const scene of root.listScenes()) {
+    for (const child of scene.listChildren()) walk(child)
+  }
+  return inScene
+}
+
+/**
+ * L4 — heal a document world on load (K2, as narrowed in Rev 2). Prunes
+ * unreferenced resources across the whole document, before the SOM is built.
+ * A resource a detached node uses is still referenced, so it stays. Nodes are
+ * never removed; the log reports how many detached roots were seen, and the
+ * counts it removed — counts only, never names (K2/S1). Not applied to file
+ * worlds: those are the operator's files, re-read at every boot.
+ *
+ * @param {object} document   glTF-Transform Document
+ * @param {{log?: object|null}} [opts]
+ * @returns {{counts: object, detachedRoots: number}}
+ */
+export function healDocumentOnLoad(document, { log = console } = {}) {
+  const root = document.getRoot()
+  const inScene = sceneNodeSet(root)
+  const detachedRoots = root.listNodes().filter(n => !inScene.has(n)).length
+
+  const { counts } = pruneDocumentInPlace(document)
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
+
+  if (total > 0 || detachedRoots > 0) {
+    log.log(
+      '[world] healed document: ' +
+      `${counts.mesh} meshes, ${counts.primitive} primitives, ` +
+      `${counts.primitiveTarget} morph targets, ${counts.material} materials, ` +
+      `${counts.texture} textures, ${counts.accessor} accessors, ` +
+      `${counts.buffer} buffers, ${counts.skin} skins, ${counts.camera} cameras, ` +
+      `${counts.light} lights removed; ${detachedRoots} detached root nodes kept`
+    )
+  }
+
+  return { counts, detachedRoots }
+}
+
 export async function createWorld(gltfPath, { baseUrl } = {}) {
-  const io = new NodeIO().registerExtensions([KHRLightsPunctual])
+  const io = createIO()
   const document = await io.read(gltfPath)
   const som = new SOMDocument(document)
 
@@ -54,8 +292,10 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
   const rootExtras = document.getRoot().getExtras()
   const meta = rootExtras?.atrium ?? {}
 
-  // Names of nodes created by ingestExternalScene — filtered from som-dump
-  const externalNodeNames = new Set()
+  // Nodes created by ingestExternalScene — filtered from som-dump by IDENTITY
+  // (L3 step 1), and by name for the A4 checks the session layer makes.
+  const externalNodes     = new Set()   // SOMNode identities
+  const externalNodeNames = new Set()   // their names, for A4 checks
 
   // Resolve external references synchronously before the server opens connections.
   // Called by index.js via world.resolveExternalReferences() after createWorld().
@@ -78,7 +318,7 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
         doc = await io.readJSON({ json: JSON.parse(text), resources: {} })
       }
       const newNodes = som.ingestExternalScene(containerName, doc)
-      // Recursively register all ingested node names so serialize() can filter them
+      // Recursively register all ingested nodes so serialize() can exclude them
       _registerExternal(newNodes)
       console.log(`[world] External ref loaded: "${containerName}" ← ${resolvedUrl} (${newNodes.length} top-level node(s))`)
     } catch (err) {
@@ -88,6 +328,7 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
 
   function _registerExternal(somNodes) {
     for (const node of somNodes) {
+      externalNodes.add(node)
       externalNodeNames.add(node.name)
       _registerExternal(node.children)
     }
@@ -138,79 +379,24 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
     return { ok: true, node }
   }
 
+  // L3 — external content is always excluded, by IDENTITY.
   async function serialize({ excludeNodes } = {}) {
-    const { json, resources } = await io.writeJSON(som._document)
-    for (const buf of json.buffers ?? []) {
-      if (buf.uri && !buf.uri.startsWith('data:')) {
-        const data = resources[buf.uri]
-        if (data) {
-          buf.uri = 'data:application/octet-stream;base64,' + Buffer.from(data).toString('base64')
-        }
-      }
-    }
-
-    // Build the full exclusion set: external refs (always filtered) plus any
-    // caller-supplied node names (e.g. avatar names for persistence saves).
-    const allExcluded = new Set(externalNodeNames)
+    const exclusions = [...externalNodes]
     if (excludeNodes) {
-      for (const name of excludeNodes) {
-        allExcluded.add(name)
-      }
+      for (const entry of excludeNodes) exclusions.push(entry)
     }
-
-    // Filter excluded nodes from the serialized glTF
-    if (allExcluded.size > 0 && json.nodes) {
-      // Build index: glTF node index → node name
-      const nameByIndex = new Map(json.nodes.map((n, i) => [i, n.name]))
-
-      // Collect set of indices to remove
-      const removeIndices = new Set(
-        json.nodes
-          .map((n, i) => (allExcluded.has(n.name) ? i : -1))
-          .filter(i => i >= 0)
-      )
-
-      if (removeIndices.size > 0) {
-        // Build a remapped index array (old index → new index, or -1 if removed)
-        const remap = []
-        let next = 0
-        for (let i = 0; i < json.nodes.length; i++) {
-          remap[i] = removeIndices.has(i) ? -1 : next++
-        }
-
-        // Remove the nodes
-        json.nodes = json.nodes.filter((_, i) => !removeIndices.has(i))
-
-        // Update children arrays to remove references to deleted nodes and remap
-        for (const node of json.nodes) {
-          if (node.children) {
-            node.children = node.children
-              .map(c => remap[c])
-              .filter(c => c >= 0)
-            if (node.children.length === 0) delete node.children
-          }
-        }
-
-        // Update scene node lists
-        for (const scene of json.scenes ?? []) {
-          if (scene.nodes) {
-            scene.nodes = scene.nodes
-              .map(c => remap[c])
-              .filter(c => c >= 0)
-          }
-        }
-      }
-    }
-
-    return json
+    return serializeSomDocument(som, { excludeNodes: exclusions })
   }
 
   function removeNode(nodeName) {
     const node = som.getNodeByName(nodeName)
     if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
-    // A6/C8 — the whole subtree goes, and the names it contributed to
-    // externalNodeNames are dropped with it.
-    for (const name of collectSubtreeNames(node)) externalNodeNames.delete(name)
+    // A6/C8 — the whole subtree goes, and the nodes it contributed to the
+    // external sets are dropped with it.
+    for (const sub of collectSubtreeNodes(node)) {
+      externalNodes.delete(sub)
+      externalNodeNames.delete(sub.name)
+    }
     node.dispose()
     return { ok: true }
   }
@@ -225,7 +411,7 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
     return som.nodes.map(n => n.name)
   }
 
-  return { meta, som, externalNodeNames, getNode, setField, addNode, removeNode, getNodeTranslation, listNodeNames, serialize, resolveExternalReferences }
+  return { meta, som, externalNodeNames, externalNodes, getNode, setField, addNode, removeNode, getNodeTranslation, listNodeNames, serialize, resolveExternalReferences }
 }
 
 /**
@@ -237,16 +423,17 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
  * @returns {Promise<object>} world object with same API as createWorld
  */
 export async function createWorldFromDocument(documentJson) {
-  const io = new NodeIO().registerExtensions([KHRLightsPunctual])
+  const io = createIO()
   const parsed = typeof documentJson === 'string' ? JSON.parse(documentJson) : documentJson
   const document = await io.readJSON({ json: parsed, resources: {} })
+
+  // L4 — heal on load, before the SOM is built. No node is removed.
+  healDocumentOnLoad(document)
+
   const som = new SOMDocument(document)
 
   const rootExtras = document.getRoot().getExtras()
   const meta = rootExtras?.atrium ?? {}
-
-  // Names of nodes created by ingestExternalScene — filtered from som-dump
-  const externalNodeNames = new Set()
 
   // Document worlds never fetch external references on the server (S1).
   // extras.atrium.source names a glTF URL; resolving it server-side was a
@@ -264,6 +451,9 @@ export async function createWorldFromDocument(documentJson) {
       )
     }
   }
+
+  const externalNodes     = new Set()
+  const externalNodeNames = new Set()
 
   function getNode(name) { return som.getNodeByName(name) }
 
@@ -302,53 +492,16 @@ export async function createWorldFromDocument(documentJson) {
   }
 
   async function serialize({ excludeNodes } = {}) {
-    const { json, resources } = await io.writeJSON(som._document)
-    for (const buf of json.buffers ?? []) {
-      if (buf.uri && !buf.uri.startsWith('data:')) {
-        const data = resources[buf.uri]
-        if (data) {
-          buf.uri = 'data:application/octet-stream;base64,' + Buffer.from(data).toString('base64')
-        }
-      }
-    }
-
-    const allExcluded = new Set(externalNodeNames)
-    if (excludeNodes) {
-      for (const name of excludeNodes) allExcluded.add(name)
-    }
-
-    if (allExcluded.size > 0 && json.nodes) {
-      const nameByIndex = new Map(json.nodes.map((n, i) => [i, n.name]))
-      const removeIndices = new Set(
-        json.nodes.map((n, i) => (allExcluded.has(n.name) ? i : -1)).filter(i => i >= 0)
-      )
-      if (removeIndices.size > 0) {
-        const remap = []
-        let next = 0
-        for (let i = 0; i < json.nodes.length; i++) remap[i] = removeIndices.has(i) ? -1 : next++
-        json.nodes = json.nodes.filter((_, i) => !removeIndices.has(i))
-        for (const node of json.nodes) {
-          if (node.children) {
-            node.children = node.children.map(c => remap[c]).filter(c => c >= 0)
-            if (node.children.length === 0) delete node.children
-          }
-        }
-        for (const scene of json.scenes ?? []) {
-          if (scene.nodes) {
-            scene.nodes = scene.nodes.map(c => remap[c]).filter(c => c >= 0)
-          }
-        }
-      }
-    }
-    return json
+    return serializeSomDocument(som, { excludeNodes })
   }
 
   function removeNode(nodeName) {
     const node = som.getNodeByName(nodeName)
     if (!node) return { ok: false, code: 'NODE_NOT_FOUND' }
-    // A6/C8 — the whole subtree goes, and the names it contributed to
-    // externalNodeNames are dropped with it.
-    for (const name of collectSubtreeNames(node)) externalNodeNames.delete(name)
+    for (const sub of collectSubtreeNodes(node)) {
+      externalNodes.delete(sub)
+      externalNodeNames.delete(sub.name)
+    }
     node.dispose()
     return { ok: true }
   }
@@ -361,5 +514,5 @@ export async function createWorldFromDocument(documentJson) {
 
   function listNodeNames() { return som.nodes.map(n => n.name) }
 
-  return { meta, som, externalNodeNames, getNode, setField, addNode, removeNode, getNodeTranslation, listNodeNames, serialize, resolveExternalReferences }
+  return { meta, som, externalNodeNames, externalNodes, getNode, setField, addNode, removeNode, getNodeTranslation, listNodeNames, serialize, resolveExternalReferences }
 }
