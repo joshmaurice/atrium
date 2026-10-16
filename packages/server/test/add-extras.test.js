@@ -292,7 +292,7 @@ test('K4: a non-string destination on add is INVALID_VALUE "destination must be 
 // K4/L5 — the avatar rows
 // ---------------------------------------------------------------------------
 
-test('K4: an avatar add carrying any own extras.atrium is PERMISSION_DENIED, and no avatar is created', async () => {
+test('K4: an avatar add carrying a non-first-party extras.atrium is PERMISSION_DENIED, and no avatar is created', async () => {
   const { world, port } = await startOwnerWorld()
   const { ws, messages } = await connect(port)
   const peer = await connect(port)
@@ -304,6 +304,17 @@ test('K4: an avatar add carrying any own extras.atrium is PERMISSION_DENIED, and
       { teleporter: { destination: '#' } },
       { behavior: { spin: true } },
       {},
+      // OPERATOR RULING on K4 (2026-10-16): an avatar add's extras.atrium must
+      // be absent, or exactly { ephemeral: true }. Everything else is refused,
+      // including a false marker, a marker plus any other key, and a
+      // non-object. The branch's exemption (cc18947) implements exactly this.
+      { ephemeral: false },
+      { ephemeral: true, teleporter: { destination: '#' } },
+      { ephemeral: true, behavior: { spin: true } },
+      'not-an-object',
+      42,
+      [],
+      null,
     ]
     for (const [i, atrium] of cases.entries()) {
       const before = resourceCounts(world)

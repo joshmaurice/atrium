@@ -143,10 +143,10 @@ function candidatesForNodes(gltfNodes) {
  * live document is never touched.
  *
  * @param {SOMDocument} som
- * @param {{excludeNodes?: Iterable<object|string>}} [options]
+ * @param {{excludeNodes?: Iterable<object|string>, _testForceNodeListMismatch?: boolean}} [options]
  * @returns {Promise<object>} glTF JSON
  */
-export async function serializeSomDocument(som, { excludeNodes } = {}) {
+export async function serializeSomDocument(som, { excludeNodes, _testForceNodeListMismatch = false } = {}) {
   const io = createIO()
   const document = som._document
   const root = document.getRoot()
@@ -178,7 +178,13 @@ export async function serializeSomDocument(som, { excludeNodes } = {}) {
   const { json, resources } = await io.writeJSON(document)
   const copy = await io.readJSON({ json, resources })
   const copyRoot = copy.getRoot()
-  const copyNodes = copyRoot.listNodes()
+  // §7.1 test hook: the copy is written from the live node list, so this guard
+  // is unreachable from the public surface. Tests pass
+  // `_testForceNodeListMismatch` to drop a node from the copy's list and prove
+  // the guard fires instead of writing a document keyed to the wrong nodes.
+  const copyNodes = _testForceNodeListMismatch
+    ? copyRoot.listNodes().slice(1)
+    : copyRoot.listNodes()
 
   if (copyNodes.length !== liveNodes.length) {
     throw typedError(SERIALIZE_INDEX_MISMATCH,
