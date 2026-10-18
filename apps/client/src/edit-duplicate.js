@@ -151,12 +151,16 @@ function sendableArray(acc) {
   return Array.from(acc.getArray())
 }
 
-/** The copy's descriptor, from current values. Assumes the rules passed. */
-function buildCopy(node, name) {
+/**
+ * The descriptor, from current values. Assumes the rules passed.
+ * `offsetX` is 0 for a restore (Y2): the node's own translation, bit for bit
+ * — never `x + 1.5 − 1.5`, which is not always `x` in floating point (U5).
+ */
+function buildDescriptor(node, name, offsetX) {
   const t = node.getTranslation()
   const descriptor = {
     name,
-    translation: [t[0] + DUPLICATE_OFFSET_X, t[1], t[2]],
+    translation: offsetX ? [t[0] + offsetX, t[1], t[2]] : [t[0], t[1], t[2]],
     rotation: [...node.getRotation()],
     scale: [...node.getScale()],
   }
@@ -258,7 +262,28 @@ export function duplicateRuleProblem(node) {
 export function prepareDuplicate(node, { name }) {
   const problem = duplicateRuleProblem(node)
   if (problem) return problem
-  const descriptor = buildCopy(node, name)
+  const descriptor = buildDescriptor(node, name, DUPLICATE_OFFSET_X)
+  const bytes = addMessageBytes(descriptor)
+  if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
+  return { ok: true, descriptor, bytes }
+}
+
+/**
+ * Y2 — the `add` that brings this node back exactly as it is now. Rules 1–9
+ * are N3's, unchanged; the descriptor is built by the same code as a copy but
+ * with the node's own name and its own translation, no offset applied or
+ * subtracted (U5). Its output is the canonical form the undo engine compares:
+ * the same node gives the same descriptor, key order included.
+ *
+ * @param {object} node  the glTF-Transform Node (read now, from current values)
+ * @param {object} [opts]
+ * @param {string} [opts.name]  defaults to the node's own name
+ * @returns {{ok: true, descriptor: object, bytes: number} | {ok: false, rule: string, reason: string}}
+ */
+export function prepareRestore(node, { name = node.getName?.() } = {}) {
+  const problem = duplicateRuleProblem(node)
+  if (problem) return problem
+  const descriptor = buildDescriptor(node, name, 0)
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   return { ok: true, descriptor, bytes }

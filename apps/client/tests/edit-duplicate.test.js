@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  prepareDuplicate, duplicateRuleProblem, addMessageBytes, DUPLICATE_REASONS, DUPLICATE_OFFSET_X, MAX_ADD_BYTES,
+  prepareDuplicate, prepareRestore, duplicateRuleProblem, addMessageBytes, DUPLICATE_REASONS, DUPLICATE_OFFSET_X, MAX_ADD_BYTES,
 } from '../src/edit-duplicate.js'
 
 // ── glTF-Transform stand-ins ────────────────────────────────────────────────
@@ -71,11 +71,12 @@ function mesh(prims, { name = '', extras = {}, extensions = 0, weights = [] } = 
 // accepted edit changes the SOM without any event reaching this module.
 function node(o = {}) {
   const n = {
-    translation: [1, 0.5, -2], rotation: [0, 0, 0, 1], scale: [1, 1, 1], extras: {},
+    name: 'Cube', translation: [1, 0.5, -2], rotation: [0, 0, 0, 1], scale: [1, 1, 1], extras: {},
     mesh: null, children: [], parents: ['Root', 'Scene'], camera: null, skin: null, light: null,
     extensions: 0, ...o,
   }
   return {
+    getName: () => n.name,
     getTranslation: () => n.translation, getRotation: () => n.rotation, getScale: () => n.scale,
     getExtras: () => n.extras, getMesh: () => n.mesh, listChildren: () => n.children,
     listParents: () => n.parents.map((t) => ({ propertyType: t })),
@@ -378,6 +379,93 @@ test('(review #1) a node that became ineligible after the first check is refused
   assert.equal(prepareDuplicate(n, { name: NAME }).ok, true)
   n._n.children = [{}]                       // a child was added since
   expectRule(n, 'children')
+})
+
+// ── Y2: prepareRestore ──────────────────────────────────────────────────────
+
+function expectRestoreRule(n, rule) {
+  const r = prepareRestore(n)
+  assert.equal(r.ok, false, `expected refusal by ${rule}`)
+  assert.equal(r.rule, rule)
+  assert.ok(r.reason.startsWith(DUPLICATE_REASONS[rule]), r.reason)
+  return r
+}
+
+test('Y2: restore equals the copy but for the name and the translation, bit for bit', () => {
+  const n = node({ mesh: cubeMesh(), extras: { __atrium_visible: false } })
+  const copy = prepareDuplicate(n, { name: 'Cube copy' })
+  const restore = prepareRestore(n)
+  assert.equal(restore.ok, true)
+  assert.equal(restore.descriptor.name, 'Cube', 'the node’s own name')
+  assert.deepStrictEqual(restore.descriptor.translation, n._n.translation, 'its own translation')
+  // everything else is exactly the copy’s
+  assert.deepStrictEqual(
+    { ...restore.descriptor, name: null, translation: null },
+    { ...copy.descriptor, name: null, translation: null })
+  assert.equal(restore.descriptor.mesh.primitives[0].material.roughnessFactor,
+    copy.descriptor.mesh.primitives[0].material.roughnessFactor)
+})
+
+test('Y2 (U5): an X the offset round-trip cannot reproduce is kept bit for bit', () => {
+  // 0.1 + 1.5 − 1.5 !== 0.1: a restore must never apply and subtract the offset.
+  assert.notEqual(0.1 + DUPLICATE_OFFSET_X - DUPLICATE_OFFSET_X, 0.1)
+  const n = node({ translation: [0.1, 0.5, -2] })
+  const restore = prepareRestore(n)
+  assert.deepStrictEqual(restore.descriptor.translation, [0.1, 0.5, -2])
+  assert.notDeepStrictEqual(restore.descriptor.translation,
+    [0.1 + DUPLICATE_OFFSET_X - DUPLICATE_OFFSET_X, 0.5, -2])
+  // the copy still applies the offset
+  assert.deepStrictEqual(prepareDuplicate(n, { name: NAME }).descriptor.translation,
+    [0.1 + DUPLICATE_OFFSET_X, 0.5, -2])
+})
+
+test('Y2: every one of N3’s rules 1–9 refuses a restore too', () => {
+  const m = cubeMesh()
+  expectRestoreRule(node({ mesh: m, children: [{}] }), 'children')
+  expectRestoreRule(node({ mesh: m, parents: ['Root', 'Node'] }), 'parent')
+  expectRestoreRule(node({ camera: {} }), 'attached')
+  expectRestoreRule(node({ mesh: m, parents: ['Root', 'Scene', 'AnimationChannel'] }), 'referenced')
+  expectRestoreRule(node({ extras: { atrium: { source: null } } }), 'external')
+  expectRestoreRule(node({ extras: { atrium: { teleporter: 'x' } } }), 'atrium')
+  expectRestoreRule(node({ mesh: cubeMesh({ meshOpts: { extras: { lod: 0 } } }) }), 'mesh')
+  expectRestoreRule(node({ mesh: m, extensions: 1 }), 'extensions')
+  expectRestoreRule(node({ mesh: m, rotation: [0, 0, 0, 0.99] }), 'transform')
+  expectRestoreRule(node({ mesh: m, scale: [1, 0, 1] }), 'transform')
+  const zeros = new Float32Array(600_000)
+  expectRestoreRule(node({ mesh: mesh([primitive({ attrs: { POSITION: accessor(zeros) } })]) }), 'size')
+})
+
+test('Y2: two restores of an unchanged node are equal; one changed number makes them differ', () => {
+  const n = node({ mesh: cubeMesh({ meshOpts: { name: 'CrateMesh' } }), extras: { __atrium_visible: false } })
+  const a = prepareRestore(n).descriptor
+  const b = prepareRestore(n).descriptor
+  assert.deepStrictEqual(a, b, 'the canonical form is deterministic, key order included')
+  assert.deepStrictEqual(Object.keys(a), Object.keys(b))
+  // every one of these is a number (or name) the comparison must see
+  n._n.translation = [99, 0.5, -2]
+  assert.notDeepStrictEqual(prepareRestore(n).descriptor, a)
+  const c = prepareRestore(n).descriptor
+  n._n.rotation = [0, Math.SQRT1_2, 0, Math.SQRT1_2]
+  assert.notDeepStrictEqual(prepareRestore(n).descriptor, c)
+  const d = prepareRestore(n).descriptor
+  n._n.scale = [1, 1, 1.0000001]
+  assert.notDeepStrictEqual(prepareRestore(n).descriptor, d)
+  const e = prepareRestore(n).descriptor
+  n._n.extras = { __atrium_visible: true }
+  assert.notDeepStrictEqual(prepareRestore(n).descriptor, e)
+  const f = prepareRestore(n).descriptor
+  n._n.name = 'Crate'
+  assert.notDeepStrictEqual(prepareRestore(n).descriptor, f)
+})
+
+test('Y2: the restore descriptor is a fresh object: changing it never reaches the node', () => {
+  const n = node({ mesh: cubeMesh() })
+  const d = prepareRestore(n).descriptor
+  d.translation[0] = 42
+  d.rotation[3] = 0
+  d.mesh.primitives[0].attributes.POSITION[0] = 99
+  assert.deepStrictEqual(n._n.translation, [1, 0.5, -2])
+  assert.deepStrictEqual(n._n.rotation, [0, 0, 0, 1])
 })
 
 test('the copy is a fresh object: changing it never reaches the source', () => {
