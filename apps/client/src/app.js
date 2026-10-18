@@ -21,8 +21,9 @@ import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } fr
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 import { palettePlacement, paletteName, copyName } from './edit-palette.js'
-import { prepareDuplicate, duplicateRuleProblem } from './edit-duplicate.js'
-import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, isActiveCameraStale } from './edit-structure.js'
+import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
+import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, isActiveCameraStale } from './edit-structure.js'
+import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -782,11 +783,16 @@ client.on('som:set', ({ nodeName, path }) => {
   // node holding one (B7: a moved group moves its pads' zones)
   const node = nodeName ? client.som.getNodeByName(nodeName) : null
   if (node) {
+    // U16 — another session's change reaches the gesture tracker, so a revert
+    // puts back the server's value, never an older one. Edit mode on or off.
+    if (TRANSFORM_FIELDS.includes(path)) editTracker.remoteSet(node, path, [...node[path]])
     if (isTeleporter(node) || (TRANSFORM_FIELDS.includes(path) && subtreeSome(node, isTeleporter))) {
       rebuildPads()
     }
     if (node === selected) refreshEditPanel()
   }
+  // Y2 — a delete's capture is redone on every remote change until its removal
+  undo.reCapture()
 })
 
 // Teleporter pad tracking (T4): rebuild pads on add/remove/set of teleporter nodes
@@ -798,6 +804,7 @@ client.on('som:add', ({ nodeName }) => {
       rebuildPads()
     }
   }
+  undo.reCapture()                     // Y2 — a remote add re-captures a pending delete
 })
 
 client.on('som:remove', ({ nodeName }) => {
@@ -818,6 +825,7 @@ client.on('som:remove', ({ nodeName }) => {
 client.on('som:rename', () => {
   if (!client.som) return
   rebuildPads()
+  undo.reCapture()                     // Y2 — a remote rename re-captures a pending delete
 })
 
 // A7/C7 — the client missed state: an `add` named a parent this client does
@@ -1574,6 +1582,8 @@ const epPalette      = document.getElementById('ep-palette')        // 1b-2 N1
 const epPaletteBtns  = [...epPalette.querySelectorAll('button[data-kind]')]
 const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
+const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
+const epRedo         = document.getElementById('ep-redo')           // step 2, Y5
 
 let selected      = null   // the selected SOMNode, held by object (B2)
 let selectedObj   = null   // its three.js object, owned by DocumentView
@@ -1598,10 +1608,69 @@ const editTracker = createEditTracker({
     if (node === selected) refreshEditVectors()
     if (subtreeSome(node, isTeleporter)) rebuildPads()
   },
+  // Y3 — one settle batch at a time: what the server accepted becomes an entry
+  onTransformsSettled: (results, info) => {
+    undo.onTransformsSettled(results, info)
+    refreshEditActions()
+  },
 })
 
 // 1b-2 N4 — the pending add, duplicate or delete (one at a time).
 const structure = createStructureTracker()
+
+// ---------------------------------------------------------------------------
+// Undo and redo (Phase 3 step 2, Y1/Y4) — devtasks/PREBRIEF-undo-redo.md
+//
+// Every entry goes through a handle (W2) and every send is preceded by an
+// identity-and-value check (W4, Y4). Recording does not depend on Edit mode
+// (Y7); the stacks are cleared only when the edit session ends (W7).
+// ---------------------------------------------------------------------------
+
+/** One shared guard for every Edit-mode change's dispatch path (Y4). */
+function editDispatchBlocked() {
+  return editBlocked({ undoing: undo.inFlight(), pending: !!structure.pending })
+}
+
+const undo = createEditUndo({
+  getNodeByName: (name) => client.som?.getNodeByName(name) ?? null,
+  checkNewName: (name, node) => client.som?.checkNewName(name, node) ?? { ok: true },
+  prepareRestore,                      // Y2's capture, straight from edit-duplicate
+  // Y3 — an undo's or a redo's send is never recorded as a new edit
+  sendTransform: (node, field, value) => editTracker.commit(node, field, value, { record: false }),
+  // Y4 — a rename goes through the same pendingRename path as the name field
+  rename: (node, from, to, direction) => {
+    const seq = client.renameNode(from, to)
+    pendingRename = { seq, node, direction }
+    return seq
+  },
+  // Y4 — a remove or a re-add through the structure tracker, marked as ours
+  structural: (request, direction) => {
+    let seq
+    try {
+      seq = request.kind === 'delete'
+        ? client.removeNode(request.name)
+        : client.addNode(request.descriptor)
+    } catch (err) {
+      showEditError(`Couldn’t ${direction}: ${err.message}`)
+      return null
+    }
+    structure.begin(request.kind, seq, {
+      name: request.name,
+      node: request.node ?? null,
+      subtree: request.subtree ?? null,
+      undo: direction,
+    })
+    return seq
+  },
+  // W10 — select what changed; with Edit off nothing is selected (Y7)
+  select: (node) => { if (modes.edit) selectForEdit(node) },
+  message: (text) => showEditError(text),
+  isEditOn: () => modes.edit,
+  isDragging: () => !!activeGesture || !!gizmo?.dragging,
+  isRenamePending: () => !!pendingRename,
+  hasPendingSend: () => editTracker.pendingCount > 0,
+  hasPendingStructural: () => !!structure.pending || teleporterRequestPending(),
+})
 
 // E4 — the local avatar and peers' avatars are never selectable. The server
 // refuses edits to live avatars anyway; this is for the UI.
@@ -1636,7 +1705,9 @@ function setEditMode(on) {
   } else {
     if (!modes.edit) return
     selectForEdit(null)          // ends a drag with its final send
-    structure.reset()            // N4 — a late answer is no longer the panel's
+    // Y7 (Rev 2) — the structure tracker is NOT reset here: it holds 1b-2's
+    // one-at-a-time rule and the S1 evidence, and a request answered while
+    // Edit mode is off is handled as usual. Only the session end resets it.
     modes.setEdit(false)
     syncGizmoEnabled()
     editPanel.style.display = 'none'
@@ -1649,11 +1720,13 @@ function setEditMode(on) {
 }
 
 // Connection lifecycle and world reloads (B1): Edit mode off, and every
-// unanswered edit forgotten — the next som-dump is the truth.
+// unanswered edit forgotten — the next som-dump is the truth. W7: this, and
+// only this, clears the undo and redo stacks.
 function endEditSession() {
   setEditMode(false)
   editTracker.reset()
   structure.reset()
+  undo.endSession()
   pendingRename = null
 }
 
@@ -1663,11 +1736,12 @@ editToggleBtn.addEventListener('click', () => setEditMode(!modes.edit))
 
 // TransformControls captures the pointer on every press while enabled, even
 // with nothing attached. Enable it only in Edit mode, with an object selected,
-// and not while that object's rename is unanswered.
+// and not while that object's rename is unanswered — nor while an undo or a
+// redo is in flight or a structural request is pending (Y4, Rev 2 #3).
 function syncGizmoEnabled() {
   if (!gizmo) return
   const renaming = !!pendingRename && pendingRename.node === selected
-  gizmo.enabled = modes.edit && !!selectedObj && !renaming
+  gizmo.enabled = modes.edit && !!selectedObj && !renaming && !editDispatchBlocked()
 }
 
 function ensureGizmo() {
@@ -1681,7 +1755,9 @@ function ensureGizmo() {
 
 function onHandleDragging(isDragging) {
   if (isDragging) {
-    if (selected) activeGesture = editTracker.begin(selected)
+    // Y4 — no gesture begins while an undo or a redo is in flight or a
+    // structural request is pending: the dispatch path, not just the button
+    if (selected && !editDispatchBlocked()) activeGesture = editTracker.begin(selected)
   } else if (activeGesture) {
     activeGesture.end()
     activeGesture = null
@@ -1891,6 +1967,12 @@ function onEditFieldKey(e) {
 function commitVectorField(field) {
   if (!selected) return
   const inputs = epVectorInputs.filter(i => i.dataset.field === field)
+  // Y4 — the dispatch path, not only the button state: an undo or a redo in
+  // flight (or a pending structural request) leaves the field as it was
+  if (editDispatchBlocked()) {
+    for (const i of inputs) i.value = i.dataset.shown ?? ''
+    return
+  }
   const nums = inputs.map(i => Number(i.value.trim()))
   if (inputs.some(i => i.value.trim() === '') || nums.some(n => !Number.isFinite(n))) {
     for (const i of inputs) i.value = i.dataset.shown ?? ''
@@ -1920,6 +2002,12 @@ epName.addEventListener('change', () => {
   const node = selected
   const value = epName.value
   if (value === node.name) return
+  // Y4 — the dispatch path: while an undo or a redo is in flight or a
+  // structural request is pending, the field goes back to the node's name
+  if (editDispatchBlocked()) {
+    epName.value = node.name
+    return
+  }
   // Instant check against the D3 rules; the server still decides.
   const check = client.som?.checkNewName(value, node)
   if (check && !check.ok) {
@@ -1928,7 +2016,10 @@ epName.addEventListener('change', () => {
     return
   }
   try {
-    pendingRename = { seq: client.renameNode(node.name, value), node }
+    const seq = client.renameNode(node.name, value)
+    pendingRename = { seq, node }
+    // Y1 — recorded only when the answer arrives AND the rename applied (U15)
+    undo.registerRename(seq, { node, from: node.name, to: value })
     clearEditError()
   } catch (err) {
     showEditError(err.message)
@@ -1954,6 +2045,11 @@ client.on('edit:accepted', ({ seq }) => {
     // F14 / B7 — the editor's own move of a pad, or of a group holding one
     if (subtreeSome(mine.node, isTeleporter)) rebuildPads()
   }
+  // Y4 — the undo engine's own answers (a transform send, or a rename it sent)
+  if (undo.onAccepted(seq)) {
+    refreshEditVectors()          // the node holds the undone value now
+    refreshEditActions()
+  }
   if (pendingRename && seq === pendingRename.seq) {
     pendingRename = null
     refreshNameField()
@@ -1962,15 +2058,18 @@ client.on('edit:accepted', ({ seq }) => {
 
 client.on('edit:rejected', ({ seq, code, message }) => {
   editTracker.rejected(seq, { code, message })
+  if (undo.onRejected(seq, { code, message })) refreshEditActions()
   if (pendingRename && seq === pendingRename.seq) {
+    const typed = !pendingRename.direction     // an undo's rename brings its own message
     pendingRename = null
-    showEditError(`Couldn’t rename: ${message || code}`)
+    if (typed) showEditError(`Couldn’t rename: ${message || code}`)
     refreshNameField()
   }
 })
 
 client.on('edit:unknown', ({ seq }) => {
   editTracker.unknown(seq)
+  if (undo.onUnknown(seq)) refreshEditActions()
   if (pendingRename && seq === pendingRename.seq) {
     pendingRename = null
     refreshNameField()
@@ -2036,6 +2135,8 @@ function structuralBlock() {
     pending:      !!structure.pending,
     dragging:     !!activeGesture || !!gizmo?.dragging,
     renaming:     !!pendingRename && pendingRename.node === selected,
+    sending:      editTracker.pendingCount > 0,     // Y2, U14
+    undoing:      undo.inFlight(),                  // Y4, Rev 2 #3
   })
 }
 
@@ -2055,8 +2156,8 @@ function duplicateHint(node) {
 
 // Enabled state and tooltips. A hint only: every click checks again.
 function refreshEditActions() {
-  const pending = !!structure.pending
-  for (const b of epPaletteBtns) b.disabled = pending || !modes.edit
+  const blocked = editDispatchBlocked()
+  for (const b of epPaletteBtns) b.disabled = blocked || !modes.edit
   const block = structuralBlock()
   epDelete.disabled = !!block
   epDelete.title = block ?? 'Delete the selected object'
@@ -2064,12 +2165,46 @@ function refreshEditActions() {
   if (!dupReason) dupReason = duplicateHint(selected)
   epDuplicate.disabled = !!dupReason
   epDuplicate.title = dupReason ?? 'Duplicate the selected object'
+  // Y5 — Undo and Redo, beside Duplicate and Delete. The tooltip is the Y1
+  // label, or the Y4 reason (`Nothing to undo`, `Waiting for the server…`).
+  const undoReason = undo.reason('undo')
+  epUndo.disabled = !!undoReason
+  epUndo.title = undoReason ?? undo.label('undo')
+  const redoReason = undo.reason('redo')
+  epRedo.disabled = !!redoReason
+  epRedo.title = redoReason ?? undo.label('redo')
 }
+
+// Y5 — the two buttons. A click checks again (Y4): the reason is the tooltip,
+// and the same guard blocks the keys.
+epUndo.addEventListener('click', () => { undo.run('undo'); refreshEditActions() })
+epRedo.addEventListener('click', () => { undo.run('redo'); refreshEditActions() })
+
+// Y5/W9 — the keys, in their own document listener: Ctrl+Z (Cmd+Z) undo;
+// Ctrl+Shift+Z (Cmd+Shift+Z) and Ctrl+Y redo. Nothing happens unless Edit mode
+// is on and focus is not in a text field — that Ctrl+Z is the browser's own
+// (U9). Handled keys preventDefault.
+document.addEventListener('keydown', (e) => {
+  if (!modes.edit) return
+  if (!e.ctrlKey && !e.metaKey) return
+  if (e.altKey) return
+  if (e.target?.closest?.('input, textarea, select')) return
+  const key = (e.key || '').toLowerCase()
+  if (key === 'z' && !e.shiftKey) {
+    e.preventDefault()
+    undo.run('undo')
+    refreshEditActions()
+  } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+    e.preventDefault()
+    undo.run('redo')
+    refreshEditActions()
+  }
+})
 
 // N1 — a palette primitive, along the view, resting on y = 0.
 epPalette.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-kind]')
-  if (!btn || !modes.edit || structure.pending) return
+  if (!btn || !modes.edit || editDispatchBlocked()) return
   const kind = btn.dataset.kind
   const name = paletteName(kind, isNameFree)
   if (!name) { showEditError('No free name for a new object'); return }
@@ -2087,6 +2222,8 @@ epPalette.addEventListener('click', (e) => {
   }
   // The answer can't be handled before this handler returns (one thread).
   structure.begin('add', seq, { name, primitive: kind, descriptor })
+  // Y7 — recorded from its answer, whatever the Edit mode then
+  undo.registerAdd(seq, { name, duplicate: false })
   clearEditError()
   refreshEditActions()
 })
@@ -2109,26 +2246,33 @@ epDuplicate.addEventListener('click', () => {
     return
   }
   structure.begin('duplicate', seq, { name: check.descriptor.name, node })
+  undo.registerAdd(seq, { name: check.descriptor.name, duplicate: true })
   clearEditError()
   refreshEditActions()
 })
 
-// N2 — confirm every delete; say how many objects go with it.
+// N2 — a delete of a node that can come back asks nothing; one that can't
+// asks, and says so (W6 supersedes design §4.1 for restorable nodes).
 // The pause after the dialog lets messages that arrived meanwhile be handled.
 const AFTER_DIALOG_MS = 50
 epDelete.addEventListener('click', async () => {
   if (!modes.edit || !selected || structuralBlock()) return
   const node = selected
-  const n = countDescendants(node)
-  const question = n > 0
-    ? `Delete "${node.name}" and ${n} object${n === 1 ? '' : 's'} inside it? This can’t be undone.`
-    : `Delete "${node.name}"? This can’t be undone.`
-  if (!window.confirm(question)) return
-  // Outside review S1: the dialog paused this page, so messages that arrived
-  // meanwhile are still queued. Let them land before sending: if another tab
-  // removed this object (and perhaps made a new one with its name), the
-  // delete-by-name would hit the wrong object. Re-check by identity.
-  await new Promise((r) => setTimeout(r, AFTER_DIALOG_MS))
+  // Y2 — captured at click time, before the delete is sent, from current
+  // values only (a pending transform send blocks the click, U14)
+  const capture = undo.capture(node)
+  if (!capture.ok) {
+    const n = countDescendants(node)
+    const question = n > 0
+      ? `Delete "${node.name}" and ${n} object${n === 1 ? '' : 's'} inside it? This can’t be undone.`
+      : `Delete "${node.name}"? This can’t be undone.`
+    if (!window.confirm(question)) return
+    // Outside review S1: the dialog paused this page, so messages that arrived
+    // meanwhile are still queued. Let them land before sending: if another tab
+    // removed this object (and perhaps made a new one with its name), the
+    // delete-by-name would hit the wrong object. Re-check by identity.
+    await new Promise((r) => setTimeout(r, AFTER_DIALOG_MS))
+  }
   if (!modes.edit || selected !== node || structuralBlock()) return
   if (client.som?.getNodeByName(node.name) !== node) return
   const subtree = collectSubtree(node)
@@ -2140,6 +2284,8 @@ epDelete.addEventListener('click', async () => {
     return
   }
   structure.begin('delete', seq, { name: node.name, node, subtree })
+  // W5 — a delete that can't come back isn't recorded; its answer clears redo
+  undo.registerDelete(seq, { node, name: node.name, descriptor: capture.ok ? capture.descriptor : null })
   clearEditError()
   refreshEditActions()
 })
@@ -2150,6 +2296,20 @@ function onStructureAnswer(seq, status, message) {
   const result = structure.settle(seq, status)
   if (!result) return
   const { request, removedMessage } = result
+  // Y4 — the undo engine sees every structural answer, and handles its own
+  // before anything else. In particular the palette retry must never run for
+  // an undo's or a redo's request.
+  undo.onStructureAnswer(result, message)
+  if (request.undo) {
+    if (removedMessage === 'show') {
+      showEditError(REMOVED_MESSAGE)             // another tab's delete won
+    } else if (removedMessage === 'replaced') {
+      // S1: ours was already gone; the server removed a newer object of that name.
+      showEditError(`This object was removed elsewhere, and a newer “${request.name}” was deleted instead.`)
+    }
+    refreshEditActions()
+    return
+  }
   if (removedMessage === 'show') {
     showEditError(REMOVED_MESSAGE)             // another tab's delete won
   } else if (removedMessage === 'replaced') {
@@ -2171,6 +2331,7 @@ function onStructureAnswer(seq, status, message) {
 
 // One retry of a palette add whose name another tab took first (outside
 // review nit). Same shape and place, the next free name; never retried twice.
+// Y1 — the final name is what gets recorded.
 function retryAdd(request, name) {
   const descriptor = { ...request.descriptor, name }
   let seq
@@ -2179,7 +2340,9 @@ function retryAdd(request, name) {
   } catch {
     return false
   }
-  return structure.begin('add', seq, { name, primitive: request.primitive, descriptor, retried: true })
+  const begun = structure.begin('add', seq, { name, primitive: request.primitive, descriptor, retried: true })
+  if (begun) undo.registerAdd(seq, { name, duplicate: false })
+  return begun
 }
 
 // J6 — select the new node once the server has it. The node is in the SOM
