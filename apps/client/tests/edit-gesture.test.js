@@ -22,6 +22,7 @@ function makeWorld() {
   const sent = []
   const messages = []
   const reverts = []
+  const settled = []
   const tracker = createEditTracker({
     read: (node, field) => node[field],
     writeLocal: (node, field, value) => { node[field] = value; locals.push({ node, field, value }) },
@@ -33,10 +34,13 @@ function makeWorld() {
     },
     onMessage: (text, info) => messages.push({ text, ...info }),
     onReverted: (node, field, value) => reverts.push({ node, field, value }),
+    onTransformsSettled: (results, info) => settled.push({ results, info }),
     now: () => t,
   })
   return {
-    tracker, locals, sent, messages, reverts,
+    tracker, locals, sent, messages, reverts, settled,
+    /** The batches reported since the last call, and forget them. */
+    takeSettled() { const out = settled.slice(); settled.length = 0; return out },
     advance(ms) { t += ms },
   }
 }
@@ -382,5 +386,321 @@ describe('edit-gesture: values', () => {
     assert.equal(r.node, n)
     assert.equal(r.field, 'rotation')
     assert.equal(w.tracker.accepted(999), null, 'not ours')
+  })
+})
+
+// ── Y3: settle batches, outcomes and remote sets ────────────────────────────
+// Phase 3 step 2 — the engine must record what the server accepted, not what
+// this tab meant to do. Everything below drives the tracker directly.
+
+describe('edit-gesture: settle batches (Y3)', () => {
+  test('every send accepted: one result per gesture, after the last answer, changed fields only', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })    // seq 1
+    w.advance(200); g.update({ translation: [2, 0, 0] })    // seq 2
+    assert.equal(w.sent.length, 2)
+    g.end()                                                // nothing more to send
+    w.tracker.accepted(1)
+    assert.deepEqual(w.takeSettled(), [], 'nothing is reported while a send is outstanding')
+    w.tracker.accepted(2)
+    assert.equal(w.settled.length, 1, 'reported once, after the last answer')
+    assert.deepEqual(w.settled[0].results,
+      [{ node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [2, 0, 0] }] }])
+    assert.deepEqual(w.settled[0].info,
+      { acceptedOwnSend: true, remote: false, rejected: false })
+    assert.equal(w.tracker.awaitingCount, 0)
+  })
+
+  test('every send accepted writes nothing: the node already holds the last value', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })
+    w.advance(200); g.update({ translation: [2, 0, 0] })
+    g.end()
+    const writes = w.locals.length
+    w.tracker.accepted(1)
+    w.tracker.accepted(2)
+    assert.equal(w.locals.length, writes, 'reconcile writes nothing in the ordinary path')
+    assert.equal(w.reverts.length, 0)
+  })
+
+  test('(U13) partly accepted, one field: the accepted change is still recorded, from the start', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })    // seq 1: accepted
+    w.advance(200); g.update({ translation: [2, 0, 0] })    // seq 2: refused
+    g.end()
+    w.tracker.accepted(1)
+    w.tracker.rejected(2, { message: 'nope' })
+    assert.deepEqual(n.translation, [1, 0, 0], 'reconcile left the accepted value')
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results,
+      [{ node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [1, 0, 0] }] }])
+    assert.deepEqual(w.settled[0].info,
+      { acceptedOwnSend: true, remote: false, rejected: true })
+  })
+
+  test('(U13) partly accepted, two fields: one merged result, the refused field left out', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0], rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2] })
+    assert.deepEqual(w.sent.map(s => s.field).sort(), ['rotation', 'translation'])
+    const t1 = w.sent.find(s => s.field === 'translation').seq
+    const r1 = w.sent.find(s => s.field === 'rotation').seq
+    w.advance(200); g.update({ translation: [2, 0, 0] })   // no rotation change: no second send
+    const t2 = w.sent.filter(s => s.field === 'translation').at(-1).seq
+    g.end()
+    w.tracker.accepted(t1)
+    w.tracker.accepted(t2)
+    w.tracker.rejected(r1, { message: 'not a unit quaternion' })
+    assert.deepEqual(n.translation, [2, 0, 0])
+    assert.deepEqual(n.rotation, [0, 0, 0, 1], 'reconcile put the rotation back to its start')
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results, [{
+      node: n,
+      changes: [{ field: 'translation', from: [0, 0, 0], to: [2, 0, 0] }],
+    }], 'the rotation is left out: reconcile made it its start again')
+  })
+
+  test('overlap with a refusal: one merged result, reported only after the older gesture’s answer', () => {
+    const w = makeWorld()
+    const n = node()
+    const g1 = w.tracker.begin(n)
+    w.advance(200); g1.update({ translation: [1, 0, 0] })   // seq 1, still unanswered
+    g1.end()
+    const g2 = w.tracker.begin(n)
+    w.advance(200); g2.update({ translation: [2, 0, 0] })   // seq 2, shares the record
+    g2.end()
+    w.tracker.accepted(2)
+    assert.deepEqual(w.takeSettled(), [], 'gesture 2’s own answer does not settle the batch')
+    w.tracker.rejected(1, { message: 'late' })
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results,
+      [{ node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [2, 0, 0] }] }])
+    assert.deepEqual(n.translation, [2, 0, 0], 'the accepted value stands')
+    assert.equal(w.reverts.length, 0)
+  })
+
+  test('overlap, both accepted: two results in begin order, so Undo reverses the newest first', () => {
+    const w = makeWorld()
+    const n = node()
+    const g1 = w.tracker.begin(n)
+    w.advance(200); g1.update({ translation: [1, 0, 0] })   // seq 1
+    const g2 = w.tracker.begin(n)
+    w.advance(200); g2.update({ translation: [2, 0, 0] })   // seq 2
+    g1.end()
+    g2.end()
+    w.tracker.accepted(1)
+    w.tracker.accepted(2)
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results, [
+      { node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [1, 0, 0] }] },
+      { node: n, changes: [{ field: 'translation', from: [1, 0, 0], to: [2, 0, 0] }] },
+    ])
+  })
+
+  test('two gestures on different fields settle on their own records, not together', () => {
+    const w = makeWorld()
+    const n = node()
+    const g1 = w.tracker.begin(n)
+    w.advance(200); g1.update({ translation: [1, 0, 0] })
+    g1.end()
+    const g2 = w.tracker.begin(n)
+    w.advance(200); g2.update({ rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2] })
+    g2.end()
+    w.tracker.accepted(2)                                    // the rotation only
+    assert.equal(w.settled.length, 1, 'gesture 2 does not wait for gesture 1')
+    assert.deepEqual(w.settled[0].results[0].changes[0].field, 'rotation')
+    w.tracker.accepted(1)
+    assert.equal(w.settled.length, 2)
+    assert.deepEqual(w.settled[1].results[0].changes[0].field, 'translation')
+  })
+
+  test('a drag put back to its start reports nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })
+    w.advance(200); g.update({ translation: [0, 0, 0] })
+    g.end()
+    for (const s of w.sent) w.tracker.accepted(s.seq)
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results, [], 'from equals to: no change to record')
+  })
+
+  test('(review 2 #4) a partial drag dragged back over the refused value records the confirmed result', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })    // seq 1 accepted
+    w.advance(200); g.update({ translation: [0, 0, 0] })    // seq 2 refused
+    g.end()
+    w.tracker.accepted(1)
+    w.tracker.rejected(2, { message: 'nope' })
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results,
+      [{ node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [1, 0, 0] }] }],
+      'judged on the confirmed result, never on the last attempted value')
+  })
+
+  test('a drag cancelled by a remove reports nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })
+    w.tracker.nodeRemoved(n)
+    assert.deepEqual(w.takeSettled(), [], 'a dead batch reports nothing')
+    g.end()
+    assert.deepEqual(w.takeSettled(), [])
+  })
+
+  test('an unknown send reports nothing: the session is ending (W7)', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })
+    g.end()
+    w.tracker.unknown(1)
+    assert.deepEqual(w.takeSettled(), [])
+  })
+})
+
+describe('edit-gesture: other sessions’ changes reach the tracker (Y3, U16)', () => {
+  test('(U16 case 1) a refusal writes nothing when a remote set is already the server’s value', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })    // seq 1
+    w.advance(200); g.update({ translation: [2, 0, 0] })    // seq 2
+    g.end()
+    w.tracker.accepted(1)                                    // confirmed = 1
+    n.translation = [4, 0, 0]                                // another session’s som:set applied
+    w.tracker.remoteSet(n, 'translation', [4, 0, 0])         // it arrived after our accepted send
+    w.tracker.rejected(2, { message: 'nope' })
+    assert.deepEqual(n.translation, [4, 0, 0], 'the server’s newer value is never overwritten')
+    assert.equal(w.reverts.length, 0, 'nothing was written')
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results, [], 'a batch another session touched records nothing')
+    assert.equal(w.settled[0].info.acceptedOwnSend, true, 'one of this tab’s sends was accepted')
+  })
+
+  test('(U16 case 2, the probe) an accepted send after a remote set leaves the node at this tab’s value', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [5, 0, 0])
+    n.translation = [4, 0, 0]                                // the remote set, applied locally
+    w.tracker.remoteSet(n, 'translation', [4, 0, 0])
+    w.tracker.accepted(seq)
+    assert.deepEqual(n.translation, [5, 0, 0], 'the last thing to arrive is the server’s value')
+    assert.deepEqual(w.reverts, [{ node: n, field: 'translation', value: [5, 0, 0] }])
+    assert.equal(w.settled.length, 1)
+    assert.deepEqual(w.settled[0].results, [], 'nothing is recorded for a remote-touched batch')
+  })
+
+  test('(U16 case 2) the same with an undo’s send: { record: false } still reconciles to confirmed', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [5, 0, 0], { record: false })
+    n.translation = [4, 0, 0]
+    w.tracker.remoteSet(n, 'translation', [4, 0, 0])
+    w.tracker.accepted(seq)
+    assert.deepEqual(n.translation, [5, 0, 0])
+    assert.deepEqual(w.takeSettled(), [], 'an undo’s send is never part of a reported batch')
+  })
+
+  test('a remote set then this tab’s accepted value then a refusal reverts to the last to arrive', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [5, 0, 0] })     // seq 1
+    n.translation = [4, 0, 0]
+    w.tracker.remoteSet(n, 'translation', [4, 0, 0])
+    w.advance(200); g.update({ translation: [6, 0, 0] })     // seq 2
+    g.end()
+    w.tracker.accepted(1)
+    w.tracker.rejected(2, { message: 'nope' })
+    assert.deepEqual(n.translation, [5, 0, 0], 'the last to arrive was this tab’s accepted 5')
+  })
+
+  test('a remote set for a node and field with no open record changes nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    w.tracker.remoteSet(n, 'translation', [9, 0, 0])
+    assert.equal(w.tracker.hasRecord(n, 'translation'), false)
+    assert.equal(w.tracker.awaitingCount, 0)
+    assert.deepEqual(w.takeSettled(), [])
+    // and the next commit still starts from what the node holds, as before
+    const seq = w.tracker.commit(n, 'translation', [9, 0, 0])
+    assert.equal(seq, 1, 'the remote value never reached the tracker')
+    assert.deepEqual(w.sent[0].value, [9, 0, 0])
+  })
+
+  test('(review 3 #3) a remote batch clears redo only when one of this tab’s sends was accepted', () => {
+    // every own send refused: this tab changed nothing
+    const a = makeWorld()
+    const na = node()
+    const ga = a.tracker.begin(na)
+    a.advance(200); ga.update({ translation: [1, 0, 0] })    // seq 1
+    na.translation = [4, 0, 0]
+    a.tracker.remoteSet(na, 'translation', [4, 0, 0])
+    a.advance(200); ga.update({ translation: [2, 0, 0] })    // seq 2
+    ga.end()
+    a.tracker.rejected(1, { message: 'no' })
+    a.tracker.rejected(2, { message: 'no' })
+    assert.equal(a.settled.length, 1)
+    assert.deepEqual(a.settled[0].results, [])
+    assert.equal(a.settled[0].info.acceptedOwnSend, false, 'both stacks stay')
+
+    // one own send accepted: a confirmed change went unrecorded
+    const b = makeWorld()
+    const nb = node()
+    const gb = b.tracker.begin(nb)
+    b.advance(200); gb.update({ translation: [1, 0, 0] })    // seq 1
+    nb.translation = [4, 0, 0]
+    b.tracker.remoteSet(nb, 'translation', [4, 0, 0])
+    b.advance(200); gb.update({ translation: [2, 0, 0] })    // seq 2
+    gb.end()
+    b.tracker.accepted(1)
+    b.tracker.rejected(2, { message: 'no' })
+    assert.equal(b.settled.length, 1)
+    assert.deepEqual(b.settled[0].results, [])
+    assert.equal(b.settled[0].info.acceptedOwnSend, true, 'the redo stack is cleared')
+  })
+})
+
+describe('edit-gesture: an undo’s or a redo’s own send (Y3)', () => {
+  test('commit(..., { record: false }) is never reported as a gesture', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [3, 0, 0], { record: false })
+    assert.equal(w.sent.length, 1)
+    w.tracker.accepted(seq)
+    assert.deepEqual(w.takeSettled(), [])
+    assert.equal(w.tracker.pendingCount, 0)
+  })
+
+  test('commit(..., { record: false }) is still reverted when refused, and says nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [3, 0, 0], { record: false })
+    w.tracker.rejected(seq, { message: 'nope' })
+    assert.deepEqual(n.translation, [0, 0, 0], 'the refused undo is reverted locally')
+    assert.deepEqual(w.messages, [], 'the undo engine shows its own message')
+    assert.deepEqual(w.takeSettled(), [])
+  })
+
+  test('an ordinary commit is still a one-send gesture with a reported batch', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [4, 0, 0])
+    assert.deepEqual(w.takeSettled(), [], 'not settled while the send is outstanding')
+    w.tracker.accepted(seq)
+    assert.deepEqual(w.settled[0].results,
+      [{ node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [4, 0, 0] }] }])
   })
 })
