@@ -622,6 +622,8 @@ describe('edit-undo: lifetime (W7, Y7)', () => {
     assert.equal(app.undo.undoCount + app.undo.redoCount, 1)
 
     app.flags.editOn = false                          // Edit mode off is not the end
+    // the panel polls the reason on every Edit-mode toggle (refreshEditActions)
+    assert.match(app.undo.reason('undo'), /Edit mode/)
     assert.equal(app.undo.undoCount + app.undo.redoCount, 1)
     app.flags.editOn = true
     assert.equal(app.undo.reason('redo'), null, 'and Undo works again afterwards')
