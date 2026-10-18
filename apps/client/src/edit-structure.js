@@ -11,13 +11,33 @@
  * (answers arrive in request order on one socket).
  */
 
-/** Why Delete or Duplicate is unavailable right now, or null. */
-export function structuralBlockReason({ hasSelection, pending, dragging, renaming }) {
+/**
+ * Why Delete or Duplicate is unavailable right now, or null.
+ *
+ * `undoing` is an undo or a redo in flight (Y4); `sending` is an unanswered
+ * transform send — Delete and Duplicate must never capture optimistic values
+ * (Y2, U14).
+ */
+export function structuralBlockReason({
+  hasSelection, pending, dragging, renaming, sending = false, undoing = false,
+}) {
   if (!hasSelection) return 'Select an object first'
+  if (undoing) return 'Undoing…'
   if (pending) return 'Waiting for the server…'
+  if (sending) return 'Waiting for the server…'
   if (dragging) return 'Finish moving the object first'
   if (renaming) return 'Waiting for the rename…'
   return null
+}
+
+/**
+ * One shared guard for every Edit-mode change's dispatch path (Y4): an undo or
+ * a redo in flight, or any structural request pending — an add, a duplicate or
+ * a delete, a click's or an undo's. A handle drag, a panel commit, a rename,
+ * the palette, Duplicate and Delete all check this and send nothing.
+ */
+export function editBlocked({ undoing = false, pending = false } = {}) {
+  return !!undoing || !!pending
 }
 
 /**

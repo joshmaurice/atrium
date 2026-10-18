@@ -6,7 +6,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, isActiveCameraStale, isAttachedUnder,
+  createStructureTracker, countDescendants, collectSubtree, structuralBlockReason,
+  editBlocked, isActiveCameraStale, isAttachedUnder,
 } from '../src/edit-structure.js'
 
 const nodeA = { name: 'Crate', children: [] }
@@ -156,6 +157,62 @@ test('structuralBlockReason: Delete/Duplicate wait for a selection, a request, a
   assert.match(structuralBlockReason({ ...ok, pending: true }), /server/)
   assert.match(structuralBlockReason({ ...ok, dragging: true }), /moving/)
   assert.match(structuralBlockReason({ ...ok, renaming: true }), /rename/)
+})
+
+test('(Rev 1 #4, U14) structuralBlockReason: an unanswered transform send blocks first', () => {
+  const ok = { hasSelection: true, pending: false, dragging: false, renaming: false }
+  assert.equal(structuralBlockReason({ ...ok, sending: true }), 'Waiting for the server…')
+  assert.equal(structuralBlockReason({ ...ok, sending: false }), null)
+  // it comes before a drag: a drag ended a moment ago still has sends to answer
+  assert.equal(structuralBlockReason({ ...ok, sending: true, dragging: true }), 'Waiting for the server…')
+})
+
+test('(Rev 2) structuralBlockReason: an undo or a redo in flight blocks with its own reason', () => {
+  const ok = { hasSelection: true, pending: false, dragging: false, renaming: false }
+  assert.equal(structuralBlockReason({ ...ok, undoing: true }), 'Undoing…')
+  assert.equal(structuralBlockReason({ ...ok, undoing: false }), null)
+  assert.equal(structuralBlockReason({ ...ok, undoing: true, pending: true }), 'Undoing…')
+})
+
+test('(Rev 2, Rev 3 #2) editBlocked: an undo in flight or any structural request pending', () => {
+  assert.equal(editBlocked({ undoing: false, pending: false }), false)
+  assert.equal(editBlocked({ undoing: true, pending: false }), true)
+  assert.equal(editBlocked({ undoing: false, pending: true }), true)
+  assert.equal(editBlocked({ undoing: true, pending: true }), true)
+  assert.equal(editBlocked(), false)
+})
+
+test('(Rev 2, review 2 #1) a pending delete survives an Edit-off-and-on cycle', () => {
+  // The app no longer resets the tracker when Edit mode goes off (Y7), so the
+  // tracker's own API is what must hold: no reset, the one-at-a-time rule and
+  // the S1 evidence all survive to `settle`.
+  const t = createStructureTracker()
+  const child = { name: 'leg', children: [] }
+  const parent = { name: 'Table', children: [child] }
+  t.begin('delete', 12, { name: 'Table', node: parent, subtree: collectSubtree(parent) })
+  // Edit mode off … and on again: nothing touches the tracker
+  assert.equal(t.begin('add', 13, { name: 'Cube' }), false, 'a second request is still refused')
+  assert.equal(t.pending.seq, 12)
+  assert.equal(t.removalSeen(parent), 'hold')
+  t.addSeen('Table')
+  const r = t.settle(12, 'accepted')
+  assert.equal(r.request.seq, 12)
+  assert.equal(r.removedMessage, 'replaced', 'held and replaced both survived')
+})
+
+test('(Y4) a request carries the undo/redo marker through settle()', () => {
+  const t = createStructureTracker()
+  const nodeA2 = { name: 'Crate', children: [] }
+  t.begin('delete', 21, { name: 'Crate', node: nodeA2, undo: 'undo' })
+  assert.equal(t.pending.undo, 'undo')
+  const r = t.settle(21, 'accepted')
+  assert.equal(r.request.undo, 'undo', 'the marker reaches the answer')
+  // the S1 hold works for a marked delete exactly as for a click
+  const u = createStructureTracker()
+  u.begin('delete', 22, { name: 'Sphere', node: nodeA, undo: 'redo' })
+  assert.equal(u.removalSeen(nodeA), 'hold')
+  u.addSeen('Sphere')
+  assert.equal(u.settle(22, 'accepted').removedMessage, 'replaced')
 })
 
 // ── J8 ──────────────────────────────────────────────────────────────────────
