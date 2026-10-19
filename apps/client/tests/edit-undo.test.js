@@ -964,4 +964,20 @@ describe('edit-undo: redo-stack rules (Y1, R6)', () => {
     assert.equal(app.undo.redoCount, 1, 'a remote-only batch keeps the redo stack (proof (y))')
     assert.equal(app.undo.undoCount, 0)
   })
+
+  test('(R7) a drag put back to its start keeps the redo stack', () => {
+    const app = makeApp()
+    const a = app.put(somNode('Cube'))
+    app.settle(a, [{ field: 'translation', from: [0, 0, 0], to: [1, 0, 0] }])
+    a.translation = [1, 0, 0]
+    app.undo.run('undo')
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.equal(app.undo.redoCount, 1)
+
+    // the drag reported no result, its own send was accepted, and nothing was
+    // remote: the world did not change
+    app.undo.onTransformsSettled([], { acceptedOwnSend: true, remote: false })
+    assert.equal(app.undo.redoCount, 1, 'keep redo: the world did not change')
+    assert.equal(app.undo.undoCount, 0)
+  })
 })

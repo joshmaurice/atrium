@@ -186,7 +186,10 @@ export function createEditUndo({
     if (!results || results.length === 0) {
       // A remote-touched batch with an accepted own send: a confirmed change of
       // this tab's went unrecorded, so the redo stack is cleared (Y1, Rev 3 #3).
-      if (info.acceptedOwnSend) clearRedo()
+      // R7 — and only then. A drag put back to its start reports no result with
+      // `acceptedOwnSend` true and nothing remote: the world did not change, so
+      // the redo stack stays.
+      if (info.remote && info.acceptedOwnSend) clearRedo()
       return
     }
     for (const r of results) {
