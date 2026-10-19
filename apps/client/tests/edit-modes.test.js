@@ -77,8 +77,8 @@ describe('edit-modes: teleport triggers', () => {
 
   test('the delete getter is gone', () => {
     const { modes } = setup()
-    assert.equal('delete' in modes, false)
-    assert.equal(modes.delete, undefined)
+    assert.equal('delete' in modes, false, 'the mode is not readable any more')
+    assert.equal(Reflect.get(modes, 'delete'), undefined)
   })
 
   test("'delete' is refused before and after a placement, without touching it", () => {

@@ -24,6 +24,7 @@ import { palettePlacement, paletteName, copyName } from './edit-palette.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
+import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -1132,22 +1133,19 @@ connectBtn.addEventListener('click', handleConnect)
 // ---------------------------------------------------------------------------
 
 function resetTeleporterUi() {
-  const isActive = modes.placement || modes.delete || tpForm.style.display !== 'none' ||
-    pendingSeq != null || pendingDeleteSeq != null
+  const isActive = modes.placement || tpForm.style.display !== 'none' ||
+    pendingSeq != null
 
   if (isActive) {
-    // Abandon pending save/delete
+    // Abandon pending save
     pendingSeq = null
     pendingName = null
-    pendingDeleteSeq = null
-    deleteTargetName = null
     pendingPosition = null
     // Close form and mode (triggers follow from the modes, B1)
     modes.setTeleporterMode(null)
     tpForm.style.display = 'none'
     tpCancelBtn.style.display = 'none'
     tpPlaceBtn.style.display = ''
-    tpDeleteBtn.style.display = ''
     viewportEl.style.cursor = ''
     // Restore Save button and re-enable cancels
     tpSaveBtn.textContent = 'Save'
@@ -1163,11 +1161,14 @@ function resetTeleporterUi() {
 }
 
 // ---------------------------------------------------------------------------
-// Teleporter placement and delete UI (T5)
+// Teleporter placement UI (T5)
+//
+// The teleporter delete mode and its toolbar button were retired in the
+// edit-tweaks round (K4, Z6): a pad is deleted in Edit mode with Delete, and
+// Undo brings it back. Placement and the destination form are unchanged.
 // ---------------------------------------------------------------------------
 
 const tpPlaceBtn = document.getElementById('tp-place-btn')
-const tpDeleteBtn = document.getElementById('tp-delete-btn')
 const tpCancelBtn = document.getElementById('tp-cancel-btn')
 const tpForm = document.getElementById('tp-form')
 const tpWorldSelect = document.getElementById('tp-world-select')
@@ -1177,12 +1178,10 @@ const tpFormError = document.getElementById('tp-form-error')
 const tpSaveBtn = document.getElementById('tp-save-btn')
 const tpFormCancel = document.getElementById('tp-form-cancel')
 
-// placementMode / deleteMode live in `modes` (edit-modes.js), B1.
+// placementMode lives in `modes` (edit-modes.js), B1.
 let pendingPosition = null
 let pendingName = null
 let pendingSeq = null
-let deleteTargetName = null
-let pendingDeleteSeq = null
 
 // Overlay ownership flag (operator correction #3):
 // Teleporter-originated messages go through showTeleporterOverlay, which sets
@@ -1228,10 +1227,9 @@ function showTeleportFailurePanel(msg, { showGoBack = true } = {}) {
 
 function updateTeleporterControls() {
   const allowed = canEditNow()
-  // While Edit mode is on, the teleporter modes are unavailable (E6)
+  // While Edit mode is on, the teleporter mode is unavailable (E6)
   tpPlaceBtn.disabled = !allowed || modes.placement || modes.edit
-  tpDeleteBtn.disabled = !allowed || modes.delete || modes.edit
-  if (!allowed && (modes.placement || modes.delete)) {
+  if (!allowed && modes.placement) {
     exitTeleporterMode()
   }
   updateEditControls()
@@ -1251,12 +1249,9 @@ function exitTeleporterMode() {
   pendingPosition = null
   pendingName = null
   pendingSeq = null
-  deleteTargetName = null
-  pendingDeleteSeq = null
   tpForm.style.display = 'none'
   tpCancelBtn.style.display = 'none'
   tpPlaceBtn.style.display = ''
-  tpDeleteBtn.style.display = ''
   viewportEl.style.cursor = ''
   // Restore Save button and re-enable both Cancels
   tpSaveBtn.textContent = 'Save'
@@ -1283,7 +1278,7 @@ document.addEventListener('keydown', (e) => {
     }
     // Ignore Escape while a save is pending
     if (pendingSeq != null) return
-    if (modes.placement || modes.delete || tpForm.style.display !== 'none') {
+    if (modes.placement || tpForm.style.display !== 'none') {
       exitTeleporterMode()
       return
     }
@@ -1304,7 +1299,6 @@ tpPlaceBtn.addEventListener('click', () => {
   if (!modes.setTeleporterMode('placement')) return
   tpCancelBtn.style.display = ''
   tpPlaceBtn.disabled = true
-  tpDeleteBtn.style.display = 'none'
   viewportEl.style.cursor = 'crosshair'
   showTeleporterOverlay('Click in the viewport to place a teleporter pad')
 })
@@ -1460,7 +1454,7 @@ client.on('som:add', ({ nodeName }) => {
   }
 })
 
-// Listen for error carrying our seq (placement or delete)
+// Listen for error carrying our placement's seq
 client.on('error', (err) => {
   if (pendingSeq != null && err.seq === pendingSeq) {
     // Placement save error — clear pending, restore Save, re-enable cancels
@@ -1473,86 +1467,6 @@ client.on('error', (err) => {
     pendingSeq = null
     pendingName = null
     updateEditControls()
-  }
-  if (pendingDeleteSeq != null && err.seq === pendingDeleteSeq) {
-    // Delete error
-    showTeleporterOverlay(`Couldn't delete teleporter: ${err.message || 'refused'}`)
-    pendingDeleteSeq = null
-    deleteTargetName = null
-    updateEditControls()
-  }
-})
-
-// ── Delete mode ─────────────────────────────────────────────────────────
-
-tpDeleteBtn.addEventListener('click', () => {
-  if (!canEditNow()) return
-  if (!modes.setTeleporterMode('delete')) return
-  tpCancelBtn.style.display = ''
-  tpDeleteBtn.disabled = true
-  tpPlaceBtn.style.display = 'none'
-  viewportEl.style.cursor = 'pointer'
-  showTeleporterOverlay('Click on a teleporter pad to delete it')
-})
-
-// Handle viewport click in delete mode — raycast to find teleporter
-viewportEl.addEventListener('click', (e) => {
-  if (!modes.delete) return
-  // Act only on canvas clicks — overlay/form/panel clicks pass through
-  if (e.target !== canvas) return
-
-  const rect = viewportEl.getBoundingClientRect()
-  const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1
-  const my = -((e.clientY - rect.top) / rect.height) * 2 + 1
-  const camera = stage.camera
-  const raycaster = new THREE.Raycaster()
-  raycaster.setFromCamera(new THREE.Vector2(mx, my), camera)
-
-  if (!sceneGroup) return
-  const intersects = raycaster.intersectObjects(sceneGroup.children, true)
-  if (intersects.length === 0) return
-
-  // Walk up to find SOM node
-  let somNode = null
-  for (const hit of intersects) {
-    let obj = hit.object
-    while (obj) {
-      if (obj.name && client.som) {
-        const node = client.som.getNodeByName(obj.name)
-        if (node) { somNode = node; break }
-      }
-      obj = obj.parent
-    }
-    if (somNode) break
-  }
-
-  if (!somNode || !isTeleporter(somNode)) return
-
-  deleteTargetName = somNode.name
-  const dest = teleporterDestination(somNode)
-  const label = dest ? teleporterLabel(dest, currentWorldUrl) : 'unknown'
-  if (!confirm(`Delete teleporter "${label}"?`)) {
-    deleteTargetName = null
-    return
-  }
-
-  try {
-    pendingDeleteSeq = client.removeNode(somNode.name)
-    updateEditControls()
-    showTeleporterOverlay('Deleting teleporter...')
-  } catch (err) {
-    showTeleporterOverlay('Delete failed: ' + err.message)
-    deleteTargetName = null
-    pendingDeleteSeq = null
-  }
-})
-
-// Listen for som:remove echo of our deletion
-client.on('som:remove', ({ nodeName }) => {
-  if (deleteTargetName && nodeName === deleteTargetName) {
-    showOverlay('')
-    deleteTargetName = null
-    exitTeleporterMode()
   }
 })
 
@@ -1708,14 +1622,14 @@ function updateEditControls() {
 }
 
 function teleporterRequestPending() {
-  return pendingSeq != null || pendingDeleteSeq != null
+  return pendingSeq != null
 }
 
 function setEditMode(on) {
   if (on) {
     if (!canEditNow() || modes.edit || teleporterRequestPending()) return
-    // E6 — Edit mode closes the teleporter modes; triggers follow from `modes`.
-    if (modes.placement || modes.delete || tpForm.style.display !== 'none') exitTeleporterMode()
+    // E6 — Edit mode closes the teleporter mode; triggers follow from `modes`.
+    if (modes.placement || tpForm.style.display !== 'none') exitTeleporterMode()
     modes.setEdit(true)
     if (document.pointerLockElement) document.exitPointerLock()
     ensureGizmo()
@@ -2223,27 +2137,60 @@ function refreshEditActions() {
 epUndo.addEventListener('click', () => { undo.run('undo'); refreshEditActions() })
 epRedo.addEventListener('click', () => { undo.run('redo'); refreshEditActions() })
 
-// Y5/W9 — the keys, in their own document listener: Ctrl+Z (Cmd+Z) undo;
-// Ctrl+Shift+Z (Cmd+Shift+Z) and Ctrl+Y redo. Nothing happens unless Edit mode
-// is on and focus is not in a text-entry field — that Ctrl+Z is the browser's
-// own (U9). R9: a checkbox, a radio or a button (a snap toggle, W9) does not
-// swallow the keys. Handled keys preventDefault.
+// Y5/W9 + K3/Z5 — the ONE Edit-mode key listener: Ctrl+Z (Cmd+Z) undo;
+// Ctrl+Shift+Z (Cmd+Shift+Z) and Ctrl+Y redo; Delete and Backspace delete;
+// Ctrl/Cmd+D duplicates. Which key is which lives in edit-keys.js (Z4); this
+// is the DOM half. It stays registered BEFORE the canvas navigation listener,
+// which passes e.code to navigation with no modifier check.
+//
+// Nothing happens unless Edit mode is on and focus is not in a text-entry
+// field — that Ctrl+Z, that Backspace and that Ctrl/Cmd+D are the browser's
+// own (U9). R9: a checkbox, a radio or a button (a snap toggle) does not
+// swallow the keys.
+//
+// Every recognised key takes the event (preventDefault +
+// stopImmediatePropagation), whether or not it runs: in Edit mode Ctrl/Cmd+D
+// must never reach navigation (KeyD strafes) or open the bookmark dialog.
+// A repeat is taken but not run, so holding the key makes one change.
 document.addEventListener('keydown', (e) => {
-  if (!modes.edit) return
-  if (!e.ctrlKey && !e.metaKey) return
-  if (e.altKey) return
-  if (e.target?.closest?.('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select')) return
-  const key = (e.key || '').toLowerCase()
-  if (key === 'z' && !e.shiftKey) {
-    e.preventDefault()
-    undo.run('undo')
+  const result = editKeyAction(keyEventFor(e), { editOn: modes.edit })
+  if (!result) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  if (!result.run) return
+
+  if (result.action === 'undo' || result.action === 'redo') {
+    undo.run(result.action)
     refreshEditActions()
-  } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
-    e.preventDefault()
-    undo.run('redo')
-    refreshEditActions()
+    return
   }
+  // Delete and Duplicate do exactly what their buttons' clicks do: same
+  // handler, so W6's dialog, the pause and the identity re-check all apply.
+  // Nothing selected: the key is taken and nothing more happens (no message).
+  // Selected but blocked: the button's tooltip is the reason shown.
+  const button = result.action === 'delete' ? epDelete : epDuplicate
+  if (!selected) return
+  if (button.disabled) {
+    showEditError(button.title)
+    return
+  }
+  button.click()
 })
+
+// The small target description edit-keys.js reads (Z4): the field the event
+// target sits inside, if any, so a key inside a name field stays the field's.
+function keyEventFor(e) {
+  const el = e.target?.closest?.('input, textarea, select') ?? e.target
+  return {
+    key: e.key,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+    shiftKey: e.shiftKey,
+    altKey: e.altKey,
+    repeat: e.repeat,
+    target: { tagName: el?.tagName, type: el?.type },
+  }
+}
 
 // N1 — a palette primitive, along the view, resting on y = 0.
 epPalette.addEventListener('click', (e) => {
