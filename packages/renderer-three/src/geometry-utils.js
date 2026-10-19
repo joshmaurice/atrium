@@ -28,6 +28,66 @@ export function threeGeometryToGltfPrimitive(geometry, material) {
 }
 
 /**
+ * Give a flat, indexed geometry a back face, in the geometry itself rather
+ * than through a double-sided material (K2, Z1): a duplicate of such a node,
+ * and a restore of it, must still be accepted, and the Duplicate rules refuse
+ * `doubleSided`.
+ *
+ * Every vertex is copied into EVERY attribute the geometry carries
+ * (`position`, `normal` and `uv`, which three.js geometries provide), with
+ * only the normal negated; every triangle `(a, b, c)` is appended as
+ * `(c', b', a')` on the copies, so each appended triangle winds the way its
+ * own (negated) normal faces. Every attribute ends with the same count, so
+ * the geometry stays consistent even though threeGeometryToGltfPrimitive
+ * only serialises POSITION, NORMAL and the indices. Returns the same
+ * geometry.
+ *
+ * Intended inputs: indexed, non-interleaved geometries only — the Edit-mode
+ * plane and the teleporter pad's ring. Interleaved attributes are not
+ * supported.
+ *
+ * @param {THREE.BufferGeometry} geometry
+ * @returns {THREE.BufferGeometry} the same geometry
+ */
+export function addBackFace(geometry) {
+  const names = Object.keys(geometry.attributes)
+  if (names.length === 0) return geometry
+
+  const count = geometry.attributes[names[0]].count
+
+  for (const name of names) {
+    const attr = geometry.attributes[name]
+    const itemSize = attr.itemSize
+    const src = attr.array
+    const doubled = new src.constructor(src.length * 2)
+    doubled.set(src, 0)
+    for (let i = 0; i < count; i++) {
+      const base = i * itemSize
+      for (let c = 0; c < itemSize; c++) {
+        const value = src[base + c]
+        doubled[src.length + base + c] = name === 'normal' ? -value : value
+      }
+    }
+    geometry.setAttribute(name, new THREE.BufferAttribute(doubled, itemSize, attr.normalized))
+  }
+
+  const index = geometry.index
+  if (index) {
+    const src = index.array
+    const doubled = new src.constructor(src.length * 2)
+    doubled.set(src, 0)
+    for (let t = 0; t < src.length; t += 3) {
+      doubled[src.length + t]     = src[t + 2] + count
+      doubled[src.length + t + 1] = src[t + 1] + count
+      doubled[src.length + t + 2] = src[t] + count
+    }
+    geometry.setIndex(new THREE.BufferAttribute(doubled, 1))
+  }
+
+  return geometry
+}
+
+/**
  * Build a glTF node descriptor for a procedurally-generated capsule
  * avatar, suitable for passing to AtriumClient.connect(). Random pastel
  * color per call.
@@ -131,6 +191,7 @@ function primitiveGeometry(kind) {
     case 'plane': {
       const geo = new THREE.PlaneGeometry(2, 2)
       geo.rotateX(-Math.PI / 2)         // lying flat, facing +Y
+      addBackFace(geo)                  // K2/Z2 — visible from below too
       return geo
     }
     case 'sphere':   return new THREE.SphereGeometry(0.5, 32, 16)
@@ -184,6 +245,7 @@ export function buildTeleporterDescriptor({ name, position, destination }) {
   // Rotate flat onto xz plane, then lift 5 cm above y=0 to avoid z-fighting
   geo.rotateX(-Math.PI / 2)
   geo.translate(0, 0.05, 0)
+  addBackFace(geo)                  // K2/Z3 — visible from below too
 
   const primitive = threeGeometryToGltfPrimitive(geo, {
     pbrMetallicRoughness: {

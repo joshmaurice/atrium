@@ -89,13 +89,47 @@ test('ramp: rises toward −Z, 1 m wide, 1 m deep, 0.5 m high', () => {
   assert.ok(top.length > 0 && top.every(v => v[2] < -0.49), 'the high edge is at −Z')
 })
 
-test('plane: lies flat, facing +Y', () => {
+test('plane: has a top face and a back face (8 vertices, 4 triangles)', () => {
+  const p = prim(buildPrimitiveDescriptor({ kind: 'plane', name: 'p', position: [0, 0, 0] }))
+  assert.equal(p.attributes.POSITION.length / 3, 8, '8 vertices')
+  assert.equal(p.indices.length / 3, 4, '4 triangles')
+})
+
+test('plane: lies flat, facing +Y on the top face and −Y on the back face', () => {
   const p = prim(buildPrimitiveDescriptor({ kind: 'plane', name: 'p', position: [0, 0, 0] }))
   for (let i = 1; i < p.attributes.POSITION.length; i += 3) assert.ok(Math.abs(p.attributes.POSITION[i]) < 1e-9)
+  let up = 0, down = 0
   for (let i = 0; i < p.attributes.NORMAL.length / 3; i++) {
     const n = vertex(p.attributes.NORMAL, i)
-    assert.ok(Math.abs(n[1] - 1) < 1e-6, `normal ${n}`)
+    assert.ok(Math.abs(n[0]) < 1e-6 && Math.abs(n[2]) < 1e-6, `normal ${n} is not ±Y`)
+    assert.ok(Math.abs(Math.abs(n[1]) - 1) < 1e-6, `normal ${n} is not ±Y`)
+    if (n[1] > 0) up++; else down++
   }
+  assert.equal(up, 4, '4 normals +Y')
+  assert.equal(down, 4, '4 normals −Y')
+})
+
+test('plane: each triangle winds the way its normal faces, on both faces', () => {
+  // The back face is visible only if the appended triangles are reversed:
+  // an unreversed copy would be culled from below as well (Z1, pre-brief §8).
+  const p = prim(buildPrimitiveDescriptor({ kind: 'plane', name: 'p', position: [0, 0, 0] }))
+  const pos = p.attributes.POSITION, nrm = p.attributes.NORMAL
+  for (let t = 0; t < p.indices.length; t += 3) {
+    const [a, b, c] = [p.indices[t], p.indices[t + 1], p.indices[t + 2]].map(i => vertex(pos, i))
+    const wound = cross(sub(b, a), sub(c, a))
+    assert.ok(dot(wound, vertex(nrm, p.indices[t])) > 0, `triangle ${t / 3} normal disagrees with its winding`)
+  }
+})
+
+test('plane: spans 2 m × 2 m and rests on the ground point 1 cm up', () => {
+  const d = buildPrimitiveDescriptor({ kind: 'plane', name: 'p', position: GROUND })
+  const pos = prim(d).attributes.POSITION
+  const vs = []
+  for (let i = 0; i < pos.length / 3; i++) vs.push(vertex(pos, i))
+  const span = (k) => Math.max(...vs.map(v => v[k])) - Math.min(...vs.map(v => v[k]))
+  assert.ok(Math.abs(span(0) - 2) < 1e-6, `x span ${span(0)}`)
+  assert.ok(Math.abs(span(2) - 2) < 1e-6, `z span ${span(2)}`)
+  assert.equal(d.translation[1], PRIMITIVE_REST_Y.plane, 'the node is lifted by PRIMITIVE_REST_Y.plane')
 })
 
 test('descriptor: name, rotation copied, no extras, default material per primitive', () => {
