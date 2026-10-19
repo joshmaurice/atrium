@@ -218,6 +218,13 @@ export function createEditUndo({
 
   function renameAccepted(req) {
     if (!renameApplied(req)) {
+      // R2 — an undo's or a redo's rename accepted without applying locally:
+      // this window is out of step, so both stacks go, and the request is
+      // settled here. Without clearing `inFlight` the failed undo would stay
+      // in flight and `editBlocked()` would block every Edit-mode change until
+      // a reload.
+      inFlight = null
+      deleteWindow = null
       clearBoth()
       message(OUT_OF_STEP_MESSAGE)
       return true

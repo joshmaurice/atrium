@@ -503,6 +503,25 @@ describe('edit-undo: in flight and refusals (Y4)', () => {
       'Undo was only partly applied: position changed, rotation was refused (not a unit quaternion).')
   })
 
+  test('(R2) an undo’s rename accepted without applying clears the stacks, the flight state and the block', () => {
+    const app = makeApp()
+    const a = app.put(somNode('Cube'))
+    const s = app.typeRename(a, 'Box')
+    app.answer(s, 'accepted')
+    assert.equal(app.undo.undoCount, 1, 'the rename was recorded')
+
+    // the undo's own rename: accepted by the server but not applied locally (U15)
+    assert.equal(app.undo.run('undo'), true)
+    assert.equal(app.undo.inFlight(), true, 'the undo is in flight')
+
+    app.answer(app.sent.at(-1).seq, 'accepted', null, { applyRename: false })
+    assert.equal(app.undo.inFlight(), false, 'R2 — the lockup is cleared, not left in flight')
+    assert.equal(app.undo.undoCount, 0)
+    assert.equal(app.undo.redoCount, 0)
+    assert.equal(app.undo.reason('undo'), NOTHING_TO_UNDO)
+    assert.equal(app.messages.at(-1), OUT_OF_STEP_MESSAGE)
+  })
+
   test('(Rev 1 #8) a zero-send undo moves the entry with no request at all', () => {
     const app = makeApp()
     // a legacy rotation: the entry's `from` normalizes to the identity the node
