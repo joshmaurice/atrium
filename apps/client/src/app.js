@@ -1584,6 +1584,8 @@ const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
 const epRedo         = document.getElementById('ep-redo')           // step 2, Y5
+// R1 — Undo and Redo live in their own row (#ep-history) outside #ep-fields,
+// so they stay visible with no selection; the ids and this wiring are unchanged.
 
 let selected      = null   // the selected SOMNode, held by object (B2)
 let selectedObj   = null   // its three.js object, owned by DocumentView

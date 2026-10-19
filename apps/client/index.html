@@ -573,6 +573,13 @@
       <button data-kind="cylinder" title="Add a 1 m cylinder in front of you">Cylinder</button>
       <button data-kind="ramp" title="Add a ramp in front of you, rising away from you">Ramp</button>
     </div>
+    <!-- R1 — Undo and Redo in their own row, outside #ep-fields, so they stay
+         visible with no selection (right after a delete). Edit mode alone
+         shows this row; the ids are unchanged (Y5). -->
+    <div class="ep-buttons ep-actions" id="ep-history">
+      <button id="ep-undo" title="Nothing to undo">Undo</button>
+      <button id="ep-redo" title="Nothing to redo">Redo</button>
+    </div>
     <div class="ep-empty" id="ep-empty">Click an object to select it.</div>
     <div id="ep-fields" style="display:none">
       <div class="ep-row"><span>Name</span><input type="text" id="ep-name" spellcheck="false" autocomplete="off" /></div>
@@ -593,8 +600,6 @@
         <input type="text" data-field="scale" data-i="2" aria-label="Scale z" />
       </div>
       <div class="ep-buttons ep-actions" id="ep-actions">
-        <button id="ep-undo" title="Nothing to undo">Undo</button>
-        <button id="ep-redo" title="Nothing to redo">Redo</button>
         <button id="ep-duplicate" title="Duplicate the selected object">Duplicate</button>
         <button id="ep-delete" class="ep-danger" title="Delete the selected object">Delete</button>
       </div>
