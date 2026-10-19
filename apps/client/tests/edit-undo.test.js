@@ -103,9 +103,11 @@ function makeApp(opts = {}) {
     },
     structural: (req, direction) => {
       if (req.kind === 'delete') {
-        drop(req.node)
+        // the server's `som:remove` broadcast arrives before its own answer
+        // (U2); the node stays in the world until then, so a remote change can
+        // still be re-captured while the removal is pending (R4)
         const s = record('structural-delete', { name: req.name, node: req.node, subtree: req.subtree })
-        bySeq.set(s, { kind: 'structural', undo: direction, name: req.name })
+        bySeq.set(s, { kind: 'structural', undo: direction, name: req.name, node: req.node, drop: req.node })
         return s
       }
       // the server makes a NEW node object (U5, J1)
@@ -150,6 +152,7 @@ function makeApp(opts = {}) {
     if (status === 'rejected' && info.kind === 'rename') flags.renamePending = false
     // the server broadcasts `som:remove` before the delete's own answer (U2)
     if (status === 'accepted' && info.kind === 'plain-delete') drop(info.node)
+    if (status === 'accepted' && info.drop) drop(info.drop)
     if (status === 'accepted') undo.onAccepted(s)
     else if (status === 'rejected') undo.onRejected(s, { message: text ?? 'refused' })
     else undo.onUnknown(s)
@@ -798,6 +801,69 @@ describe('edit-undo: what is recorded and what is not (Y1, W5)', () => {
     app.answer(seq, 'rejected', 'already in use')
     assert.equal(app.undo.undoCount, 0)
     assert.equal(app.messages.length, 0, 'the panel’s own message is the app’s')
+  })
+})
+
+// ── R4: an undo's or a redo's own removal re-captures (Y2) ─────────────────
+
+describe('edit-undo: an undo’s or a redo’s own removal re-captures (R4)', () => {
+  test('an undo of an add re-captures a remote change, and the redo re-adds it', () => {
+    const app = makeApp()
+    const a = somNode('Sphere', { translation: [1, 0, 0] })
+    app.addNode(a)
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.equal(app.undo.undoCount, 1)
+
+    const before = app.deletes().length
+    app.undo.run('undo')                             // the remove is sent
+    assert.equal(app.deletes().length, before + 1)
+    a.translation = [4, 0, 0]                        // another session moved it
+    app.undo.reCapture()                             // the window is open for a removal too
+    app.answer(app.deletes().at(-1).seq, 'accepted')
+    assert.equal(app.undo.undoCount, 0)
+    assert.equal(app.undo.redoCount, 1)
+
+    app.undo.run('redo')
+    const readded = app.adds().at(-1).node
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.deepEqual(readded.translation, [4, 0, 0], 'the redo restores the last capture, not a stale one')
+  })
+
+  test('a redo of a delete re-captures a remote change, and the undo re-adds it', () => {
+    const app = makeApp()
+    const a = app.put(somNode('Pad', { translation: [2, 0, 0] }))
+    app.clickDelete(a)
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    app.undo.run('undo')                             // re-add it
+    const readded = app.adds().at(-1).node
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.equal(app.undo.redoCount, 1, 'the delete entry is on the redo stack')
+
+    app.undo.run('redo')                             // the remove is sent
+    readded.translation = [5, 0, 0]                  // another session moved the re-added node
+    app.undo.reCapture()
+    app.answer(app.deletes().at(-1).seq, 'accepted')
+    assert.equal(app.undo.undoCount, 1, 'the entry moved back to the undo stack')
+
+    app.undo.run('undo')
+    const again = app.adds().at(-1).node
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.deepEqual(again.translation, [5, 0, 0], 'the undo restores the last capture')
+  })
+
+  test('a re-capture that fails drops the entry with its message; the removal still happened', () => {
+    const app = makeApp()
+    const a = somNode('Sphere')
+    app.addNode(a)
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    app.undo.run('undo')
+    a.children = [somNode('leg')]                    // it can never come back now
+    app.undo.reCapture()
+    app.answer(app.deletes().at(-1).seq, 'accepted')
+    assert.equal(app.undo.undoCount, 0)
+    assert.equal(app.undo.redoCount, 0, 'it never moved to the redo stack')
+    assert.equal(app.undo.inFlight(), false)
+    assert.equal(app.messages.at(-1), DELETE_CHANGED_MESSAGE)
   })
 })
 

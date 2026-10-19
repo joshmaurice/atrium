@@ -118,7 +118,11 @@ export function createEditUndo({
   const requests = new Map()
   /** the undo or redo under way, or null */
   let inFlight = null
-  /** the pending delete's capture window (Y2), or null */
+  /**
+   * The open capture window (Y2), or null: a click delete's, or — R4 — an
+   * undo's add-removal or a redo's delete-removal. While it is open, every
+   * remote `som:set`/`som:rename`/`som:add` re-captures the descriptor.
+   */
   let deleteWindow = null
   let ageCounter = 0
 
@@ -289,6 +293,26 @@ export function createEditUndo({
     return req
   }
 
+  /**
+   * R4 — an undo's add-removal or a redo's delete-removal opens the same
+   * capture window as a click delete (Y2): a remote change between the entry's
+   * check and the server's remove re-captures the entry's descriptor on every
+   * `som:set`/`som:rename`/`som:add` until the removal, so a later redo or undo
+   * restores the server's state and never a stale one.
+   */
+  function openRemovalWindow(entry, direction, node) {
+    const cap = capture(node)
+    deleteWindow = {
+      kind: 'removal',
+      name: node.name,
+      node,
+      direction,
+      entry,
+      descriptor: cap.ok ? cap.descriptor : null,
+      failed: !cap.ok,
+    }
+  }
+
   /** A `som:set`, `som:rename` or `som:add` while a delete is pending (Y2). */
   function reCapture() {
     const req = deleteWindow
@@ -298,6 +322,8 @@ export function createEditUndo({
     const cap = capture(node)
     if (!cap.ok) { req.failed = true; return }
     req.descriptor = cap.descriptor
+    // R4 — a removal's entry keeps the descriptor its later re-add will use
+    if (req.entry) req.entry.descriptor = cap.descriptor
   }
 
   function acceptAdd(req) {
@@ -391,9 +417,20 @@ export function createEditUndo({
     if (request.undo) {
       if (!inFlight || !inFlight.bySeq.has(request.seq)) return false
       inFlight.bySeq.delete(request.seq)
+      // R4 — a removal's capture window is over as soon as its answer arrives
+      const removal = deleteWindow && deleteWindow.kind === 'removal' ? deleteWindow : null
+      const removalFailed = !!removal && removal.failed && removal.entry === inFlight.entry
+      if (removal) deleteWindow = null
       if (status === 'accepted' && removedMessage !== 'replaced') {
-        // held 'quiet' or nothing held: ours won
-        completeAccepted()
+        if (removalFailed) {
+          // R4 — the object changed while it was being removed: the removal
+          // still happened, but the entry can no longer bring it back
+          dropEntry()
+          inFlight = null
+          message(DELETE_CHANGED_MESSAGE)
+        } else {
+          completeAccepted()      // held 'quiet' or nothing held: ours won
+        }
       } else if (status === 'accepted') {
         // S1: ours was already gone and a newer object with the name went
         // instead — the entry is dropped (W2's known limitation)
@@ -612,6 +649,7 @@ export function createEditUndo({
       const seq = structural(req, direction)
       if (seq == null) return
       inFlight = { direction, entry, kind: 'add', bySeq: new Map([[seq, { field: null }]]) }
+      openRemovalWindow(entry, direction, node)        // R4 — the same capture window
       return
     }
     if (entry.kind === 'add') {
@@ -634,6 +672,7 @@ export function createEditUndo({
       const seq = structural(req, direction)
       if (seq == null) return
       inFlight = { direction, entry, kind: 'delete', bySeq: new Map([[seq, { field: null }]]) }
+      openRemovalWindow(entry, direction, node)        // R4 — the same capture window
     }
   }
 
