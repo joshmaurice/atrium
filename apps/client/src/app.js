@@ -1664,8 +1664,18 @@ const undo = createEditUndo({
     })
     return seq
   },
-  // W10 — select what changed; with Edit off nothing is selected (Y7)
-  select: (node) => { if (modes.edit) selectForEdit(node) },
+  // W10 (R5) — select what changed. A re-add selects the new node with the
+  // same next-frame retry `selectAdded` uses (J6); a removal clears the
+  // selection only when the removed node was the selected one; with Edit off
+  // nothing is selected (Y7).
+  select: ({ node, removed }) => {
+    if (!modes.edit) return
+    if (removed) {
+      if (removed === selected) selectForEdit(null)
+      return
+    }
+    if (node) selectAddedNode(node)
+  },
   message: (text) => showEditError(text),
   isEditOn: () => modes.edit,
   isDragging: () => !!activeGesture || !!gizmo?.dragging,
@@ -2375,11 +2385,16 @@ function retryAdd(request, name) {
 function selectAdded(name) {
   const node = client.som?.getNodeByName(name)
   if (!node) return
+  selectAddedNode(node)
+}
+
+// Select a node, retrying once on the next frame when DocumentView has not
+// built its object yet (J6). An undo's or a redo's re-add uses this too (R5).
+function selectAddedNode(node) {
   selectForEdit(node)
   if (selected === node) return
-  // Not attachable yet: try once more on the next frame.
   requestAnimationFrame(() => {
-    if (modes.edit && !selected && client.som?.getNodeByName(name) === node) selectForEdit(node)
+    if (modes.edit && !selected && client.som?.getNodeByName(node.name) === node) selectForEdit(node)
   })
 }
 

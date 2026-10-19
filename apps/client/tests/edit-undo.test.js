@@ -121,7 +121,7 @@ function makeApp(opts = {}) {
       bySeq.set(s, { kind: 'structural', undo: direction, name: req.name })
       return s
     },
-    select: (node) => selections.push(node),
+    select: (info) => selections.push(info),
     message: (text) => messages.push(text),
     isEditOn: () => flags.editOn,
     isDragging: () => flags.dragging,
@@ -896,7 +896,7 @@ describe('edit-undo: undo’s own structural requests (Y4)', () => {
     assert.equal(app.messages.at(-1), 'Couldn’t undo: no permission')
   })
 
-  test('a re-add after an undo of a delete selects the new node (W10)', () => {
+  test('a re-add after an undo of a delete selects the new node (W10, R5)', () => {
     const app = makeApp()
     const a = app.put(somNode('Pad'))
     app.clickDelete(a)
@@ -905,17 +905,34 @@ describe('edit-undo: undo’s own structural requests (Y4)', () => {
     app.undo.run('undo')
     const readded = app.adds().at(-1).node
     app.answer(app.sent.at(-1).seq, 'accepted')
-    assert.equal(app.selections.at(-1), readded)
+    assert.deepEqual(app.selections.at(-1), { node: readded, removed: null },
+      'the panel is handed the new node, for J6’s next-frame retry')
   })
 
-  test('an undo’s remove that takes the node away selects nothing (W10)', () => {
+  test('(R5) a redo of a delete hands the removed node over too', () => {
+    const app = makeApp()
+    const a = app.put(somNode('Pad'))
+    app.clickDelete(a)
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    app.undo.run('undo')                             // re-add it
+    const readded = app.adds().at(-1).node
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    app.selections.length = 0
+    app.undo.run('redo')                             // remove the re-added node
+    app.answer(app.deletes().at(-1).seq, 'accepted')
+    assert.deepEqual(app.selections.at(-1), { node: null, removed: readded },
+      'the node that went is named, never a bare deselect')
+  })
+
+  test('an undo’s remove that takes the node away selects nothing (W10, R5)', () => {
     const app = makeApp()
     const a = somNode('Sphere')
     app.addNode(a)
     app.answer(app.sent.at(-1).seq, 'accepted')
     app.undo.run('undo')
     app.answer(app.deletes().at(-1).seq, 'accepted')
-    assert.equal(app.selections.at(-1), null)
+    assert.deepEqual(app.selections.at(-1), { node: null, removed: a },
+      'the panel clears the selection only if the removed node had it')
   })
 })
 

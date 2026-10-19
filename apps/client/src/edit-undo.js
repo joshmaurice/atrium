@@ -569,15 +569,22 @@ export function createEditUndo({
         : { field: c.field, from: c.from, to: [...(node[c.field] ?? c.to)] }))
     }
     const readded = (kind === 'add' && direction === 'redo') || (kind === 'delete' && direction === 'undo')
+    const removed = (kind === 'add' && direction === 'undo') || (kind === 'delete' && direction === 'redo')
     if (readded) {
       // a re-add: the handle follows the new node (it is in the SOM before
       // edit:accepted), so older entries for the node follow it too (W2)
       const fresh = getNodeByName(entry.descriptor.name)
       if (fresh) repoint(entry.handle, fresh)
     }
+    const removedNode = removed ? entry.handle.node : null
     moveEntry(entry, direction)
-    // W10 — select what changed
-    select(alive(entry.handle.node) ? entry.handle.node : null)
+    // W10 (R5) — tell the panel what changed. A re-add hands over the new node
+    // (the panel selects it with J6's next-frame retry); a removal hands over
+    // the removed node, so the panel clears the selection only when that very
+    // node was the selected one — a delete must not deselect another object.
+    select(removed
+      ? { node: null, removed: removedNode }
+      : { node: alive(entry.handle.node) ? entry.handle.node : null, removed: null })
   }
 
   /** A refusal: the entry is dropped. Nothing of this tab's was confirmed. */
