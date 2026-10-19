@@ -41,6 +41,17 @@ export function editBlocked({ undoing = false, pending = false } = {}) {
 }
 
 /**
+ * R3 — the same block reaches the fields. Every transform vector input and the
+ * name field are disabled while the selected object's rename is unanswered, or
+ * while any Edit-mode change is blocked (an undo or a redo in flight, or a
+ * structural request pending). The handles are held by `editBlocked` through
+ * `syncGizmoEnabled`; this is the panel half of the same decision.
+ */
+export function fieldsDisabled({ renaming = false, blocked = false } = {}) {
+  return !!renaming || !!blocked
+}
+
+/**
  * Every node below `node` in the SOM (children, recursively). N2's "N
  * objects inside it": a delete removes them all (D2).
  * @param {{ children?: object[] }} node

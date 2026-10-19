@@ -22,7 +22,7 @@ import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 import { palettePlacement, paletteName, copyName } from './edit-palette.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
-import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, isActiveCameraStale } from './edit-structure.js'
+import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 
 // ---------------------------------------------------------------------------
@@ -1930,21 +1930,31 @@ function refreshEditVectors() {
   }
 }
 
+// Why the selected node's name can't be edited, or '' — the same rules the
+// name field shows and the answers still decide.
+function nameFieldProblem(node) {
+  if (!node) return ''
+  if (node.camera || node.light) {
+    return 'Renaming a node with a camera or light is not supported yet'
+  }
+  if (isDuplicatedName(node.name)) {
+    // E7 — until the server cleanup round fixes the name setter
+    return 'Another node has the same name, so this one can’t be renamed yet'
+  }
+  return ''
+}
+
 function refreshNameField() {
   if (!selected) return
   const renaming = !!pendingRename && pendingRename.node === selected
-  let reason = ''
-  if (selected.camera || selected.light) {
-    reason = 'Renaming a node with a camera or light is not supported yet'
-  } else if (isDuplicatedName(selected.name)) {
-    // E7 — until the server cleanup round fixes the name setter
-    reason = 'Another node has the same name, so this one can’t be renamed yet'
-  }
-  // A move sent before the rename is answered would name the node by its old
-  // name and be refused; hold the handles and fields until the answer.
+  const reason = nameFieldProblem(selected)
+  // R3 — the fields are held by a rename AND by any block: an undo or a redo
+  // in flight, or a structural request pending. A move sent while either is
+  // true would name the node by a stale name or write a hidden offset.
+  const locked = fieldsDisabled({ renaming, blocked: editDispatchBlocked() })
   syncGizmoEnabled()
-  for (const input of epVectorInputs) input.disabled = renaming
-  epName.disabled = !!reason || renaming
+  for (const input of epVectorInputs) input.disabled = locked
+  epName.disabled = locked || !!reason
   epName.title = reason
   if (document.activeElement !== epName) {
     epName.value = selected.name
@@ -2159,6 +2169,19 @@ function duplicateHint(node) {
 // Enabled state and tooltips. A hint only: every click checks again.
 function refreshEditActions() {
   const blocked = editDispatchBlocked()
+  // R3 — the block reaches the handles and the fields, not only the buttons:
+  // a handle left live during an undo or a pending request would move the
+  // object with nothing sent, and the next real drag would commit the hidden
+  // offset. Every place a block starts or ends calls this.
+  syncGizmoEnabled()
+  const locked = fieldsDisabled({
+    renaming: !!pendingRename && pendingRename.node === selected,
+    blocked,
+  })
+  for (const input of epVectorInputs) input.disabled = locked
+  const nameProblem = nameFieldProblem(selected)
+  epName.disabled = locked || !!nameProblem
+  epName.title = nameProblem
   for (const b of epPaletteBtns) b.disabled = blocked || !modes.edit
   const block = structuralBlock()
   epDelete.disabled = !!block

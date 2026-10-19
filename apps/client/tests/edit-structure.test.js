@@ -5,10 +5,15 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   createStructureTracker, countDescendants, collectSubtree, structuralBlockReason,
-  editBlocked, isActiveCameraStale, isAttachedUnder,
+  editBlocked, fieldsDisabled, isActiveCameraStale, isAttachedUnder,
 } from '../src/edit-structure.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const nodeA = { name: 'Crate', children: [] }
 
@@ -180,6 +185,30 @@ test('(Rev 2, Rev 3 #2) editBlocked: an undo in flight or any structural request
   assert.equal(editBlocked({ undoing: false, pending: true }), true)
   assert.equal(editBlocked({ undoing: true, pending: true }), true)
   assert.equal(editBlocked(), false)
+})
+
+test('(R3) fieldsDisabled: a pending rename, or any block, disables the fields', () => {
+  assert.equal(fieldsDisabled({ renaming: false, blocked: false }), false)
+  assert.equal(fieldsDisabled({ renaming: true, blocked: false }), true, 'a pending rename')
+  assert.equal(fieldsDisabled({ renaming: false, blocked: true }), true, 'an undo/redo or a pending request')
+  assert.equal(fieldsDisabled({ renaming: true, blocked: true }), true)
+  assert.equal(fieldsDisabled(), false)
+})
+
+test('(R3) refreshEditActions holds the handles and the fields, not only the buttons', () => {
+  // The pure decision is fieldsDisabled (above). This guards the wiring half:
+  // every place a block starts or ends calls refreshEditActions, and that is
+  // where the handles (syncGizmoEnabled) and the fields (fieldsDisabled) must
+  // be held — a gizmo or a field left live during a block moves the object with
+  // nothing sent.
+  const lines = readFileSync(resolve(__dirname, '../src/app.js'), 'utf-8').split('\n')
+  const start = lines.findIndex((l) => l.startsWith('function refreshEditActions()'))
+  assert.ok(start >= 0, 'refreshEditActions is in app.js')
+  const body = []
+  for (let i = start + 1; i < lines.length && lines[i] !== '}'; i++) body.push(lines[i])
+  const text = body.join('\n')
+  assert.match(text, /syncGizmoEnabled\(\)/, 'the handles are re-synced from refreshEditActions')
+  assert.match(text, /fieldsDisabled\(/, 'the fields use the shared decision')
 })
 
 test('(Rev 2, review 2 #1) a pending delete survives an Edit-off-and-on cycle', () => {
