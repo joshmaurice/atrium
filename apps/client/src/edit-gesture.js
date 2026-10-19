@@ -21,12 +21,15 @@
  *   accepted send, or another session's `som:set` through `remoteSet` (U16);
  * - a rejection sets a flag and reports a message;
  * - the record reconciles only when nothing is pending AND no gesture on that
- *   field is active: when it was rejected, or another session changed the
- *   field while this tab's sends were in flight, the field is set back to
- *   `confirmed`. The server answers one session's requests in order, so that is
- *   the server's value. A late rejection from an older gesture therefore can't
- *   overwrite a newer accepted edit, and nothing is written while a newer
- *   gesture is still under way.
+ *   field is active. Reconcile then writes `confirmed` back locally when — and
+ *   only when — the record was refused, or another session changed the field
+ *   while this tab's sends were in flight (`remoteSet`), and the node's value
+ *   already differs from `confirmed`. It never writes after an
+ *   `edit:unknown`, and never for a dead record (a removed node). The server
+ *   answers one session's requests in order, so `confirmed` is the server's
+ *   value: a late rejection from an older gesture can't overwrite a newer
+ *   accepted edit, and nothing is written while a newer gesture is still under
+ *   way.
  *
  * Outcomes (Y3) — one settle batch at a time, never one gesture at a time:
  * - a gesture is settled only when every record it touched has reconciled;
@@ -149,8 +152,10 @@ export function createEditTracker({
     if (rec.pending.size > 0 || rec.active > 0) return
     // Only write when the node actually differs from the server's value, and
     // only when there is a reason to: a refusal, or another session's set that
-    // arrived while this tab's sends were in flight (U16). The ordinary path
-    // leaves the node at the last accepted send, so it writes nothing.
+    // arrived while this tab's sends were in flight (U16). An unknown (the
+    // connection ended) and a dead record (a removed node) never write. The
+    // ordinary path leaves the node at the last accepted send, so it writes
+    // nothing.
     if (!rec.dead && !rec.anyUnknown && (rec.rejected || rec.remote) &&
         !same(read(rec.node, rec.field), rec.confirmed)) {
       writeLocal(rec.node, rec.field, rec.confirmed)

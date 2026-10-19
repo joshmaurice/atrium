@@ -1639,9 +1639,17 @@ const undo = createEditUndo({
   prepareRestore,                      // Y2's capture, straight from edit-duplicate
   // Y3 — an undo's or a redo's send is never recorded as a new edit
   sendTransform: (node, field, value) => editTracker.commit(node, field, value, { record: false }),
-  // Y4 — a rename goes through the same pendingRename path as the name field
+  // Y4 — a rename goes through the same pendingRename path as the name field.
+  // R10 — a throw from the client is reported like `structural`'s and sends
+  // nothing.
   rename: (node, from, to, direction) => {
-    const seq = client.renameNode(from, to)
+    let seq
+    try {
+      seq = client.renameNode(from, to)
+    } catch (err) {
+      showEditError(`Couldn’t ${direction}: ${err.message}`)
+      return null
+    }
     pendingRename = { seq, node, direction }
     return seq
   },
@@ -2217,13 +2225,14 @@ epRedo.addEventListener('click', () => { undo.run('redo'); refreshEditActions() 
 
 // Y5/W9 — the keys, in their own document listener: Ctrl+Z (Cmd+Z) undo;
 // Ctrl+Shift+Z (Cmd+Shift+Z) and Ctrl+Y redo. Nothing happens unless Edit mode
-// is on and focus is not in a text field — that Ctrl+Z is the browser's own
-// (U9). Handled keys preventDefault.
+// is on and focus is not in a text-entry field — that Ctrl+Z is the browser's
+// own (U9). R9: a checkbox, a radio or a button (a snap toggle, W9) does not
+// swallow the keys. Handled keys preventDefault.
 document.addEventListener('keydown', (e) => {
   if (!modes.edit) return
   if (!e.ctrlKey && !e.metaKey) return
   if (e.altKey) return
-  if (e.target?.closest?.('input, textarea, select')) return
+  if (e.target?.closest?.('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select')) return
   const key = (e.key || '').toLowerCase()
   if (key === 'z' && !e.shiftKey) {
     e.preventDefault()
