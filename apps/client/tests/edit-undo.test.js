@@ -938,8 +938,8 @@ describe('edit-undo: undo’s own structural requests (Y4)', () => {
 
 // ── Y1/Y4: the redo stack's own rules ──────────────────────────────────────
 
-describe('edit-undo: redo-stack rules (Y1)', () => {
-  test('a remote-touched batch with an accepted own send clears redo without recording', () => {
+describe('edit-undo: redo-stack rules (Y1, R6)', () => {
+  test('(R6) a remote-touched batch clears redo only when one of this tab’s sends was accepted', () => {
     const app = makeApp()
     const a = app.put(somNode('Cube'))
     app.settle(a, [{ field: 'translation', from: [0, 0, 0], to: [1, 0, 0] }])
@@ -952,7 +952,16 @@ describe('edit-undo: redo-stack rules (Y1)', () => {
     assert.equal(app.undo.redoCount, 0, 'a confirmed change went unrecorded')
     assert.equal(app.undo.undoCount, 0)
 
+    // an entry back on the redo stack: a batch this tab only touched remotely
+    // must keep it — the rule is `remote && acceptedOwnSend`, not `remote` alone
+    app.settle(a, [{ field: 'translation', from: [0, 0, 0], to: [2, 0, 0] }])
+    a.translation = [2, 0, 0]
+    app.undo.run('undo')
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.equal(app.undo.redoCount, 1, 'the redo stack has an entry again')
+
     app.undo.onTransformsSettled([], { acceptedOwnSend: false, remote: true })
-    assert.equal(app.undo.redoCount, 0)
+    assert.equal(app.undo.redoCount, 1, 'a remote-only batch keeps the redo stack (proof (y))')
+    assert.equal(app.undo.undoCount, 0)
   })
 })
