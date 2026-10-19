@@ -11,7 +11,11 @@
  * mode was on would have turned triggers back on mid-edit. Here the trigger's
  * activity is derived from the modes, every time any of them changes:
  *
- *   triggerActive = !editMode && !placementMode && !deleteMode
+ *   triggerActive = !editMode && !placementMode
+ *
+ * Placement is the only teleporter mode: the teleporter delete mode was retired
+ * in the edit-tweaks round (K4, Z6) — Edit mode deletes pads, and Undo brings
+ * them back.
  *
  * The avatar-ready gate (trigger.setReady) is separate and unchanged.
  *
@@ -25,7 +29,7 @@
  */
 export function createEditModes({ setTriggerActive, pointerLock = false }) {
   let edit = false
-  let teleporter = null          // null | 'placement' | 'delete'
+  let teleporter = null          // null | 'placement'
   let pointerLockPref = pointerLock
 
   const sync = () => setTriggerActive(!edit && teleporter === null)
@@ -33,7 +37,6 @@ export function createEditModes({ setTriggerActive, pointerLock = false }) {
   return {
     get edit()      { return edit },
     get placement() { return teleporter === 'placement' },
-    get delete()    { return teleporter === 'delete' },
     get triggerActive() { return !edit && teleporter === null },
 
     /** The effective pointer-lock setting: the preference, unless editing. */
@@ -47,10 +50,13 @@ export function createEditModes({ setTriggerActive, pointerLock = false }) {
     },
 
     /**
-     * Enter a teleporter mode ('placement' | 'delete') or leave it (null).
-     * Refused (returns false) while Edit mode is on.
+     * Enter the teleporter placement mode ('placement') or leave it (null).
+     * Any other value — including the retired 'delete' (K4, Z6) — is refused
+     * (returns false) and changes nothing. Entering a mode is also refused
+     * while Edit mode is on.
      */
     setTeleporterMode(mode) {
+      if (mode !== null && mode !== 'placement') return false
       if (mode !== null && edit) return false
       teleporter = mode
       sync()
