@@ -186,10 +186,17 @@ async function readBody(response, { budget, ledger, limits, signal }) {
   const chunks = []
   let total = 0
   if (!reader) {
+    // S5 (round 6) — the non-streaming path applies the limits too. Round 5
+    // charged the budget and answered `ok` without checking the 25 MiB cap, the
+    // world ledger or the abort signal, so a server that ignored the streaming
+    // path could hand a visitor a body of any size.
     const buffer = await response.arrayBuffer()
     const bytes = new Uint8Array(buffer)
     budget.bytes += bytes.byteLength
-    ledger?.charge(bytes.byteLength)
+    const worldOver = ledger ? ledger.charge(bytes.byteLength) : false
+    if (signal?.aborted) return { aborted: true }
+    if (budget.bytes > limits.modelBytes) return failure('too-large')
+    if (worldOver) return failure('world-download-budget')
     return { ok: true, bytes }
   }
 
@@ -319,12 +326,15 @@ export function listDependencies(json, effectiveUrl, { rootRelative = false, wor
     if (uri.startsWith('data:')) { out.push({ uri, url: uri, isData: true }); continue }
     let resolved
     try { resolved = new URL(uri, effectiveUrl).href } catch { return failure('bad-dependency', uri) }
+    // S2 (round 6) — A1 itself validates every resolved dependency, not only a
+    // root-relative model's origin rule. Round 5 checked a root-relative model's
+    // dependencies for the same origin and an absolute model's with A1, so an
+    // absolute model's `user:pw@host/dep.bin` slipped through.
+    if (modelUrlProblem(resolved) !== null) return failure('bad-dependency', uri)
     if (rootRelative) {
       let origin = null
       try { origin = new URL(worldBaseUrl).origin } catch { return failure('bad-dependency', uri) }
       if (new URL(resolved).origin !== origin) return failure('bad-dependency', uri)
-    } else if (modelUrlProblem(resolved) !== null) {
-      return failure('bad-dependency', uri)
     }
     if (seen.has(resolved)) continue
     seen.add(resolved)

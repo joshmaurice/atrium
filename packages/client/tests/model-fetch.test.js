@@ -539,3 +539,78 @@ test('M3: a deadline that was never started is never expired', () => {
   assert.equal(deadline.expired(), false)
   assert.equal(deadline.remainingMs(), 1)
 })
+
+// ---------------------------------------------------------------------------
+// S2 and S5 (round 6) — the fetcher's two should-fixes
+// ---------------------------------------------------------------------------
+
+test('S2: a dependency carrying credentials is refused by A1 itself', async () => {
+  const url = 'https://cdn.example.com/chair.gltf'
+  const fetchFn = stubFetch({
+    [url]: () => response(GLTF_JSON({ buffers: [{ uri: 'https://user:pw@cdn.example.com/m.bin', byteLength: 4 }] })),
+  })
+  const result = await fetchModel({ url, fetchFn })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'bad-dependency')
+  assert.equal(fetchFn.calls.length, 1, 'only the model was asked for')
+
+  // A root-relative model's dependency is A1-checked as well as same-origin.
+  const relativeFetch = stubFetch({
+    'https://world.example/chair.gltf': () => response(GLTF_JSON({ buffers: [{ uri: 'https://user:pw@world.example/m.bin', byteLength: 4 }] })),
+  })
+  const relative = await fetchModel({ url: '/chair.gltf', worldBaseUrl: 'https://world.example/index.html', fetchFn: relativeFetch })
+  assert.equal(relative.reason, 'bad-dependency')
+})
+
+test('S2: listDependencies validates every non-data dependency with A1', () => {
+  const json = {
+    buffers: [{ uri: 'https://user:pw@h/m.bin' }],
+    images: [{ uri: 'data:image/png;base64,AAAA' }],
+  }
+  const result = listDependencies(json, 'https://h/chair.gltf')
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'bad-dependency')
+  assert.deepEqual(listDependencies({ images: [{ uri: 'data:image/png;base64,AAAA' }] }, 'https://h/c.gltf').dependencies,
+    [{ uri: 'data:image/png;base64,AAAA', url: 'data:image/png;base64,AAAA', isData: true }])
+})
+
+/** A response with NO readable stream: only `arrayBuffer()`, as a stub server sends. */
+function bufferResponse(body, { status = 200, url = 'https://h/m.glb' } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    redirected: false,
+    url,
+    headers: new Headers(),
+    body: null,
+    arrayBuffer: async () => (body instanceof Uint8Array ? body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) : bytes(body).buffer),
+  }
+}
+
+test('S5: the non-streaming body path applies the 25 MiB cap', async () => {
+  const url = 'https://h/big.glb'
+  const fetchFn = stubFetch({ [url]: () => bufferResponse(new Uint8Array(MODEL_LIMITS.modelBytes + 1)) })
+  const result = await fetchModel({ url, fetchFn })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'too-large')
+})
+
+test('S5: the non-streaming body path charges the world ledger and can cross it', async () => {
+  const url = 'https://h/m.glb'
+  const ledger = createWorldLedger({ worldBytes: 4 })
+  const fetchFn = stubFetch({ [url]: () => bufferResponse(new Uint8Array(8)) })
+  const result = await fetchModel({ url, fetchFn, ledger })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'world-download-budget')
+  assert.equal(ledger.charged, 8, 'the bytes are still charged (A4 never refunds)')
+})
+
+test('S5: a non-streaming body that fits is still fine', async () => {
+  const url = 'https://h/m.glb'
+  const fetchFn = stubFetch({ [url]: () => bufferResponse(glbBytes(4)) })
+  const ledger = createWorldLedger({ worldBytes: 1_000 })
+  const result = await fetchModel({ url, fetchFn, ledger })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(result.bytes.length, 12)
+  assert.equal(ledger.charged, 12)
+})
