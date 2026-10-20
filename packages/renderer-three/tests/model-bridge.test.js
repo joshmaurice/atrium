@@ -153,12 +153,20 @@ test('Z5: a model node gets a wrapper under its host, and a loaded status', asyn
   assert.ok(!children[0].isGroup, 'the wrapper is a plain Object3D (P3)')
 })
 
-test('Z5: a node without a model spec gets nothing; a mesh-carrying model node is skipped (A6)', async () => {
+test('Z5/A6/S7: a node with no model gets nothing; a node the spec rejects shows bad-spec', async () => {
   const h = harness()
   h.state.nodes.push({ name: 'Plain', _node: { def: 'Plain' }, extras: {} })
   h.addNode(somNode('WithMesh', { url: 'https://h/m.glb' }, { mesh: { primitives: [] } }))
   await tick()
-  assert.equal(h.bridge.instanceCount, 0, 'neither is a model host')
+  assert.equal(h.bridge.status('Plain'), null, 'a node with no model is not a model host')
+  // S7 (round 6) — A6's mesh rule is a spec rejection: until this round the node
+  // was skipped exactly like `Plain`, and the owner saw nothing at all.
+  const rejected = h.bridge.status('WithMesh')
+  assert.equal(rejected.status, MODEL_STATUS.failed)
+  assert.equal(rejected.reason, 'bad-spec')
+  assert.equal(h.state.fetches, 0, 'nothing was fetched')
+  assert.equal(h.childrenOf('WithMesh').length, 1, 'and the failed placeholder is in the scene')
+  assert.equal(h.bridge.instanceCount, 1, 'only the rejected node has a record')
 })
 
 test('Z5: DocumentView’s own wrapper is re-attached after a rebuild, with no second fetch', async () => {
@@ -1018,4 +1026,42 @@ test('M4: a late parse releases the old budget, never the new world\'s', async (
   await settle()
   assert.equal(h.bridge.status('New').status, MODEL_STATUS.loaded, 'the new world still loads')
   assert.equal(freshBudget.taken, per)
+})
+
+// ---------------------------------------------------------------------------
+// S7 (round 6) — an invalid model node shows its reason
+//
+// A6 says the bridge validates the whole node before anything is fetched. Round
+// 5 answered a rejected spec by skipping the node exactly as it skips a node
+// with no model at all, so a node declaring `{ url: 'http://x' }` simply
+// disappeared.
+// ---------------------------------------------------------------------------
+
+test('S7: a node declaring a model the spec rejects gets the bad-spec placeholder', async () => {
+  const h = harness()
+  h.addNode(somNode('Bad', { url: 'http://x' }))
+  await settle()
+
+  const status = h.bridge.status('Bad')
+  assert.equal(status.status, MODEL_STATUS.failed)
+  assert.equal(status.reason, 'bad-spec')
+  assert.equal(h.state.fetches, 0, 'nothing is fetched for a rejected spec')
+  assert.equal(h.state.parses, 0)
+  assert.equal(h.childrenOf('Bad').length, 1, 'the failed placeholder is under the host')
+
+  // A node with NO model is still skipped, and gets no record at all.
+  h.addNode({ name: 'Plain', _node: { def: 'Plain' }, mesh: null, extras: { atrium: {} } })
+  await settle()
+  assert.equal(h.bridge.status('Plain'), null, 'a node with no model is not a model host')
+  assert.equal(h.childrenOf('Plain').length, 0)
+})
+
+test('S7: a rejected node does not hold up the model behind it in allNodes order', async () => {
+  const h = harness()
+  h.addNode(somNode('Bad', { url: 'not-a-url' }))
+  h.addNode(somNode('Good', { url: 'https://h/good.glb' }))
+  await settle()
+  assert.equal(h.bridge.status('Bad').reason, 'bad-spec')
+  assert.equal(h.bridge.status('Good').status, MODEL_STATUS.loaded,
+    'the rejected node settles at once, so W5 admission is not blocked')
 })

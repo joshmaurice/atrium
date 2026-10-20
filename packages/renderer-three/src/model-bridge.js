@@ -598,7 +598,7 @@ export function createModelBridge(deps = {}) {
   /** Z6 — the placeholder, present while loading and after a failure. */
   function showPlaceholder(record) {
     if (!currentView) return
-    const built = makePlaceholder(record.spec.bounds ?? null)
+    const built = makePlaceholder(record.spec?.bounds ?? null)
     record.placeholder = built
     record.wrapper = built.wrapper
     const failed = record.status === MODEL_STATUS.failed
@@ -621,25 +621,41 @@ export function createModelBridge(deps = {}) {
     const live = new Set()
     let admitted = 0
     for (const node of document.allNodes ?? []) {
-      const spec = specFor(node)
-      if (!spec) continue
+      const validated = validateHost ? validateHost(node) : null
+      // Z5 — a node that carries no model is not a model node: it is skipped.
+      if (!validated) continue
+      if (validated.ok && !validated.spec) continue
+      // S7 (round 6) — a node that DOES declare a model the spec rejects used to
+      // be skipped exactly like a node with no model: the node kept its mesh and
+      // the owner saw nothing at all. It gets a failed placeholder with
+      // `bad-spec` instead, and nothing is fetched (A6).
+      const spec = validated.ok ? validated.spec : null
+      const key = spec ? specKey(spec) : BAD_SPEC_KEY
       live.add(node.name)
       const existing = instances.get(node.name)
-      if (existing && existing.specKey === specKey(spec)) { admitted += 1; continue }
+      if (existing && existing.specKey === key) { admitted += 1; continue }
       if (existing) removeInstance(node.name)
       if (admitted >= MODEL_INSTANCE_LIMIT) continue
       admitted += 1
       const record = {
-        node, spec, specKey: specKey(spec), status: null, reason: null, message: null,
+        node, spec, specKey: key, status: null, reason: null, message: null,
         wrapper: null, placeholder: null, clips: [], droppedTracks: 0, key: null,
         worldGeneration, viewGeneration: null, attachedGeneration: null,
         worldBaseUrl: deps.worldBaseUrl?.() ?? null,
         settled: false,
       }
       instances.set(node.name, record)
-      setStatus(record, MODEL_STATUS.loading)
-      showPlaceholder(record)
-      enqueue(record)
+      if (validated.ok) {
+        setStatus(record, MODEL_STATUS.loading)
+        showPlaceholder(record)
+        enqueue(record)
+      } else {
+        // A bad spec never loads: it is terminal at once, so it cannot hold up
+        // the model nodes behind it in `allNodes` order (W5).
+        setStatus(record, MODEL_STATUS.failed, 'bad-spec', validated.message)
+        showPlaceholder(record)
+        settle(record)
+      }
     }
 
     const removed = []
@@ -662,12 +678,6 @@ export function createModelBridge(deps = {}) {
   function status(name) {
     const record = instances.get(name)
     return record ? statusOf(record) : null
-  }
-
-  function specFor(node) {
-    const parsed = validateHost ? validateHost(node) : null
-    if (!parsed?.ok || !parsed.spec) return null
-    return parsed.spec
   }
 
   return {
@@ -707,6 +717,9 @@ async function settleHash(entry) {
 export function specKey(spec) {
   return `${spec.url}\u0000${spec.sha256 ?? ''}\u0000${(spec.bounds ?? []).join(',')}`
 }
+
+/** S7 — the key a node whose model spec was REJECTED is remembered under. */
+const BAD_SPEC_KEY = '\u0000bad-spec'
 
 /**
  * V4 (round 2) — the key a stored spec's template lives under: the spec URL
