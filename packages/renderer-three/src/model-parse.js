@@ -68,43 +68,57 @@ function u32be(bytes, at) {
  * @returns {{format: 'png'|'jpeg'|'webp', width: number, height: number, hasAlpha: boolean}|null}
  */
 export function imageHeader(bytes) {
-  if (!bytes || bytes.length < 16) return null
+  if (!bytes) return null
 
   if (matches(bytes, PNG_SIGNATURE)) {
-    // IHDR is the first chunk: 8 signature + 4 length + 4 type, then the size.
+    // IHDR is the first chunk: 8 signature + 4 length + 4 type, then 13 bytes of
+    // fields. M5 — every offset read below is checked first: the width and
+    // height end at byte 24 and the colour type is byte 25, so a truncated
+    // header is null (unsupported-image) rather than a 0 × 0 image.
+    if (bytes.length < 26) return null
+    if (bytes[8] !== 0 || bytes[9] !== 0 || bytes[10] !== 0 || bytes[11] !== 13) return null
     if (String.fromCharCode(...bytes.subarray(12, 16)) !== 'IHDR') return null
     const colorType = bytes[25]
     const hasAlpha = colorType === 4 || colorType === 6
     return { format: 'png', width: u32be(bytes, 16), height: u32be(bytes, 20), hasAlpha }
   }
 
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
     let at = 2
-    while (at + 8 < bytes.length) {
+    // M5 — walk the segments with a length check on every hop, and require the
+    // frame's own fields to be inside the bytes before reading them.
+    while (at + 4 <= bytes.length) {
       if (bytes[at] !== 0xff) { at += 1; continue }
       const marker = bytes[at + 1]
       if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { at += 2; continue }
       const length = u16be(bytes, at + 2)
       // SOF0–SOF15, minus the non-frame markers in that range.
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        if (length < 8 || at + 9 > bytes.length) return null
         return { format: 'jpeg', height: u16be(bytes, at + 5), width: u16be(bytes, at + 7), hasAlpha: false }
       }
-      if (length < 2) return null
+      if (length < 2 || at + 2 + length > bytes.length) return null
       at += 2 + length
     }
     return null
   }
 
-  if (matches(bytes, [0x52, 0x49, 0x46, 0x46]) && String.fromCharCode(...bytes.subarray(8, 12)) === 'WEBP') {
+  if (bytes.length >= 16 && matches(bytes, [0x52, 0x49, 0x46, 0x46]) && String.fromCharCode(...bytes.subarray(8, 12)) === 'WEBP') {
     const kind = String.fromCharCode(...bytes.subarray(12, 16))
     if (kind === 'VP8 ') {
+      // M5 — the frame header's own fields: 14 bytes of VP8 header, then the
+      // 16-bit width and height at 26 and 28.
+      if (bytes.length < 30) return null
       return { format: 'webp', width: u16le(bytes, 26) & 0x3fff, height: u16le(bytes, 28) & 0x3fff, hasAlpha: false }
     }
     if (kind === 'VP8L') {
+      if (bytes.length < 25) return null
       const bits = bytes[21] | (bytes[22] << 8) | (bytes[23] << 16) | (bytes[24] << 24)
       return { format: 'webp', width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1, hasAlpha: true }
     }
     if (kind === 'VP8X') {
+      // M5 — the alpha flag is byte 20 and the 24-bit sizes end at byte 29.
+      if (bytes.length < 30) return null
       const hasAlpha = (bytes[20] & 0x10) !== 0
       const width = 1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16))
       const height = 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16))
@@ -197,11 +211,19 @@ function dependencyProblem(uri) {
 export function glbImages(json, bin) {
   const out = []
   for (const [index, image] of (json?.images ?? []).entries()) {
-    if (image.bufferView === undefined || !bin) continue
-    const viewDef = json.bufferViews?.[image.bufferView]
-    if (!viewDef) continue
-    const start = viewDef.byteOffset ?? 0
-    out.push({ index, mimeType: image.mimeType ?? null, bytes: bin.subarray(start, start + viewDef.byteLength) })
+    let bytes = null
+    if (image.bufferView !== undefined && bin) {
+      const viewDef = json.bufferViews?.[image.bufferView]
+      if (viewDef) {
+        const start = viewDef.byteOffset ?? 0
+        bytes = bin.subarray(start, start + viewDef.byteLength)
+      }
+    }
+    // W2/M5 — a `data:` image is measured too, and an image whose bytes are not
+    // here is still REPORTED (with `bytes: null`) rather than dropped: every
+    // declared image must pass, or the model is refused.
+    if (bytes === null && typeof image.uri === 'string' && image.uri.startsWith('data:')) bytes = dataUriBytes(image.uri)
+    out.push({ index, mimeType: image.mimeType ?? null, bytes })
   }
   return out
 }
@@ -264,12 +286,12 @@ function gltfImages(json, dependencies) {
   for (const image of json?.images ?? []) {
     if (typeof image?.uri === 'string') {
       if (image.uri.startsWith('data:')) { out.push({ bytes: dataUriBytes(image.uri) }); continue }
-      const dependency = dependencies.get(image.uri)
-      if (dependency) out.push({ bytes: dependency.bytes })
+      // M5 — a declared image whose bytes are not here is reported with null
+      // bytes, so the preflight refuses the model instead of skipping the image.
+      out.push({ bytes: dependencies.get(image.uri)?.bytes ?? null })
       continue
     }
-    const bytes = image?.bufferView === undefined ? null : gltfBufferViewBytes(json, image.bufferView, dependencies)
-    if (bytes) out.push({ bytes })
+    out.push({ bytes: image?.bufferView === undefined ? null : gltfBufferViewBytes(json, image.bufferView, dependencies) })
   }
   return out
 }
@@ -324,6 +346,9 @@ export function preflightProblem(json, images = [], limits = MODEL_PARSE_LIMITS)
   for (const image of images) {
     const header = imageHeader(image.bytes)
     if (!header) return problem('unsupported-image')
+    // M5 — a zero width or height is not a usable image, whatever its header
+    // said it was.
+    if (header.width <= 0 || header.height <= 0) return problem('unsupported-image')
     if (header.width > limits.maxTextureSide || header.height > limits.maxTextureSide) {
       return problem('texture-too-large', `${header.width}×${header.height}`)
     }

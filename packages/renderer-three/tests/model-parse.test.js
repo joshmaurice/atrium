@@ -487,6 +487,7 @@ test('W1/A5: a .gltf whose fetched texture does not fit is refused the same way'
   dependencyBytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
   dependencyBytes.set([0x49, 0x48, 0x44, 0x52], 12)
   const view = new DataView(dependencyBytes.buffer)
+  view.setUint32(8, 13)              // M5: the IHDR chunk's own length is checked
   view.setUint32(16, 1024)
   view.setUint32(20, 1024)
   const json = {
@@ -746,4 +747,111 @@ test('M3: a parse inside the deadline is not a timeout', async () => {
   const result = await parseTemplate({ kind: 'glb', bytes: simpleGlb(), loader, deadline })
   assert.equal(result.ok, true, result.message)
   assert.equal(calls.parseAsync, 1)
+})
+
+// ---------------------------------------------------------------------------
+// M5 (round 6) — the image preflight no longer accepts truncated headers
+//
+// Round 5's `imageHeader` asked only for 16 bytes and then read fields beyond
+// them: a truncated PNG was accepted as 0 × 0 and charged nothing, a truncated
+// WebP `VP8X` as 1 × 1, and an image whose bytes were not there dropped out of
+// the preflight list altogether.
+// ---------------------------------------------------------------------------
+
+/** A `VP8 ` (lossy) WebP header, 30 bytes. */
+function webpSimple(width, height) {
+  const bytes = new Uint8Array(30)
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0)   // 'RIFF'
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8)   // 'WEBP'
+  bytes.set([0x56, 0x50, 0x38, 0x20], 12)  // 'VP8 '
+  const view = new DataView(bytes.buffer)
+  view.setUint16(26, width, true)
+  view.setUint16(28, height, true)
+  return bytes
+}
+
+/** A `VP8X` (extended) WebP header, 30 bytes. */
+function webpExtended(width, height, alpha = false) {
+  const bytes = new Uint8Array(30)
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0)   // 'RIFF'
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8)   // 'WEBP'
+  bytes.set([0x56, 0x50, 0x38, 0x58], 12)  // 'VP8X'
+  bytes[20] = alpha ? 0x10 : 0
+  const w = width - 1
+  const h = height - 1
+  bytes[24] = w & 0xff; bytes[25] = (w >> 8) & 0xff; bytes[26] = (w >> 16) & 0xff
+  bytes[27] = h & 0xff; bytes[28] = (h >> 8) & 0xff; bytes[29] = (h >> 16) & 0xff
+  return bytes
+}
+
+test('M5: every format is refused at every field boundary', () => {
+  const png = pngHeader(512, 256)
+  for (let length = 8; length < 26; length++) assert.equal(imageHeader(png.subarray(0, length)), null, `png, ${length} bytes`)
+  assert.equal(imageHeader(png.subarray(0, 26)).width, 512, 'the width and height end at byte 24')
+  const badChunkLength = pngHeader(512, 256)
+  badChunkLength[11] = 12
+  assert.equal(imageHeader(badChunkLength), null, 'the IHDR chunk length must be 13')
+
+  const jpeg = jpegHeader(300, 200)
+  for (let length = 2; length < 20; length++) assert.equal(imageHeader(jpeg.subarray(0, length)), null, `jpeg, ${length} bytes`)
+  assert.deepEqual(imageHeader(jpeg), { format: 'jpeg', width: 300, height: 200, hasAlpha: false })
+  const walked = jpegHeader(300, 200)
+  new DataView(walked.buffer).setUint16(4, 0x7fff)   // the APP0 segment walks off the end
+  assert.equal(imageHeader(walked), null)
+
+  const lossless = webpLossless(64, 32)
+  for (let length = 16; length < 25; length++) assert.equal(imageHeader(lossless.subarray(0, length)), null, `webp VP8L, ${length} bytes`)
+  assert.equal(imageHeader(lossless).width, 64)
+
+  const simple = webpSimple(80, 40)
+  for (let length = 16; length < 30; length++) assert.equal(imageHeader(simple.subarray(0, length)), null, `webp VP8, ${length} bytes`)
+  assert.deepEqual(imageHeader(simple), { format: 'webp', width: 80, height: 40, hasAlpha: false })
+
+  const extended = webpExtended(100, 50, true)
+  for (let length = 16; length < 30; length++) assert.equal(imageHeader(extended.subarray(0, length)), null, `webp VP8X, ${length} bytes`)
+  assert.deepEqual(imageHeader(extended), { format: 'webp', width: 100, height: 50, hasAlpha: true })
+})
+
+test('M5: a zero width or height is unsupported-image, whatever the header said', () => {
+  assert.equal(preflightProblem({ nodes: [] }, [{ bytes: pngHeader(0, 256) }]).reason, 'unsupported-image')
+  assert.equal(preflightProblem({ nodes: [] }, [{ bytes: pngHeader(256, 0) }]).reason, 'unsupported-image')
+  assert.equal(preflightProblem({ nodes: [] }, [{ bytes: pngHeader(0, 0) }]).reason, 'unsupported-image')
+  // The exact round-5 hole: 24 bytes of a valid PNG were read as 0 × 0 and charged nothing.
+  const truncated = pngHeader(512, 256).subarray(0, 24)
+  assert.equal(imageHeader(truncated), null)
+  assert.equal(preflightProblem({ nodes: [] }, [{ bytes: truncated }]).reason, 'unsupported-image')
+})
+
+test('M5: a declared image with no bytes is refused, never silently skipped', async () => {
+  const bin = new Uint8Array([1, 2, 3, 4])
+  const json = { images: [{ bufferView: 0 }, { bufferView: 9 }], bufferViews: [{ byteOffset: 0, byteLength: 4 }] }
+  const images = glbImages(json, bin)
+  assert.equal(images.length, 2, 'every declared image is reported, bytes or not')
+  assert.equal(images[1].bytes, null)
+  assert.equal(preflightProblem(json, images).reason, 'unsupported-image')
+
+  // A .gltf whose image bytes were never fetched is refused, not dropped.
+  const { loader, calls } = quietLoader()
+  const gltf = {
+    asset: { version: '2.0' }, scenes: [{ nodes: [] }],
+    images: [{ uri: 'textures/missing.png' }],
+  }
+  const result = await parseTemplate({
+    kind: 'gltf', bytes: new TextEncoder().encode(JSON.stringify(gltf)), json: gltf,
+    dependencies: new Map(), urls: fakeUrls().api, loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'unsupported-image')
+  assert.equal(calls.parseAsync, 0)
+})
+
+test('M5: a .glb’s data: image is measured like any other', () => {
+  const bytes = packGlb({
+    asset: { version: '2.0' }, scenes: [{ nodes: [] }], nodes: [],
+    images: [{ uri: `data:image/png;base64,${base64Of(pngHeader(1024, 1024))}` }],
+  })
+  const read = readGlb(bytes)
+  const outcome = preflightProblem(read.json, glbImages(read.json, read.bin))
+  assert.equal(outcome.reason, null)
+  assert.equal(outcome.textureBytes, estimateTextureBytes(1024, 1024))
 })
