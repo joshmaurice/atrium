@@ -15,6 +15,9 @@ export {
   buildInstance, buildPlaceholder, disposeInstance, retargetClip,
   MODEL_WRAPPER_FLAG, MODEL_NAME_KEY, PLACEHOLDER_COLOURS,
 } from './model-instances.js'
+export {
+  createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specKey,
+} from './model-bridge.js'
 export { AnimationBridge } from './AnimationBridge.js'
 export { Stage } from './Stage.js'
 export {

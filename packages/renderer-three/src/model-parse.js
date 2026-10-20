@@ -475,9 +475,25 @@ export function measureBounds(scene, Box3, Vector3) {
 export async function parseTemplate({
   kind, bytes, json = null, dependencies = new Map(),
   urls = objectUrlApi(), timeoutMs = 30_000, loader = null,
+  reserveTexture = null, releaseTexture = null,
 } = {}) {
   const preflight = preflightFor(kind, bytes, json, dependencies)
   if (preflight.problem?.reason) return { ok: false, ...preflight.problem }
+
+  // A5 — the reservation is taken BEFORE parsing and released if the model
+  // fails. The caller owns the budget, so it owns both halves of the pair.
+  const textureBytes = preflight.textureBytes ?? 0
+  let reserved = false
+  if (reserveTexture && textureBytes > 0) {
+    if (!reserveTexture(textureBytes)) {
+      return { ok: false, reason: 'world-texture-budget', message: PARSE_REASONS['world-texture-budget'] }
+    }
+    reserved = true
+  }
+  const stop = (result) => {
+    if (reserved && !result.ok) { releaseTexture?.(textureBytes); reserved = false }
+    return result
+  }
 
   let blobUrls = new Map()
   let manager = null
@@ -492,7 +508,7 @@ export async function parseTemplate({
     const unmapped = declaredUris(rewritten.json).find((uri) => !isMappedUri(uri, blobUrls))
     if (unmapped !== undefined) {
       revokeBlobs(blobUrls, urls)
-      return { ok: false, reason: 'unexpected-request', message: `the model asked for ${unmapped}` }
+      return stop({ ok: false, reason: 'unexpected-request', message: `the model asked for ${unmapped}` })
     }
     // GLTFLoader.parse takes a JSON string for a .gltf and an ArrayBuffer for a
     // .glb; a bare Uint8Array is neither (three's own rule).
@@ -508,14 +524,14 @@ export async function parseTemplate({
     const data = typeof payload === 'string' ? payload : bufferOf(payload)
     const gltf = await withTimeout(gltfLoader.parseAsync(data, ''), timeoutMs)
     if (modifier && modifier.violations.length > 0) {
-      return { ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` }
+      return stop({ ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` })
     }
-    return { ok: true, template: gltf }
+    return { ok: true, template: gltf, textureBytes }
   } catch (error) {
     if (modifier && modifier.violations.length > 0) {
-      return { ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` }
+      return stop({ ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` })
     }
-    return { ok: false, reason: 'parse', message: error?.message ?? 'the model could not be parsed' }
+    return stop({ ok: false, reason: 'parse', message: error?.message ?? 'the model could not be parsed' })
   } finally {
     revokeBlobs(blobUrls, urls)
   }
