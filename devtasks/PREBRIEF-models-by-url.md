@@ -1,7 +1,9 @@
 # Pre-brief: Phase 3 step 3 — models by URL (3a), then the starter library and sky (3b)
 
-Status: **FINAL, Revision 1 (2026-10-19). Decisions L1–L16 approved by the
-operator, all as recommended in Rev 0 (§3, §11).**
+Status: **FINAL, Revision 2 (2026-10-20). Decisions L1–L19 approved by the
+operator, all as recommended (§3, §12 A15, §11). Revision 2 adds §12, the
+binding amendments from the operator's outside review: where §12 differs
+from §2–§8, §12 governs.**
 - **Drafted by Claude from a clone of `main` at `c6482bb0`.** Its runtime
   code is identical to the released `229c4a87` (DEV, MAIN record and PROD):
   the three commits since add only the edit-polish-2 passdown, design
@@ -316,7 +318,7 @@ the operator's outside code review come before DEV acceptance. 3b: full
 pipeline for its client parts; the library build and Caddy as operator host
 steps.
 
-## 4. Contract (3a, per the approved decisions)
+## 4. Contract (3a, per the approved decisions; amended by §12)
 
 ### Z1. The model spec (one rule set, two implementations)
 - `extras.atrium.model` is a plain object with exactly these keys:
@@ -624,3 +626,257 @@ not committed), with fixture `.glb` files served by the static server:
 - **Rev 1 (2026-10-19, ~23:18 PT):** the operator approved L1–L16, all as
   recommended. Status, §3's preamble and the §4 and §9 headings updated;
   nothing else changed. No outside review of the pre-brief.
+- **Rev 2 (2026-10-20, ~00:00 PT):** an outside review of Rev 1 (must-fix
+  M1–M9, should-fix S1–S4, nits N1–N3) after the kickoff and the GLM brief,
+  before the brief gate was completed. Every finding is taken in §12
+  (A1–A14), with three new decisions L17–L19 (A15), approved as
+  recommended. The status line and §4's heading point to §12; §1–§10 are
+  otherwise unchanged.
+
+## 12. Revision 2 amendments (binding; they supersede §2–§8 wherever they differ)
+
+From the operator's outside review of Rev 1 (2026-10-19, ~23:56 PT: must-fix
+M1–M9, should-fix S1–S4, nits N1–N3). Claude checked the concrete claims
+against the code: M1 *probe* (`new URL('/\\evil.example/m.glb', base)` and
+`'/\t/evil.example/m.glb'` both resolve to `https://evil.example/…`;
+`'/%2F%2Fevil…'` stays on the base origin), M9 (`connecting` is emitted at
+`AtriumClient.js` L376, long before the next `som-dump`), S2 (`som.nodes` is
+name-map order; `som.allNodes` is glTF node-index order), S4 (`app.js`
+L650–658), M6 *probe* (template and `SkeletonUtils.clone` objects have
+different uuids, so a uuid track bound to the template can't address a
+clone). L1–L16 stand. L17–L19 (A15) are new; the operator approved them as
+recommended on 2026-10-20 (~00:00 PT). Each item names the step (§7) it belongs to.
+
+### A1. URL rule, exact (M1; replaces Z1's `url` bullet; step 1 and 2)
+A stored `url` is valid only if **all** of these hold:
+1. A string of 1–2048 characters with **no** character below U+0021, no
+   U+007F and no backslash (`\`). (Spaces must be percent-encoded.)
+2. Either:
+   - it starts with `https://` (lowercase), `new URL(url)` succeeds, the
+     result's `protocol` is `https:`, `hostname` is non-empty, and
+     `username` and `password` are empty; **or**
+   - its first character is `/` and its second is not `/`, and
+     `new URL(url, 'https://atrium.invalid').origin === 'https://atrium.invalid'`.
+3. Nothing else is valid.
+
+The server (`checkModelExtras`) and the client implement exactly this. The
+shared vectors gain adversarial cases: backslash variants (`/\host/x`,
+`/\\host/x`), tab, CR, LF, NUL, a raw space, `//host/x`, `https:/x`,
+`https:x`, `HTTPS://h/x`, `https://user:pw@h/x`, `https://` with an empty
+host, percent-encoded slashes and backslashes (`/%2F%2Fh/x`, `/%5Ch/x`:
+valid, they stay paths), and one at 2048 and one at 2049 characters.
+
+**Client, before fetching a root-relative URL:** resolve it against
+`worldBaseUrl` and require the result's origin to equal
+`new URL(worldBaseUrl).origin`. With no usable `worldBaseUrl` (a world
+dropped in as a file), the reason is `no-base`, and nothing is fetched. A
+root-relative URL is never resolved against the page's own origin.
+
+### A2. Request policy (M3; step 3)
+Every request for a model or a dependency uses exactly:
+`{ method: 'GET', mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'follow', signal }`.
+- No cookies or HTTP authentication are ever sent, including to the world's
+  own origin, and the referring page isn't sent.
+- **Redirects (L17):** followed, then checked before the body is read. If
+  `response.redirected`, `response.url` must pass A1's absolute-`https`
+  rule. For a root-relative spec it must also stay on the world's origin.
+  Otherwise the body is cancelled and the reason is `redirect`.
+- Tests assert these options on **every** request, dependencies included,
+  and the redirect rule's three cases: off-scheme, off-origin for a
+  root-relative spec, and an allowed `https` hop.
+
+### A3. Dependencies of a `.gltf`, fail-closed (M4; replaces Z2's `.gltf` bullet and Z3's URL-modifier bullet; steps 3–4)
+1. Parse the `.gltf` JSON and list every `buffers[].uri` and `images[].uri`
+   **before** `GLTFLoader` sees anything.
+2. Resolve each non-`data:` URI with `new URL(uri, effectiveUrl)`, where
+   `effectiveUrl` is the `.gltf`'s final `response.url`. The result must pass
+   A1's absolute-`https` rule, or for a root-relative model, A1's
+   root-relative origin check. Otherwise the model fails `bad-dependency`.
+3. Deduplicate by the canonical `href`. Each distinct URL is fetched once
+   (A2 policy), and its bytes count against the model's 25 MiB and the
+   world's ledger (A4).
+4. **Rewrite the JSON** so each such URI is the `blob:` URL of its fetched
+   bytes, then parse the rewritten JSON. `data:` URIs are left as they are
+   (their bytes are already in the counted file).
+5. Give `GLTFLoader` a `LoadingManager` whose URL modifier passes **only**
+   the `blob:` URLs this load created and `data:` URLs. Any other request
+   fails the load with `unexpected-request`; the modifier returns a `blob:`
+   URL of an empty blob so nothing reaches the network.
+6. Revoke every `blob:` URL this load created, on success and on failure.
+7. The 30 s timer covers the whole job: the first request, every
+   dependency, preflight (A5) and parsing.
+
+Tests: a `.gltf` with `textures/../images/a.png`; with duplicate URIs (one
+fetch); with an `http:` dependency and with one whose host differs on a
+root-relative model; with a URL modifier receiving an absolute URL that's not
+in the map (refused, no fetch); and a stubbed `GLTFLoader` that asks for an
+unexpected URL.
+
+### A4. One world transfer ledger (M7; replaces L8's "unique model files" wording; step 3)
+- One running total per world generation (A9), charged **as each chunk
+  arrives**, for every model and dependency request, including those that
+  later fail, time out, are aborted, mismatch their hash, or are refused.
+  Never refunded, including when a node is removed. When the total passes
+  150 MiB, every in-flight request is aborted and every queued or later
+  model fails `world-download-budget`.
+- Fetches are deduplicated by canonical URL for the whole world: two nodes
+  with one URL download once.
+- **The concurrency limit of 4 counts HTTP transfers**, dependencies
+  included, per page. Queued transfers start in A10's order.
+- Test: several downloads, each under 25 MiB and some failing to parse,
+  whose sum passes 150 MiB. The one that crosses is aborted mid-stream, and
+  later ones never start.
+
+### A5. Preflight before parsing (M8; L18; step 4)
+After all bytes are in and before `GLTFLoader` runs, these checks run on the
+JSON (and the GLB's JSON chunk) and the image bytes. All are pure and
+testable in Node:
+
+| Check | Limit | Reason |
+|---|---|---|
+| `nodes.length` | ≤ **10,000** | `too-many-nodes` |
+| Σ `POSITION` accessor `count` over every primitive | ≤ **500,000** (the vertex cap, checked early; the post-parse count still applies) | `too-many-vertices` |
+| Σ over accessors of `count × element bytes` (sparse accessors at full `count`) | ≤ **64 MiB** | `too-much-data` |
+| Each image's format, from its bytes | **PNG, JPEG or WebP** only | `unsupported-image` |
+| Each image's width and height, from its header | ≤ 4096 | `texture-too-large` |
+| Σ estimated texture memory (w × h × 4 × 4⁄3) | reserved against the world's 256 MiB **before** parsing | `world-texture-budget` |
+
+- An image whose header can't be read is `unsupported-image`. Images come
+  from the GLB's buffer views or from A3's fetched bytes.
+- **Parsing is serialised:** one `GLTFLoader` parse at a time per page.
+- A reservation is released if the model fails, and replaced by the measured
+  figures after parsing. The post-parse checks of Z3 still run.
+
+### A6. Node-level validation (M5; steps 1–2, 6)
+- `parseModelSpec(extras)` keeps the value rules (A1 plus Z1's `sha256` and
+  `bounds`). A new **`validateModelHost(node)`** checks the spec **and**
+  that the node has no mesh. The bridge calls `validateModelHost` before any
+  fetch or attach; a failure renders the placeholder with the reason
+  `bad-spec`.
+- The shared vectors file has two arrays: `specs` (extras values) and
+  `nodes` (whole node descriptors, including a valid model with a mesh,
+  which is invalid). The server's `add` test, `validateModelHost` and
+  Duplicate's `atriumProblem` all use `nodes`; the value-level tests use
+  `specs`.
+
+### A7. Animation retargeting by identity; imported lights and cameras (M6, S1; replaces Z4 steps 2–3; step 5)
+For each instance:
+1. Clone with `SkeletonUtils.clone(template.scene)`, then build a
+   template-object → instance-object map by walking both trees in parallel,
+   **before** any name is cleared.
+2. For each track of each clip: `PropertyBinding.parseTrackName`; resolve the
+   node part against the **template** with `PropertyBinding.findNode` (which
+   matches name or uuid, including bones); map it to the instance object;
+   rewrite only the node part to that object's `uuid`. The rest of the path
+   (`objectName`, `objectIndex`, `propertyName`, `propertyIndex`) is kept.
+3. A track whose target can't be resolved to exactly one template object is
+   **dropped**, and the instance's status records the count ("2 animation
+   tracks couldn't be bound"). It is never bound to a guess.
+4. Then clear every name (Z4 step 3).
+5. **Remove the model's own lights and cameras** from the instance (an
+   imported light would light the world, L10's spirit; an imported camera
+   must never become a world camera).
+
+Tests (with a real `GLTFLoader` parse): an unnamed animated node; a skinned
+model; a morph-target track (`…morphTargetInfluences[…]`); **two instances
+of one template**, each clip moving only its own instance; a model with a
+light and a camera (both gone). **The camera test runs `Stage.setSceneGroup`
+itself** (with an injected renderer) on a world camera whose host name
+collides with a model part: the camera lands on the world node.
+
+### A8. Template cache: active references and an idle cache (M2; replaces Z3's last bullet; step 4)
+- A template whose last instance goes away becomes **idle**; it is not
+  disposed. Idle templates stay until the world changes (A9) and still count
+  against the world texture budget.
+- When a new model would exceed the texture budget, idle templates are
+  evicted least-recently-used first, before refusing anything.
+- **A successful Check holds its template** (and its bytes' hash) until Save
+  (it becomes the node's cache entry), Cancel, a URL edit, the form closing,
+  or a world change.
+- Tests, with fetch counts: delete the only instance then Redo (0 new
+  fetches); Check then Save (0 new fetches); Check then Cancel then Check
+  the same URL (1 new fetch); idle eviction under budget pressure.
+
+### A9. Two lifetimes: world and view (M9, S3; replaces Z5's world-change bullet; steps 6–7)
+- **World generation:** the bridge's `resetWorld()` aborts every request and
+  parse, drops the ledger (A4), and disposes every template and instance. It
+  runs on the client's `connecting` and `disconnected` events, and the app
+  calls it immediately before `loadWorld`/`loadWorldFromData`. It does
+  **not** wait for a new `client.som`.
+- **View generation:** in the app's `world:loaded` handler, `bridge.detachView()`
+  runs **before** `initDocumentView` (removing every wrapper from its host),
+  and `bridge.attachView(docView, sceneGroup)` runs after `stage.setSceneGroup`.
+  A view change keeps the cache.
+- **Every attach re-checks, at the moment of attaching:**
+  - the world generation it started in;
+  - that the SOM node is still in `client.som` (by identity);
+  - that the node's spec key is unchanged;
+  - and the current view.
+
+  It then takes the host from `docView.listViews(node._node)`, keeping only
+  an object whose ancestor chain reaches the current `sceneGroup`. A host
+  captured before an `await` is never used.
+- No host after **10** frames: status `failed`, reason `no-host`, never
+  stuck in `loading`.
+- Disposing an instance removes its wrapper and cloned skeleton only; the
+  template's geometries, materials and textures are disposed only with the
+  template.
+- Tests:
+  - a fetch that completes after an external-ref `world:loaded` rebuilt the
+    view with the same SOM attaches only in the new view;
+  - repeated same-SOM rebuilds;
+  - `connecting` mid-fetch aborts it, and it never attaches;
+  - removing one of two instances keeps the other's geometry and textures.
+
+### A10. Order (S2; step 6)
+- Order is `som.allNodes` order (glTF node index), never `som.nodes`.
+- The **instance limit** counts model nodes in that order.
+- **Texture-budget admission** happens in that order: a model is admitted
+  only once every earlier model has been admitted or has failed (bounded by
+  their own 30 s timeouts). So the same models win on every visitor's screen.
+- The **download ledger** (A4) is first-come by arriving bytes. That is the
+  one network-dependent limit; it is an abuse ceiling that ordinary worlds
+  never reach.
+
+### A11. The diagnostic listeners (S4; L19; step 7)
+`app.js` L650–658 adds five pointer listeners to every SOM node on **every**
+`world:loaded`. External-ref loads repeat that event on the same SOM, so the
+listeners pile up. Register them **once per SOM node** (a `WeakSet` in a
+small helper module), with a test that repeated calls on one SOM attach once.
+
+### A12. Clarifications (N1–N3)
+- `bounds` is an array of exactly three finite numbers, each in
+  [0.001, 1000]. Check clamps each measured dimension into that range (a
+  flat model gets 0.001).
+- MB in L8 means MiB (× 1,048,576 bytes).
+- World budgets include idle templates (A8). Duplicate dependency URLs in
+  one `.gltf` are fetched once (A3).
+- **Pin this version** depends on the **detected** binary glTF format, not
+  the URL's suffix. A `.gltf` with external files can't be pinned
+  (`pin-needs-glb`).
+
+### A13. Reason codes added
+`redirect`, `bad-dependency`, `unexpected-request`, `unsupported-image`,
+`too-many-nodes`, `too-much-data`, `no-base`, `no-host`.
+
+### A14. Proofs added (to §7's (a)–(g))
+- (h) accept a backslash in a root-relative URL;
+- (i) drop `credentials: 'omit'`;
+- (j) let the URL modifier pass an unmapped URL;
+- (k) refund a failed download's bytes;
+- (l) skip the image-header dimension check;
+- (m) attach to a host captured before an `await`, across a view rebuild;
+- (n) bind an unresolvable track instead of dropping it.
+
+Each must be caught by a named test.
+
+### A15. New decisions (approved as recommended, 2026-10-20)
+- **L17. Redirects:** (a) **follow, then check the final URL (A2)**: many
+  ordinary model links redirect (GitHub "raw" links, CDNs), and with
+  credentials omitted a redirect reaches nothing the owner couldn't name
+  directly; or (b) refuse every redirect (`redirect: 'error'`).
+- **L18. Preflight limits (A5)**, which extend L8: 10,000 nodes, 64 MiB of
+  accessor data, PNG/JPEG/WebP images with header-checked dimensions, and
+  serialised parsing. **Yes.**
+- **L19. Fix the listener pile-up (A11) in this round.** **Yes**: it's in
+  the same handler this round changes.
