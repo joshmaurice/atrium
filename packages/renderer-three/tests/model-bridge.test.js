@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import { Group, Object3D } from 'three'
 import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
 import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonText, MODEL_PARSE_LIMITS } from '../src/model-parse.js'
+import { createJobDeadline } from '@atrium/client/model-fetch'
 import { imageGlb, multiImageGlb } from './glb-fixture.js'
 import { validateModelHost } from '@atrium/client/model-spec'
 
@@ -21,7 +22,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
   return { name, _node: { def: name }, mesh, extras: { atrium: { model } } }
 }
 
-function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null } = {}) {
+function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null, newDeadline = null } = {}) {
   const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
@@ -66,6 +67,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
         return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
       },
       ...(textureBudget ? { textureBudget } : {}),
+      ...(newDeadline ? { newDeadline } : {}),
       ...(disposeTemplate ? { disposeTemplate } : {}),
     },
   })
@@ -854,4 +856,61 @@ test('W6/L20: the world budget reads the constant at 512 MiB — five 85.3 MiB m
     assert.equal(refused.reason, 'world-texture-budget')
   }
   assert.equal(h.bridge.textureBudget.taken, perModel * 5, 'five reservations of ≈85.3 MiB')
+})
+
+// ---------------------------------------------------------------------------
+// M3 (round 6) — ONE deadline per job
+//
+// Round 5's fetcher ran a 30 s timer that stopped when `fetchModel` returned,
+// and `parseTemplate` started a second 30 s of its own: one model could spend
+// about 60 s of its own work. The bridge now creates one deadline per job, at
+// the job's first request, and passes it to both stages. Waiting for a turn
+// (W5 admission, the serialized parse queue) does not count against it.
+// ---------------------------------------------------------------------------
+
+test('M3: a slow fetch plus a slow parse time out on the job\'s own deadline, not 30 s + 30 s', async () => {
+  const seen = []
+  const h = harness({
+    newDeadline: () => createJobDeadline({ timeoutMs: 150 }),
+    fetchModel: async ({ url, deadline }) => {
+      seen.push(deadline)
+      await new Promise((resolve) => setTimeout(resolve, 90))   // 90 of the job's 150 ms
+      return {
+        ok: true, kind: 'glb', bytes: imageGlb({ width: 64, height: 64 }), json: null,
+        dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
+      }
+    },
+    parseLoader: { parseAsync: () => new Promise(() => {}) },   // never settles
+  })
+  h.addNode(somNode('M1'))
+  const started = Date.now()
+  await drain(h, 300)
+  const took = Date.now() - started
+  const status = h.bridge.status('M1')
+  assert.equal(status.status, MODEL_STATUS.failed)
+  assert.equal(status.reason, 'timeout')
+  assert.equal(seen.length, 1, 'exactly one deadline per job')
+  assert.ok(took < 1_000, `the job\'s own work is one deadline, not two (took ${took} ms)`)
+})
+
+test('M3: the job\'s clock stops while it waits for its turn, and starts again for the parse', async () => {
+  const events = []
+  const makeDeadline = () => {
+    const deadline = {
+      start() { events.push('start'); return deadline },
+      pause() { events.push('pause'); return deadline },
+      resume() { events.push('resume'); return deadline },
+      expired() { return false },
+      remainingMs() { return 30_000 },
+    }
+    return deadline
+  }
+  const h = harness({ newDeadline: makeDeadline })
+  h.addNode(somNode('M1', { url: modelUrl('M1') }))
+  h.addNode(somNode('M2', { url: modelUrl('M2') }))
+  await drain(h)
+  assert.equal(events.filter((e) => e === 'pause').length, 2, 'one pause per job, before it waits')
+  assert.equal(events.filter((e) => e === 'resume').length, 2, 'one resume when its turn comes')
+  assert.equal(h.bridge.status('M1').status, MODEL_STATUS.loaded)
+  assert.equal(h.bridge.status('M2').status, MODEL_STATUS.loaded)
 })

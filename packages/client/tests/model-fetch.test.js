@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import {
-  fetchModel, createWorldLedger, redirectProblem, sniffFormat, unsupportedExtension,
+  fetchModel, createWorldLedger, createJobDeadline, redirectProblem, sniffFormat, unsupportedExtension,
   listDependencies, sha256Hex, MODEL_LIMITS, FETCH_OPTIONS, FETCH_REASONS,
 } from '../src/model-fetch.js'
 
@@ -478,4 +478,64 @@ test('M2: an unredirected response still reports the url it was asked for', asyn
   const result = await fetchModel({ url, fetchFn })
   assert.equal(result.ok, true)
   assert.equal(result.effectiveUrl, url)
+})
+
+// ---------------------------------------------------------------------------
+// M3 (round 6) — ONE deadline per job
+//
+// Round 5's fetcher ran its own 30 s timer and stopped it when `fetchModel`
+// returned; `parseTemplate` then started a second 30 s of its own, so one model
+// could spend about 60 s of its own work. The deadline is set at the job's
+// first request, passes into the fetch, the preflight and the parse, and counts
+// WORK: waiting for earlier models' admission (W5) or for the parse queue is
+// excluded.
+// ---------------------------------------------------------------------------
+
+test('M3: a deadline set at the first request spends what is left of it', async () => {
+  let clock = 0
+  const deadline = createJobDeadline({ timeoutMs: 1, now: () => clock })
+  const fetchFn = stubFetch({ 'https://h/m.glb': () => response(glbBytes()) })
+  deadline.start()
+  clock += 5
+  const result = await fetchModel({ url: 'https://h/m.glb', fetchFn, deadline })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'timeout')
+  assert.equal(fetchFn.calls.length, 0, 'a job past its deadline makes no request')
+})
+
+test('M3: the fetcher’s own timer is the deadline’s remaining time', async () => {
+  let clock = 0
+  const deadline = createJobDeadline({ timeoutMs: 40, now: () => clock })
+  deadline.start()
+  clock += 30                       // a stage already used 30 of the 40 ms
+  const started = Date.now()
+  const fetchFn = (url, options) => new Promise((_, reject) => {
+    options.signal.addEventListener('abort', () => reject(new Error('aborted')))
+  })
+  const result = await fetchModel({ url: 'https://h/m.glb', fetchFn, deadline })
+  const took = Date.now() - started
+  assert.equal(result.reason, 'timeout', result.message)
+  assert.ok(took < 500, `the remaining 10 ms is the budget, not a fresh 30 s (took ${took} ms)`)
+})
+
+test('M3: a deadline counts work, not waiting', () => {
+  let clock = 0
+  const deadline = createJobDeadline({ timeoutMs: 30_000, now: () => clock })
+  deadline.start()
+  clock += 20_000                   // the fetch
+  deadline.pause()
+  clock += 20_000                   // waiting in the admission/parse queue
+  deadline.resume()
+  assert.equal(deadline.elapsedMs, 20_000, 'the wait is not counted')
+  assert.equal(deadline.expired(), false)
+  clock += 20_000
+  assert.equal(deadline.expired(), true, 'its own work is')
+  assert.equal(deadline.remainingMs(), 0)
+})
+
+test('M3: a deadline that was never started is never expired', () => {
+  const deadline = createJobDeadline({ timeoutMs: 1, now: () => 1_000_000 })
+  assert.equal(deadline.started, false)
+  assert.equal(deadline.expired(), false)
+  assert.equal(deadline.remainingMs(), 1)
 })

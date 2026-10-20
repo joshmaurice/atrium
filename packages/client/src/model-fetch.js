@@ -119,6 +119,38 @@ export function createWorldLedger({ worldBytes = MODEL_LIMITS.worldBytes } = {})
 const TIMEOUT = Symbol('timeout')
 
 /**
+ * M3 (round 6) — ONE deadline per job, set at its first request. The fetch, the
+ * preflight and the parse all run against it, so a model's own work totals 30 s
+ * (L8) rather than 30 s of download plus 30 s of parse.
+ *
+ * Time spent WAITING is excluded: `pause()` while a job waits for earlier
+ * models' admission (W5) or for the serialized parse queue, `resume()` when the
+ * stage it was waiting for starts. Those waits are bounded because each earlier
+ * job has a deadline of its own.
+ *
+ * @param {{timeoutMs?: number, now?: () => number}} [opts]
+ */
+export function createJobDeadline({ timeoutMs = MODEL_LIMITS.timeoutMs, now = () => Date.now() } = {}) {
+  let started = false
+  let used = 0
+  let runningSince = null
+  const elapsedMs = () => used + (runningSince === null ? 0 : Math.max(0, now() - runningSince))
+  return {
+    get started() { return started },
+    get timeoutMs() { return timeoutMs },
+    get elapsedMs() { return elapsedMs() },
+    /** The job's first request goes out: the clock runs from here. */
+    start() { if (!started) { started = true; runningSince = now() } return this },
+    /** The job is waiting: the clock stops. */
+    pause() { if (runningSince !== null) { used = elapsedMs(); runningSince = null } return this },
+    /** A stage is about to start: the clock runs again. */
+    resume() { if (started && runningSince === null) { runningSince = now() } return this },
+    remainingMs() { return Math.max(0, timeoutMs - elapsedMs()) },
+    expired() { return started && timeoutMs - elapsedMs() <= 0 },
+  }
+}
+
+/**
  * A2/L17 — the redirect rule. A followed redirect's final URL must pass A1's
  * absolute-`https` rule, and for a root-relative spec it must also stay on the
  * world's origin.
@@ -312,6 +344,8 @@ export function listDependencies(json, effectiveUrl, { rootRelative = false, wor
  * @param {string|null} [args.worldBaseUrl]
  * @param {object|null} [args.ledger]
  * @param {object} [args.limits]
+ * @param {object|null} [args.deadline]     M3 — the JOB's deadline, shared with
+ *   the preflight and the parse; this call starts it at its first request
  * @returns {Promise<object>} `{ ok: true, kind, bytes, json, dependencies, effectiveUrl, totalBytes }`
  *   or `{ ok: false, reason, message }`; `aborted` is the quiet refusal.
  */
@@ -323,6 +357,7 @@ export async function fetchModel({
   worldBaseUrl = null,
   ledger = null,
   limits = MODEL_LIMITS,
+  deadline = null,
 } = {}) {
   const problem = modelUrlProblem(url)
   if (problem) return failure('bad-spec', problem)
@@ -332,7 +367,14 @@ export async function fetchModel({
   if (!resolved.ok) return failure(resolved.reason)
 
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(TIMEOUT), limits.timeoutMs)
+  // M3 (round 6) — the job's own deadline, set at its first request: the fetch,
+  // the preflight and the parse share it. Round 5's 30 s stopped when this
+  // returned, so a model could take about 60 s of its own work.
+  if (deadline) {
+    deadline.start()
+    if (deadline.expired()) return failure('timeout')
+  }
+  const timer = setTimeout(() => controller.abort(TIMEOUT), deadline ? deadline.remainingMs() : limits.timeoutMs)
   const onExternalAbort = () => controller.abort('external')
   if (signal) {
     if (signal.aborted) {

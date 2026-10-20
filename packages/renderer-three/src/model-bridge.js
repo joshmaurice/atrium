@@ -37,7 +37,7 @@
  * one whose download lost the race rather than the last in document order.
  */
 
-import { MODEL_LIMITS, createWorldLedger, sha256Hex } from '@atrium/client/model-fetch'
+import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline } from '@atrium/client/model-fetch'
 import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
 import { buildInstance, buildPlaceholder, PLACEHOLDER_COLOURS } from './model-instances.js'
@@ -94,6 +94,9 @@ export function createModelBridge(deps = {}) {
   const ledger = hooks.ledger ?? createWorldLedger({ worldBytes: MODEL_LIMITS.worldBytes })
   const textureBudget = hooks.textureBudget ?? createTextureBudget()
   const cache = hooks.cache ?? createTemplateCache()
+  // M3 (round 6) — one deadline per job. The seam exists so a test can drive a
+  // controlled clock (the deadline counts WORK, not waiting).
+  const newDeadline = hooks.newDeadline ?? (() => createJobDeadline())
 
   let worldGeneration = 1
   let viewGeneration = 1
@@ -361,15 +364,21 @@ export function createModelBridge(deps = {}) {
    */
   function fetchAndParse(token, key, controller, wanted) {
     const { spec } = token
+    // M3 (round 6) — ONE deadline per job, set at its first request. Round 5's
+    // fetcher timer stopped when `fetchModel` returned and `parseTemplate`
+    // started a second 30 s, so one model could spend about 60 s of its own
+    // work; a job past its deadline is `timeout`, and a parse that outlives it
+    // is disposed when it settles.
+    const deadline = newDeadline()
     return (async () => {
       const fetched = await fetchModel({
         url: spec.url, sha256: spec.sha256 ?? null, signal: controller.signal,
-        worldBaseUrl: token.worldBaseUrl, ledger,
+        worldBaseUrl: token.worldBaseUrl, ledger, deadline,
       })
       if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'cancelled' }
       if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
 
-      const got = await templateFor(key, token, fetched, wanted)
+      const got = await templateFor(key, token, fetched, wanted, deadline)
       if (!got.ok) return got
 
       // V4/W3 — when a redirect changed the URL the bytes came from, the
@@ -409,7 +418,7 @@ export function createModelBridge(deps = {}) {
    * (A5), in `allNodes` order. W3: the entry is created ACQUIRED by the load
    * that parsed it, and that load is named in the answer (`createdFor`).
    */
-  function templateFor(key, token, fetched, wanted) {
+  function templateFor(key, token, fetched, wanted, deadline = null) {
     const existing = cache.get(key)
     if (existing) return Promise.resolve({ ok: true, entry: existing })
 
@@ -422,12 +431,19 @@ export function createModelBridge(deps = {}) {
       // failed or dropped first, so the same models win on every visitor's
       // screen. The fetch already ran in parallel; only the parse is ordered.
       // A Check (`token` has no node) goes after every model node loading.
+      //
+      // M3 — waiting does not count against the job's deadline: the clock stops
+      // for the admission wait and for the serialized parse queue, and starts
+      // again when the turn comes. Those waits are bounded because each earlier
+      // job has a deadline of its own.
+      deadline?.pause()
       const allowed = token.node
         ? await waitForEarlier(token, wanted)
         : await waitForLoading(wanted)
       if (!allowed) return { ok: false, reason: 'aborted', message: 'cancelled' }
 
       return serialize(async () => {
+        deadline?.resume()
         const again = cache.get(key)
         if (again) return { ok: true, entry: again }
         if (!wanted()) return { ok: false, reason: 'aborted', message: 'cancelled' }
@@ -435,7 +451,7 @@ export function createModelBridge(deps = {}) {
         const parsed = await parse({
           kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
           dependencies: fetched.dependencies ?? new Map(),
-          reserveTexture, releaseTexture,
+          reserveTexture, releaseTexture, deadline,
         })
         if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
 

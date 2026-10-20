@@ -18,6 +18,7 @@ import {
   parseTemplate, MODEL_PARSE_LIMITS,
 } from '../src/model-parse.js'
 import { simpleGlb, modelGlb, packGlb, imageGlb } from './glb-fixture.js'
+import { createJobDeadline } from '@atrium/client/model-fetch'
 
 // ---------------------------------------------------------------------------
 // Image headers (A5) — hand-built, no decoding
@@ -676,4 +677,73 @@ test('M1: a .glb with embedded images still parses, and gets the modifier its ow
   const { api } = fakeUrls()
   const { modifier } = createUrlModifier(new Map(), api)
   assert.equal(modifier('https://evil.example/x.png').startsWith('blob:'), true, 'the installed modifier is fail-closed')
+})
+
+// ---------------------------------------------------------------------------
+// M3 (round 6) — the parse gets what is LEFT of the job's deadline
+//
+// Round 5's fetcher stopped its 30 s timer when `fetchModel` returned and
+// `parseTemplate` started a fresh 30 s of its own, so one model could take about
+// 60 s. A parse that runs past the deadline cannot be stopped: the job is
+// `timeout` at once, and when the parse settles, its template is disposed and
+// the reservation it took is given back — against the budget of the generation
+// it started in (M4's caller-owned closures).
+// ---------------------------------------------------------------------------
+
+test('M3: an expired job is refused timeout before the loader is built', async () => {
+  const { loader, calls } = quietLoader()
+  const reservations = []
+  let clock = 0
+  const deadline = createJobDeadline({ timeoutMs: 30_000, now: () => clock })
+  deadline.start()
+  clock += 30_000
+  const result = await parseTemplate({
+    kind: 'glb', bytes: imageGlb({ width: 64, height: 64 }), loader, deadline,
+    reserveTexture: (n) => { reservations.push(n); return true },
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'timeout')
+  assert.equal(calls.parseAsync, 0, 'the loader never saw the model')
+  assert.deepEqual(reservations, [], 'nothing is reserved for a job past its deadline')
+})
+
+test('M3: a parse that outlives the deadline is timeout at once, then disposes and releases once', async () => {
+  const { loader } = quietLoader()
+  const disposed = []
+  const released = []
+  const template = { scene: { traverse: (fn) => fn({ geometry: { dispose: () => disposed.push('geometry') } }) } }
+  let settle = null
+  const parsePromise = new Promise((resolve) => { settle = resolve })
+  const slowLoader = { parseAsync: () => parsePromise }
+
+  let clock = 0
+  const deadline = createJobDeadline({ timeoutMs: 30, now: () => clock })
+  deadline.start()
+  clock += 26                       // 4 ms of the job's work left
+
+  const result = await parseTemplate({
+    kind: 'glb', bytes: imageGlb({ width: 64, height: 64 }), loader: slowLoader, deadline,
+    reserveTexture: () => true,
+    releaseTexture: (n) => released.push(n),
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'timeout')
+  assert.deepEqual(released, [], 'the parse is still holding its bytes')
+  assert.deepEqual(disposed, [], 'and nothing is disposed while it runs')
+
+  settle(template)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(disposed, ['geometry'], 'the late template is disposed exactly once')
+  assert.deepEqual(released, [estimateTextureBytes(64, 64)], 'and its reservation is given back exactly once')
+})
+
+test('M3: a parse inside the deadline is not a timeout', async () => {
+  const { loader, calls } = quietLoader()
+  let clock = 0
+  const deadline = createJobDeadline({ timeoutMs: 30_000, now: () => clock })
+  deadline.start()
+  clock += 1_000
+  const result = await parseTemplate({ kind: 'glb', bytes: simpleGlb(), loader, deadline })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(calls.parseAsync, 1)
 })

@@ -585,6 +585,9 @@ export function createTemplateCache() {
 
 const POSITION = 'position'   // three's BufferGeometry attribute name for glTF POSITION
 
+/** M3 — the plain text for a parse that ran past its job's deadline. */
+const PARSE_TIMEOUT_MESSAGE = 'the model took too long'
+
 /** Z3 — vertex count over a parsed scene, skinned meshes included. */
 export function countVertices(root) {
   let vertices = 0
@@ -640,8 +643,13 @@ export function measureBounds(scene, Box3, Vector3) {
 export async function parseTemplate({
   kind, bytes, json = null, dependencies = new Map(),
   urls = objectUrlApi(), timeoutMs = 30_000, loader = null,
-  reserveTexture = null, releaseTexture = null,
+  reserveTexture = null, releaseTexture = null, deadline = null,
 } = {}) {
+  // M3 (round 6) — each stage checks the job's deadline before it starts. A
+  // parse past its deadline cannot be stopped, so the job is `timeout` at once
+  // and the late result is disposed when it settles (below).
+  if (deadline?.expired()) return { ok: false, reason: 'timeout', message: PARSE_TIMEOUT_MESSAGE }
+
   const preflight = preflightFor(kind, bytes, json, dependencies)
   if (preflight.problem?.reason) return { ok: false, ...preflight.problem }
 
@@ -655,8 +663,9 @@ export async function parseTemplate({
     }
     reserved = true
   }
+  const releaseReservation = () => { if (reserved) { reserved = false; releaseTexture?.(textureBytes) } }
   const stop = (result) => {
-    if (reserved && !result.ok) { releaseTexture?.(textureBytes); reserved = false }
+    if (!result.ok) releaseReservation()
     return result
   }
 
@@ -692,16 +701,32 @@ export async function parseTemplate({
 
   try {
     const data = typeof payload === 'string' ? payload : bufferOf(payload)
-    const gltf = await withTimeout(gltfLoader.parseAsync(data, ''), timeoutMs)
-    if (modifier && modifier.violations.length > 0) {
+    // M3 — the parse gets whatever is LEFT of the job's 30 s, not a fresh 30 s.
+    const parseMs = deadline ? deadline.remainingMs() : timeoutMs
+    if (deadline && parseMs <= 0) return stop({ ok: false, reason: 'timeout', message: PARSE_TIMEOUT_MESSAGE })
+
+    const parsePromise = gltfLoader.parseAsync(data, '')
+    let gltf
+    try {
+      gltf = await withTimeout(parsePromise, parseMs)
+    } catch (error) {
+      if (modifier.violations.length > 0) {
+        return stop({ ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` })
+      }
+      if (error?.atriumTimeout) {
+        // M3/M4 — a parse past its deadline cannot be stopped: the job is
+        // `timeout` at once, and when the parse settles its template is
+        // disposed and its reservation given back, against the budget of the
+        // generation it started in (the caller's `releaseTexture`).
+        settleLate(parsePromise, releaseReservation, disposeTemplate)
+        return { ok: false, reason: 'timeout', message: PARSE_TIMEOUT_MESSAGE }
+      }
+      return stop({ ok: false, reason: 'parse', message: error?.message ?? 'the model could not be parsed' })
+    }
+    if (modifier.violations.length > 0) {
       return stop({ ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` })
     }
     return { ok: true, template: gltf, textureBytes }
-  } catch (error) {
-    if (modifier && modifier.violations.length > 0) {
-      return stop({ ok: false, reason: 'unexpected-request', message: `the model asked for ${modifier.violations[0]}` })
-    }
-    return stop({ ok: false, reason: 'parse', message: error?.message ?? 'the model could not be parsed' })
   } finally {
     revokeBlobs(blobUrls, urls)
   }
@@ -759,8 +784,29 @@ function bufferOf(bytes) {
 }
 
 function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('the model took too long to parse')), ms).unref?.()),
-  ])
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error('the model took too long to parse')
+      error.atriumTimeout = true
+      reject(error)
+    }, ms)
+    Promise.resolve(promise).then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (error) => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
+/**
+ * M3/M4 (round 6) — a parse that outlived its deadline settles LATER: dispose
+ * what it built exactly once, and give its reservation back exactly once. Both
+ * closures belong to the caller and name the generation the parse started in,
+ * so a release after a world change cannot touch the new world's budget.
+ */
+function settleLate(parsePromise, releaseReservation, dispose) {
+  const finish = (gltf) => {
+    try { if (gltf) dispose(gltf) } catch { /* best effort */ }
+    try { releaseReservation() } catch { /* best effort */ }
+  }
+  Promise.resolve(parsePromise).then(finish, () => finish(null))
 }
