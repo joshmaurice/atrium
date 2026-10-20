@@ -30,7 +30,7 @@
  * its turn in `allNodes` order.
  */
 
-import { MODEL_LIMITS, createWorldLedger } from '@atrium/client/model-fetch'
+import { MODEL_LIMITS, createWorldLedger, sha256Hex } from '@atrium/client/model-fetch'
 import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
 import { buildInstance, buildPlaceholder, PLACEHOLDER_COLOURS } from './model-instances.js'
@@ -207,7 +207,7 @@ export function createModelBridge(deps = {}) {
 
       let job = loads.get(key)
       if (!job) {
-        job = fetchAndParse(record, key, controller)
+        job = fetchAndParse(record, key, controller, () => stillWanted(record))
         loads.set(key, job)
         job.then(noop, noop).finally(() => { if (loads.get(key) === job) loads.delete(key) })
       }
@@ -217,48 +217,106 @@ export function createModelBridge(deps = {}) {
       if (!got.ok) return fail(record, got.reason, got.message)
       if (!stillWanted(record)) return drop(record)
 
-      return useEntry(record, key, got.entry)
+      return useEntry(record, key, got.entry, got.createdFor === record)
     } finally {
       controllers.delete(controller)
     }
   }
 
   /**
-   * V4 — one fetch and one parse per template key. Every node that asks while
-   * the job is in flight awaits the same promise, so two nodes with one URL
-   * download once (and parse once, through `templateFor`'s own map).
+   * W4 — the bridge's ONE entry point for loading a template by URL: the cache
+   * and the in-flight lookup, the fetch, the serialized parse with its texture
+   * reservation, and the entry handed back ACQUIRED. The caller holds that
+   * reference and gives it back with `releaseTemplate`.
+   *
+   * `app.js`'s Check uses this and nothing else. Round 3's Check fetched and
+   * parsed on its own — outside the budget and outside the parse queue — and
+   * then put the result in the cache with its `textureBytes`, so the owner's
+   * page kept `textureBudget.taken` at 0.0 MiB through every Check-then-Save.
+   *
+   * @param {{url: string, sha256?: string|null}} args
+   * @returns {Promise<{ok: true, key: string, entry: object, fetched: object|null}
+   *                   | {ok: false, reason: string, message: string}>}
    */
-  function fetchAndParse(record, key, controller) {
-    const { spec } = record
+  async function loadTemplate({ url, sha256 = null } = {}) {
+    const token = { spec: { url, sha256 }, worldBaseUrl: deps.worldBaseUrl?.() ?? null, key: null }
+    const key = specTemplateKey(token.spec, token.worldBaseUrl)
+    const generation = worldGeneration
+    const wanted = () => generation === worldGeneration
+
+    const cached = cache.get(key)
+    if (cached) {
+      const held = cache.acquire(key) ?? cached
+      await settleHash(held)
+      return { ok: true, key, entry: held, fetched: null }
+    }
+
+    const controller = new AbortController()
+    controllers.add(controller)
+    try {
+      let job = loads.get(key)
+      if (!job) {
+        job = fetchAndParse(token, key, controller, wanted)
+        loads.set(key, job)
+        job.then(noop, noop).finally(() => { if (loads.get(key) === job) loads.delete(key) })
+      }
+
+      const got = await job
+      if (got.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'the download was cancelled' }
+      if (!got.ok) return { ok: false, reason: got.reason, message: got.message }
+
+      // W3 — an entry created for this very check is already held by it.
+      const entry = got.createdFor === token ? got.entry : (cache.acquire(key) ?? got.entry)
+      await settleHash(entry)
+      return { ok: true, key, entry, fetched: got.fetched ?? null }
+    } finally {
+      controllers.delete(controller)
+    }
+  }
+
+  /** W4 — the held Check ends: the entry goes idle and is kept (A8). */
+  function releaseTemplate(key) {
+    return cache.release(key)
+  }
+
+  /**
+   * V4/W3 — one fetch and one parse per template key, for a model load or for
+   * the form's Check. Every node that asks while the job is in flight awaits the
+   * same promise, so two nodes with one URL download once (and parse once,
+   * through `templateFor`'s own map). `token` is `{ spec, worldBaseUrl, key }`;
+   * `wanted()` answers whether the requester still wants the result.
+   */
+  function fetchAndParse(token, key, controller, wanted) {
+    const { spec } = token
     return (async () => {
       const fetched = await fetchModel({
         url: spec.url, sha256: spec.sha256 ?? null, signal: controller.signal,
-        worldBaseUrl: record.worldBaseUrl, ledger,
+        worldBaseUrl: token.worldBaseUrl, ledger,
       })
       if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'cancelled' }
       if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
 
-      const got = await templateFor(key, record, fetched)
+      const got = await templateFor(key, token, fetched, wanted)
       if (!got.ok) return got
 
-      // V4 — when a redirect changed the URL the bytes came from, the same
-      // template answers to the effective URL's key as well, as the form's held
-      // Check already stores it. The texture reservation is taken once, in the
-      // parse; the template is one object under both keys.
+      // V4/W3 — when a redirect changed the URL the bytes came from, the
+      // effective URL's key is an ALIAS of the one entry (one template, one byte
+      // count, one dispose), not a second entry that would be evicted — and
+      // disposed — on its own.
       const effective = templateKey(fetched.effectiveUrl ?? spec.url, spec.sha256 ?? null)
-      if (effective !== key && !cache.has(effective)) {
-        const entry = cache.set(effective, { ...got.entry.template, textureBytes: got.entry.textureBytes })
-        entry.refs = got.entry.refs
-        entry.idle = got.entry.idle
-      }
-      return { ok: true, entry: got.entry }
+      if (effective !== key) cache.alias(effective, key)
+
+      return { ok: true, entry: got.entry, createdFor: got.createdFor, fetched }
     })()
   }
 
   /** Everything after the entry exists: acquire it, build an instance, attach. */
-  function useEntry(record, key, entry) {
+  function useEntry(record, key, entry, adopted = false) {
     record.key = key
-    cache.acquire(key)
+    // W3 — an entry created for THIS load is already acquired by it (see
+    // `templateFor`), so the load adopts that reference instead of taking a
+    // second one. Every other caller acquires.
+    if (!adopted) cache.acquire(key)
     const held = cache.get(key) ?? entry
     const built = makeInstance(held.template)
     if (!stillWanted(record)) { cache.release(key); return drop(record) }
@@ -274,9 +332,10 @@ export function createModelBridge(deps = {}) {
   /**
    * Z3/A8/A10 — the template for `key`, parsed once: two nodes with one URL
    * share one parse, and the texture reservation is taken before the parse
-   * (A5), in `allNodes` order.
+   * (A5), in `allNodes` order. W3: the entry is created ACQUIRED by the load
+   * that parsed it, and that load is named in the answer (`createdFor`).
    */
-  function templateFor(key, record, fetched) {
+  function templateFor(key, token, fetched, wanted) {
     const existing = cache.get(key)
     if (existing) return Promise.resolve({ ok: true, entry: existing })
 
@@ -286,7 +345,7 @@ export function createModelBridge(deps = {}) {
     const promise = serialize(async () => {
       const again = cache.get(key)
       if (again) return { ok: true, entry: again }
-      if (!stillWanted(record)) return { ok: false, reason: 'aborted', message: 'cancelled' }
+      if (!wanted()) return { ok: false, reason: 'aborted', message: 'cancelled' }
 
       const parsed = await parse({
         kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
@@ -296,7 +355,35 @@ export function createModelBridge(deps = {}) {
       if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
 
       const textureBytes = parsed.textureBytes ?? 0
-      return { ok: true, entry: cache.set(key, { ...parsed.template, textureBytes }) }
+      // W3 — the world may have moved on while the parse ran (a world change, the
+      // node removed, the form closed): give the reservation back rather than
+      // charging a world that no longer wants the template.
+      if (!wanted()) {
+        releaseTexture?.(textureBytes)
+        return { ok: false, reason: 'aborted', message: 'cancelled' }
+      }
+
+      // W3 — the entry is created already acquired by the load that parsed it
+      // (`refs: 1`, not idle) INSIDE the serialized parse. Round 3 created it
+      // idle and the load acquired it a microtask later, so the next model's
+      // `reserveTexture` → `evictIdleFor` could dispose a template that was
+      // about to be, or already was, on screen.
+      const entry = cache.set(key, { ...parsed.template, textureBytes }, { acquired: true })
+      // V4/W4 — what the form's Check reads back off a held entry: the kind, the
+      // bytes it came from, and (a .glb's) hash, the one Save pins with. The
+      // digest runs OFF the model-load critical path — a placed model must not
+      // wait a thread-pool turn for it — and `loadTemplate` awaits it for the
+      // Check, which is the only caller that reports a hash.
+      entry.kind = fetched.kind
+      entry.totalBytes = fetched.totalBytes ?? 0
+      entry.bytesSha256 = null
+      if (fetched.kind === 'glb' && fetched.bytes) {
+        entry.bytesSha256Promise = sha256Hex(fetched.bytes)
+          .then((hex) => { entry.bytesSha256 = hex; return hex })
+          .catch(() => null)
+      }
+      token.key = key
+      return { ok: true, entry, createdFor: token }
     })
     parses.set(key, promise)
     promise.then(noop, noop).finally(() => { if (parses.get(key) === promise) parses.delete(key) })
@@ -468,6 +555,9 @@ export function createModelBridge(deps = {}) {
     resetWorld,
     reconcile,
     status,
+    /** W4 — the one load entry point and the pair that gives the reference back. */
+    loadTemplate,
+    releaseTemplate,
     /** The cache and its budget, for tests and for the form's Check (Z7). */
     cache,
     ledger,
@@ -477,6 +567,18 @@ export function createModelBridge(deps = {}) {
     get viewGeneration() { return viewGeneration },
     get worldGeneration() { return worldGeneration },
   }
+}
+
+/**
+ * W4 — the bytes' hash a Check reports (`entry.bytesSha256`), awaited only where
+ * it is used: the digest is started when the entry is created and settled here,
+ * off the model-load path (see `templateFor`).
+ */
+async function settleHash(entry) {
+  if (entry?.bytesSha256Promise) {
+    try { entry.bytesSha256 = await entry.bytesSha256Promise } catch { entry.bytesSha256 = null }
+  }
+  return entry?.bytesSha256 ?? null
 }
 
 /** The key an instance's spec is compared by (A9's "spec unchanged"). */

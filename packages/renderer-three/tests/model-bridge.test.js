@@ -21,7 +21,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
   return { name, _node: { def: name }, mesh, extras: { atrium: { model } } }
 }
 
-function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null } = {}) {
+function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null } = {}) {
   const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
@@ -53,7 +53,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
         }
         return {
           ok: true, kind: 'glb', bytes: modelBytes ?? new Uint8Array([1]), json: null,
-          dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
+          dependencies: new Map(), effectiveUrl: redirectTo ? redirectTo(url) : url, totalBytes: 1,
         }
       },
       parseTemplate: async (args) => {
@@ -66,6 +66,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
         return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
       },
       ...(textureBudget ? { textureBudget } : {}),
+      ...(disposeTemplate ? { disposeTemplate } : {}),
     },
   })
   bridge.attachView({}, state.sceneGroup)
@@ -459,4 +460,99 @@ test('W1/A5/A10: the budget is charged once per template, and refuses the model 
   // The two that fit are still charged, and still attached.
   assert.equal(h.childrenOf('Twin A').length, 1)
   assert.equal(h.childrenOf('Second').length, 1)
+})
+
+// ── W3 (round 4): the race, and the redirect alias ──────────────────────────
+//
+// Round 3's `templateFor` created an entry IDLE (`refs: 0`) inside the serialized
+// parse and the load acquired it a microtask later, so the next model's
+// `reserveTexture` → `evictIdleFor` could evict and dispose a template that was
+// about to be — or already was — on screen; three.js re-uploads a disposed
+// texture, so the GPU held ~320 MiB while the books said 234.7. A redirect's key
+// was stored as a SECOND entry with the same `textureBytes`, so evicting both
+// released the bytes twice and disposed one template twice.
+//
+// No image decoding (the loader stand-in), a counting budget, and a dispose
+// recorder: what is checked is the bookkeeping.
+
+/** A budget that records the highest `taken` it ever showed. */
+function watchedBudget(inner) {
+  const watch = { maxTaken: 0 }
+  return {
+    watch,
+    budget: {
+      get limit() { return inner.limit },
+      get taken() { return inner.taken },
+      get free() { return inner.free },
+      fits: (n) => inner.fits(n),
+      reserve: (n) => { const ok = inner.reserve(n); watch.maxTaken = Math.max(watch.maxTaken, inner.taken); return ok },
+      release: (n) => { inner.release(n) },
+      reset: () => inner.reset(),
+    },
+  }
+}
+
+/** A bridge whose fetches all carry one 2048² texture, with `textures` of room. */
+function texturedHarness({ textures = 3, redirectTo = null } = {}) {
+  const per = estimateTextureBytes(2048, 2048)
+  const { budget, watch } = watchedBudget(createTextureBudget({ bytes: per * textures }))
+  const disposed = []
+  const h = harness({
+    textureBudget: budget,
+    modelBytes: imageGlb({ width: 2048, height: 2048 }),
+    parseLoader: hostlessLoader,
+    disposeTemplate: (template) => disposed.push(template),
+    redirectTo,
+  })
+  return { h, budget, watch, disposed, per }
+}
+
+/** The W3 assertions: three charged, the fourth refused, nothing in use evicted. */
+function assertThreeFitAndTheFourthIsRefused({ h, budget, watch, disposed, per }) {
+  assert.equal(budget.taken, per * 3, 'three textured models are charged')
+  assert.ok(watch.maxTaken <= budget.limit, '`taken` never exceeded the limit')
+  assert.equal(watch.maxTaken, per * 3)
+  assert.deepEqual(disposed, [], 'no entry with refs > 0 was ever disposed')
+  for (const name of ['M1', 'M2', 'M3']) {
+    assert.equal(h.bridge.status(name).status, MODEL_STATUS.loaded, `${name} loaded`)
+    assert.equal(h.childrenOf(name).length, 1, `${name} is attached`)
+  }
+  const refused = h.bridge.status('M4')
+  assert.equal(refused.status, MODEL_STATUS.failed)
+  assert.equal(refused.reason, 'world-texture-budget', 'the fourth is refused the budget reason')
+}
+
+test('W3/A5: four distinct models requested back to back — the fourth is refused', async () => {
+  const harnessed = texturedHarness({ textures: 3 })
+  for (const name of ['M1', 'M2', 'M3', 'M4']) harnessed.h.addNode(somNode(name, { url: `https://h/${name}.glb` }))
+  await settle()
+  assertThreeFitAndTheFourthIsRefused(harnessed)
+})
+
+test('W3/A5: the fourth requested before the third continued past its parse — the same', async () => {
+  const harnessed = texturedHarness({ textures: 3 })
+  for (const name of ['M1', 'M2', 'M3']) harnessed.h.addNode(somNode(name, { url: `https://h/${name}.glb` }))
+  await tick()   // the three parses are queued; no load has been handed its entry yet
+  harnessed.h.addNode(somNode('M4', { url: 'https://h/M4.glb' }))   // the race
+  await settle()
+  assertThreeFitAndTheFourthIsRefused(harnessed)
+})
+
+test('W3: a redirect’s key is an alias of one entry — counted, evicted and disposed once', async () => {
+  const { h, budget, disposed, per } = texturedHarness({ textures: 1, redirectTo: () => 'https://h/effective.glb' })
+  h.addNode(somNode('M1', { url: 'https://h/alias.glb' }))
+  await settle()
+
+  const keys = h.bridge.cache.keys()
+  assert.equal(h.bridge.cache.size, 1, 'one entry, however many keys it answers to')
+  assert.equal(keys.length, 2, 'the spec URL’s key and the effective URL’s')
+  assert.equal(h.bridge.cache.get(keys[0]), h.bridge.cache.get(keys[1]), 'both keys are the same entry')
+  assert.equal(budget.taken, per, 'its bytes are counted once')
+
+  h.removeNode('M1')                                             // the template goes idle
+  const evicted = h.bridge.cache.evictIdleFor(per, budget, (template) => disposed.push(template))
+  assert.equal(evicted.length, 1, 'one entry went')
+  assert.equal(disposed.length, 1, 'and its template was disposed once')
+  assert.equal(budget.taken, 0, 'and its bytes were released once')
+  assert.equal(h.bridge.cache.size, 0)
 })

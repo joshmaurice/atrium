@@ -270,6 +270,48 @@ test('A8: a template with a live instance is not evicted', () => {
   assert.ok(cache.get(a))
 })
 
+// W3 (round 4) — the two bookkeeping rules the round-3 cache got wrong: an entry
+// created for a load is created ACQUIRED by it (so the next model's eviction
+// cannot take a template that is about to be, or already is, in use), and a
+// redirect's second key is an ALIAS of one entry (one byte count, one dispose).
+test('W3: an entry created for a load is created acquired, not idle', () => {
+  const cache = createTemplateCache()
+  const key = templateKey('https://h/held.glb')
+  const entry = cache.set(key, templateOf(100), { acquired: true })
+  assert.equal(entry.refs, 1, 'the load that is parsing it holds the entry')
+  assert.equal(entry.idle, false)
+
+  const budget = createTextureBudget({ bytes: 100 })
+  budget.reserve(100)
+  const disposed = []
+  const evicted = cache.evictIdleFor(100, budget, (t) => disposed.push(t))
+  assert.deepEqual(evicted, [], 'an entry a load still holds is not evictable')
+  assert.deepEqual(disposed, [], 'and is never disposed')
+  assert.equal(budget.taken, 100, 'its bytes are not released')
+  assert.equal(cache.size, 1)
+})
+
+test('W3: a redirect’s second key is an alias of one entry', () => {
+  const cache = createTemplateCache()
+  const key = templateKey('https://h/alias.glb')
+  const effective = templateKey('https://h/effective.glb')
+  const entry = cache.set(key, templateOf(64), { acquired: true })
+
+  assert.equal(cache.alias(effective, key), entry, 'the alias takes the same entry')
+  assert.equal(cache.get(effective), entry)
+  assert.equal(cache.size, 1, 'one entry, two keys')
+  assert.equal(cache.keys().length, 2)
+  assert.equal(cache.acquire(effective).refs, 2, 'both keys count the same references')
+  cache.release(key)
+  assert.equal(cache.get(effective).refs, 1, 'one release, whichever key it names')
+  assert.equal(cache.alias(effective, key), entry, 'aliasing twice is the same entry, not a second one')
+
+  assert.equal(cache.delete(effective), entry)
+  assert.equal(cache.size, 0, 'the entry goes from every key it answered to')
+  assert.equal(cache.get(key), null)
+  assert.equal(cache.has(effective), false)
+})
+
 test('a world change clears and disposes everything (A9)', () => {
   const cache = createTemplateCache()
   cache.set('a', templateOf(1))

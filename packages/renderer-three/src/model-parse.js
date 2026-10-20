@@ -410,28 +410,71 @@ export function templateKey(resolvedUrl, sha256 = null) {
  * instance goes away becomes IDLE: it is not disposed, still counts against the
  * world texture budget, and is evicted least-recently-used first when a new
  * model would not otherwise fit.
+ *
+ * W3 (round 4):
+ *   - an entry created for a load is created ALREADY ACQUIRED by that load
+ *     (`set(key, template, { acquired: true })` → `refs: 1`, not idle), inside
+ *     the serialized parse, so an eviction that runs before that load hands the
+ *     entry to its instance cannot take it;
+ *   - `evictIdleFor` walks every entry and skips any with `refs > 0`: a template
+ *     a load or an instance still holds is never evicted and never disposed;
+ *   - a redirect's second key is an ALIAS of the same entry (`alias`): one
+ *     entry, one byte count, one dispose.
  */
 export function createTemplateCache() {
-  const entries = new Map()
+  const entries = new Map()   // key → entry (aliases share the entry object)
+  const all = new Set()       // the distinct entries, for `size` and the clear
   let clock = 0
 
   const entryFor = (key) => entries.get(key) ?? null
 
+  /** Least recently used first, one row per entry however many keys it has. */
+  const byRecency = () => [...all].sort((a, b) => a.usedAt - b.usedAt)
+
+  /** Take an entry out of the cache under every key it answers to. */
+  const drop = (entry) => {
+    for (const key of entry.keys) entries.delete(key)
+    all.delete(entry)
+  }
+
   return {
-    get size() { return entries.size },
+    get size() { return all.size },
     has: (key) => entries.has(key),
     get: (key) => entryFor(key),
 
-    /** Store a template; returns the entry. */
-    set(key, template) {
-      const existing = entries.get(key)
+    /**
+     * Store a template; returns the entry. `{ acquired: true }` is W3's rule for
+     * an entry created for a load that is still parsing it.
+     */
+    set(key, template, { acquired = false } = {}) {
+      const existing = entryFor(key)
       if (existing) {
         existing.template = template
         existing.usedAt = ++clock
         return existing
       }
-      const entry = { key, template, refs: 0, idle: true, usedAt: ++clock, textureBytes: template.textureBytes ?? 0 }
+      const entry = {
+        key, keys: [key], template,
+        refs: acquired ? 1 : 0, idle: !acquired,
+        usedAt: ++clock, textureBytes: template.textureBytes ?? 0,
+      }
       entries.set(key, entry)
+      all.add(entry)
+      return entry
+    },
+
+    /**
+     * W3 — make `aliasKey` another name for the entry at `key`. One entry, one
+     * byte count, one dispose. Returns the shared entry, or `null` when there is
+     * nothing at `key` or `aliasKey` is already taken.
+     */
+    alias(aliasKey, key) {
+      const entry = entryFor(key)
+      if (!entry) return null
+      const taken = entryFor(aliasKey)
+      if (taken) return taken === entry ? entry : null
+      entries.set(aliasKey, entry)
+      entry.keys.push(aliasKey)
       return entry
     },
 
@@ -455,17 +498,24 @@ export function createTemplateCache() {
       return entry
     },
 
+    /** Entries nothing holds any more, least recently used first. */
     idleEntries() {
-      return [...entries.values()].filter((e) => e.idle).sort((a, b) => a.usedAt - b.usedAt)
+      return byRecency().filter((e) => e.refs === 0)
     },
 
-    /** A8 — evict idle templates, least-recently-used first, until `n` bytes fit. */
+    /**
+     * A8/W3 — evict templates, least-recently-used first, until `n` bytes fit.
+     * Every entry is a candidate (`idleEntries` is what the caller may look at),
+     * and the `refs > 0` guard is what actually protects one that is in use: it
+     * is skipped and never disposed, whatever its `idle` flag says.
+     */
     evictIdleFor(n, budget, dispose) {
       const evicted = []
-      for (const entry of this.idleEntries()) {
+      for (const entry of byRecency()) {
         if (budget.fits(n)) break
+        if (entry.refs > 0) continue
         budget.release(entry.textureBytes)
-        entries.delete(entry.key)
+        drop(entry)
         dispose?.(entry.template)
         evicted.push(entry.key)
       }
@@ -474,15 +524,16 @@ export function createTemplateCache() {
 
     /** Drop and dispose everything (the world changed, A9). */
     clear(dispose) {
-      for (const entry of entries.values()) dispose?.(entry.template)
+      for (const entry of all) dispose?.(entry.template)
       entries.clear()
+      all.clear()
     },
 
-    /** Drop one entry (the form's held Check ended, Z7/A8). */
+    /** Drop one entry, under all of its keys (the form's held Check ended, Z7/A8). */
     delete(key) {
       const entry = entries.get(key)
       if (!entry) return null
-      entries.delete(key)
+      drop(entry)
       return entry
     },
 
