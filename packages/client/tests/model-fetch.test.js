@@ -431,3 +431,51 @@ test('A4: two models share one ledger, and the total is what crosses', async () 
   assert.equal(second.reason, 'world-download-budget')
   assert.ok(ledger.charged > 150)
 })
+
+// ---------------------------------------------------------------------------
+// M2 (round 6) — a redirected .gltf resolves its dependencies against its FINAL
+// url
+//
+// Round 5 checked `response.url` after a redirect and then dropped it:
+// `readBody` answered `{ ok, bytes }` with no url, so `first.url` was always
+// undefined and `effectiveUrl` fell back to the PRE-redirect URL. A model
+// redirected into a subdirectory then asked for `textures/d.png` beside the
+// redirect source instead of beside the file that actually arrived.
+// ---------------------------------------------------------------------------
+
+test('M2: a root-relative .gltf redirected on the same origin resolves dependencies against the final url', async () => {
+  const spec = '/models/a.gltf'
+  const asked = 'https://world.example/models/a.gltf'
+  const final = 'https://world.example/lib/chair/model.gltf'
+  const fetchFn = stubFetch({
+    [asked]: () => response(GLTF_JSON({ buffers: [{ uri: 'textures/d.png', byteLength: 4 }] }), { redirected: true, url: final }),
+    'https://world.example/lib/chair/textures/d.png': () => response(glbBytes(4)),
+  })
+  const result = await fetchModel({ url: spec, fetchFn, worldBaseUrl: 'https://world.example/index.html' })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(result.effectiveUrl, final, 'the final url is what the caller gets back')
+  assert.deepEqual(fetchFn.calls.map((c) => c.url), [asked, 'https://world.example/lib/chair/textures/d.png'],
+    'the dependency resolves against the redirect target, not the redirect source')
+  assert.deepEqual([...result.dependencies.keys()], ['textures/d.png'])
+})
+
+test('M2: an absolute https redirect across origins does the same', async () => {
+  const asked = 'https://cdn.example.com/a.gltf'
+  const final = 'https://other.example/lib/chair/model.gltf'
+  const fetchFn = stubFetch({
+    [asked]: () => response(GLTF_JSON({ buffers: [{ uri: 'textures/d.png', byteLength: 4 }] }), { redirected: true, url: final }),
+    'https://other.example/lib/chair/textures/d.png': () => response(glbBytes(4)),
+  })
+  const result = await fetchModel({ url: asked, fetchFn })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(result.effectiveUrl, final)
+  assert.deepEqual(fetchFn.calls.map((c) => c.url), [asked, 'https://other.example/lib/chair/textures/d.png'])
+})
+
+test('M2: an unredirected response still reports the url it was asked for', async () => {
+  const url = 'https://cdn.example.com/m.glb'
+  const fetchFn = stubFetch({ [url]: () => response(glbBytes(), { url }) })
+  const result = await fetchModel({ url, fetchFn })
+  assert.equal(result.ok, true)
+  assert.equal(result.effectiveUrl, url)
+})

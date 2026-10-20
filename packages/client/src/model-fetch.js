@@ -219,11 +219,12 @@ async function fetchOne(target, { fetchFn, signal, budget, ledger, limits, rootR
   }
 
   // L17 — the redirect is checked before the body is read.
+  const finalUrl = typeof response.url === 'string' && response.url.length > 0 ? response.url : target
   if (response.redirected) {
-    const problem = redirectProblem(response.url ?? '', rootRelative, worldBaseUrl)
+    const problem = redirectProblem(finalUrl, rootRelative, worldBaseUrl)
     if (problem) {
       try { await response.body?.cancel?.() } catch { /* ignore */ }
-      return failure(problem, response.url)
+      return failure(problem, finalUrl)
     }
   }
 
@@ -232,7 +233,14 @@ async function fetchOne(target, { fetchFn, signal, budget, ledger, limits, rootR
     return failure('http', String(response.status))
   }
 
-  return readBody(response, { budget, ledger, limits, signal })
+  const body = await readBody(response, { budget, ledger, limits, signal })
+  if (!body.ok) return body
+  // M2 (round 6) — the validated FINAL url travels with the bytes. Round 5
+  // checked `response.url` after a redirect and then dropped it: `readBody`
+  // answered `{ ok, bytes }`, so `first.url` was always undefined and
+  // `effectiveUrl` fell back to the pre-redirect URL — a redirected `.gltf`
+  // resolved its dependencies against the wrong address.
+  return { ...body, url: finalUrl }
 }
 
 /** The glTF magic, from content — never the extension (Z2). */
