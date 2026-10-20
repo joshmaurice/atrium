@@ -161,6 +161,38 @@ export function readGlb(bytes) {
   return json ? { json, bin } : null
 }
 
+/**
+ * M1 (round 6) — the A3 rule for a `.glb`, applied to its JSON chunk BEFORE
+ * anything is parsed. GLTFLoader follows a `.glb`'s `uri`s with its own loaders,
+ * outside `fetchModel`, its budget and its preflight, so a `.glb` that names any
+ * file it does not carry is refused here — before a loader is even constructed.
+ *
+ * A `.glb`'s buffers are its binary chunk (no `uri`) or `data:` URIs; its images
+ * are buffer views or `data:` URIs. Anything else is `bad-dependency`.
+ *
+ * @param {object} json  the GLB's JSON chunk
+ * @returns {{reason: string, message: string}|null}
+ */
+export function glbDependencyProblem(json) {
+  for (const buffer of json?.buffers ?? []) {
+    const uri = buffer?.uri
+    if (uri === undefined || uri === null) continue
+    if (typeof uri !== 'string' || !uri.startsWith('data:')) return dependencyProblem(uri)
+  }
+  for (const image of json?.images ?? []) {
+    const uri = image?.uri
+    if (typeof uri === 'string' && uri.startsWith('data:')) continue
+    if (uri !== undefined && uri !== null) return dependencyProblem(uri)
+    if (image?.bufferView === undefined) return dependencyProblem('')
+  }
+  return null
+}
+
+function dependencyProblem(uri) {
+  const text = typeof uri === 'string' && uri.length > 0 ? uri : 'a file it does not carry'
+  return { reason: 'bad-dependency', message: `the model asks for ${text}` }
+}
+
 /** The bytes of every image a GLB's JSON names in a buffer view. */
 export function glbImages(json, bin) {
   const out = []
@@ -370,8 +402,11 @@ export function createUrlModifier(blobUrls, urls) {
   const allowed = new Set(blobUrls.values())
   const violations = []
   const emptyBlobUrl = urls.createObjectURL(new Blob([]))
+  // M1 (round 6) — pass `data:` and `blob:` URLs only. `blob:` URLs are
+  // page-local, and GLTFLoader creates them itself for a `.glb`'s buffer-view
+  // images, so the prefix is the rule; `allowed` names this load's own rewrites.
   const modifier = (url) => {
-    if (typeof url === 'string' && (allowed.has(url) || url.startsWith('data:'))) return url
+    if (typeof url === 'string' && (allowed.has(url) || url.startsWith('data:') || url.startsWith('blob:'))) return url
     violations.push(url)
     return emptyBlobUrl
   }
@@ -626,13 +661,10 @@ export async function parseTemplate({
   }
 
   let blobUrls = new Map()
-  let manager = null
-  let modifier = null
   let payload = bytes
   if (kind === 'gltf') {
     const rewritten = rewriteGltfJson(json, dependencies, urls)
     blobUrls = rewritten.blobUrls
-    modifier = createUrlModifier(blobUrls, urls)
     // A3 step 5: every declared URI must now be one of this load's blob URLs
     // or a data: URI. Anything else is a request the model did not declare.
     const unmapped = declaredUris(rewritten.json).find((uri) => !isMappedUri(uri, blobUrls))
@@ -643,12 +675,20 @@ export async function parseTemplate({
     // GLTFLoader.parse takes a JSON string for a .gltf and an ArrayBuffer for a
     // .glb; a bare Uint8Array is neither (three's own rule).
     payload = JSON.stringify(rewritten.json)
-    manager = new LoadingManager()
-    manager.setURLModifier(modifier.modifier)
   }
 
+  // M1 (round 6) — the URL modifier is installed for EVERY parse, `.glb`
+  // included. Round 5 installed it only for a `.gltf`, and GLTFLoader follows a
+  // `.glb`'s JSON `uri`s with its own loaders: a hostile public world made every
+  // visitor's browser request any URL, with a Referer, outside `fetchModel`, its
+  // budget and its preflight. A `.glb` has no rewritten URIs, so only `data:`
+  // and GLTFLoader's own page-local `blob:` URLs pass.
+  const modifier = createUrlModifier(blobUrls, urls)
+  const manager = new LoadingManager()
+  manager.setURLModifier(modifier.modifier)
+
   const gltfLoader = loader ?? new GLTFLoader()
-  if (manager) gltfLoader.manager = manager
+  gltfLoader.manager = manager
 
   try {
     const data = typeof payload === 'string' ? payload : bufferOf(payload)
@@ -687,6 +727,10 @@ function preflightFor(kind, bytes, json, dependencies) {
   if (kind === 'glb') {
     const glb = readGlb(bytes)
     if (!glb) return { problem: { reason: 'parse', message: 'the file is not a GLB' } }
+    // M1 — a `.glb` that names a file it does not carry is refused here, before
+    // any loader is built (see `glbDependencyProblem`).
+    const dependency = glbDependencyProblem(glb.json)
+    if (dependency) return { problem: dependency }
     const images = glbImages(glb.json, glb.bin)
     return outcomeOf(preflightProblem(glb.json, images))
   }

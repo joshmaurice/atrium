@@ -11,7 +11,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Box3, Vector3, Object3D, Mesh, BufferGeometry, BufferAttribute } from 'three'
 import {
-  imageHeader, estimateTextureBytes, readGlb, glbImages, preflightProblem,
+  imageHeader, estimateTextureBytes, readGlb, glbImages, preflightProblem, glbDependencyProblem,
   accessorByteTotal, positionVertexTotal, createTextureBudget,
   rewriteGltfJson, createUrlModifier, revokeBlobs, objectUrlApi,
   templateKey, createTemplateCache, countVertices, disposeTemplate, measureBounds,
@@ -603,4 +603,77 @@ test('W2: a .gltf image held in a buffer view is read from that buffer’s bytes
   assert.equal(result.ok, false)
   assert.equal(result.reason, 'texture-too-large')
   assert.equal(calls.parseAsync, 0)
+})
+
+// ---------------------------------------------------------------------------
+// M1 (round 6) — a .glb can no longer make the browser fetch anything
+//
+// Round 5 installed the fail-closed `LoadingManager` URL modifier only for a
+// `.gltf`. `GLTFLoader` follows a `.glb`'s JSON `uri`s with its own loaders —
+// outside `fetchModel`, its 25 MiB budget, the world ledger, the redirect check
+// and the image preflight — so a hostile public world made every visitor's
+// browser request any URL, with a `Referer` (Claude's headless probe fetched
+// `probe.png` for a GLB declaring `images[0].uri = "/models/probe.png"`).
+// ---------------------------------------------------------------------------
+
+test('M1: glbDependencyProblem passes the binary chunk and data: URIs only', () => {
+  assert.equal(glbDependencyProblem({ buffers: [{ byteLength: 4 }], images: [{ bufferView: 0 }] }), null)
+  assert.equal(glbDependencyProblem({
+    buffers: [{ uri: 'data:application/octet-stream;base64,AAAA' }],
+    images: [{ uri: 'data:image/png;base64,AAAA' }],
+  }), null)
+  assert.equal(glbDependencyProblem({ buffers: [{ uri: 'm.bin' }] }).reason, 'bad-dependency')
+  assert.match(glbDependencyProblem({ buffers: [{ uri: 'https://h/m.bin' }] }).message, /https:\/\/h\/m\.bin/)
+  assert.equal(glbDependencyProblem({ images: [{ uri: '/models/probe.png' }] }).reason, 'bad-dependency')
+  assert.equal(glbDependencyProblem({ images: [{ uri: 'probe.png' }] }).reason, 'bad-dependency')
+  assert.equal(glbDependencyProblem({ images: [{}] }).reason, 'bad-dependency', 'an image with neither a bufferView nor a URI')
+  assert.equal(glbDependencyProblem({ images: [{ bufferView: 0, uri: 'https://h/x.png' }] }).reason, 'bad-dependency',
+    'a bufferView does not license a URI as well')
+})
+
+test('M1: the URL modifier passes data: and blob: and refuses an https: URL and a root-relative path', () => {
+  const { api } = fakeUrls()
+  const { modifier, violations, emptyBlobUrl } = createUrlModifier(new Map(), api)
+  assert.equal(modifier('data:image/png;base64,AAAA'), 'data:image/png;base64,AAAA')
+  assert.equal(modifier('blob:http://localhost/1e2f'), 'blob:http://localhost/1e2f', 'GLTFLoader’s own image blob')
+  assert.equal(modifier('https://evil.example/x.png'), emptyBlobUrl)
+  assert.equal(modifier('/models/probe.png'), emptyBlobUrl)
+  assert.equal(modifier('textures/a.png'), emptyBlobUrl)
+  assert.deepEqual(violations, ['https://evil.example/x.png', '/models/probe.png', 'textures/a.png'])
+})
+
+test('M1: a .glb whose image names an external URI is refused before any loader call', async () => {
+  const { loader, calls } = quietLoader()
+  const bytes = packGlb({
+    asset: { version: '2.0' }, scenes: [{ nodes: [] }], nodes: [],
+    images: [{ uri: '/models/probe.png' }],
+  })
+  const result = await parseTemplate({ kind: 'glb', bytes, loader })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'bad-dependency')
+  assert.match(result.message, /\/models\/probe\.png/)
+  assert.equal(calls.parseAsync, 0, 'the loader never saw the model')
+})
+
+test('M1: a .glb whose buffer names an external URI is refused before any loader call', async () => {
+  const { loader, calls } = quietLoader()
+  const bytes = packGlb({
+    asset: { version: '2.0' }, scenes: [{ nodes: [] }], nodes: [],
+    buffers: [{ uri: 'https://elsewhere.example/m.bin', byteLength: 4 }],
+  })
+  const result = await parseTemplate({ kind: 'glb', bytes, loader })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'bad-dependency')
+  assert.equal(calls.parseAsync, 0)
+})
+
+test('M1: a .glb with embedded images still parses, and gets the modifier its own manager', async () => {
+  const { loader, calls } = quietLoader()
+  const result = await parseTemplate({ kind: 'glb', bytes: imageGlb({ width: 64, height: 64 }), loader })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(calls.parseAsync, 1)
+  assert.ok(loader.manager, 'the loader was given a manager for every format, not only .gltf')
+  const { api } = fakeUrls()
+  const { modifier } = createUrlModifier(new Map(), api)
+  assert.equal(modifier('https://evil.example/x.png').startsWith('blob:'), true, 'the installed modifier is fail-closed')
 })
