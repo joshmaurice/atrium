@@ -20,7 +20,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
 }
 
 function harness({ nextFrame = null, parseResult = null, fetchGate = null } = {}) {
-  const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0 }
+  const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
   const som = () => ({
@@ -45,7 +45,10 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null } = {}
       fetchModel: async ({ url, signal }) => {
         state.fetches += 1
         if (fetchGate && !signal.aborted) await fetchGate
-        if (signal?.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+        if (signal?.aborted) {
+          state.aborts += 1
+          return { ok: false, reason: 'aborted', message: 'cancelled' }
+        }
         return {
           ok: true, kind: 'glb', bytes: new Uint8Array([1]), json: null,
           dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
@@ -162,6 +165,8 @@ test('A9: resetWorld aborts a request in flight and nothing is ever attached', a
   release()
   await tick()
 
+  assert.equal(h.state.aborts, 1, 'the in-flight request was aborted, not left to finish')
+  assert.equal(h.bridge.status('Chair'), null, 'the node is not in this world any more')
   assert.equal(h.bridge.instanceCount, 0, 'the instance and its template are gone')
   assert.equal(h.childrenOf('Chair').length, 0, 'nothing attached in the new world')
   assert.equal(h.bridge.cache.size, 0, 'the cache went with the world')
