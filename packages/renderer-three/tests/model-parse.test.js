@@ -270,6 +270,30 @@ test('A8: a template with a live instance is not evicted', () => {
   assert.ok(cache.get(a))
 })
 
+// W6 (round 5) — decision L20: the world texture budget is 512 MiB, and the
+// default budget READS the constant rather than repeating a 256 MiB literal, so
+// the next change to the limit moves both together.
+//
+// The revision's scale line says "about six typical 2048-px PBR models (four 2k
+// textures each)". The arithmetic is a hair tighter than that: `estimateTextureBytes`
+// takes the CEILING per texture (2048² → 22,369,622 bytes), so a four-texture
+// model is 85.33 MiB and six of them are 536,870,928 — 16 bytes over 512 MiB.
+// Five fit whole and the sixth is refused. The boundary is pinned below, not
+// asserted away.
+test('W6/L20: worldTextureBytes is 512 MiB and the default budget reads the constant', () => {
+  assert.equal(MODEL_PARSE_LIMITS.worldTextureBytes, 512 * 1024 * 1024, 'L20 raised the world budget to 512 MiB')
+  assert.equal(createTextureBudget().limit, MODEL_PARSE_LIMITS.worldTextureBytes, 'the default budget takes the constant')
+
+  const per2k = estimateTextureBytes(2048, 2048)          // one 2k texture with its mips
+  const model = 4 * per2k                                 // a typical PBR model: four 2k textures
+  assert.equal(model, 89_478_488, 'a four-texture 2k model is 85.33 MiB')
+  assert.equal(Math.floor(MODEL_PARSE_LIMITS.worldTextureBytes / model), 5, 'five fit the 512 MiB budget')
+  assert.equal(model * 6 - MODEL_PARSE_LIMITS.worldTextureBytes, 16,
+    'a sixth is 16 bytes over — the per-texture ceiling, and why the revision’s “six” is five here')
+  assert.ok(model * 2 <= 256 * 1024 * 1024, 'at 256 MiB only two fit')
+  assert.ok(model * 3 > 256 * 1024 * 1024, 'the third was refused there')
+})
+
 // W3 (round 4) — the two bookkeeping rules the round-3 cache got wrong: an entry
 // created for a load is created ACQUIRED by it (so the next model's eviction
 // cannot take a template that is about to be, or already is, in use), and a

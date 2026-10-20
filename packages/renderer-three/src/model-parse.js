@@ -24,7 +24,10 @@ export const MODEL_PARSE_LIMITS = Object.freeze({
   maxVertices: 500_000,
   maxAccessorBytes: 64 * 1024 * 1024,
   maxTextureSide: 4096,
-  worldTextureBytes: 256 * 1024 * 1024,
+  // W6 (round 5) — decision L20: the world texture budget is 512 MiB, not 256.
+  // For scale (w × h × 4 × 4⁄3): about six typical 2048-px PBR models (four 2k
+  // textures each), or about twenty-four of the 1k-texture library items.
+  worldTextureBytes: 512 * 1024 * 1024,
 })
 
 /** A5/A8/A13 — the reasons this module adds, with their plain text. */

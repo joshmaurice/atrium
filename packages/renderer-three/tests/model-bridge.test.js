@@ -12,8 +12,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Group, Object3D } from 'three'
 import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
-import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonText } from '../src/model-parse.js'
-import { imageGlb } from './glb-fixture.js'
+import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonText, MODEL_PARSE_LIMITS } from '../src/model-parse.js'
+import { imageGlb, multiImageGlb } from './glb-fixture.js'
 import { validateModelHost } from '@atrium/client/model-spec'
 
 /** A SOM node stand-in: identity, name, a glTF node object and model extras. */
@@ -797,4 +797,40 @@ test('W5: a Check issued while nodes are loading reserves after them', async () 
   assert.equal(got.entry.refs, 1, 'the Check holds what it reserved')
   assert.equal(budget.taken, PER_2K * 2 + PER_1K)
   h.bridge.releaseTemplate(got.key)
+})
+
+// ── W6 (round 5): the world texture budget is 512 MiB (decision L20) ────────
+//
+// Round 4's bookkeeping was right; the size was the operator's decision. The
+// test reads the constant rather than a literal, so the limit moves with it —
+// and a revert to 256 MiB fails here (only two such models would fit).
+//
+// The revision's scale line ("about six typical 2048-px PBR models, four 2k
+// textures each") is a hair optimistic: `estimateTextureBytes` takes the
+// ceiling per texture, so a four-2k-texture model is 85.33 MiB and six are
+// 16 bytes over 512 MiB. Five fit whole; the sixth is refused. The boundary is
+// asserted exactly, not rounded away.
+
+test('W6/L20: the world budget reads the constant at 512 MiB — five 85.3 MiB models fit and the sixth is refused', async () => {
+  const perModel = 4 * estimateTextureBytes(2048, 2048)
+  const h = harness({ parseLoader: hostlessLoader, modelBytes: multiImageGlb({ count: 4 }) })
+
+  assert.equal(h.bridge.textureBudget.limit, MODEL_PARSE_LIMITS.worldTextureBytes, 'the bridge budget is the constant')
+  assert.equal(MODEL_PARSE_LIMITS.worldTextureBytes, 512 * 1024 * 1024, 'decision L20: 512 MiB, not 256')
+  assert.equal(perModel, 89_478_488, 'a four-2k-texture model is 85.33 MiB')
+
+  const names = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7']
+  for (const name of names) h.addNode(somNode(name, { url: modelUrl(name) }))
+  await drain(h, 200)
+
+  for (const name of names.slice(0, 5)) {
+    assert.equal(h.bridge.status(name).status, MODEL_STATUS.loaded, `${name} fits the 512 MiB budget`)
+    assert.equal(h.childrenOf(name).length, 1, `${name} is attached`)
+  }
+  for (const name of names.slice(5)) {
+    const refused = h.bridge.status(name)
+    assert.equal(refused.status, MODEL_STATUS.failed, `${name} is refused`)
+    assert.equal(refused.reason, 'world-texture-budget')
+  }
+  assert.equal(h.bridge.textureBudget.taken, perModel * 5, 'five reservations of ≈85.3 MiB')
 })

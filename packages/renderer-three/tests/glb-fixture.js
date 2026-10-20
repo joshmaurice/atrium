@@ -234,3 +234,25 @@ export function imageGlb({ width = 2048, height = 2048, mimeType = 'image/png' }
   }
   return packGlb(json, bin.bin())
 }
+
+/**
+ * W6 — a GLB carrying `count` PNG images of the given size. The preflight sums
+ * every image's estimate, so this is the model a world's texture budget is
+ * measured against: a typical 2048-px PBR model with four 2k textures is
+ * `multiImageGlb({ count: 4 })` ≈ 85.3 MiB.
+ */
+export function multiImageGlb({ count = 4, width = 2048, height = 2048, mimeType = 'image/png' } = {}) {
+  const bin = binBuilder()
+  const images = []
+  for (let i = 0; i < count; i++) images.push({ bufferView: bin.view(pngHeaderBytes(width, height)), mimeType })
+  const json = {
+    asset: { version: '2.0', generator: 'atrium-test-fixture' },
+    scene: 0,
+    scenes: [{ nodes: [] }],
+    nodes: [],
+    images,
+    bufferViews: bin.bufferViews,
+    buffers: [{ byteLength: bin.length }],
+  }
+  return packGlb(json, bin.bin())
+}
