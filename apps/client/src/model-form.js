@@ -125,6 +125,11 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     waitSeq: null,
     error: null,
     pinned: false,
+    // S3 (round 6) — the Check's generation. Editing the URL, Cancel, closing
+    // the form and a world change all end the check in flight; a result that
+    // arrives afterwards is ignored (round 5 let a late `old.glb` result land
+    // on `new.glb` — Save stayed enabled for a URL that had never been checked).
+    generation: 0,
   }
 
   const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
@@ -183,6 +188,8 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
 
   function onUrlInput(value) {
     state.url = value ?? ''
+    // S3 — editing the URL ends a Check that is in flight.
+    state.generation += 1
     // Editing the URL clears the result and disables Save (Z7).
     state.result = null
     state.problem = null
@@ -221,18 +228,30 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     state.problem = null
     state.error = null
     state.checking = true
+    // S3 — this Check's generation: a result that arrives after the URL was
+    // edited, Cancel, a close or a world change is ignored, and the reference it
+    // took is given back (`onDropResult`).
+    const generation = ++state.generation
     render()
     try {
       const result = await deps.checkModel?.({
         url: state.url.trim(),
         worldBaseUrl: deps.worldBaseUrl?.() ?? null,
       })
+      if (state.generation !== generation) {
+        deps.onDropResult?.()
+        return false
+      }
       if (result?.ok) {
         state.result = checkResult(result)
       } else {
         state.problem = { reason: result?.reason ?? 'network', message: result?.message ?? null }
       }
     } catch (error) {
+      if (state.generation !== generation) {
+        deps.onDropResult?.()
+        return false
+      }
       state.problem = { reason: 'network', message: error?.message ?? null }
     } finally {
       state.checking = false
@@ -318,6 +337,8 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     state.saving = false
     state.waitSeq = null
     state.error = null
+    // S3 — closing the form ends a Check that is in flight.
+    state.generation += 1
     // A8 — the Check's held template and its hash end with the form.
     state.result = null
     state.problem = null

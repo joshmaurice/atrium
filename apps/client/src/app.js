@@ -2689,6 +2689,13 @@ function refreshModelRow() {
 // reservation.
 let heldCheck = null
 
+// S3 (round 6) — the Check's own generation. A check in flight is ended by
+// editing the URL, Cancel, closing the form (all through `onDropResult`) and by
+// a world change. A result that arrives after that is ignored AND the reference
+// it took is given back: round 5's late result set `heldCheck` again, so a
+// template the form had already let go was held until the next URL edit.
+let checkGeneration = 0
+
 function releaseHeldCheck() {
   if (!heldCheck) return
   // W4 — the entry was acquired by `loadTemplate`; giving the reference back
@@ -2697,6 +2704,12 @@ function releaseHeldCheck() {
   // on bytes that had never been reserved, which `release` clamps at 0.
   modelBridge.releaseTemplate(heldCheck.key)
   heldCheck = null
+}
+
+/** S3 — end the check in flight: a late result is ignored and nothing is held. */
+function endCheck() {
+  checkGeneration += 1
+  releaseHeldCheck()
 }
 
 function holdCheckedTemplate({ url, worldBaseUrl, entry, key }) {
@@ -2715,6 +2728,10 @@ function holdCheckedTemplate({ url, worldBaseUrl, entry, key }) {
 /** Z7/L9 — Check: the client's spec rules first (in the form), then the real
  *  loader through the bridge's one load entry point. */
 async function checkModelNow({ url, worldBaseUrl }) {
+  // S3 — the generation this check belongs to. If the form has moved on by the
+  // time it answers (an edited URL, Cancel, a close, a world change), the result
+  // is not held and not reported: the entry goes straight back to the cache.
+  const generation = checkGeneration
   // W4 — the Check goes through the bridge: it reserves the model's texture
   // estimate, takes its turn in the serialized parse, and holds the entry until
   // the form lets it go. Round 3 fetched and parsed here — outside the budget and
@@ -2722,6 +2739,10 @@ async function checkModelNow({ url, worldBaseUrl }) {
   // the owner's `textureBudget.taken` stayed at 0.0 MiB through all five
   // Check-then-Save cycles.
   const loaded = await modelBridge.loadTemplate({ url, sha256: null })
+  if (generation !== checkGeneration) {
+    if (loaded.ok) modelBridge.releaseTemplate(loaded.key)
+    return { ok: false, reason: 'aborted', message: 'the check was cancelled' }
+  }
   if (!loaded.ok) return { ok: false, reason: loaded.reason, message: loaded.message }
 
   const template = loaded.entry.template
@@ -2766,7 +2787,7 @@ modelForm = createModelForm({
     undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
     refreshActions: () => refreshEditActions(),
     selectNode: (name) => selectAdded(name),
-    onDropResult: () => releaseHeldCheck(),
+    onDropResult: () => endCheck(),
   },
 })
 modelForm.wire()
@@ -2787,7 +2808,7 @@ epModel.addEventListener('click', () => {
  * events call the same pair).
  */
 function beginNewWorld() {
-  releaseHeldCheck()
+  endCheck()
   modelBridge.resetWorld()
   modelForm.reset()
   refreshModelRow()

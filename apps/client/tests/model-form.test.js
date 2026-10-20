@@ -37,7 +37,7 @@ function harness({ checkResult = { ok: true, vertices: 12400, bytes: 3250586, bo
     status: fakeElement(), pinRow: fakeElement(), pin: fakeElement(), error: fakeElement(),
     save: fakeElement(), cancel: fakeElement(),
   }
-  const calls = { checks: [], descriptors: [], structure: [], undo: [], selected: [], refreshed: 0, closedOther: 0 }
+  const calls = { checks: [], descriptors: [], structure: [], undo: [], selected: [], refreshed: 0, closedOther: 0, dropped: 0 }
   const bridge = { computeBounds: null }
   const form = createModelForm({
     elements,
@@ -53,6 +53,7 @@ function harness({ checkResult = { ok: true, vertices: 12400, bytes: 3250586, bo
       undoRegisterAdd: (seq, entry) => calls.undo.push({ seq, entry }),
       refreshActions: () => { calls.refreshed += 1 },
       selectNode: (name) => calls.selected.push(name),
+      onDropResult: () => { calls.dropped += 1 },
     },
   })
   form.wire()
@@ -349,3 +350,63 @@ test('Z7: the pure helpers', () => {
 })
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
+
+// ---------------------------------------------------------------------------
+// S3 (round 6) — a late Check result must not land on a different URL
+//
+// The outside reviewer's sequence: Check `old.glb`, change the URL to
+// `new.glb`, and let the old result arrive. Round 5 had no generation: the late
+// result set `state.result`, so Save was enabled for a URL that had never been
+// checked and the page held a template the form had already let go.
+// ---------------------------------------------------------------------------
+
+test('S3: a Check whose result arrives after the URL changed is ignored, and nothing is held', async () => {
+  const pending = []
+  const h = harness({ checkResult: () => new Promise((resolve) => pending.push(resolve)) })
+  h.form.open()
+  h.form.onUrlInput('https://host/old.glb')
+  const checking = h.form.check()
+  await tick()
+  assert.equal(pending.length, 1, 'the old Check is in flight')
+  assert.equal(h.form.state.checking, true)
+
+  h.form.onUrlInput('https://host/new.glb')          // the reviewer's edit
+  pending[0]({ ok: true, vertices: 12400, bytes: 3250586, bounds: [1, 2, 3], sha256: 'abc', kind: 'glb' })
+  await checking
+  await tick()
+
+  assert.equal(h.form.canSave(), false, 'Save stays disabled: new.glb was never checked')
+  assert.equal(h.form.specForSave(), null)
+  assert.equal(h.elements.status.style.display, 'none', 'the late result is not shown')
+  assert.ok(h.calls.dropped >= 2, 'the late result gave its reference back as well as the URL edit')
+})
+
+test('S3: closing the form ends a Check in flight', async () => {
+  const pending = []
+  const h = harness({ checkResult: () => new Promise((resolve) => pending.push(resolve)) })
+  h.form.open()
+  h.form.onUrlInput('https://host/old.glb')
+  const checking = h.form.check()
+  await tick()
+
+  h.form.close()
+  pending[0]({ ok: true, vertices: 1, bytes: 1, bounds: [1, 1, 1], sha256: null, kind: 'glb' })
+  await checking
+  await tick()
+  assert.equal(h.form.canSave(), false)
+  assert.equal(h.form.specForSave(), null)
+  assert.equal(h.elements.status.style.display, 'none')
+})
+
+test('S3: a Check that is still current is not ignored', async () => {
+  const pending = []
+  const h = harness({ checkResult: () => new Promise((resolve) => pending.push(resolve)) })
+  h.form.open()
+  h.form.onUrlInput('https://host/old.glb')
+  const checking = h.form.check()
+  await tick()
+  pending[0]({ ok: true, vertices: 12400, bytes: 3250586, bounds: [1, 2, 3], sha256: 'abc', kind: 'glb' })
+  await checking
+  assert.equal(h.form.canSave(), true)
+  assert.equal(h.form.specForSave().url, 'https://host/old.glb')
+})

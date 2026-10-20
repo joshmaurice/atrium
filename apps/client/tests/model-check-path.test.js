@@ -73,3 +73,23 @@ test('W4: the Check reserves through the bridge, and Cancel gives the reference 
   assert.match(holdBody, /modelBridge\.cache\.alias\(/, 'the pinned key is an alias of the held entry, not a second one')
   assert.doesNotMatch(holdBody, /\btextureBudget\b/, 'nothing in the held Check charges the budget twice')
 })
+
+// S3 (round 6) — the Check's generation, app.js's side.
+//
+// The outside reviewer's sequence left the page holding a template for a URL the
+// form had moved off: the late result called `holdCheckedTemplate` again, after
+// `releaseHeldCheck` had already given the reference back.
+
+const releaseBodyS3 = withoutComments(functionBody(source, 'releaseHeldCheck') ?? '')
+const endBodyS3 = withoutComments(functionBody(source, 'endCheck') ?? '')
+
+test('S3: a Check that lands after the form moved on gives its reference back', () => {
+  assert.ok(endBodyS3, 'endCheck is in app.js')
+  assert.match(endBodyS3, /checkGeneration\s*\+=\s*1/, 'ending a check moves the generation on')
+  assert.match(endBodyS3, /releaseHeldCheck\(/, 'and releases what it held')
+  assert.match(checkBody, /checkGeneration/, 'the Check path reads the generation it belongs to')
+  assert.match(checkBody, /releaseTemplate\(loaded\.key\)/, 'and gives a stale entry straight back to the cache')
+  assert.match(checkBody, /if \(generation !== checkGeneration\)/, 'the guard is on the generation, not on the URL text')
+  assert.match(source, /onDropResult: \(\) => endCheck\(\)/, 'the form ends the check on a URL edit and on a close')
+  assert.doesNotMatch(releaseBodyS3, /checkGeneration/, 'releasing a held entry does not move the generation')
+})
