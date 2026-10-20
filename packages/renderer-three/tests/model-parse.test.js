@@ -442,3 +442,99 @@ test('W1/A5: a .gltf whose fetched texture does not fit is refused the same way'
   assert.equal(result.reason, 'world-texture-budget')
   assert.equal(calls.parseAsync, 0)
 })
+
+// ---------------------------------------------------------------------------
+// W2 (round 3) — a .gltf's `data:` images and buffer-view images are checked
+//
+// A5 says an image comes "from the GLB's buffer views or from A3's fetched
+// bytes" and omits a `.gltf`'s `data:` image URIs, which `preflightFor` skipped
+// entirely: the bytes counted toward the download (they are inside the counted
+// file) but their format and dimensions were never read and their texture
+// memory never reserved.
+// ---------------------------------------------------------------------------
+
+const base64Of = (bytes) => Buffer.from(bytes).toString('base64')
+
+test('W2: a .gltf with an 8192×8192 data: image is refused texture-too-large before parsing', async () => {
+  const { loader, calls } = quietLoader()
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    images: [{ uri: `data:image/png;base64,${base64Of(pngHeader(8192, 8192))}` }],
+  }
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    dependencies: new Map(),
+    urls: fakeUrls().api,
+    loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'texture-too-large')
+  assert.equal(result.message, 'the model has a texture larger than 4096 px (8192×8192)')
+  assert.equal(calls.parseAsync, 0, 'the loader never saw the model')
+})
+
+test('W2/A5: a .gltf data: image that fits is measured and reserved like any other', async () => {
+  const { loader } = quietLoader()
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    images: [{ uri: `data:image/png;base64,${base64Of(pngHeader(1024, 1024))}` }],
+  }
+  const reservations = []
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    dependencies: new Map(),
+    urls: fakeUrls().api,
+    reserveTexture: (n) => { reservations.push(n); return true },
+    loader,
+  })
+  assert.equal(result.ok, true, result.message)
+  assert.deepEqual(reservations, [estimateTextureBytes(1024, 1024)])
+})
+
+test('W2: a data: URI that is not `;base64,` is unsupported-image, not silently skipped', async () => {
+  const { loader, calls } = quietLoader()
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    images: [{ uri: 'data:image/png,notbase64' }],
+  }
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    dependencies: new Map(),
+    urls: fakeUrls().api,
+    loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'unsupported-image')
+  assert.equal(calls.parseAsync, 0)
+})
+
+test('W2: a .gltf image held in a buffer view is read from that buffer’s bytes and refused', async () => {
+  const { loader, calls } = quietLoader()
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    buffers: [{ uri: 'm.bin', byteLength: 33 }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 33 }],
+    images: [{ bufferView: 0, mimeType: 'image/png' }],
+  }
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    dependencies: new Map([['m.bin', { url: 'https://h/m.bin', bytes: pngHeader(8192, 8) }]]),
+    urls: fakeUrls().api,
+    loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'texture-too-large')
+  assert.equal(calls.parseAsync, 0)
+})

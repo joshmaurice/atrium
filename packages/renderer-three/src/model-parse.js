@@ -171,6 +171,74 @@ export function glbImages(json, bin) {
   return out
 }
 
+/**
+ * W2 (round 3) — the bytes a `data:` URI carries. Only the `;base64,` form is
+ * decoded (A5: "the model's data"); any other payload — a percent-encoded or
+ * plain-text one — is an image Atrium does not load, so this answers `null`
+ * and the preflight refuses the image `unsupported-image`.
+ *
+ * @param {string} uri
+ * @returns {Uint8Array|null}
+ */
+function dataUriBytes(uri) {
+  const comma = uri.indexOf(',')
+  if (comma === -1) return null
+  if (!uri.slice(5, comma).toLowerCase().split(';').includes('base64')) return null
+  try {
+    const binary = atob(uri.slice(comma + 1))
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  } catch {
+    return null
+  }
+}
+
+/**
+ * W2 — the bytes a `.gltf` image's buffer view covers, taken from its buffer's
+ * bytes the way the GLB branch takes them from the binary chunk: the buffer is
+ * either a `data:` URI's decoded payload or one of A3's fetched dependencies.
+ * `null` when the buffer's bytes are not here.
+ */
+function gltfBufferViewBytes(json, index, dependencies) {
+  const view = json?.bufferViews?.[index]
+  if (!view) return null
+  const buffer = json?.buffers?.[view.buffer ?? 0]
+  if (typeof buffer?.uri !== 'string') return null
+  const source = buffer.uri.startsWith('data:')
+    ? dataUriBytes(buffer.uri)
+    : dependencies.get(buffer.uri)?.bytes ?? null
+  if (!source) return null
+  const start = view.byteOffset ?? 0
+  return source.subarray(start, start + view.byteLength)
+}
+
+/**
+ * W2 (round 3) — the image bytes a `.gltf` names, for the A5 preflight: a
+ * `data:` URI's decoded payload, a buffer view's slice of its buffer, or the
+ * fetched bytes of an image URI. A `data:` URI that cannot be decoded is
+ * passed on as `{ bytes: null }`, which `imageHeader` answers `null` for and
+ * `preflightProblem` therefore refuses `unsupported-image`.
+ *
+ * @param {object} json
+ * @param {Map<string, {bytes: Uint8Array}>} dependencies
+ * @returns {Array<{bytes: Uint8Array|null}>}
+ */
+function gltfImages(json, dependencies) {
+  const out = []
+  for (const image of json?.images ?? []) {
+    if (typeof image?.uri === 'string') {
+      if (image.uri.startsWith('data:')) { out.push({ bytes: dataUriBytes(image.uri) }); continue }
+      const dependency = dependencies.get(image.uri)
+      if (dependency) out.push({ bytes: dependency.bytes })
+      continue
+    }
+    const bytes = image?.bufferView === undefined ? null : gltfBufferViewBytes(json, image.bufferView, dependencies)
+    if (bytes) out.push({ bytes })
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // A5 — the preflight, pure over the JSON and the image bytes
 // ---------------------------------------------------------------------------
@@ -569,15 +637,9 @@ function preflightFor(kind, bytes, json, dependencies) {
     return outcomeOf(preflightProblem(glb.json, images))
   }
   if (!json) return { problem: { reason: 'parse', message: 'the .gltf JSON is missing' } }
-  // A3: a .gltf's images are either `data:` URIs (already in the counted file)
-  // or A3's fetched bytes, whose format and dimensions are checked too.
-  const images = []
-  for (const image of json.images ?? []) {
-    if (typeof image?.uri !== 'string' || image.uri.startsWith('data:')) continue
-    const dependency = dependencies.get(image.uri)
-    if (dependency) images.push({ bytes: dependency.bytes })
-  }
-  return outcomeOf(preflightProblem(json, images))
+  // A3/A5: a .gltf's images are its `data:` URIs, the buffer views of its
+  // buffers (W2), or A3's fetched bytes — all of them checked.
+  return outcomeOf(preflightProblem(json, gltfImages(json, dependencies)))
 }
 
 /**
