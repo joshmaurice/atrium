@@ -6,6 +6,7 @@
 1. Clone the repo and read `devtasks/`, newest first (this file first).
 2. If the `atrium-ops` connector's tools are listed, use them for board, release, log and git state. It is read-only.
 3. Then §6: the follow-up round, or step 3b's pre-brief. The order is the operator's call.
+4. **Whichever comes first, include §6.0 (the release merge done automatically) in that pre-brief as a prerequisite.** The operator wants no manual merge at the next release.
 
 ## 1. Status at handoff
 
@@ -209,6 +210,22 @@ The worktree's `.git` file points at the container's paths, so run git inside th
 Post a comment on the card naming the committed steps, what's left and any accepted deviation. Then run `hermes kanban --board atrium unblock <id>`. This works for a dispatcher "gave up" block, which isn't an operator gate.
 
 ## 6. Follow-ups
+
+### 6.0 Prerequisite for the next round: the release merge without the operator (operator request, 10-20)
+**Problem (§4.7):** revision docs uploaded to `main` during a round put `main` ahead of the workflow branch, so `atrium-main-push` can't fast-forward. This round, the operator had to run §5.2 by hand.
+
+**Wanted:** the release chain handles it. After the GLM APPROVE of `<SHA>`, the Publish step:
+1. merges `origin/main` into `<SHA>` when `main` isn't already an ancestor;
+2. refuses unless the merge is clean and `git diff --name-only <SHA> <merge>` touches only `devtasks/`;
+3. publishes the merge.
+
+The DEV deploy, acceptance, MAIN and PROD then all use the merge SHA, and the acceptance card names both SHAs.
+
+**Where:** most likely `atrium-deploy`'s publish action, or a new deployer action. These are host scripts that Hermes can't change, so the pre-brief should spell out the change for the operator or for Claude on the host. Read them with `read_file("atrium-deploy")` and `read_file("atrium-main-push")` first.
+
+**Not wanted:** changing where the operator uploads docs.
+
+**Note:** cutting the workflow branch is already automatic. Workers branch from a freshly fetched `origin/main`, per the card operating notes.
 
 ### 6.1 A small hardening round (models-by-url follow-up)
 From the outside review, deferred, none of them security:
