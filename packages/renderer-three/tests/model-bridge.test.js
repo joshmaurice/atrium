@@ -756,6 +756,27 @@ test('W5: removing a node releases whatever waits on it — C does not wait on B
   assert.equal(budget.taken, PER_2K * 2)
 })
 
+test('W5: a fetch that throws settles its node, so the models behind it still get their turn', async () => {
+  const fetch = orderedFetch()
+  const throwing = ({ url, signal }) => (url.endsWith('/B.glb')
+    ? Promise.resolve().then(() => { throw new Error('the socket died') })
+    : fetch.fetchModel({ url, signal }))
+  const budget = createTextureBudget({ bytes: PER_2K * 3 })
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: throwing })
+  for (const name of ['A', 'B', 'C']) h.addNode(somNode(name, { url: modelUrl(name) }))
+
+  fetch.release(modelUrl('C'))                  // C's bytes are here; its turn is not
+  await settle()
+  assert.equal(h.bridge.status('C').status, MODEL_STATUS.loading, 'C waits its turn')
+
+  fetch.release(modelUrl('A'))
+  await drain(h)
+  assert.equal(h.bridge.status('A').status, MODEL_STATUS.loaded)
+  assert.equal(h.bridge.status('B').status, MODEL_STATUS.failed, 'B’s thrown fetch is a status, not a hang')
+  assert.equal(h.bridge.status('C').status, MODEL_STATUS.loaded, 'C is admitted once A is done')
+  assert.equal(budget.taken, PER_2K * 2)
+})
+
 test('W5: a model added live after the world loaded waits for the earlier ones', async () => {
   const fetch = orderedFetch()
   const budget = createTextureBudget({ bytes: PER_2K * 3 })

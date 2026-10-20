@@ -286,6 +286,11 @@ export function createModelBridge(deps = {}) {
       if (!stillWanted(record)) return drop(record)
 
       return useEntry(record, key, got.entry, got.createdFor === record)
+    } catch (error) {
+      // W5 — every node must end in a status: a later node's turn waits on this
+      // one, so a thrown fetch or parse has to settle it, not leave it loading.
+      fail(record, 'network', error?.message ?? 'the model could not be loaded')
+      return undefined
     } finally {
       controllers.delete(controller)
     }
