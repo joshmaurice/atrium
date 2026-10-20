@@ -42,16 +42,37 @@ export function threeGeometryToGltfPrimitive(geometry, material) {
  * only serialises POSITION, NORMAL and the indices. Returns the same
  * geometry.
  *
- * Intended inputs: indexed, non-interleaved geometries only — the Edit-mode
- * plane and the teleporter pad's ring. Interleaved attributes are not
- * supported.
+ * Inputs: indexed, non-interleaved geometries only — the Edit-mode plane and
+ * the teleporter pad's ring. Anything else is refused (Z2): a geometry with no
+ * index has no triangles to mirror, and on one the attribute copies below would
+ * double the vertex count with `index` left null — a second front face with
+ * negated normals, not a back face. Interleaved attributes are not supported
+ * either. Both are thrown as Errors, naming the problem, before the geometry is
+ * touched at all.
  *
  * @param {THREE.BufferGeometry} geometry
  * @returns {THREE.BufferGeometry} the same geometry
+ * @throws {Error} the geometry has no index, or an attribute is interleaved
  */
 export function addBackFace(geometry) {
+  if (!geometry.index) {
+    throw new Error(
+      'addBackFace: this geometry has no index, so it has no triangles to mirror — ' +
+      'indexed, non-interleaved geometry only',
+    )
+  }
+
   const names = Object.keys(geometry.attributes)
   if (names.length === 0) return geometry
+
+  for (const name of names) {
+    if (geometry.attributes[name].isInterleavedBufferAttribute) {
+      throw new Error(
+        `addBackFace: attribute "${name}" is interleaved — ` +
+        'indexed, non-interleaved geometry only',
+      )
+    }
+  }
 
   const count = geometry.attributes[names[0]].count
 

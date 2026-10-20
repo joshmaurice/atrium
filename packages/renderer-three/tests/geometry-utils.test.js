@@ -237,6 +237,69 @@ test('addBackFace: returns the same geometry, and leaves the real plane and ring
 })
 
 // ---------------------------------------------------------------------------
+// 9b. addBackFace — Z2. It refuses what it cannot do, and changes nothing.
+// ---------------------------------------------------------------------------
+
+/** The same square as `fixture()`, with no index, plus a copy of every attribute. */
+function nonIndexedFixture() {
+  const geo = fixture()
+  const snapshot = {}
+  for (const name of Object.keys(geo.attributes)) snapshot[name] = Array.from(geo.attributes[name].array)
+  geo.setIndex(null)
+  return { geo, snapshot }
+}
+
+test('addBackFace: a non-indexed geometry throws, and is left untouched', () => {
+  const { geo, snapshot } = nonIndexedFixture()
+  const names = Object.keys(geo.attributes)
+  const counts = names.map((n) => geo.attributes[n].count)
+
+  assert.throws(() => addBackFace(geo), /no index/, 'a geometry with no index is refused')
+
+  assert.deepStrictEqual(Object.keys(geo.attributes), names, 'no attribute is added or lost')
+  assert.deepStrictEqual(names.map((n) => geo.attributes[n].count), counts, 'no attribute is doubled')
+  for (const name of names) {
+    assert.deepStrictEqual(Array.from(geo.attributes[name].array), snapshot[name], `${name} is unchanged`)
+  }
+  assert.equal(geo.index, null, 'it is still non-indexed')
+})
+
+test('addBackFace: a bare geometry (no attributes, no index) is refused too', () => {
+  assert.throws(() => addBackFace(new THREE.BufferGeometry()), /no index/)
+})
+
+test('addBackFace: an interleaved attribute throws, and is left untouched', () => {
+  const geo = fixture()
+  const uv = geo.attributes.uv
+  const buffer = new THREE.InterleavedBuffer(new Float32Array(uv.array), 2)
+  geo.setAttribute('uv', new THREE.InterleavedBufferAttribute(buffer, 2, 0, false))
+  const position = Array.from(geo.attributes.position.array)
+  const normal   = Array.from(geo.attributes.normal.array)
+  const indices  = Array.from(geo.index.array)
+
+  assert.throws(() => addBackFace(geo), /interleaved/, 'an interleaved attribute is refused')
+
+  assert.equal(geo.attributes.position.count, 4, 'positions are not doubled')
+  assert.deepStrictEqual(Array.from(geo.attributes.position.array), position)
+  assert.deepStrictEqual(Array.from(geo.attributes.normal.array), normal)
+  assert.deepStrictEqual(Array.from(geo.index.array), indices)
+  assert.ok(geo.attributes.uv.isInterleavedBufferAttribute, 'the interleaved attribute is still the one set')
+})
+
+test('addBackFace: the real plane and ring are indexed and non-interleaved, so both are accepted', () => {
+  const plane = new THREE.PlaneGeometry(2, 2)
+  plane.rotateX(-Math.PI / 2)
+  assert.ok(plane.index, 'the plane is indexed')
+  assert.doesNotThrow(() => addBackFace(plane))
+
+  const ring = new THREE.RingGeometry(0.45, 0.75, 48, 1)
+  ring.rotateX(-Math.PI / 2)
+  ring.translate(0, 0.05, 0)
+  assert.ok(ring.index, 'the ring is indexed')
+  assert.doesNotThrow(() => addBackFace(ring))
+})
+
+// ---------------------------------------------------------------------------
 // 10. The teleporter pad's back face — Z3
 // ---------------------------------------------------------------------------
 
