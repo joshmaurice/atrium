@@ -1,0 +1,1055 @@
+{
+  "note": "Shared by the server's, the client's and Duplicate's tests (models-by-url Z1/A6). 'specs' are extras values; 'nodes' are whole add descriptors. 'reason' is the shared reason code.",
+  "specs": [
+    {
+      "label": "no extras",
+      "extras": null,
+      "ok": true
+    },
+    {
+      "label": "extras without atrium",
+      "extras": {
+        "displayName": "x"
+      },
+      "ok": true
+    },
+    {
+      "label": "atrium without model",
+      "extras": {
+        "atrium": {
+          "teleporter": {
+            "destination": "/"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "atrium.model absent",
+      "extras": {
+        "atrium": {
+          "behavior": {
+            "spin": true
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "extras is an array",
+      "extras": [],
+      "ok": true
+    },
+    {
+      "label": "extras.atrium is a string",
+      "extras": {
+        "atrium": "nope"
+      },
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "label": "extras.atrium is null",
+      "extras": {
+        "atrium": null
+      },
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "label": "extras.atrium.model is a string",
+      "extras": {
+        "atrium": {
+          "model": "https://h/m.glb"
+        }
+      },
+      "ok": false,
+      "reason": "model-type"
+    },
+    {
+      "label": "extras.atrium.model is null",
+      "extras": {
+        "atrium": {
+          "model": null
+        }
+      },
+      "ok": false,
+      "reason": "model-type"
+    },
+    {
+      "label": "extras.atrium.model is an array",
+      "extras": {
+        "atrium": {
+          "model": []
+        }
+      },
+      "ok": false,
+      "reason": "model-type"
+    },
+    {
+      "label": "exactly url",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/m.glb"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "url and sha256",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/m.glb",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "url and bounds",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/m.glb",
+            "bounds": [
+              1,
+              2,
+              3
+            ]
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "all three keys",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "bounds": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "an extra key",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/m.glb",
+            "playback": {}
+          }
+        }
+      },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "the old other key",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/m.glb",
+            "name": "chair"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "no url",
+      "extras": {
+        "atrium": {
+          "model": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "url is not a string",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": 42
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-type"
+    },
+    {
+      "label": "url is null",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": null
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-type"
+    },
+    {
+      "label": "url is empty",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": ""
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-length"
+    },
+    {
+      "label": "url is 2048 characters",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "url is 2049 characters",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-length"
+    },
+    {
+      "label": "url has a raw space",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/a b.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has a backslash",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/a\\b.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has a tab",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\tm.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has a newline",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\nm.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has a carriage return",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\rm.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has a NUL",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\u0000m.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has DEL",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\u007fm.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "url has a non-breaking space (above U+007F, allowed by A1)",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\u00a0m.glb"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "url has an ideographic space (above U+007F, allowed by A1)",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h/\u3000m.glb"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "https url",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://cdn.example.com/a/chair.glb"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "https url with a port and a query",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h:8443/m.glb?v=2#x"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "http url",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "http://h/m.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "HTTPS uppercase",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "HTTPS://h/m.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "https without slashes",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https:/x"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "https without any slash",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https:x"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "https with no host",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-parse"
+    },
+    {
+      "label": "https with credentials",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://user:pw@h/x"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-credentials"
+    },
+    {
+      "label": "javascript scheme",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "javascript:alert(1)"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "data scheme",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "data:model/gltf-binary;base64,AAAA"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "blob scheme",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "blob:https://h/1234"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "file scheme",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "file:///m.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "document-relative path",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "chair.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a bare word",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "chair"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "protocol-relative url",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "//host/x"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a backslash host",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/\\host/x"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "a doubled backslash host",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/\\\\host/x"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "a backslash after the scheme",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "https://h\\evil/m.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "a root-relative path",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/assets/library/chair.glb"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a root-relative path with a query",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb?v=2"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "percent-encoded slashes stay a path",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/%2F%2Fh/x"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a percent-encoded backslash stays a path",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/%5Ch/x"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a lone slash",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a root-relative path with dots",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/a/../b/m.glb"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "valid sha256",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "sha256 with uppercase",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "sha256"
+    },
+    {
+      "label": "sha256 too short",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "sha256"
+    },
+    {
+      "label": "sha256 too long",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "sha256"
+    },
+    {
+      "label": "sha256 not hex",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "sha256"
+    },
+    {
+      "label": "sha256 is not a string",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "sha256": 1234
+          }
+        }
+      },
+      "ok": false,
+      "reason": "sha256"
+    },
+    {
+      "label": "valid bounds",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              0.001,
+              1000,
+              2.5
+            ]
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "bounds with two numbers",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds with four numbers",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds with a string",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              1,
+              "2",
+              3
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds with null",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              1,
+              null,
+              3
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds with a zero",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              0,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds with a negative number",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              1,
+              -1,
+              1
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds below the floor",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              0.0009,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds above the ceiling",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": [
+              1000.5,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    },
+    {
+      "label": "bounds is not an array",
+      "extras": {
+        "atrium": {
+          "model": {
+            "url": "/m.glb",
+            "bounds": {
+              "x": 1
+            }
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bounds"
+    }
+  ],
+  "nodes": [
+    {
+      "label": "a valid model node",
+      "node": {
+        "name": "Chair",
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "https://h/chair.glb"
+            }
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a valid model node with a parent",
+      "node": {
+        "name": "Chair",
+        "parent": "Root",
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "/chair.glb",
+              "bounds": [
+                1,
+                1,
+                1
+              ]
+            }
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a model node with a mesh",
+      "node": {
+        "name": "Chair",
+        "mesh": {
+          "primitives": []
+        },
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "https://h/chair.glb"
+            }
+          }
+        }
+      },
+      "ok": false,
+      "reason": "mesh"
+    },
+    {
+      "label": "a model node with a named mesh",
+      "node": {
+        "name": "Chair",
+        "mesh": {
+          "name": "ChairMesh",
+          "primitives": []
+        },
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "/chair.glb"
+            }
+          }
+        }
+      },
+      "ok": false,
+      "reason": "mesh"
+    },
+    {
+      "label": "a mesh node with no model",
+      "node": {
+        "name": "Cube",
+        "mesh": {
+          "primitives": []
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "a plain node with no extras",
+      "node": {
+        "name": "Empty"
+      },
+      "ok": true
+    },
+    {
+      "label": "a model node with a bad url",
+      "node": {
+        "name": "Chair",
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "javascript:1"
+            }
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a model node with a bad url and a mesh",
+      "node": {
+        "name": "Chair",
+        "mesh": {
+          "primitives": []
+        },
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "http://h/m.glb"
+            }
+          }
+        }
+      },
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a model node with an unknown key",
+      "node": {
+        "name": "Chair",
+        "extras": {
+          "atrium": {
+            "model": {
+              "url": "/m.glb",
+              "loose": 1
+            }
+          }
+        }
+      },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "a model node whose model is a string",
+      "node": {
+        "name": "Chair",
+        "extras": {
+          "atrium": {
+            "model": "https://h/m.glb"
+          }
+        }
+      },
+      "ok": false,
+      "reason": "model-type"
+    },
+    {
+      "label": "a node whose extras.atrium is a string",
+      "node": {
+        "name": "Chair",
+        "extras": {
+          "atrium": "x"
+        }
+      },
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "label": "a teleporter node",
+      "node": {
+        "name": "Pad",
+        "extras": {
+          "atrium": {
+            "teleporter": {
+              "destination": "/worlds/josh/room"
+            }
+          }
+        }
+      },
+      "ok": true
+    }
+  ]
+}

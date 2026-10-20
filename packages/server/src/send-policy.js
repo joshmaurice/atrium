@@ -143,9 +143,15 @@ export function checkTeleporterDestination(value) {
  * L5/K4 — the `add`-path `extras.atrium` checker, row by row of the L5 table.
  *
  * A node that carries no `extras`, no own `atrium`, or no `teleporter` key is
- * accepted (it is not a teleporter). `extras.atrium` — and `teleporter` —
- * must be plain objects, and the destination, if the teleporter is present,
- * must be a string of at most 2048 characters. `""` is accepted, as on `send`.
+ * accepted (it is not a teleporter). `extras.atrium` — and `teleporter` and
+ * `model` — must be plain objects, and the destination, if the teleporter is
+ * present, must be a string of at most 2048 characters. `""` is accepted, as
+ * on `send`.
+ *
+ * models-by-url (Z1): the same call also runs the model value rules, so `add`
+ * gets the model check with the teleporter check and before the first world
+ * change. The "no mesh" half of Z1 needs the whole descriptor and lives in
+ * `checkModelHost`, which the `add` handler calls with the node.
  *
  * @param {object|undefined|null} extras  the descriptor's own `node.extras`
  * @returns {{ok: boolean, code: string|null, message: string|null}}
@@ -158,11 +164,146 @@ export function checkAtriumExtras(extras) {
     return deny(SEND_INVALID, 'extras.atrium must be an object')
   }
   const teleporter = atrium.teleporter
-  if (teleporter === undefined) return allow()
-  if (!isPlainObject(teleporter)) {
-    return deny(SEND_INVALID, 'teleporter must be an object')
+  if (teleporter !== undefined) {
+    if (!isPlainObject(teleporter)) {
+      return deny(SEND_INVALID, 'teleporter must be an object')
+    }
+    const teleporterCheck = checkTeleporterDestination(teleporter.destination)
+    if (!teleporterCheck.ok) return teleporterCheck
   }
-  return checkTeleporterDestination(teleporter.destination)
+  return checkModelValue(atrium.model)
+}
+
+// ---------------------------------------------------------------------------
+// models-by-url (Z1, A1, A6, A12) — the model value rules
+//
+// One rule set, two implementations: this and the client's
+// `packages/client/src/model-spec.js`, pinned to each other by
+// `tests/fixtures/model-spec-vectors.json`, which both read. `checkModelValue`
+// is the value half (called from `checkAtriumExtras`, so `add` gets it);
+// `checkModelHost` adds the node half — a model node has no mesh — and is
+// called by the `add` handler with the whole descriptor.
+// ---------------------------------------------------------------------------
+
+/** The URL cap (A1 rule 1). */
+export const MODEL_URL_MAX = 2048
+export const MODEL_BOUNDS_MIN = 0.001
+export const MODEL_BOUNDS_MAX = 1000
+
+/** The exact key set of `extras.atrium.model` (L4, strict). */
+const MODEL_KEYS = ['url', 'sha256', 'bounds']
+
+/** The base a root-relative URL is measured against; never fetched (A1). */
+const RELATIVE_BASE = 'https://atrium.invalid'
+
+const MODEL_MESSAGES = {
+  'not-object':      'extras.atrium must be an object',
+  'model-type':      'extras.atrium.model must be an object',
+  'keys':            'extras.atrium.model must have exactly the keys url, sha256 and bounds, with url required',
+  'url-type':        'url must be a string',
+  'url-length':      `url must be 1 to ${MODEL_URL_MAX} characters`,
+  'url-chars':       'url may not contain spaces, control characters or backslashes',
+  'url-scheme':      'url must start with https:// or with a single /',
+  'url-parse':       'url is not a valid https URL',
+  'url-host':        'url must name a host',
+  'url-credentials': 'url may not carry a username or password',
+  'url-relative':    'url must stay on the same host',
+  'sha256':          'sha256 must be 64 lowercase hex characters',
+  'bounds':          `bounds must be three numbers from ${MODEL_BOUNDS_MIN} to ${MODEL_BOUNDS_MAX}`,
+  'mesh':            'a node with extras.atrium.model cannot have a mesh',
+}
+
+const MODEL_SHA256_RE = /^[0-9a-f]{64}$/
+
+/**
+ * A1 — is `url` a valid stored model URL? Returns a reason code, or null.
+ * The exact rule: see `packages/client/src/model-spec.js`, which mirrors it.
+ *
+ * @param {*} url
+ * @returns {string|null}  reason code, or null when the URL is valid
+ */
+export function modelUrlProblem(url) {
+  if (typeof url !== 'string') return 'url-type'
+  if (url.length < 1 || url.length > MODEL_URL_MAX) return 'url-length'
+  for (const ch of url) {
+    const code = ch.codePointAt(0)
+    if (code < 0x21 || code === 0x7f) return 'url-chars'
+  }
+  if (url.includes('\\')) return 'url-chars'
+
+  if (url.startsWith('https://')) {
+    let parsed
+    try { parsed = new URL(url) } catch { return 'url-parse' }
+    if (parsed.protocol !== 'https:') return 'url-scheme'
+    if (!parsed.hostname) return 'url-host'
+    if (parsed.username || parsed.password) return 'url-credentials'
+    return null
+  }
+
+  if (url[0] === '/' && url[1] !== '/') {
+    let parsed
+    try { parsed = new URL(url, RELATIVE_BASE) } catch { return 'url-relative' }
+    return parsed.origin === RELATIVE_BASE ? null : 'url-relative'
+  }
+
+  return 'url-scheme'
+}
+
+/** The reason code for an `extras.atrium.model` value, or null. */
+export function modelValueProblem(model) {
+  if (model === undefined) return null
+  if (!isPlainObject(model)) return 'model-type'
+  const keys = Object.keys(model)
+  if (keys.some((k) => !MODEL_KEYS.includes(k))) return 'keys'
+  if (!Object.hasOwn(model, 'url')) return 'keys'
+  const urlProblem = modelUrlProblem(model.url)
+  if (urlProblem) return urlProblem
+  if (model.sha256 !== undefined &&
+      !(typeof model.sha256 === 'string' && MODEL_SHA256_RE.test(model.sha256))) return 'sha256'
+  if (model.bounds !== undefined) {
+    const b = model.bounds
+    if (!Array.isArray(b) || b.length !== 3) return 'bounds'
+    for (const n of b) {
+      if (typeof n !== 'number' || !Number.isFinite(n)) return 'bounds'
+      if (n < MODEL_BOUNDS_MIN || n > MODEL_BOUNDS_MAX) return 'bounds'
+    }
+  }
+  return null
+}
+
+/** The reason code for an `extras` value, or null when it is not a model / is fine. */
+export function modelExtrasProblem(extras) {
+  if (extras == null || typeof extras !== 'object' || Array.isArray(extras)) return null
+  const atrium = extras.atrium
+  if (atrium === undefined) return null
+  if (!isPlainObject(atrium)) return 'not-object'
+  return modelValueProblem(atrium.model)
+}
+
+function modelDeny(reason) {
+  return deny(SEND_INVALID, MODEL_MESSAGES[reason] ?? 'the model value is invalid')
+}
+
+/** The value half of Z1 (called from `checkAtriumExtras`). */
+function checkModelValue(model) {
+  const problem = modelValueProblem(model)
+  return problem ? modelDeny(problem) : allow()
+}
+
+/**
+ * Z1/A6 — the node-level check: the value rules plus "a node carrying
+ * `extras.atrium.model` has no mesh". Called by the `add` handler so a mesh
+ * and a model on one node are refused before the first world change.
+ *
+ * @param {object|undefined|null} node  the `add` descriptor
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkModelHost(node) {
+  if (node == null || typeof node !== 'object') return allow()
+  const problem = modelExtrasProblem(node.extras)
+  if (problem) return modelDeny(problem)
+  if (node.extras?.atrium?.model !== undefined && node.mesh != null) return modelDeny('mesh')
+  return allow()
 }
 
 const PLAYBACK_BOOL_KEYS     = ['playing', 'paused', 'loop', 'autoStart']

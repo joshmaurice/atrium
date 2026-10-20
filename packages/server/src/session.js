@@ -10,7 +10,7 @@ import { resolveUpgradeUserId } from './http-routes.js'
 import { parsePath } from '@atrium/som'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
-  checkAtriumExtras, checkTransformValues,
+  checkAtriumExtras, checkTransformValues, checkModelHost,
 } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
@@ -834,6 +834,14 @@ export function attachSessionHandlers({
             const extrasCheck = checkAtriumExtras(msg.node.extras)
             if (!extrasCheck.ok) {
               sendError(ws, msg.seq, extrasCheck.code, extrasCheck.message)
+              break
+            }
+            // models-by-url (Z1/A6): the node-level half of the model rules —
+            // a node carrying extras.atrium.model may not carry a mesh. Runs
+            // with the value check, before the first world change.
+            const modelCheck = checkModelHost(msg.node)
+            if (!modelCheck.ok) {
+              sendError(ws, msg.seq, modelCheck.code, modelCheck.message)
               break
             }
           }
