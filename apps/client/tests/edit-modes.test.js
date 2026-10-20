@@ -5,6 +5,9 @@
 // modes, in whatever order they're entered and left (Phase 3 step 1b-1, B1/E6),
 // and pointer lock stays off while editing.
 //
+// Edit is the only editing mode (edit-polish-2, L6): the teleporter placement
+// mode went with the toolbar's Place Teleporter, so `triggerActive` is `!edit`.
+//
 // `trigger` is the real createTeleportTrigger's setActive surface, recorded:
 // the last value set is what the app's trigger would hold.
 
@@ -26,53 +29,54 @@ describe('edit-modes: teleport triggers', () => {
     assert.equal(modes.triggerActive, false)
   })
 
-  test('Edit mode on while place mode was open: place mode closes, triggers stay inactive', () => {
-    const { modes, active } = setup()
-    modes.setTeleporterMode('placement')
-    assert.equal(active(), false)
-    modes.setEdit(true)
-    assert.equal(modes.placement, false)
-    // The exitTeleporterMode() path then runs and leaves its mode:
-    modes.setTeleporterMode(null)
-    assert.equal(active(), false, 'leaving a teleporter mode does not re-enable triggers mid-edit')
-  })
-
-  test('the resetTeleporterUi path while Edit mode is on → still inactive', () => {
-    const { modes, active } = setup()
-    modes.setEdit(true)
-    modes.setTeleporterMode(null)        // resetTeleporterUi() leaves any mode
-    assert.equal(active(), false)
-  })
-
-  test('a teleporter mode cannot be entered while Edit mode is on', () => {
-    const { modes } = setup()
-    modes.setEdit(true)
-    assert.equal(modes.setTeleporterMode('placement'), false)
-    assert.equal(modes.placement, false)
-  })
-
   test('leaving Edit mode with no other mode → active', () => {
     const { modes, active } = setup()
     modes.setEdit(true)
     modes.setEdit(false)
     assert.equal(active(), true)
+    assert.equal(modes.triggerActive, true)
   })
 
-  test('place mode on its own still switches triggers off and on', () => {
+  test('triggerActive is !edit through on, off and reset', () => {
+    const { modes, calls } = setup()
+    assert.equal(modes.triggerActive, true, 'a fresh object has triggers active')
+    assert.deepEqual(calls, [], 'and has not touched the trigger yet')
+
+    modes.setEdit(true)
+    assert.equal(modes.triggerActive, false)
+    modes.setEdit(false)
+    assert.equal(modes.triggerActive, true)
+    modes.setEdit(true)
+    assert.equal(modes.triggerActive, false)
+    modes.reset()
+    assert.equal(modes.triggerActive, true, 'reset leaves every mode off')
+    assert.deepEqual(calls, [false, true, false, true])
+  })
+
+  test('setEdit syncs every time, even when the value does not change', () => {
+    const { modes, calls } = setup()
+    modes.setEdit(true)
+    modes.setEdit(true)
+    assert.deepEqual(calls, [false, false])
+    assert.equal(modes.triggerActive, false)
+  })
+
+  test('the reset while Edit mode is on → still inactive', () => {
+    // The connection-lifecycle path: reset() runs while the Edit panel is up.
     const { modes, active } = setup()
-    modes.setTeleporterMode('placement')
-    assert.equal(active(), false)
-    modes.setTeleporterMode(null)
-    assert.equal(active(), true)
+    modes.setEdit(true)
+    modes.reset()
+    assert.equal(active(), true, 'reset turns every mode off, so triggers resume')
+    assert.equal(modes.edit, false)
+    assert.equal(modes.triggerActive, true)
   })
 
-  test("the retired 'delete' mode is refused and changes nothing (K4, Z6)", () => {
-    const { modes, calls, active } = setup()
-    assert.equal(modes.setTeleporterMode('delete'), false, 'refused')
-    assert.equal(modes.placement, false)
-    assert.equal(modes.triggerActive, true, 'triggers stay active')
-    assert.deepEqual(calls, [], 'no mode change, so no trigger sync')
-    assert.equal(active(), undefined, 'the trigger was never switched')
+  test('the teleporter-mode API is gone (L6)', () => {
+    const { modes } = setup()
+    assert.equal(typeof modes.setTeleporterMode, 'undefined', 'setTeleporterMode is not a function any more')
+    assert.equal('setTeleporterMode' in modes, false)
+    assert.equal('placement' in modes, false, 'the placement getter is gone')
+    assert.equal(Reflect.get(modes, 'placement'), undefined)
   })
 
   test('the delete getter is gone', () => {
@@ -81,32 +85,10 @@ describe('edit-modes: teleport triggers', () => {
     assert.equal(Reflect.get(modes, 'delete'), undefined)
   })
 
-  test("'delete' is refused before and after a placement, without touching it", () => {
-    const { modes, active } = setup()
-    assert.equal(modes.setTeleporterMode('delete'), false)
-    assert.equal(modes.setTeleporterMode('placement'), true)
-    assert.equal(active(), false)
-    assert.equal(modes.setTeleporterMode('delete'), false, 'refused while placing')
-    assert.equal(modes.placement, true, 'placement is untouched')
-    assert.equal(active(), false, 'still placing, triggers still off')
-  })
-
-  test('placement needs Edit mode off, exactly as before', () => {
-    const { modes, active } = setup()
-    modes.setEdit(true)
-    assert.equal(modes.setTeleporterMode('placement'), false)
-    modes.setEdit(false)
-    assert.equal(modes.setTeleporterMode('placement'), true)
-    assert.equal(active(), false)
-  })
-
-  test('disconnect while editing → every mode off, triggers active again', () => {
-    const { modes, active } = setup()
-    modes.setEdit(true)
-    modes.reset()
-    assert.equal(modes.edit, false)
-    assert.equal(modes.placement, false)
-    assert.equal(active(), true)
+  test('the object exposes only Edit mode and pointer lock', () => {
+    const { modes } = setup()
+    assert.deepEqual(Object.keys(modes).sort(),
+      ['edit', 'reset', 'setEdit', 'togglePointerLock', 'triggerActive', 'usePointerLock'])
   })
 })
 
