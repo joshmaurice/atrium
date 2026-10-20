@@ -21,7 +21,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
   return { name, _node: { def: name }, mesh, extras: { atrium: { model } } }
 }
 
-function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null } = {}) {
+function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null } = {}) {
   const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
@@ -44,7 +44,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
     onStatus: (node, status) => statuses.push({ name: node.name, ...status }),
     hooks: {
       validateModelHost,
-      fetchModel: async ({ url, signal }) => {
+      fetchModel: fetchModel ?? (async ({ url, signal }) => {
         state.fetches += 1
         if (fetchGate && !signal.aborted) await fetchGate
         if (signal?.aborted) {
@@ -55,7 +55,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
           ok: true, kind: 'glb', bytes: modelBytes ?? new Uint8Array([1]), json: null,
           dependencies: new Map(), effectiveUrl: redirectTo ? redirectTo(url) : url, totalBytes: 1,
         }
-      },
+      }),
       parseTemplate: async (args) => {
         state.parses += 1
         if (parseResult) return parseResult
@@ -619,4 +619,182 @@ test('W4/A5: a Check that does not fit is refused, and nothing is held', async (
   assert.equal(loaded.message, parseReasonText('world-texture-budget'), 'the form shows the plain text')
   assert.equal(budget.taken, before, 'nothing was reserved')
   assert.equal(h.bridge.cache.size, 1, 'and nothing was held')
+})
+
+// ── W5 (round 5): admission is `som.allNodes` order, not download order ─────
+//
+// A10: texture-budget admission happens in `som.allNodes` order — "a model is
+// admitted only once every earlier model has been admitted or has failed
+// (bounded by their own 30 s timeouts). So the same models win on every
+// visitor's screen." Round 4 admitted in the order the downloads finished, so
+// on a visitor's page (every model loading at once) the model refused was the
+// one whose download lost the race, not the last in document order. These tests
+// drive a fetch whose responses complete only when the test says so, the W1/W3
+// loader stand-in (no image decoding) and a counting budget sized for three.
+
+const W5_2K = imageGlb({ width: 2048, height: 2048 })
+const W5_1K = imageGlb({ width: 1024, height: 1024 })
+const PER_2K = estimateTextureBytes(2048, 2048)
+const PER_1K = estimateTextureBytes(1024, 1024)
+const modelUrl = (name) => `https://h/${name}.glb`
+
+/**
+ * A fetch whose every response waits for the test: `release(url)` lets that one
+ * download finish. `fail` names the URLs that answer with a network failure.
+ */
+function orderedFetch({ bytesFor = () => W5_2K, fail = new Set() } = {}) {
+  const gates = new Map()
+  const calls = []
+  const fetchModel = ({ url, signal }) => {
+    calls.push(url)
+    if (!gates.has(url)) {
+      let open
+      gates.set(url, { promise: new Promise((resolve) => { open = resolve }), release: () => open() })
+    }
+    return gates.get(url).promise.then(() => {
+      if (signal?.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+      if (fail.has(url)) return { ok: false, reason: 'network', message: 'the download failed' }
+      const bytes = bytesFor(url)
+      return { ok: true, kind: 'glb', bytes, json: null, dependencies: new Map(), effectiveUrl: url, totalBytes: bytes.length }
+    })
+  }
+  return {
+    fetchModel, calls,
+    release(...urls) { for (const url of urls) gates.get(url)?.release() },
+  }
+}
+
+/** A budget that records the order its successful reservations were taken in. */
+function loggingBudget(inner, log) {
+  return {
+    get limit() { return inner.limit },
+    get taken() { return inner.taken },
+    get free() { return inner.free },
+    fits: (n) => inner.fits(n),
+    reserve: (n) => { const ok = inner.reserve(n); if (ok) log.push(n); return ok },
+    release: (n) => inner.release(n),
+    reset: () => inner.reset(),
+  }
+}
+
+/** Let the fetch → parse → admit chain run until nothing is still loading. */
+async function drain(h, ticks = 60) {
+  for (let i = 0; i < ticks; i++) {
+    if (![...h.bridge.instances.values()].some((r) => r.status === MODEL_STATUS.loading)) return
+    await tick()
+  }
+}
+
+test('W5/A10: downloads finish D, C, B, A — A, B and C are admitted and D is refused', async () => {
+  const fetch = orderedFetch()
+  const budget = createTextureBudget({ bytes: PER_2K * 3 })
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: fetch.fetchModel })
+  for (const name of ['A', 'B', 'C', 'D']) h.addNode(somNode(name, { url: modelUrl(name) }))
+  assert.equal(fetch.calls.length, 4, 'all four transfers start together (A4)')
+
+  fetch.release(modelUrl('D'), modelUrl('C'), modelUrl('B'), modelUrl('A'))   // reverse order
+  await drain(h)
+
+  for (const name of ['A', 'B', 'C']) {
+    assert.equal(h.bridge.status(name).status, MODEL_STATUS.loaded, `${name} is admitted`)
+  }
+  const refused = h.bridge.status('D')
+  assert.equal(refused.status, MODEL_STATUS.failed)
+  assert.equal(refused.reason, 'world-texture-budget', 'D, the LAST in document order, is the one refused')
+  assert.equal(budget.taken, PER_2K * 3, 'three reservations, in document order')
+})
+
+test('W5/A10: downloads finish A, B, C, D — the same three are admitted and D is refused', async () => {
+  const fetch = orderedFetch()
+  const budget = createTextureBudget({ bytes: PER_2K * 3 })
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: fetch.fetchModel })
+  for (const name of ['A', 'B', 'C', 'D']) h.addNode(somNode(name, { url: modelUrl(name) }))
+
+  fetch.release(modelUrl('A'), modelUrl('B'), modelUrl('C'), modelUrl('D'))
+  await drain(h)
+
+  for (const name of ['A', 'B', 'C']) assert.equal(h.bridge.status(name).status, MODEL_STATUS.loaded, `${name} is admitted`)
+  const refused = h.bridge.status('D')
+  assert.equal(refused.status, MODEL_STATUS.failed)
+  assert.equal(refused.reason, 'world-texture-budget', 'the same model wins on every page')
+  assert.equal(budget.taken, PER_2K * 3)
+})
+
+test('W5: a failed download does not hold up the models behind it — A, C and D are admitted', async () => {
+  const fetch = orderedFetch({ fail: new Set([modelUrl('B')]) })
+  const budget = createTextureBudget({ bytes: PER_2K * 3 })
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: fetch.fetchModel })
+  for (const name of ['A', 'B', 'C', 'D']) h.addNode(somNode(name, { url: modelUrl(name) }))
+
+  fetch.release(modelUrl('D'), modelUrl('C'), modelUrl('B'), modelUrl('A'))
+  await drain(h)
+
+  assert.equal(h.bridge.status('B').status, MODEL_STATUS.failed, 'B failed, and reserved nothing')
+  for (const name of ['A', 'C', 'D']) assert.equal(h.bridge.status(name).status, MODEL_STATUS.loaded, `${name} is admitted`)
+  assert.equal(budget.taken, PER_2K * 3, 'the three that fit are charged')
+})
+
+test('W5: removing a node releases whatever waits on it — C does not wait on B', async () => {
+  const fetch = orderedFetch()
+  const budget = createTextureBudget({ bytes: PER_2K * 3 })
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: fetch.fetchModel })
+  for (const name of ['A', 'B', 'C']) h.addNode(somNode(name, { url: modelUrl(name) }))
+
+  fetch.release(modelUrl('C'))                  // C's bytes are here; its turn is not
+  await settle()
+  assert.equal(h.bridge.status('C').status, MODEL_STATUS.loading, 'C waits: A and B are ahead of it')
+
+  h.removeNode('B')                             // B never downloads; it leaves the world
+  await settle()
+  assert.equal(h.bridge.status('C').status, MODEL_STATUS.loading, 'C still waits on A alone')
+
+  fetch.release(modelUrl('A'))
+  await drain(h)
+  assert.equal(h.bridge.status('A').status, MODEL_STATUS.loaded)
+  assert.equal(h.bridge.status('C').status, MODEL_STATUS.loaded, 'C was released by A, not held by B')
+  assert.equal(h.bridge.status('B'), null, 'B is not in this world any more')
+  assert.equal(budget.taken, PER_2K * 2)
+})
+
+test('W5: a model added live after the world loaded waits for the earlier ones', async () => {
+  const fetch = orderedFetch()
+  const budget = createTextureBudget({ bytes: PER_2K * 3 })
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: fetch.fetchModel })
+  h.addNode(somNode('A', { url: modelUrl('A') }))
+  h.addNode(somNode('B', { url: modelUrl('B') }))
+  await settle()
+
+  h.addNode(somNode('C', { url: modelUrl('C') }))    // added live: after every existing node
+  await settle()
+  fetch.release(modelUrl('C'))                       // C's download wins the race
+  await settle()
+  assert.equal(h.bridge.status('C').status, MODEL_STATUS.loading, 'C waits for A and B')
+
+  fetch.release(modelUrl('B'), modelUrl('A'))
+  await drain(h)
+
+  const loaded = h.statuses.filter((s) => s.status === MODEL_STATUS.loaded).map((s) => s.name)
+  assert.deepEqual(loaded, ['A', 'B', 'C'], 'admission followed document order, not download order')
+})
+
+test('W5: a Check issued while nodes are loading reserves after them', async () => {
+  const reserves = []
+  const fetch = orderedFetch({ bytesFor: (url) => (url.endsWith('/check.glb') ? W5_1K : W5_2K) })
+  const budget = loggingBudget(createTextureBudget({ bytes: PER_2K * 3 }), reserves)
+  const h = harness({ textureBudget: budget, parseLoader: hostlessLoader, fetchModel: fetch.fetchModel })
+
+  h.addNode(somNode('A', { url: modelUrl('A') }))
+  h.addNode(somNode('B', { url: modelUrl('B') }))
+  const checked = h.bridge.loadTemplate({ url: 'https://h/check.glb' })   // the form's Check
+  fetch.release('https://h/check.glb')                                    // its download wins the race
+  await settle()
+  assert.deepEqual(reserves, [], 'the Check reserves nothing while A and B are loading')
+
+  fetch.release(modelUrl('B'), modelUrl('A'))
+  const got = await checked
+  assert.equal(got.ok, true, got.message)
+  assert.deepEqual(reserves, [PER_2K, PER_2K, PER_1K], 'A, then B, then the Check — in that order')
+  assert.equal(got.entry.refs, 1, 'the Check holds what it reserved')
+  assert.equal(budget.taken, PER_2K * 2 + PER_1K)
+  h.bridge.releaseTemplate(got.key)
 })

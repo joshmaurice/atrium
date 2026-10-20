@@ -28,6 +28,13 @@
  * counts model nodes in that order and texture-budget admission happens in that
  * order too, because one parse runs at a time per page (A5) and each load takes
  * its turn in `allNodes` order.
+ *
+ * W5 (round 5) makes that last clause true for a page where every model loads at
+ * once (a visitor): the fetches still run in parallel, but a model node's parse
+ * does not reserve texture bytes until every model node before it in the current
+ * `som.allNodes` order has been admitted, has failed or has been dropped. Round
+ * 4 admitted in the order the downloads finished, so the model refused was the
+ * one whose download lost the race rather than the last in document order.
  */
 
 import { MODEL_LIMITS, createWorldLedger, sha256Hex } from '@atrium/client/model-fetch'
@@ -98,12 +105,72 @@ export function createModelBridge(deps = {}) {
   let running = 0
   const controllers = new Set()
 
+  // W5 (round 5) — admission is ordered by `som.allNodes`, not by the order the
+  // downloads happen to finish. A model node's reservation (the start of its
+  // serialized parse) waits until every model node before it in the current
+  // `som.allNodes` order has been admitted, has failed or has been dropped.
+  // Fetches stay parallel; only the turn at which a parse may reserve is ordered.
+  const admissionWaiters = new Set()
+
   /** A5 — one parse at a time per page, in the order the loads arrived. */
   let parseChain = Promise.resolve()
   function serialize(fn) {
     const next = parseChain.then(fn, fn)
     parseChain = next.then(noop, noop)
     return next
+  }
+
+  // ── W5: admission in document order ─────────────────────────────────────
+
+  /** A node has reached a terminal state: admitted, failed, or dropped. */
+  function settle(record) {
+    if (!record || record.settled) return
+    record.settled = true
+    notifyAdmission()
+  }
+
+  /** Wake every parse waiting for a turn. */
+  function notifyAdmission() {
+    for (const wake of admissionWaiters) wake()
+    admissionWaiters.clear()
+  }
+
+  function admissionChanged() {
+    return new Promise((resolve) => admissionWaiters.add(resolve))
+  }
+
+  /**
+   * The model nodes before `record` in the CURRENT `som.allNodes` order that
+   * have not settled yet. A node added live is after every existing node, and a
+   * node the SOM no longer lists is not a predecessor at all.
+   */
+  function earlierPending(record) {
+    const order = som()?.allNodes
+    if (!order) return []
+    const mine = order.indexOf(record.node)
+    if (mine < 0) return []
+    const pending = []
+    for (let i = 0; i < mine; i++) {
+      const other = instances.get(order[i].name)
+      if (other && other !== record && !other.settled) pending.push(other)
+    }
+    return pending
+  }
+
+  /** W5 — wait for the earlier model nodes to be admitted, failed or dropped. */
+  async function waitForEarlier(record, wanted) {
+    while (wanted() && earlierPending(record).length > 0) await admissionChanged()
+    return wanted()
+  }
+
+  /**
+   * W5 — a Check (`loadTemplate`) is not a node: it goes after every model node
+   * that is loading. The snapshot is the set loading when the Check's turn came.
+   */
+  async function waitForLoading(wanted) {
+    const pending = [...instances.values()].filter((r) => !r.settled)
+    while (wanted() && pending.some((r) => !r.settled)) await admissionChanged()
+    return wanted()
   }
 
   const statusOf = (record) => ({ status: record.status, reason: record.reason, message: record.message })
@@ -155,10 +222,11 @@ export function createModelBridge(deps = {}) {
     parses.clear()
     loads.clear()
     ledger.reset()
-    for (const record of instances.values()) removeWrapper(record)
+    for (const record of instances.values()) { settle(record); removeWrapper(record) }
     instances.clear()
     textureBudget.reset()
     cache.clear((template) => dispose(template))
+    notifyAdmission()
   }
 
   /** Z5 — fetches queue at L8's concurrency; the order is A10's. */
@@ -326,6 +394,7 @@ export function createModelBridge(deps = {}) {
     record.droppedTracks = built.droppedTracks
     setStatus(record, MODEL_STATUS.loaded, null, built.droppedTracks
       ? `${built.droppedTracks} animation tracks couldn't be bound` : null)
+    settle(record)
     attachOrWait(record)
   }
 
@@ -342,49 +411,61 @@ export function createModelBridge(deps = {}) {
     const inFlight = parses.get(key)
     if (inFlight) return inFlight
 
-    const promise = serialize(async () => {
-      const again = cache.get(key)
-      if (again) return { ok: true, entry: again }
-      if (!wanted()) return { ok: false, reason: 'aborted', message: 'cancelled' }
+    const promise = (async () => {
+      // W5 (round 5) — the reservation waits its turn: every model node before
+      // this one in the current `som.allNodes` order must have been admitted,
+      // failed or dropped first, so the same models win on every visitor's
+      // screen. The fetch already ran in parallel; only the parse is ordered.
+      // A Check (`token` has no node) goes after every model node loading.
+      const allowed = token.node
+        ? await waitForEarlier(token, wanted)
+        : await waitForLoading(wanted)
+      if (!allowed) return { ok: false, reason: 'aborted', message: 'cancelled' }
 
-      const parsed = await parse({
-        kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
-        dependencies: fetched.dependencies ?? new Map(),
-        reserveTexture, releaseTexture,
+      return serialize(async () => {
+        const again = cache.get(key)
+        if (again) return { ok: true, entry: again }
+        if (!wanted()) return { ok: false, reason: 'aborted', message: 'cancelled' }
+
+        const parsed = await parse({
+          kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
+          dependencies: fetched.dependencies ?? new Map(),
+          reserveTexture, releaseTexture,
+        })
+        if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
+
+        const textureBytes = parsed.textureBytes ?? 0
+        // W3 — the world may have moved on while the parse ran (a world change, the
+        // node removed, the form closed): give the reservation back rather than
+        // charging a world that no longer wants the template.
+        if (!wanted()) {
+          releaseTexture?.(textureBytes)
+          return { ok: false, reason: 'aborted', message: 'cancelled' }
+        }
+
+        // W3 — the entry is created already acquired by the load that parsed it
+        // (`refs: 1`, not idle) INSIDE the serialized parse. Round 3 created it
+        // idle and the load acquired it a microtask later, so the next model's
+        // `reserveTexture` → `evictIdleFor` could dispose a template that was
+        // about to be, or already was, on screen.
+        const entry = cache.set(key, { ...parsed.template, textureBytes }, { acquired: true })
+        // V4/W4 — what the form's Check reads back off a held entry: the kind, the
+        // bytes it came from, and (a .glb's) hash, the one Save pins with. The
+        // digest runs OFF the model-load critical path — a placed model must not
+        // wait a thread-pool turn for it — and `loadTemplate` awaits it for the
+        // Check, which is the only caller that reports a hash.
+        entry.kind = fetched.kind
+        entry.totalBytes = fetched.totalBytes ?? 0
+        entry.bytesSha256 = null
+        if (fetched.kind === 'glb' && fetched.bytes) {
+          entry.bytesSha256Promise = sha256Hex(fetched.bytes)
+            .then((hex) => { entry.bytesSha256 = hex; return hex })
+            .catch(() => null)
+        }
+        token.key = key
+        return { ok: true, entry, createdFor: token }
       })
-      if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
-
-      const textureBytes = parsed.textureBytes ?? 0
-      // W3 — the world may have moved on while the parse ran (a world change, the
-      // node removed, the form closed): give the reservation back rather than
-      // charging a world that no longer wants the template.
-      if (!wanted()) {
-        releaseTexture?.(textureBytes)
-        return { ok: false, reason: 'aborted', message: 'cancelled' }
-      }
-
-      // W3 — the entry is created already acquired by the load that parsed it
-      // (`refs: 1`, not idle) INSIDE the serialized parse. Round 3 created it
-      // idle and the load acquired it a microtask later, so the next model's
-      // `reserveTexture` → `evictIdleFor` could dispose a template that was
-      // about to be, or already was, on screen.
-      const entry = cache.set(key, { ...parsed.template, textureBytes }, { acquired: true })
-      // V4/W4 — what the form's Check reads back off a held entry: the kind, the
-      // bytes it came from, and (a .glb's) hash, the one Save pins with. The
-      // digest runs OFF the model-load critical path — a placed model must not
-      // wait a thread-pool turn for it — and `loadTemplate` awaits it for the
-      // Check, which is the only caller that reports a hash.
-      entry.kind = fetched.kind
-      entry.totalBytes = fetched.totalBytes ?? 0
-      entry.bytesSha256 = null
-      if (fetched.kind === 'glb' && fetched.bytes) {
-        entry.bytesSha256Promise = sha256Hex(fetched.bytes)
-          .then((hex) => { entry.bytesSha256 = hex; return hex })
-          .catch(() => null)
-      }
-      token.key = key
-      return { ok: true, entry, createdFor: token }
-    })
+    })()
     parses.set(key, promise)
     promise.then(noop, noop).finally(() => { if (parses.get(key) === promise) parses.delete(key) })
     return promise
@@ -414,6 +495,7 @@ export function createModelBridge(deps = {}) {
     removeWrapper(record)
     if (record.key) { cache.release(record.key); record.key = null }
     setStatus(record, MODEL_STATUS.loading, 'aborted', null)
+    settle(record)
   }
 
   function fail(record, reason, message) {
@@ -421,6 +503,7 @@ export function createModelBridge(deps = {}) {
     if (record.key) { cache.release(record.key); record.key = null }
     setStatus(record, MODEL_STATUS.failed, reason, message)
     showPlaceholder(record)
+    settle(record)
   }
 
   // ── attaching (A9) ─────────────────────────────────────────────────────
@@ -515,6 +598,7 @@ export function createModelBridge(deps = {}) {
         wrapper: null, placeholder: null, clips: [], droppedTracks: 0, key: null,
         worldGeneration, viewGeneration: null, attachedGeneration: null,
         worldBaseUrl: deps.worldBaseUrl?.() ?? null,
+        settled: false,
       }
       instances.set(node.name, record)
       setStatus(record, MODEL_STATUS.loading)
@@ -535,6 +619,7 @@ export function createModelBridge(deps = {}) {
     removeWrapper(record)
     if (record.key) { cache.release(record.key); record.key = null }
     instances.delete(name)
+    settle(record)
   }
 
   /** Z5 — a status change for one node, for the panel. */
