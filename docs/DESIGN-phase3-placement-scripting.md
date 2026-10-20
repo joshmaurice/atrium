@@ -1,6 +1,6 @@
 # Design: Phase 3 — Object Placement and Scripting
 
-Status: **Revision 1, 2026-10-12.**
+Status: **Revision 1.2, 2026-10-19.**
 - **Drafted 2026-10-11.** The operator settled all seven open questions on
   2026-10-12 (§10).
 - **Revision 1** incorporates an outside review (ChatGPT, 2026-10-12) and
@@ -15,8 +15,14 @@ Status: **Revision 1, 2026-10-12.**
   revocation, `.glb`-only pinning, a trust policy for `activate`, and
   rename error codes (§11.2). It also adds the Create-copies-commons fix
   (2026-10-09 passdown §4) as a prerequisite for step 1 (§9, step 0b).
-- **Next:** the step 0 pre-brief, the step 0b decision, then a pre-brief for
-  step 1.
+- **Revision 1.2, 2026-10-19:** an operator decision changes §6's last
+  paragraph. Copying objects from any world a visitor can see becomes its own
+  step, with no `copyable` flag and with attribution on every copy
+  (`devtasks/Atrium-Passdown-2026-10-19-copy-objects.md` §1). Nothing else
+  changed.
+- **Progress:** steps 0, 0b, 1 and 2 have shipped, followed by two Edit mode
+  rounds (edit-tweaks and edit-polish-2, released at `229c4a87` on
+  2026-10-19). **Next:** the step 3 pre-brief.
 
 This doc scopes the next phase after Phase 2 (home worlds, the commons,
 cross-server loading, teleporters), which finished with the Step 9 cleanup
@@ -717,8 +723,14 @@ objects as context-menu idea §1.4 suggests, is an open question.
    worthwhile. Portable exports are then readable by other viewers, and
    imported standard files readable by Atrium.
 
-"Copy this object" while visiting someone else's world needs a
-creator-controlled `copyable` flag. It's deferred.
+"Copy this object" while visiting someone else's world: **changed by the
+operator on 2026-10-19** (`devtasks/Atrium-Passdown-2026-10-19-copy-objects.md`
+§1). Copying from any world a visitor can see becomes its own step, likely
+after step 3 and the richer `add`, with **no `copyable` flag**: a visitor
+already holds everything a flag would protect, so the UI says plainly that
+visitors can copy, and visibility is the real control. Copies carry
+attribution: an `origin` fixed at the first copy, plus the most recent
+`copiedFrom`.
 
 ---
 
