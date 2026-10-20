@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Group, Object3D } from 'three'
 import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
-import { parseTemplate, createTextureBudget, estimateTextureBytes } from '../src/model-parse.js'
+import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonText } from '../src/model-parse.js'
 import { imageGlb } from './glb-fixture.js'
 import { validateModelHost } from '@atrium/client/model-spec'
 
@@ -555,4 +555,68 @@ test('W3: a redirect’s key is an alias of one entry — counted, evicted and d
   assert.equal(disposed.length, 1, 'and its template was disposed once')
   assert.equal(budget.taken, 0, 'and its bytes were released once')
   assert.equal(h.bridge.cache.size, 0)
+})
+
+// ── W4 (round 4): the form's Check, through the bridge ──────────────────────
+//
+// The owner's Check fetched and parsed on its own, outside the budget and
+// outside the serialized parse, and seeded the cache with an entry that was
+// never charged — `textureBudget.taken` stayed at 0.0 MiB through every
+// Check-then-Save. These drive `loadTemplate` exactly as `app.js`'s Check does:
+// load, hold, and give the reference back on Cancel or when the form closes.
+
+test('W4/A5: a Check reserves the model’s estimate and holds the entry', async () => {
+  const { h, budget, per } = texturedHarness({ textures: 3 })
+  const loaded = await h.bridge.loadTemplate({ url: 'https://h/checked.glb' })
+  assert.equal(loaded.ok, true, loaded.message)
+  assert.equal(h.state.fetches, 1, 'the Check fetched it once')
+  assert.equal(budget.taken, per, 'and charged the world’s budget')
+  assert.equal(loaded.entry.refs, 1, 'and holds its reference')
+  assert.equal(loaded.entry.idle, false)
+  assert.equal(loaded.entry.textureBytes, per, 'the entry carries the measured bytes')
+})
+
+test('W4/A8: Check then Cancel leaves the template idle and still counted', async () => {
+  const { h, budget, per } = texturedHarness({ textures: 3 })
+  const loaded = await h.bridge.loadTemplate({ url: 'https://h/checked.glb' })
+  h.bridge.releaseTemplate(loaded.key)                       // Cancel, a URL edit, a world change
+
+  const entry = h.bridge.cache.get(loaded.key)
+  assert.equal(entry.refs, 0, 'nothing holds it now')
+  assert.equal(entry.idle, true)
+  assert.equal(budget.taken, per, 'its bytes are still charged (A8: kept, not disposed, not refunded)')
+  assert.equal(h.bridge.cache.size, 1)
+})
+
+test('W4/V4: Check then Save counts the template once, with no second download', async () => {
+  const { h, budget, per } = texturedHarness({ textures: 3 })
+  const loaded = await h.bridge.loadTemplate({ url: 'https://h/checked.glb' })
+  assert.equal(budget.taken, per)
+
+  h.addNode(somNode('Checked', { url: 'https://h/checked.glb' }))    // Save
+  await settle()
+  assert.equal(h.state.fetches, 1, 'the held template answered: Save downloaded nothing (V4)')
+  assert.equal(h.state.parses, 1, 'and parsed nothing again')
+  assert.equal(budget.taken, per, 'counted once, not twice')
+  assert.equal(h.bridge.status('Checked').status, MODEL_STATUS.loaded)
+  assert.equal(h.childrenOf('Checked').length, 1)
+
+  h.bridge.releaseTemplate(loaded.key)                       // the form closes with the node saved
+  assert.equal(budget.taken, per, 'the instance still holds it')
+  assert.equal(h.bridge.cache.get(loaded.key).refs, 1)
+})
+
+test('W4/A5: a Check that does not fit is refused, and nothing is held', async () => {
+  const { h, budget } = texturedHarness({ textures: 1 })
+  h.addNode(somNode('M1', { url: 'https://h/M1.glb' }))      // one model fills the world
+  await settle()
+  const before = budget.taken
+  assert.equal(before, budget.limit, 'the world is full')
+
+  const loaded = await h.bridge.loadTemplate({ url: 'https://h/too-big.glb' })
+  assert.equal(loaded.ok, false)
+  assert.equal(loaded.reason, 'world-texture-budget')
+  assert.equal(loaded.message, parseReasonText('world-texture-budget'), 'the form shows the plain text')
+  assert.equal(budget.taken, before, 'nothing was reserved')
+  assert.equal(h.bridge.cache.size, 1, 'and nothing was held')
 })

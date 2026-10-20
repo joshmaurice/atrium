@@ -26,8 +26,8 @@ import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 import { palettePlacement, paletteName, teleporterName, copyName, modelName, firstFreeName } from './edit-palette.js'
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
 import { createDiagnosticListeners } from './model-listeners.js'
-import { fetchModel, sha256Hex } from '@atrium/client/model-fetch'
-import { createModelBridge, countVertices, measureBounds, parseTemplate, templateKey, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
+import { fetchModel } from '@atrium/client/model-fetch'
+import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
@@ -2682,78 +2682,50 @@ function refreshModelRow() {
 
 // ── The checked template (Z7/A8) ─────────────────────────────────────────
 
-// A successful Check holds its template (and its bytes' hash) until Save,
-// Cancel, a URL edit, the form closing or a world change. The held entry IS
-// the cache entry the new node's instance then finds, so Save costs no second
-// download.
+// A successful Check holds the template it loaded — and the reference the
+// bridge's `loadTemplate` gave it — until Save, Cancel, a URL edit, the form
+// closing or a world change. The held entry IS the cache entry the new node's
+// instance then finds, so Save costs no second download and no second
+// reservation.
 let heldCheck = null
 
 function releaseHeldCheck() {
   if (!heldCheck) return
-  // V4 — the held template can answer to several keys (a pinned and an unpinned
-  // one, and the effective URL's when a redirect changed it): its texture bytes
-  // are released once, not once per key.
-  let released = false
-  for (const key of heldCheck.keys) {
-    const entry = modelBridge.cache.get(key)
-    if (entry && entry.refs === 0) {
-      if (!released) {
-        modelBridge.textureBudget.release(entry.textureBytes ?? 0)
-        released = true
-      }
-      modelBridge.cache.delete(key)
-    }
-  }
+  // W4 — the entry was acquired by `loadTemplate`; giving the reference back
+  // idles it. It is kept, and still counted (A8): its bytes go back only when the
+  // template is evicted. Round 3 released the budget here and deleted the entry —
+  // on bytes that had never been reserved, which `release` clamps at 0.
+  modelBridge.releaseTemplate(heldCheck.key)
   heldCheck = null
 }
 
-function holdCheckedTemplate({ url, worldBaseUrl, effectiveUrl, template, textureBytes, bytesSha256 }) {
+function holdCheckedTemplate({ url, worldBaseUrl, entry, key }) {
   releaseHeldCheck()
-  // V4 — the keys the template is held under are the keys the bridge looks it
-  // up by: `specTemplateKey` is the same function the bridge uses (the spec URL
-  // resolved against the world's base, plus the pinned hash), so the node Save
-  // adds finds this template and downloads nothing. The effective URL's keys
-  // cover a redirect that changed the address the bytes came from.
-  const keys = [
-    specTemplateKey({ url, sha256: bytesSha256 }, worldBaseUrl),
-    specTemplateKey({ url, sha256: null }, worldBaseUrl),
-  ]
-  if (effectiveUrl && effectiveUrl !== url) {
-    keys.push(templateKey(effectiveUrl, bytesSha256), templateKey(effectiveUrl, null))
+  // V4 (round 2) — the template the Check holds is what the bridge looks up after
+  // Save: `loadTemplate` keyed it exactly as `specForSave`'s spec will be keyed.
+  // A Save with the pin box ticked asks under the PINNED key instead, so that key
+  // is made an ALIAS of the same entry (W3): one byte count, one dispose, no
+  // second download.
+  if (entry.bytesSha256) {
+    modelBridge.cache.alias(specTemplateKey({ url, sha256: entry.bytesSha256 }, worldBaseUrl), key)
   }
-  const unique = [...new Set(keys)]
-  if (textureBytes > 0 && !modelBridge.textureBudget.reserve(textureBytes)) return
-  for (const key of unique) modelBridge.cache.set(key, { ...template, textureBytes })
-  heldCheck = { keys: unique, textureBytes }
+  heldCheck = { key }
 }
 
 /** Z7/L9 — Check: the client's spec rules first (in the form), then the real
- *  loader through the same limits the bridge uses. */
+ *  loader through the bridge's one load entry point. */
 async function checkModelNow({ url, worldBaseUrl }) {
-  const fetched = await fetchModel({ url, worldBaseUrl, ledger: modelBridge.ledger })
-  if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'the download was cancelled' }
-  if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
+  // W4 — the Check goes through the bridge: it reserves the model's texture
+  // estimate, takes its turn in the serialized parse, and holds the entry until
+  // the form lets it go. Round 3 fetched and parsed here — outside the budget and
+  // outside the parse queue — and seeded the cache with an uncharged entry, so
+  // the owner's `textureBudget.taken` stayed at 0.0 MiB through all five
+  // Check-then-Save cycles.
+  const loaded = await modelBridge.loadTemplate({ url, sha256: null })
+  if (!loaded.ok) return { ok: false, reason: loaded.reason, message: loaded.message }
 
-  // V4 — the same key the bridge will look up after Save, not the fetched URL.
-  const key = specTemplateKey({ url, sha256: null }, worldBaseUrl)
-  const cached = modelBridge.cache.get(key)
-  let template = cached?.template ?? null
-  if (!template) {
-    const parsed = await parseTemplate({
-      kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
-      dependencies: fetched.dependencies ?? new Map(),
-    })
-    if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
-    template = parsed.template
-    holdCheckedTemplate({
-      url,
-      worldBaseUrl,
-      effectiveUrl: fetched.effectiveUrl ?? url,
-      template,
-      textureBytes: parsed.textureBytes ?? 0,
-      bytesSha256: fetched.kind === 'glb' ? await sha256Hex(fetched.bytes) : null,
-    })
-  }
+  const template = loaded.entry.template
+  holdCheckedTemplate({ url, worldBaseUrl, entry: loaded.entry, key: loaded.key })
 
   // A12 — the bounds are a Box3 of the model at rest, rounded up to 1 mm and
   // clamped into [0.001, 1000].
@@ -2761,10 +2733,10 @@ async function checkModelNow({ url, worldBaseUrl }) {
   return {
     ok: true,
     vertices: countVertices(template.scene),
-    bytes: fetched.totalBytes ?? 0,
+    bytes: loaded.entry.totalBytes ?? 0,
     bounds,
-    sha256: fetched.kind === 'glb' ? await sha256Hex(fetched.bytes) : null,
-    kind: fetched.kind,
+    sha256: loaded.entry.bytesSha256 ?? null,
+    kind: loaded.entry.kind ?? 'glb',
   }
 }
 
