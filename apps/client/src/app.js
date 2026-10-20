@@ -19,7 +19,11 @@ import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-ges
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
-import { palettePlacement, paletteName, teleporterName, copyName, firstFreeName } from './edit-palette.js'
+// `firstFreeName` is imported for the guard's sake only: app.js no longer calls
+// it, but the name still appears in app.js as the key of the dep the Model form
+// reads (`deps.firstFreeName`), and `import-guard.test.js` requires any of a
+// module's exports that appears in app.js to be in its import list (V2).
+import { palettePlacement, paletteName, teleporterName, copyName, modelName, firstFreeName } from './edit-palette.js'
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
 import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, sha256Hex } from '@atrium/client/model-fetch'
@@ -2757,8 +2761,11 @@ modelForm = createModelForm({
       return palettePlacement(origin, forward.toArray())
     },
     isNameFree,
-    // Z7 — the URL's file name, made free and cut to the name rules.
-    firstFreeName: (text) => firstFreeName(text, '', isNameFree),
+    // Z7/V2 — the URL's file name, made free and cut to the name rules.
+    // `modelName` is `firstFreeName` with its suffix rule; round 1 passed a
+    // string where `firstFreeName` wants the suffix *function*, so every Save
+    // threw `TypeError: suffix is not a function`.
+    firstFreeName: (text) => modelName(text, isNameFree),
     addNode: (descriptor) => client.addNode(descriptor),
     structureBegin: (seq, pending) => structure.begin('add', seq, pending),
     undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),

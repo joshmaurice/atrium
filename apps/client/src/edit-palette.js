@@ -103,3 +103,23 @@ export function teleporterName(isFree) {
 export function copyName(name, isFree) {
   return firstFreeName(name, (n) => (n === 1 ? ' copy' : ` copy ${n}`), isFree)
 }
+
+/**
+ * A model's default name: `<stem>`, `<stem> 2`, `<stem> 3`… (models-by-url
+ * round 2, V2).
+ *
+ * The stem is the URL's file name without its extension (`modelNameFromUrl` in
+ * model-form.js). Round 1 passed the form `firstFreeName(text, '', isNameFree)`
+ * — its second parameter is the `suffix(n)` *function*, so every Save threw
+ * `TypeError: suffix is not a function` and sent nothing. This is the missing
+ * piece: a named function beside `teleporterName` and `copyName`, built the same
+ * way, so it shares the 256-character limit and the "reserve the suffix first"
+ * rule, and can be tested on its own.
+ *
+ * @param {string} stem
+ * @param {(name: string) => boolean} isFree   e.g. `n => som.checkNewName(n).ok`
+ * @returns {string|null}  null if none of the first `limit` candidates is free
+ */
+export function modelName(stem, isFree) {
+  return firstFreeName(stem, (n) => (n === 1 ? '' : ` ${n}`), isFree)
+}

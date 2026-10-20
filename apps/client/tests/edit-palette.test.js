@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  palettePlacement, paletteName, copyName, teleporterName, firstFreeName, PALETTE_DISTANCE, PALETTE_LABELS, MAX_NAME_LENGTH,
+  palettePlacement, paletteName, copyName, teleporterName, modelName, firstFreeName, PALETTE_DISTANCE, PALETTE_LABELS, MAX_NAME_LENGTH,
 } from '../src/edit-palette.js'
 
 const close = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps
@@ -173,4 +173,47 @@ test('teleporter is not a palette kind — the palette handler would throw on it
   assert.deepStrictEqual(Object.keys(PALETTE_LABELS), ['cube', 'plane', 'sphere', 'cylinder', 'ramp'])
   assert.equal('teleporter' in PALETTE_LABELS, false, 'PALETTE_LABELS is unchanged')
   assert.throws(() => paletteName('teleporter', freeIn([])), /unknown primitive kind/)
+})
+
+// ── Model names (models-by-url round 2, V2) ─────────────────────────────────
+//
+// The stem is a URL's file name (`modelNameFromUrl`). Round 1 wired the form to
+// `firstFreeName(text, '', isNameFree)` — a string where the suffix *function*
+// belongs — so app.js's Save threw and nothing was ever added, while
+// model-form.test.js's injected stub hid it. These are the function's own tests.
+
+test('model names: a free stem is kept as it is', () => {
+  assert.equal(modelName('chair', freeIn([])), 'chair')
+  assert.equal(modelName('Model', freeIn(['Cube'])), 'Model')
+})
+
+test('model names: "chair" taken gives "chair 2", then "chair 3"…', () => {
+  assert.equal(modelName('chair', freeIn(['chair'])), 'chair 2')
+  assert.equal(modelName('chair', freeIn(['chair', 'chair 2'])), 'chair 3')
+  assert.equal(modelName('chair', freeIn(['chair', 'chair 2', 'chair 4'])), 'chair 3')
+})
+
+test('model names: cut to the name rules, and never refused by them', () => {
+  const stem = 'z'.repeat(MAX_NAME_LENGTH + 40)
+  const first = modelName(stem, freeIn([]))
+  assert.equal(first, 'z'.repeat(MAX_NAME_LENGTH))
+  const isFree = freeIn([first])
+  const second = modelName(stem, isFree)
+  assert.ok(second.length <= MAX_NAME_LENGTH, `${second.length} ≤ ${MAX_NAME_LENGTH}`)
+  assert.ok(second.endsWith(' 2'), 'the suffix is reserved before the stem is cut')
+  assert.ok(isFree(second), 'the name it hands out passes the D3 rules')
+  assert.notEqual(first, second)
+})
+
+test('model names: null when no candidate in the limit is free', () => {
+  assert.equal(modelName('chair', () => false), null)
+})
+
+test('model names: the form-facing call the app hands the form never throws (V2)', () => {
+  // Exactly app.js's wiring: `firstFreeName: (text) => modelName(text, isNameFree)`.
+  // With round 1's `(text) => firstFreeName(text, '', isNameFree)` this throws
+  // `TypeError: suffix is not a function`.
+  const firstFreeNameDep = (text) => modelName(text, freeIn(['chair']))
+  assert.equal(firstFreeNameDep('chair'), 'chair 2')
+  assert.equal(firstFreeNameDep('bench'), 'bench')
 })
