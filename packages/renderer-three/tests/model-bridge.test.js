@@ -117,6 +117,21 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null } = {}
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
+// V3 (round 2) — app.js created the bridge without `hooks.fetchModel` and the
+// module fell back to a stub that always answered `network: "no fetcher was
+// configured"`: every placed model stayed an amber placeholder, in every
+// browser, while this suite passed (it injects its own fetcher in `harness`).
+test('V3: a bridge with no hooks.fetchModel throws, and no default fetcher exists', () => {
+  const deps = { som: () => null, listViews: () => [] }
+  assert.throws(() => createModelBridge(deps), /fetchModel/, 'no hooks at all')
+  assert.throws(() => createModelBridge({ ...deps, hooks: {} }), /fetchModel/, 'empty hooks')
+  assert.throws(() => createModelBridge({ ...deps, hooks: { fetchModel: null } }), /fetchModel/, 'a null fetcher')
+  assert.throws(() => createModelBridge({ ...deps, hooks: { parseTemplate: async () => ({ ok: true }) } }), /fetchModel/,
+    'a parse hook is not a fetcher')
+  const ok = createModelBridge({ ...deps, hooks: { fetchModel: async () => ({ ok: false, reason: 'x' }) } })
+  assert.ok(ok, 'a bridge with a fetcher is built')
+})
+
 test('Z5: a model node gets a wrapper under its host, and a loaded status', async () => {
   const h = harness()
   h.addNode(somNode('Chair'))

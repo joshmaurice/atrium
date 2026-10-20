@@ -2640,6 +2640,9 @@ const modelBridge = createModelBridge({
   worldBaseUrl: () => client.worldBaseUrl ?? null,
   nextFrame: (fn) => requestAnimationFrame(fn),
   onStatus: (node, status) => { modelStatuses.set(node, status); if (node === selected) refreshModelRow() },
+  // V3 — the bridge has NO default fetcher (it throws without one): this is the
+  // real loader, the same one Check runs, so a placed model renders.
+  hooks: { fetchModel: (args) => fetchModel(args) },
 })
 
 /** The last status the bridge reported for a node (Z5/L11). */

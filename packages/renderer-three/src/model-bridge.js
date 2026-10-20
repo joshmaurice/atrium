@@ -52,7 +52,8 @@ const noop = () => {}
  * @param {() => object|null} deps.som                  the client's SOM
  * @param {() => string|null} [deps.worldBaseUrl]       the address root-relative URLs resolve against
  * @param {(fn: Function) => void} [deps.nextFrame]     requestAnimationFrame or a stub
- * @param {object} [deps.hooks]                         the tested seams (fetch/parse/…)
+ * @param {object} deps.hooks                           the tested seams
+ * @param {(args: object) => Promise<object>} deps.hooks.fetchModel  the limited fetcher (required)
  * @param {(node: object, status: object) => void} [deps.onStatus]  one event per change
  */
 export function createModelBridge(deps = {}) {
@@ -64,7 +65,17 @@ export function createModelBridge(deps = {}) {
     hooks = {},
   } = deps
 
-  const fetchModel = hooks.fetchModel ?? defaultFetchModel()
+  // V3 (round 2) — the fetcher is required. Round 1 fell back to a stub that
+  // always answered `network: "no fetcher was configured"`, so app.js's bridge
+  // — created without `hooks.fetchModel` — left every placed model an amber
+  // placeholder and told the Edit panel "no fetcher was configured", silently.
+  // A missing fetcher is a wiring bug; it must be loud, and it must be found
+  // before the first node instead of at the first load.
+  if (typeof hooks.fetchModel !== 'function') {
+    throw new TypeError('createModelBridge needs deps.hooks.fetchModel (there is no default fetcher)')
+  }
+
+  const fetchModel = hooks.fetchModel
   const parse = hooks.parseTemplate ?? parseTemplate
   const makeInstance = hooks.buildInstance ?? buildInstance
   const makePlaceholder = hooks.buildPlaceholder ?? buildPlaceholder
@@ -412,8 +423,4 @@ export function createModelBridge(deps = {}) {
 /** The key an instance's spec is compared by (A9's "spec unchanged"). */
 export function specKey(spec) {
   return `${spec.url}\u0000${spec.sha256 ?? ''}\u0000${(spec.bounds ?? []).join(',')}`
-}
-
-function defaultFetchModel() {
-  return async () => ({ ok: false, reason: 'network', message: 'no fetcher was configured' })
 }
