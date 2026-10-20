@@ -31,7 +31,7 @@
  */
 
 import { MODEL_LIMITS, createWorldLedger } from '@atrium/client/model-fetch'
-import { validateModelHost as defaultValidateModelHost } from '@atrium/client/model-spec'
+import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
 import { buildInstance, buildPlaceholder, PLACEHOLDER_COLOURS } from './model-instances.js'
 
@@ -93,6 +93,7 @@ export function createModelBridge(deps = {}) {
   let currentView = null
   const instances = new Map()      // node name → instance record
   const parses = new Map()         // template key → the parse in flight
+  const loads = new Map()          // template key → the fetch+parse in flight (V4)
   const queue = []
   let running = 0
   const controllers = new Set()
@@ -152,6 +153,7 @@ export function createModelBridge(deps = {}) {
     controllers.clear()
     queue.length = 0
     parses.clear()
+    loads.clear()
     ledger.reset()
     for (const record of instances.values()) removeWrapper(record)
     instances.clear()
@@ -176,40 +178,97 @@ export function createModelBridge(deps = {}) {
     }
   }
 
-  /** The whole job for one node: fetch, parse, admit, attach (A3/A4/A5/A9). */
+  /**
+   * V4 — the key a node's template lives under: its spec URL resolved against
+   * the world's base (A1/A13) plus the pinned hash, never the URL the response
+   * came back with. `app.js`'s held Check uses `specTemplateKey` too, so Save
+   * finds the template Check downloaded.
+   */
+  function keyFor(record) {
+    return specTemplateKey(record.spec, record.worldBaseUrl)
+  }
+
+  /** The whole job for one node: look up, fetch, parse, admit, attach (A3/A4/A5/A8/A9). */
   async function load(record) {
     const controller = new AbortController()
     controllers.add(controller)
-    const { spec } = record
     try {
+      // V4 — the cache and the in-flight loads are consulted BEFORE the fetch,
+      // under the key the spec determines. Round 1 fetched first and keyed the
+      // cache on the fetched `effectiveUrl` only afterwards, so a Duplicate, a
+      // Redo or a Save after a held Check downloaded the same bytes again — a
+      // repeat charged to the world's ledger, which never refunds.
+      const key = keyFor(record)
+      const cached = cache.get(key)
+      if (cached) {
+        if (!stillWanted(record)) return drop(record)
+        return useEntry(record, key, cached)
+      }
+
+      let job = loads.get(key)
+      if (!job) {
+        job = fetchAndParse(record, key, controller)
+        loads.set(key, job)
+        job.then(noop, noop).finally(() => { if (loads.get(key) === job) loads.delete(key) })
+      }
+
+      const got = await job
+      if (got.reason === 'aborted') return drop(record)
+      if (!got.ok) return fail(record, got.reason, got.message)
+      if (!stillWanted(record)) return drop(record)
+
+      return useEntry(record, key, got.entry)
+    } finally {
+      controllers.delete(controller)
+    }
+  }
+
+  /**
+   * V4 — one fetch and one parse per template key. Every node that asks while
+   * the job is in flight awaits the same promise, so two nodes with one URL
+   * download once (and parse once, through `templateFor`'s own map).
+   */
+  function fetchAndParse(record, key, controller) {
+    const { spec } = record
+    return (async () => {
       const fetched = await fetchModel({
         url: spec.url, sha256: spec.sha256 ?? null, signal: controller.signal,
         worldBaseUrl: record.worldBaseUrl, ledger,
       })
-      if (fetched.reason === 'aborted') return drop(record)
-      if (!fetched.ok) return fail(record, fetched.reason, fetched.message)
-      if (!stillWanted(record)) return drop(record)
+      if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'cancelled' }
+      if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
 
-      const key = templateKey(fetched.effectiveUrl ?? spec.url, spec.sha256 ?? null)
       const got = await templateFor(key, record, fetched)
-      if (got.reason === 'aborted' || !got.ok) return fail(record, got.reason, got.message)
-      if (!stillWanted(record)) return drop(record)
+      if (!got.ok) return got
 
-      record.key = key
-      cache.acquire(key)
-      const entry = cache.get(key)
-      const built = makeInstance(entry.template)
-      if (!stillWanted(record)) { cache.release(key); return drop(record) }
-      record.wrapper?.parent?.remove(record.wrapper)
-      record.wrapper = built.wrapper
-      record.clips = built.clips
-      record.droppedTracks = built.droppedTracks
-      setStatus(record, MODEL_STATUS.loaded, null, built.droppedTracks
-        ? `${built.droppedTracks} animation tracks couldn't be bound` : null)
-      attachOrWait(record)
-    } finally {
-      controllers.delete(controller)
-    }
+      // V4 — when a redirect changed the URL the bytes came from, the same
+      // template answers to the effective URL's key as well, as the form's held
+      // Check already stores it. The texture reservation is taken once, in the
+      // parse; the template is one object under both keys.
+      const effective = templateKey(fetched.effectiveUrl ?? spec.url, spec.sha256 ?? null)
+      if (effective !== key && !cache.has(effective)) {
+        const entry = cache.set(effective, { ...got.entry.template, textureBytes: got.entry.textureBytes })
+        entry.refs = got.entry.refs
+        entry.idle = got.entry.idle
+      }
+      return { ok: true, entry: got.entry }
+    })()
+  }
+
+  /** Everything after the entry exists: acquire it, build an instance, attach. */
+  function useEntry(record, key, entry) {
+    record.key = key
+    cache.acquire(key)
+    const held = cache.get(key) ?? entry
+    const built = makeInstance(held.template)
+    if (!stillWanted(record)) { cache.release(key); return drop(record) }
+    record.wrapper?.parent?.remove(record.wrapper)
+    record.wrapper = built.wrapper
+    record.clips = built.clips
+    record.droppedTracks = built.droppedTracks
+    setStatus(record, MODEL_STATUS.loaded, null, built.droppedTracks
+      ? `${built.droppedTracks} animation tracks couldn't be bound` : null)
+    attachOrWait(record)
   }
 
   /**
@@ -423,4 +482,21 @@ export function createModelBridge(deps = {}) {
 /** The key an instance's spec is compared by (A9's "spec unchanged"). */
 export function specKey(spec) {
   return `${spec.url}\u0000${spec.sha256 ?? ''}\u0000${(spec.bounds ?? []).join(',')}`
+}
+
+/**
+ * V4 (round 2) — the key a stored spec's template lives under: the spec URL
+ * resolved against the world's base (A1/A13) plus the pinned hash — never the
+ * URL a redirect ended at. The bridge keys its cache, its in-flight loads and
+ * the instance's `record.key` by this, and `app.js`'s held Check seeds its
+ * template under the same key, so Save costs no fetch.
+ *
+ * @param {{url: string, sha256?: string|null}} spec
+ * @param {string|null} [worldBaseUrl]
+ * @returns {string}
+ */
+export function specTemplateKey(spec, worldBaseUrl = null) {
+  const url = spec?.url
+  const resolved = resolveModelUrl(url, worldBaseUrl)
+  return templateKey(resolved.ok ? resolved.url : url, spec?.sha256 ?? null)
 }

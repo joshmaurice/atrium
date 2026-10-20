@@ -16,7 +16,7 @@ export {
   MODEL_WRAPPER_FLAG, MODEL_NAME_KEY, PLACEHOLDER_COLOURS,
 } from './model-instances.js'
 export {
-  createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specKey,
+  createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specKey, specTemplateKey,
 } from './model-bridge.js'
 export { AnimationBridge } from './AnimationBridge.js'
 export { Stage } from './Stage.js'

@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Group, Object3D } from 'three'
-import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT } from '../src/model-bridge.js'
+import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
 import { validateModelHost } from '@atrium/client/model-spec'
 
 /** A SOM node stand-in: identity, name, a glTF node object and model extras. */
@@ -258,14 +258,96 @@ test('Z5/A8: removing a node removes its wrapper and idles its template', async 
   assert.equal(h.bridge.cache.get(h.bridge.cache.keys()[0]).refs, 0)
 })
 
-test('Z5/A10: two nodes with one URL fetch twice and parse once', async () => {
+test('Z5/A10: two nodes with one URL added together fetch once and parse once (V4)', async () => {
   const h = harness()
   h.addNode(somNode('Chair'))
   h.addNode(somNode('Bench'))
   await tick()
-  assert.equal(h.state.fetches, 2, 'each node asks for its URL')
+  assert.equal(h.state.fetches, 1, 'one URL, one download — the second node awaits the in-flight load (V4)')
   assert.equal(h.state.parses, 1, 'but the template is parsed once')
   assert.equal(h.bridge.cache.size, 1)
+})
+
+// ── V4 (round 2): look up before fetching ───────────────────────────────────
+//
+// Round 1 called `fetchModel` first and consulted the template cache only
+// afterwards, keyed on the fetched `effectiveUrl`. In a browser (V3 fixed) one
+// model was downloaded again by every Duplicate, every Redo and every Save
+// after a Check — each repeat charged to the world's ledger, which never
+// refunds. These are the counting-stub tests from the revision's V4 list.
+
+test('V4/A8: deleting the only instance and adding it again fetches nothing', async () => {
+  const h = harness()
+  h.addNode(somNode('Chair'))
+  await tick()
+  assert.equal(h.state.fetches, 1)
+  h.removeNode('Chair')
+  assert.equal(h.bridge.cache.size, 1, 'the idle template is kept (A8)')
+
+  h.addNode(somNode('Chair'))                 // Redo
+  await tick()
+  assert.equal(h.state.fetches, 1, 'the cache answered: no second download')
+  assert.equal(h.bridge.status('Chair').status, MODEL_STATUS.loaded)
+  assert.equal(h.childrenOf('Chair').length, 1)
+})
+
+test('V4/A4: Duplicate — a second node with the same URL after the first loaded — fetches nothing', async () => {
+  const h = harness()
+  h.addNode(somNode('Chair'))
+  await tick()
+  assert.equal(h.state.fetches, 1)
+
+  h.addNode(somNode('Chair copy'))            // the same spec, a second node
+  await tick()
+  assert.equal(h.state.fetches, 1, 'one URL, one download (A4)')
+  assert.equal(h.state.parses, 1, 'and one parse')
+  assert.equal(h.bridge.status('Chair copy').status, MODEL_STATUS.loaded)
+})
+
+test('V4/A8: a held Check’s template — seeded under the bridge’s own key — is used with no fetch', async () => {
+  const h = harness()
+  // What app.js's Check does: it downloads once itself and holds the parsed
+  // template under `specTemplateKey(spec, worldBaseUrl)` — the key the bridge
+  // looks up. Save then adds the node, and that node must not download again.
+  const spec = { url: 'https://h/chair.glb', sha256: null }
+  h.bridge.cache.set(specTemplateKey(spec, null), {
+    scene: new Group(), animations: [], textureBytes: 0,
+  })
+
+  h.addNode(somNode('Chair', { url: 'https://h/chair.glb' }))
+  await tick()
+  assert.equal(h.state.fetches, 0, 'the held template answered: no download')
+  assert.equal(h.bridge.status('Chair').status, MODEL_STATUS.loaded)
+  assert.equal(h.childrenOf('Chair').length, 1)
+})
+
+test('V4/Z3: a pinned and an unpinned spec of one URL are two keys, so two fetches', async () => {
+  const h = harness()
+  h.addNode(somNode('Chair', { url: 'https://h/m.glb' }))
+  h.addNode(somNode('ChairPinned', { url: 'https://h/m.glb', sha256: 'a'.repeat(64) }))
+  await tick()
+  assert.equal(h.state.fetches, 2, 'the pinned bytes were never downloaded here')
+  assert.equal(h.bridge.cache.size, 2)
+  assert.equal(h.bridge.status('ChairPinned').status, MODEL_STATUS.loaded)
+
+  // The pinned node's twin, however, is the same key: no third download.
+  h.addNode(somNode('ChairPinned copy', { url: 'https://h/m.glb', sha256: 'a'.repeat(64) }))
+  await tick()
+  assert.equal(h.state.fetches, 2)
+})
+
+test('V4/A9: after resetWorld the same URL is fetched again', async () => {
+  const h = harness()
+  h.addNode(somNode('Chair'))
+  await tick()
+  assert.equal(h.state.fetches, 1)
+
+  h.bridge.resetWorld()
+  assert.equal(h.bridge.cache.size, 0, 'the cache went with the world')
+  h.bridge.reconcile()
+  await tick()
+  assert.equal(h.state.fetches, 2, 'the new world downloads it again')
+  assert.equal(h.bridge.status('Chair').status, MODEL_STATUS.loaded)
 })
 
 test('A10: the instance limit counts model nodes in allNodes order', () => {

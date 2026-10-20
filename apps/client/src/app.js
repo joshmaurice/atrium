@@ -27,7 +27,7 @@ import { palettePlacement, paletteName, teleporterName, copyName, modelName, fir
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
 import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, sha256Hex } from '@atrium/client/model-fetch'
-import { createModelBridge, countVertices, measureBounds, parseTemplate, templateKey, MODEL_STATUS } from '@atrium/renderer-three'
+import { createModelBridge, countVertices, measureBounds, parseTemplate, templateKey, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
@@ -2690,24 +2690,41 @@ let heldCheck = null
 
 function releaseHeldCheck() {
   if (!heldCheck) return
+  // V4 — the held template can answer to several keys (a pinned and an unpinned
+  // one, and the effective URL's when a redirect changed it): its texture bytes
+  // are released once, not once per key.
+  let released = false
   for (const key of heldCheck.keys) {
     const entry = modelBridge.cache.get(key)
     if (entry && entry.refs === 0) {
-      modelBridge.textureBudget.release(entry.textureBytes ?? 0)
+      if (!released) {
+        modelBridge.textureBudget.release(entry.textureBytes ?? 0)
+        released = true
+      }
       modelBridge.cache.delete(key)
     }
   }
   heldCheck = null
 }
 
-function holdCheckedTemplate({ effectiveUrl, template, textureBytes, bytesSha256 }) {
+function holdCheckedTemplate({ url, worldBaseUrl, effectiveUrl, template, textureBytes, bytesSha256 }) {
   releaseHeldCheck()
-  const keys = [templateKey(effectiveUrl, bytesSha256)]
-  const unpinned = templateKey(effectiveUrl, null)
-  if (!keys.includes(unpinned)) keys.push(unpinned)
+  // V4 — the keys the template is held under are the keys the bridge looks it
+  // up by: `specTemplateKey` is the same function the bridge uses (the spec URL
+  // resolved against the world's base, plus the pinned hash), so the node Save
+  // adds finds this template and downloads nothing. The effective URL's keys
+  // cover a redirect that changed the address the bytes came from.
+  const keys = [
+    specTemplateKey({ url, sha256: bytesSha256 }, worldBaseUrl),
+    specTemplateKey({ url, sha256: null }, worldBaseUrl),
+  ]
+  if (effectiveUrl && effectiveUrl !== url) {
+    keys.push(templateKey(effectiveUrl, bytesSha256), templateKey(effectiveUrl, null))
+  }
+  const unique = [...new Set(keys)]
   if (textureBytes > 0 && !modelBridge.textureBudget.reserve(textureBytes)) return
-  for (const key of keys) modelBridge.cache.set(key, { ...template, textureBytes })
-  heldCheck = { keys, textureBytes }
+  for (const key of unique) modelBridge.cache.set(key, { ...template, textureBytes })
+  heldCheck = { keys: unique, textureBytes }
 }
 
 /** Z7/L9 — Check: the client's spec rules first (in the form), then the real
@@ -2717,7 +2734,8 @@ async function checkModelNow({ url, worldBaseUrl }) {
   if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'the download was cancelled' }
   if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
 
-  const key = templateKey(fetched.effectiveUrl ?? url, null)
+  // V4 — the same key the bridge will look up after Save, not the fetched URL.
+  const key = specTemplateKey({ url, sha256: null }, worldBaseUrl)
   const cached = modelBridge.cache.get(key)
   let template = cached?.template ?? null
   if (!template) {
@@ -2728,6 +2746,8 @@ async function checkModelNow({ url, worldBaseUrl }) {
     if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
     template = parsed.template
     holdCheckedTemplate({
+      url,
+      worldBaseUrl,
       effectiveUrl: fetched.effectiveUrl ?? url,
       template,
       textureBytes: parsed.textureBytes ?? 0,
