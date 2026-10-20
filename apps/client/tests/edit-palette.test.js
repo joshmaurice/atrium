@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  palettePlacement, paletteName, copyName, firstFreeName, PALETTE_DISTANCE, PALETTE_LABELS, MAX_NAME_LENGTH,
+  palettePlacement, paletteName, copyName, teleporterName, firstFreeName, PALETTE_DISTANCE, PALETTE_LABELS, MAX_NAME_LENGTH,
 } from '../src/edit-palette.js'
 
 const close = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps
@@ -137,4 +137,40 @@ test('long names: a base ending in a surrogate pair is not split', () => {
 
 test('firstFreeName: null when nothing in the limit is free', () => {
   assert.equal(firstFreeName('A', (n) => ` ${n}`, () => false, 5), null)
+})
+
+// ── Teleporter names (edit-polish-2, L4) ────────────────────────────────────
+
+test('teleporter names: "Teleporter" when it is free', () => {
+  assert.equal(teleporterName(freeIn([])), 'Teleporter')
+})
+
+test('teleporter names: "Teleporter 2", "Teleporter 3"… as names are taken', () => {
+  assert.equal(teleporterName(freeIn(['Teleporter'])), 'Teleporter 2')
+  assert.equal(teleporterName(freeIn(['Teleporter', 'Teleporter 2'])), 'Teleporter 3')
+})
+
+test('teleporter names: skips taken numbers, like the palette does', () => {
+  assert.equal(teleporterName(freeIn(['Teleporter', 'Teleporter 2', 'Teleporter 4'])), 'Teleporter 3')
+})
+
+test('teleporter names: respect the 256-character limit and the D3 rules, as firstFreeName does', () => {
+  // The first 99 candidates are taken: the 100th is the one it returns, still
+  // inside the limit and still accepted by the same rules the server applies.
+  const taken = Array.from({ length: 99 }, (_, i) => (i === 0 ? 'Teleporter' : `Teleporter ${i + 1}`))
+  const isFree = freeIn(taken)
+  const name = teleporterName(isFree)
+  assert.equal(name, 'Teleporter 100')
+  assert.ok(name.length <= MAX_NAME_LENGTH)
+  assert.ok(isFree(name), 'the name it hands out passes the D3 rules')
+})
+
+test('teleporter names: null when no candidate in the limit is free', () => {
+  assert.equal(teleporterName(() => false), null)
+})
+
+test('teleporter is not a palette kind — the palette handler would throw on it (P2)', () => {
+  assert.deepStrictEqual(Object.keys(PALETTE_LABELS), ['cube', 'plane', 'sphere', 'cylinder', 'ramp'])
+  assert.equal('teleporter' in PALETTE_LABELS, false, 'PALETTE_LABELS is unchanged')
+  assert.throws(() => paletteName('teleporter', freeIn([])), /unknown primitive kind/)
 })

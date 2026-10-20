@@ -81,6 +81,24 @@ export function paletteName(kind, isFree) {
   return firstFreeName(label, (n) => (n === 1 ? '' : ` ${n}`), isFree)
 }
 
+/**
+ * `Teleporter`, `Teleporter 2`, `Teleporter 3`… (edit-polish-2, L4)
+ *
+ * A pad's default name, read in the Name field and in Undo's tooltip, exactly
+ * as the palette's kinds read `Cube`, `Cube 2`. Built on `firstFreeName`, so it
+ * shares the 256-character limit and the "reserve the suffix first" rule.
+ * Labels and triggers key on the node name, not on a prefix, and `isTeleporter`
+ * reads the node's extras, so nothing depends on the old `teleporter-<uuid>`
+ * shape. Teleporters are not a palette kind (PALETTE_LABELS is unchanged), so
+ * this is its own function rather than a PALETTE_LABELS entry.
+ *
+ * @param {(name: string) => boolean} isFree   e.g. `n => som.checkNewName(n).ok`
+ * @returns {string|null}  null if none of the first `limit` candidates is free
+ */
+export function teleporterName(isFree) {
+  return firstFreeName('Teleporter', (n) => (n === 1 ? '' : ` ${n}`), isFree)
+}
+
 /** `<name> copy`, `<name> copy 2`… */
 export function copyName(name, isFree) {
   return firstFreeName(name, (n) => (n === 1 ? ' copy' : ` copy ${n}`), isFree)

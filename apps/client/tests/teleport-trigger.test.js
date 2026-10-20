@@ -340,6 +340,60 @@ describe('createTeleportTrigger', () => {
     assert.equal(triggered.length, 1)
   })
 
+  // edit-polish-2, L3/S1/Z5 — a pad restored by a redo. app.js rebuilds the pad
+  // list from the world's add/remove events, so after an undo the pad is gone
+  // from the list and its redo is NEW to it: it starts disarmed. Standing on its
+  // spot when Edit mode turns off must not teleport you away.
+  test('removed then restored under the avatar — it does not fire until it is left and re-entered', () => {
+    const triggered = []
+    const trigger = createTeleportTrigger({
+      onTrigger: (ev) => triggered.push(ev),
+      resolveDestination: (d) => d,
+    })
+    const pad = [{ name: 'pad-1', position: [0, 0, 0], destination: 'ws://dest.com' }]
+    trigger.setReady(true)
+    trigger.setActive(true)
+    trigger.setPads(pad)
+    trigger.update([10, 0, 10])               // outside: arms
+
+    trigger.setPads([])                       // undo: the pad (and its zone) goes
+    trigger.setPads(pad)                      // redo: it comes back at the same place
+
+    trigger.update([0, 0, 0])                 // the avatar is standing on its spot
+    assert.equal(triggered.length, 0, 'a pad restored under the avatar must not fire')
+
+    trigger.update([10, 0, 10])               // walks off — arms it
+    trigger.update([0, 0, 0])                 // and back on — fires
+    assert.equal(triggered.length, 1, 'fires on a real re-entry')
+    assert.equal(triggered[0].name, 'pad-1')
+    assert.equal(triggered[0].destination, 'ws://dest.com')
+  })
+
+  test('the same when Edit mode off/on (setActive false/true) brackets the return', () => {
+    const triggered = []
+    const trigger = createTeleportTrigger({
+      onTrigger: (ev) => triggered.push(ev),
+      resolveDestination: (d) => d,
+    })
+    const pad = [{ name: 'pad-1', position: [0, 0, 0], destination: 'ws://dest.com' }]
+    trigger.setReady(true)
+    trigger.setActive(true)
+    trigger.setPads(pad)
+    trigger.update([10, 0, 10])               // outside: arms
+
+    trigger.setActive(false)                  // Edit mode on
+    trigger.setPads([])                       // the undo
+    trigger.setPads(pad)                      // the redo
+    trigger.setActive(true)                   // Edit mode off, standing on it
+
+    trigger.update([0, 0, 0])
+    assert.equal(triggered.length, 0, 'no teleport on the first frame after editing')
+
+    trigger.update([10, 0, 10])               // steps off
+    trigger.update([0, 0, 0])                 // and back on
+    assert.equal(triggered.length, 1, 'fires normally afterwards')
+  })
+
   test('reset drops pads — nothing fires until pads are set again', () => {
     const triggered = []
     const trigger = createTeleportTrigger({
