@@ -10,7 +10,8 @@
     ".": "./src/AtriumClient.js",
     "./AvatarController": "./src/AvatarController.js",
     "./NavigationController": "./src/NavigationController.js",
-    "./AnimationController": "./src/AnimationController.js"
+    "./AnimationController": "./src/AnimationController.js",
+    "./model-spec": "./src/model-spec.js"
   },
   "scripts": {
     "test": "node --test tests/*.test.js"

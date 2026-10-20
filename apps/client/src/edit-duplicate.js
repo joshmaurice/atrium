@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
+import { modelExtrasProblem, modelReasonText } from '@atrium/client/model-spec'
+
 /**
  * edit-duplicate.js — whether a node can be duplicated, and the `add`
  * descriptor of its copy (Phase 3 step 1b-2, N3). Pure: no DOM, no three.js.
@@ -66,16 +68,22 @@ const DESTINATION_MAX = 2048    // send-policy.js checkTeleporterDestination
 
 // The server's L5 checks on a non-avatar `add` (send-policy.js
 // checkAtriumExtras), so a legacy value is refused here, not by the server.
+// models-by-url (Z1) adds its model rule from the shared client module, so
+// Duplicate and Undo report an invalid legacy model value instead of sending an
+// `add` the server refuses. Both sides read the same vectors file.
 function atriumProblem(extras) {
   if (extras == null || typeof extras !== 'object') return null
   if (!Object.hasOwn(extras, 'atrium')) return null
   const atrium = extras.atrium
   if (!isPlainObject(atrium)) return 'extras.atrium is not an object'
-  if (!Object.hasOwn(atrium, 'teleporter')) return null
-  const tp = atrium.teleporter
-  if (!isPlainObject(tp)) return 'its teleporter data is not an object'
-  if (typeof tp.destination !== 'string') return 'its teleporter destination is not text'
-  if (tp.destination.length > DESTINATION_MAX) return `its teleporter destination is over ${DESTINATION_MAX} characters`
+  if (Object.hasOwn(atrium, 'teleporter')) {
+    const tp = atrium.teleporter
+    if (!isPlainObject(tp)) return 'its teleporter data is not an object'
+    if (typeof tp.destination !== 'string') return 'its teleporter destination is not text'
+    if (tp.destination.length > DESTINATION_MAX) return `its teleporter destination is over ${DESTINATION_MAX} characters`
+  }
+  const modelProblem = modelExtrasProblem(extras)
+  if (modelProblem) return `its model data would be refused (${modelReasonText(modelProblem)})`
   return null
 }
 
