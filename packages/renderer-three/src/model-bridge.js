@@ -92,11 +92,17 @@ export function createModelBridge(deps = {}) {
   const validateHost = hooks.validateModelHost ?? defaultValidateModelHost
 
   const ledger = hooks.ledger ?? createWorldLedger({ worldBytes: MODEL_LIMITS.worldBytes })
-  const textureBudget = hooks.textureBudget ?? createTextureBudget()
   const cache = hooks.cache ?? createTemplateCache()
   // M3 (round 6) — one deadline per job. The seam exists so a test can drive a
   // controlled clock (the deadline counts WORK, not waiting).
   const newDeadline = hooks.newDeadline ?? (() => createJobDeadline())
+  // M4 (round 6) — each world GENERATION has its own texture-budget object, and
+  // every reservation and release captures the budget of the generation it
+  // started in. Round 5 reset one object in place, so a parse from the old world
+  // that finished later released its bytes against the NEW world's total (the
+  // outside reviewer reproduced it: old reservation 64, new world 100, 36 after
+  // the late parse) and never disposed its template.
+  let textureBudget = hooks.textureBudget ?? createTextureBudget()
 
   let worldGeneration = 1
   let viewGeneration = 1
@@ -227,7 +233,10 @@ export function createModelBridge(deps = {}) {
     ledger.reset()
     for (const record of instances.values()) { settle(record); removeWrapper(record) }
     instances.clear()
-    textureBudget.reset()
+    // M4 — the new generation gets a budget OBJECT of its own, so a reservation
+    // taken by the old world (and released by a parse that finishes late) can
+    // never lower this one's total.
+    textureBudget = createTextureBudget({ bytes: textureBudget.limit })
     cache.clear((template) => dispose(template))
     notifyAdmission()
   }
@@ -444,6 +453,8 @@ export function createModelBridge(deps = {}) {
 
       return serialize(async () => {
         deadline?.resume()
+        // M4 — the budget of THIS generation, captured before the parse starts.
+        const budget = textureBudget
         const again = cache.get(key)
         if (again) return { ok: true, entry: again }
         if (!wanted()) return { ok: false, reason: 'aborted', message: 'cancelled' }
@@ -451,16 +462,23 @@ export function createModelBridge(deps = {}) {
         const parsed = await parse({
           kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
           dependencies: fetched.dependencies ?? new Map(),
-          reserveTexture, releaseTexture, deadline,
+          // M4 — the reservation pair names the budget of THIS generation: a
+          // release from a parse that outlives a world change is a no-op for the
+          // new world rather than a subtraction from it.
+          reserveTexture: (bytes) => reserveInto(budget, bytes),
+          releaseTexture: (bytes) => budget.release(bytes),
+          deadline,
         })
         if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
 
         const textureBytes = parsed.textureBytes ?? 0
         // W3 — the world may have moved on while the parse ran (a world change, the
         // node removed, the form closed): give the reservation back rather than
-        // charging a world that no longer wants the template.
+        // charging a world that no longer wants the template, and M4 — dispose the
+        // template the old world's parse made, exactly once.
         if (!wanted()) {
-          releaseTexture?.(textureBytes)
+          dispose(parsed.template)
+          budget.release(textureBytes)
           return { ok: false, reason: 'aborted', message: 'cancelled' }
         }
 
@@ -492,14 +510,11 @@ export function createModelBridge(deps = {}) {
     return promise
   }
 
-  /** A5/A8 — reserve, evicting idle templates least-recently-used first. */
-  function reserveTexture(bytes) {
-    if (!textureBudget.fits(bytes)) cache.evictIdleFor(bytes, textureBudget, dispose)
-    return textureBudget.reserve(bytes)
-  }
-
-  function releaseTexture(bytes) {
-    textureBudget.release(bytes)
+  /** A5/A8/M4 — reserve from `budget` (the generation the caller named), evicting
+ *  that budget's idle templates least-recently-used first. */
+  function reserveInto(budget, bytes) {
+    if (!budget.fits(bytes)) cache.evictIdleFor(bytes, budget, dispose)
+    return budget.reserve(bytes)
   }
 
   /** A9 — is this result still the one the world and the SOM want? */
@@ -667,7 +682,8 @@ export function createModelBridge(deps = {}) {
     /** The cache and its budget, for tests and for the form's Check (Z7). */
     cache,
     ledger,
-    textureBudget,
+    /** M4 — the CURRENT generation's budget (a new object after a world change). */
+    get textureBudget() { return textureBudget },
     get instanceCount() { return instances.size },
     get instances() { return instances },
     get viewGeneration() { return viewGeneration },

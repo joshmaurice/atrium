@@ -914,3 +914,108 @@ test('M3: the job\'s clock stops while it waits for its turn, and starts again f
   assert.equal(h.bridge.status('M1').status, MODEL_STATUS.loaded)
   assert.equal(h.bridge.status('M2').status, MODEL_STATUS.loaded)
 })
+
+// ---------------------------------------------------------------------------
+// M4 (round 6) — a parse that finishes after a world reset
+//
+// Round 5 kept ONE budget object and reset it in place, so a parse from the old
+// world that finished later called `releaseTexture` on that same object and
+// lowered the NEW world's total (the outside reviewer reproduced it: old
+// reservation 64, new world 100, 36 after the late parse), and the old template
+// was never disposed.
+// ---------------------------------------------------------------------------
+
+test('M4: after a world reset the old parse releases the OLD budget and its template is disposed once', async () => {
+  const per = estimateTextureBytes(2048, 2048)
+  const disposed = []
+  const pending = []
+  const gatedLoader = { parseAsync: () => new Promise((resolve) => pending.push(resolve)) }
+  const templateA = { scene: new Group(), animations: [] }
+  const templateB = { scene: new Group(), animations: [] }
+
+  const h = harness({
+    textureBudget: createTextureBudget({ bytes: per * 10 }),
+    modelBytes: imageGlb({ width: 2048, height: 2048 }),
+    parseLoader: gatedLoader,
+    disposeTemplate: (template) => disposed.push(template),
+  })
+
+  h.addNode(somNode('Old', { url: 'https://h/old.glb' }))
+  await settle()
+  const oldBudget = h.bridge.textureBudget
+  assert.equal(oldBudget.taken, per, 'the old world reserved the estimate before parsing')
+
+  h.bridge.resetWorld()
+  // A world change replaces the SOM too: the old node is gone from the document.
+  h.removeNode('Old')
+  const freshBudget = h.bridge.textureBudget
+  assert.notEqual(freshBudget, oldBudget, 'the new generation has a budget OBJECT of its own')
+  assert.equal(freshBudget.taken, 0, 'and starts at zero')
+
+  h.addNode(somNode('New', { url: 'https://h/new.glb' }))
+  await settle()
+
+  // The OLD parse settles, in a world that no longer exists.
+  pending[0](templateA)
+  await settle()
+  assert.equal(oldBudget.taken, 0, 'the old reservation went back to the OLD budget')
+  assert.deepEqual(disposed, [templateA], 'the old template is disposed exactly once')
+
+  // The new world loads its own model normally.
+  assert.equal(pending.length, 2, 'the new parse ran once the queue reached it')
+  pending[1](templateB)
+  await settle()
+  assert.equal(freshBudget.taken, per, 'the new world is charged its own model')
+  assert.equal(h.bridge.status('New').status, MODEL_STATUS.loaded)
+  assert.deepEqual(disposed, [templateA], 'and nothing else was disposed')
+})
+
+test('M4: a late parse releases the old budget, never the new world\'s', async () => {
+  // The discriminating order: the new world reserves FIRST, and the old parse
+  // settles afterwards. Round 5's single, in-place-reset budget object made that
+  // late release subtract from the new world's total.
+  const per = estimateTextureBytes(2048, 2048)
+  const disposed = []
+  const pending = []
+  const gatedLoader = { parseAsync: () => new Promise((resolve) => pending.push(resolve)) }
+  const templateA = { scene: { traverse: (fn) => fn({ geometry: { dispose: () => disposed.push('old') } }) } }
+  const templateB = { scene: new Group(), animations: [] }
+
+  const h = harness({
+    textureBudget: createTextureBudget({ bytes: per * 10 }),
+    modelBytes: imageGlb({ width: 2048, height: 2048 }),
+    parseLoader: gatedLoader,
+    // M3 — a deadline the gated parse runs past, so the job is `timeout` at once
+    // and its release lands when the parse finally settles.
+    newDeadline: () => createJobDeadline({ timeoutMs: 120 }),
+  })
+
+  h.addNode(somNode('Old', { url: 'https://h/old.glb' }))
+  await settle()
+  const oldBudget = h.bridge.textureBudget
+  assert.equal(oldBudget.taken, per, 'the old world reserved it')
+  await new Promise((resolve) => setTimeout(resolve, 200))    // the old parse runs past its deadline
+  assert.equal(h.bridge.status('Old').reason, 'timeout')
+  assert.equal(pending.length, 1, 'the old parse is still running')
+
+  h.bridge.resetWorld()
+  // A world change replaces the SOM too: the old node is gone from the document.
+  h.removeNode('Old')
+  const freshBudget = h.bridge.textureBudget
+  h.addNode(somNode('New', { url: 'https://h/new.glb' }))
+  await settle()
+  assert.equal(pending.length, 2, 'the new world parses its own model')
+  assert.equal(freshBudget.taken, per, 'the new world reserved its own model')
+
+  // Now the old parse settles: dispose it once, and release against the OLD budget.
+  pending[0](templateA)
+  await settle()
+  assert.deepEqual(disposed, ['old'], 'the old template is disposed exactly once')
+  assert.equal(freshBudget.taken, per, 'the new world\'s total is unchanged')
+  assert.equal(oldBudget.taken, 0, 'the old reservation went back to the old budget')
+
+  pending[1](templateB)
+  await settle()
+  assert.equal(h.bridge.status('New').status, MODEL_STATUS.loaded, 'the new world still loads')
+  assert.equal(freshBudget.taken, per)
+})
