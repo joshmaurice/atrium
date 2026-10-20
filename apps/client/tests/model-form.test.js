@@ -10,6 +10,7 @@ import {
   createModelForm, createFormGate, buildModelDescriptor, modelNameFromUrl,
   middleTruncate, checkSummary, DEFAULT_MODEL_NAME, PRIVACY_NOTE,
 } from '../src/model-form.js'
+import { modelReasonText } from '@atrium/client/model-spec'
 
 /** A stand-in for the DOM element the page hands in. */
 function fakeElement() {
@@ -112,6 +113,43 @@ test('Z7: the client refuses a bad URL itself, without a fetch', async () => {
     assert.equal(h.form.canSave(), false, `${bad} is refused`)
   }
   assert.equal(h.calls.checks.length, 0, 'nothing was fetched')
+})
+
+// V5 (round 2) — a refused URL used to put the raw reason code (`url-scheme`,
+// `url-chars`) in `#model-status`, where the owner reads it. Nothing about the
+// codes is user-facing.
+test('V5: a refused URL reads as plain text in the status, never as a raw code', async () => {
+  const h = harness()
+  h.form.open()
+  const cases = [
+    ['http://host/chair.glb', 'url-scheme'],
+    ['javascript:alert(1)', 'url-scheme'],
+    ['http://[bad/m.glb', 'url-scheme'],
+    ['//host/chair.glb', 'url-scheme'],
+    ['/evil\u0009.glb', 'url-chars'],
+    ['https://host/a b.glb', 'url-chars'],
+    ['https://host/a\\b.glb', 'url-chars'],
+  ]
+  for (const [bad, code] of cases) {
+    h.form.onUrlInput(bad)
+    await h.form.check()
+    const shown = h.elements.status.textContent
+    assert.equal(shown, modelReasonText(code), `${JSON.stringify(bad)} reads as its plain text`)
+    assert.equal(h.elements.status.style.display, '', 'the status line is shown')
+    assert.notEqual(shown, code, 'and never the raw code')
+    assert.ok(!/^url-/.test(shown), `no reason code leaks into the panel: ${shown}`)
+    assert.equal(h.form.canSave(), false)
+  }
+  assert.equal(h.calls.checks.length, 0, 'still nothing fetched')
+})
+
+test('V5: a URL over the length cap reads as plain text too', async () => {
+  const h = harness()
+  h.form.open()
+  h.form.onUrlInput(`https://host/${'a'.repeat(2100)}.glb`)
+  await h.form.check()
+  assert.equal(h.elements.status.textContent, modelReasonText('url-length'))
+  assert.equal(h.calls.checks.length, 0)
 })
 
 test('Z7/L9: the pin box is shown only for a checked .glb, and its hash rides the descriptor', async () => {

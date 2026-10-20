@@ -19,7 +19,7 @@
  * the palette handler would throw on an unknown kind.
  */
 
-import { modelUrlProblem, MODEL_URL_MAX } from '@atrium/client/model-spec'
+import { modelUrlProblem, modelReasonText, MODEL_URL_MAX } from '@atrium/client/model-spec'
 
 /** The default name when the URL has no file name of its own (Z7). */
 export const DEFAULT_MODEL_NAME = 'Model'
@@ -197,8 +197,11 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     const url = state.url.trim()
     if (!url) return { reason: 'bad-spec', message: 'Enter a model URL' }
     const problem = modelUrlProblem(url)
-    if (problem) return { reason: 'bad-spec', message: problem }
-    if (url.length > MODEL_URL_MAX) return { reason: 'bad-spec', message: 'the model URL is not valid' }
+    // V5 — the raw code (`url-scheme`, `url-chars`) used to be shown in
+    // `#model-status`; the owner reads the same plain text the rest of the
+    // model rules use.
+    if (problem) return { reason: 'bad-spec', message: modelReasonText(problem) }
+    if (url.length > MODEL_URL_MAX) return { reason: 'bad-spec', message: modelReasonText('url-length') }
     return null
   }
 
