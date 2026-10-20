@@ -6,9 +6,9 @@
  * 1b-1, B1 and E6). Pure: no DOM.
  *
  * Edit is the only editing mode (edit-polish-2, L6). Teleporters are added,
- * moved and deleted in it: the teleporter placement mode was retired with the
- * toolbar's Place Teleporter, and the teleporter delete mode in the
- * edit-tweaks round (K4, Z6). So the trigger's activity is derived from the
+ * moved and deleted in it: the placement mode was retired with the toolbar's
+ * Place Teleporter (Z4), and the delete mode in the earlier edit-tweaks round
+ * (K4, Z6). So the trigger's activity is derived from the
  * one mode, every time it changes:
  *
  *   triggerActive = !editMode

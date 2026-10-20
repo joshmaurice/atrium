@@ -434,6 +434,13 @@
   #edit-panel .ep-status:empty { display: none; }
   #edit-panel .ep-label { color: #94a3b8; font-size: 11px; margin-bottom: 3px; }
   #edit-panel #ep-palette { flex-wrap: wrap; margin-bottom: 8px; }
+  /* edit-polish-2 L2 — the destination form is a panel section now, not an
+     absolutely-positioned box: it fits the panel's 250 px like the rest. */
+  #edit-panel #tp-form { margin-bottom: 8px; }
+  #edit-panel #tp-form .ep-title { margin-bottom: 6px; }
+  #edit-panel #tp-form select,
+  #edit-panel #tp-form input[type="text"] { min-width: 0; }
+  #edit-panel #tp-form button { padding: 3px 8px; font-size: 11px; }
   #edit-panel .ep-actions { margin-top: 6px; margin-bottom: 0; }
   #edit-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
   #edit-panel .ep-buttons button.ep-danger:not(:disabled) { border-color: #7f1d1d; color: #fca5a5; }
@@ -513,8 +520,9 @@
       <button id="auth-logout-btn">Logout</button>
     </div>
     <div class="toolbar-sep"></div>
-    <button id="tp-place-btn" disabled title="Place a teleporter pad">Place Teleporter</button>
-    <button id="tp-cancel-btn" style="display:none">Cancel</button>
+    <!-- edit-polish-2 (Z4): the toolbar's Place Teleporter and its Cancel are
+         gone. A pad is added from the Edit panel's Teleporter button, moved
+         with the handles and deleted with Delete, all in Edit mode. -->
     <button id="edit-toggle-btn" style="display:none" title="Move, rotate, scale and rename this world's objects">Edit</button>
   </div>
 </div>
@@ -535,20 +543,6 @@
   <div id="overlay"></div>
   <div id="hud-hint"></div>
   <div id="crosshair"></div>
-  <!-- Teleporter placement form (T5) -->
-  <div id="tp-form" style="display:none;position:absolute;bottom:60px;left:12px;background:rgba(0,0,0,0.85);border:1px solid #444;border-radius:8px;padding:12px;font-size:12px;z-index:10;min-width:280px">
-    <div style="margin-bottom:8px;color:#a78bfa;font-weight:600">Place Teleporter</div>
-    <select id="tp-world-select" style="width:100%;background:#222;border:1px solid #444;color:#e2e8f0;padding:4px 8px;border-radius:4px;margin-bottom:6px">
-      <option value="">-- Select your world --</option>
-    </select>
-    <input id="tp-dest-input" type="text" placeholder="Or enter a path or ws(s) URL" style="width:100%;background:#222;border:1px solid #444;color:#e2e8f0;padding:4px 8px;border-radius:4px;margin-bottom:6px" />
-    <div id="tp-spawn-warn" style="color:#f0ad4e;font-size:11px;display:none;margin-bottom:6px">Visitors arrive here and will land on this pad.</div>
-    <div id="tp-form-error" style="color:#f87171;font-size:11px;margin-bottom:6px;display:none"></div>
-    <div style="display:flex;gap:6px">
-      <button id="tp-save-btn" class="primary" disabled>Save</button>
-      <button id="tp-form-cancel">Cancel</button>
-    </div>
-  </div>
 
   <!-- Edit mode panel (Phase 3 step 1b-1) -->
   <div id="edit-panel" style="display:none">
@@ -571,6 +565,28 @@
       <button data-kind="sphere" title="Add a 1 m sphere in front of you">Sphere</button>
       <button data-kind="cylinder" title="Add a 1 m cylinder in front of you">Cylinder</button>
       <button data-kind="ramp" title="Add a ramp in front of you, rising away from you">Ramp</button>
+      <!-- edit-polish-2 (Z3, P2) — the Teleporter button, last in the Add row.
+           It has NO data-kind: the palette handler above would throw on an
+           unknown kind. It has its own handler and joins the palette's enable
+           rule (`!blocked && modes.edit`). -->
+      <button id="ep-teleporter" title="Add a teleporter pad in front of you">Teleporter</button>
+    </div>
+    <!-- The destination form (T5, edit-polish-2 L2/Z3) — the same element and
+         ids, moved out of the viewport's bottom-left corner and into the panel
+         right under the Add row, so it opens next to the button that opened it
+         and hides with the panel. -->
+    <div id="tp-form" style="display:none">
+      <div class="ep-title" style="margin-bottom:6px">New teleporter</div>
+      <select id="tp-world-select" style="width:100%;background:#222;border:1px solid #444;color:#e2e8f0;padding:4px 8px;border-radius:4px;margin-bottom:6px">
+        <option value="">-- Select your world --</option>
+      </select>
+      <input id="tp-dest-input" type="text" placeholder="Or enter a path or ws(s) URL" style="width:100%;background:#222;border:1px solid #444;color:#e2e8f0;padding:4px 8px;border-radius:4px;margin-bottom:6px" />
+      <div id="tp-spawn-warn" style="color:#f0ad4e;font-size:11px;display:none;margin-bottom:6px">Visitors arrive here and will land on this pad.</div>
+      <div id="tp-form-error" style="color:#f87171;font-size:11px;margin-bottom:6px;display:none"></div>
+      <div style="display:flex;gap:6px">
+        <button id="tp-save-btn" class="primary" disabled>Save</button>
+        <button id="tp-form-cancel">Cancel</button>
+      </div>
     </div>
     <!-- R1 — Undo and Redo in their own row, outside #ep-fields, so they stay
          visible with no selection (right after a delete). Edit mode alone

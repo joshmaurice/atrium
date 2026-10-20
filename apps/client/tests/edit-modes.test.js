@@ -5,8 +5,8 @@
 // modes, in whatever order they're entered and left (Phase 3 step 1b-1, B1/E6),
 // and pointer lock stays off while editing.
 //
-// Edit is the only editing mode (edit-polish-2, L6): the teleporter placement
-// mode went with the toolbar's Place Teleporter, so `triggerActive` is `!edit`.
+// Edit is the only editing mode (edit-polish-2, L6): the placement mode went
+// with the toolbar's Place Teleporter, so `triggerActive` is `!edit`.
 //
 // `trigger` is the real createTeleportTrigger's setActive surface, recorded:
 // the last value set is what the app's trigger would hold.

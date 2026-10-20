@@ -12,7 +12,6 @@ import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
 import { syncPadLabels } from './pad-labels.js'
 import { teleportFailureMessage, evictionMessage, codeToReason, formatDestination } from './teleport-failure.js'
-import { projectRayToPlane } from '@atrium/renderer-three'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { resolveSelectionRoot } from '@atrium/interaction'
 import { createEditModes } from './edit-modes.js'
@@ -20,7 +19,7 @@ import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-ges
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
-import { palettePlacement, paletteName, copyName } from './edit-palette.js'
+import { palettePlacement, paletteName, teleporterName, copyName } from './edit-palette.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
@@ -473,9 +472,9 @@ const trigger = createTeleportTrigger({
   },
 })
 
-// B1/E6 — one place decides whether teleport triggers are active: only when no
-// editing mode (Edit, teleporter place, teleporter delete) is on. Handlers
-// change modes through `modes`; none of them call trigger.setActive directly.
+// B1/E6 — one place decides whether teleport triggers are active: only when
+// Edit mode is off. Handlers change the mode through `modes`; none of them call
+// trigger.setActive directly. Edit is the only editing mode (edit-polish-2, L6).
 const modes = createEditModes({ setTriggerActive: (active) => trigger.setActive(active) })
 
 // The pad label keys currently on screen. rebuildPads() removes exactly these,
@@ -718,8 +717,8 @@ client.on('connecting', () => {
   currentWorldUrl = null
   trigger.setReady(false)
   trigger.reset()
-  // Reset teleporter UI (closes form, abandons pendings, guarded overlay)
-  resetTeleporterUi()
+  // Close the destination form (the panel is going with the session)
+  closeTeleporterForm()
   // Hide failure panel (connecting covers teleport/Go back retry)
   hideTeleportFailurePanel()
 })
@@ -728,8 +727,8 @@ client.on('disconnected', () => {
   endEditSession()
   teardownWorld()
   setConnectionState('disconnected')
-  // Reset teleporter UI (abandons pendings, closes form, guarded overlay)
-  resetTeleporterUi()
+  // Close the destination form (the panel is going with the session)
+  closeTeleporterForm()
 
   // Reload the world in static mode — clears avatar/peer nodes from the scene
   // and restores NavigationController's localNode for input to work again.
@@ -758,7 +757,7 @@ avatar.on('avatar:local-ready', () => {
   // Teleporter trigger: set ready when local avatar is ready (T4)
   avatarReady = true
   trigger.setReady(true)
-  updateTeleporterControls()
+  updateEditControls()
 })
 
 avatar.on('avatar:peer-added', ({ displayName, nodeName, node }) => {
@@ -1023,7 +1022,6 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
 // ---------------------------------------------------------------------------
 
 function showOverlay(msg) {
-  teleporterOverlayActive = false
   overlayEl.textContent = msg || ''
 }
 
@@ -1129,47 +1127,42 @@ connectBtn.addEventListener('contextmenu', (e) => {
 connectBtn.addEventListener('click', handleConnect)
 
 // ---------------------------------------------------------------------------
-// Teleporter UI reset — called from both 'connecting' and 'disconnected'
+// The destination form — opened by the panel's Teleporter button (edit-polish-2
+// Z3). Its Cancel, Escape, turning Edit mode off and a new connection all close
+// it through closeTeleporterForm(). There is no toolbar placement mode any more
+// (Z4): a pad goes through the palette's path, so Undo removes it and Redo
+// brings it back.
 // ---------------------------------------------------------------------------
 
-function resetTeleporterUi() {
-  const isActive = modes.placement || tpForm.style.display !== 'none' ||
-    pendingSeq != null
+// The form's own wait: the seq of the add it sent, while the form shows
+// "Saving…". This is only what the form is showing — the structure tracker
+// holds the pending add and undo registers it, as for any palette add.
+let formWaitSeq = null
 
-  if (isActive) {
-    // Abandon pending save
-    pendingSeq = null
-    pendingName = null
-    pendingPosition = null
-    // Close form and mode (triggers follow from the modes, B1)
-    modes.setTeleporterMode(null)
-    tpForm.style.display = 'none'
-    tpCancelBtn.style.display = 'none'
-    tpPlaceBtn.style.display = ''
-    viewportEl.style.cursor = ''
-    // Restore Save button and re-enable cancels
-    tpSaveBtn.textContent = 'Save'
-    tpSaveBtn.disabled = true
-    tpFormCancel.disabled = false
-    tpCancelBtn.disabled = false
-    // Only clear overlay if teleporter owns it
-    if (teleporterOverlayActive) {
-      showTeleporterOverlay('')
-    }
-  }
-  updateTeleporterControls()
+function closeTeleporterForm() {
+  // Closing while saving forgets the form's wait only: the request's answer is
+  // still recorded by undo (Y7), exactly as a palette add whose answer lands
+  // after Edit mode is off.
+  formWaitSeq = null
+  pendingPosition = null
+  tpForm.style.display = 'none'
+  tpFormError.style.display = 'none'
+  tpSaveBtn.textContent = 'Save'
+  tpSaveBtn.disabled = true
+  tpFormCancel.disabled = false
+  refreshEditActions()
 }
 
 // ---------------------------------------------------------------------------
-// Teleporter placement UI (T5)
+// The destination form's DOM (T5; edit-polish-2 L2/Z3)
 //
-// The teleporter delete mode and its toolbar button were retired in the
-// edit-tweaks round (K4, Z6): a pad is deleted in Edit mode with Delete, and
-// Undo brings it back. Placement and the destination form are unchanged.
+// The form sits inside the Edit panel, under the Add row, and is opened by the
+// Teleporter button beside it. The pad delete mode and its toolbar button were
+// retired in the earlier edit-tweaks round (K4, Z6), and the pad placement mode
+// and its toolbar button in this round (Z4): a pad is added from the palette,
+// moved with the handles and deleted with Delete, all in Edit mode.
 // ---------------------------------------------------------------------------
 
-const tpPlaceBtn = document.getElementById('tp-place-btn')
-const tpCancelBtn = document.getElementById('tp-cancel-btn')
 const tpForm = document.getElementById('tp-form')
 const tpWorldSelect = document.getElementById('tp-world-select')
 const tpDestInput = document.getElementById('tp-dest-input')
@@ -1178,21 +1171,9 @@ const tpFormError = document.getElementById('tp-form-error')
 const tpSaveBtn = document.getElementById('tp-save-btn')
 const tpFormCancel = document.getElementById('tp-form-cancel')
 
-// placementMode lives in `modes` (edit-modes.js), B1.
+// The position the next Save uses: the palette's ground point, taken by the
+// Teleporter button's click (only x and z matter; the descriptor forces y = 0).
 let pendingPosition = null
-let pendingName = null
-let pendingSeq = null
-
-// Overlay ownership flag (operator correction #3):
-// Teleporter-originated messages go through showTeleporterOverlay, which sets
-// this flag. Any other showOverlay call clears it. resetTeleporterUi() only
-// clears the overlay when this flag is true.
-let teleporterOverlayActive = false
-
-function showTeleporterOverlay(msg) {
-  teleporterOverlayActive = true
-  overlayEl.textContent = msg || ''
-}
 
 // Teleporter failure panel — stub for U1, fleshed out in U2.
 // Called from connecting, session:ready, Escape handler before the panel DOM exists.
@@ -1225,49 +1206,13 @@ function showTeleportFailurePanel(msg, { showGoBack = true } = {}) {
   showOverlay('')
 }
 
-function updateTeleporterControls() {
-  const allowed = canEditNow()
-  // While Edit mode is on, the teleporter mode is unavailable (E6)
-  tpPlaceBtn.disabled = !allowed || modes.placement || modes.edit
-  if (!allowed && modes.placement) {
-    exitTeleporterMode()
-  }
-  updateEditControls()
-}
-
-// One capability gate for teleporters and Edit mode (A1: canEdit replaces
-// canPlaceTeleporters, which stays on the wire for one release).
+// One capability gate for Edit mode (A1: canEdit replaces canPlaceTeleporters,
+// which stays on the wire for one release).
 function canEditNow() {
   return client.canEdit && avatarReady && client.connected
 }
 
-// Wire teleporter control updates into avatar:local-ready (already has a handler)
-// We extend the existing handler below — updateTeleporterControls is called there
-
-function exitTeleporterMode() {
-  modes.setTeleporterMode(null)
-  pendingPosition = null
-  pendingName = null
-  pendingSeq = null
-  tpForm.style.display = 'none'
-  tpCancelBtn.style.display = 'none'
-  tpPlaceBtn.style.display = ''
-  viewportEl.style.cursor = ''
-  // Restore Save button and re-enable both Cancels
-  tpSaveBtn.textContent = 'Save'
-  tpSaveBtn.disabled = true
-  tpFormCancel.disabled = false
-  tpCancelBtn.disabled = false
-  // Only clear overlay if teleporter owns it
-  if (teleporterOverlayActive) {
-    showTeleporterOverlay('')
-  }
-  updateTeleporterControls()
-}
-
-tpCancelBtn.addEventListener('click', exitTeleporterMode)
-
-// Escape key exits teleporter modes, hides failure panel
+// Escape key closes the destination form and hides the failure panel
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     // If teleporter failure panel is visible, hide it
@@ -1277,9 +1222,9 @@ document.addEventListener('keydown', (e) => {
       return
     }
     // Ignore Escape while a save is pending
-    if (pendingSeq != null) return
-    if (modes.placement || tpForm.style.display !== 'none') {
-      exitTeleporterMode()
+    if (formWaitSeq != null) return
+    if (tpForm.style.display !== 'none') {
+      closeTeleporterForm()
       return
     }
     // Edit mode (B2): first Escape deselects, a second leaves Edit mode.
@@ -1292,90 +1237,87 @@ document.addEventListener('keydown', (e) => {
   }
 })
 
-// ── Placement mode ──────────────────────────────────────────────────────
+// ── The Teleporter button and its form (edit-polish-2 Z3, L2, L4) ────────
+//
+// A pad goes through the palette's path: the same placement (the palette's
+// fixed distance ahead of you, on the ground), the structure tracker's one-at-a-time rule and
+// `undo.registerAdd`, answered through `onStructureAnswer`. Its answer is the
+// only record of the pending add — there is no second pending-seq bookkeeping.
+//
+// The button is NOT a palette button (no `data-kind`, P2): the palette handler
+// would throw on an unknown kind. It has this handler and joins the palette's
+// enable rule (`!blocked && modes.edit`) in refreshEditActions.
 
-tpPlaceBtn.addEventListener('click', () => {
-  if (!canEditNow()) return
-  if (!modes.setTeleporterMode('placement')) return
-  tpCancelBtn.style.display = ''
-  tpPlaceBtn.disabled = true
-  viewportEl.style.cursor = 'crosshair'
-  showTeleporterOverlay('Click in the viewport to place a teleporter pad')
+const epTeleporter = document.getElementById('ep-teleporter')
+
+epTeleporter.addEventListener('click', () => {
+  if (!modes.edit || editDispatchBlocked()) return
+  // While the form waits on its own save, the click does nothing.
+  if (formWaitSeq != null) return
+
+  const origin = avatar.localNode?.translation ?? [0, 0, 0]
+  const forward = new THREE.Vector3()
+  stage.camera.getWorldDirection(forward)
+  // Exactly as a palette add; only x and z matter (the descriptor forces y = 0).
+  const { position } = palettePlacement(origin, forward.toArray())
+  pendingPosition = [position[0], 0, position[2]]
+  openTeleporterForm()
 })
 
-// Handle viewport click in placement mode
-viewportEl.addEventListener('click', (e) => {
-  if (!modes.placement) return
-  // Act only on canvas clicks — overlay/form/panel clicks pass through
-  if (e.target !== canvas) return
-  if (tpForm.style.display !== 'none') return
+/**
+ * Open the destination form for `pendingPosition`. A click while it is already
+ * open (and not saving) takes a fresh position and spawn warning and keeps what
+ * was typed: the world list and the fields are left where they are.
+ */
+function openTeleporterForm() {
+  const alreadyOpen = tpForm.style.display !== 'none'
 
-  const rect = viewportEl.getBoundingClientRect()
-  const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1
-  const my = -((e.clientY - rect.top) / rect.height) * 2 + 1
-  const camera = stage.camera
-  const raycaster = new THREE.Raycaster()
-  raycaster.setFromCamera(new THREE.Vector2(mx, my), camera)
-  const ray = { origin: raycaster.ray.origin.toArray(), direction: raycaster.ray.direction.toArray() }
-  const hit = projectRayToPlane(ray, 0)
-  if (!hit) {
-    showTeleporterOverlay('Could not find a valid placement spot')
-    return
+  if (!alreadyOpen) {
+    // Populate world list — only when same origin as account server
+    const accountHttp = AtriumClient.wsOriginToHttpOrigin(accountWsBase)
+    const worldHttp = currentWorldUrl ? AtriumClient.wsOriginToHttpOrigin(currentWorldUrl) : null
+    const sameOrigin = worldHttp && accountHttp && (() => {
+      try { return new URL(worldHttp).origin === new URL(accountHttp).origin } catch { return false }
+    })()
+
+    if (sameOrigin) {
+      tpWorldSelect.disabled = false
+      tpWorldSelect.innerHTML = '<option value="">-- Select your world --</option>'
+      // Add "The commons" option
+      const opt = document.createElement('option')
+      opt.value = '/'
+      opt.textContent = 'The commons'
+      tpWorldSelect.appendChild(opt)
+
+      fetch('/api/worlds').then(res => {
+        if (!res.ok) return null
+        return res.json()
+      }).then(worlds => {
+        if (!worlds) return
+        for (const w of worlds) {
+          const opt = document.createElement('option')
+          const username = currentUser?.username || ''
+          opt.value = `/worlds/${encodeURIComponent(username)}/${encodeURIComponent(w.slug)}`
+          opt.textContent = `${w.name || w.slug}${w.visibility === 'private' ? ' (private)' : ''}`
+          tpWorldSelect.appendChild(opt)
+        }
+      }).catch(() => {})
+    } else {
+      tpWorldSelect.disabled = true
+      tpWorldSelect.innerHTML = '<option value="">-- Manual entry only (different server) --</option>'
+    }
+
+    tpFormError.style.display = 'none'
+    tpDestInput.value = ''
+    tpSaveBtn.textContent = 'Save'
+    tpSaveBtn.disabled = true
   }
 
-  pendingPosition = [hit.x, 0, hit.z]
-  showOverlay('')
-  openPlacementForm()
-})
-
-function openPlacementForm() {
-  // Populate world list — only when same origin as account server
-  const accountHttp = AtriumClient.wsOriginToHttpOrigin(accountWsBase)
-  const worldHttp = currentWorldUrl ? AtriumClient.wsOriginToHttpOrigin(currentWorldUrl) : null
-  const sameOrigin = worldHttp && accountHttp && (() => {
-    try { return new URL(worldHttp).origin === new URL(accountHttp).origin } catch { return false }
-  })()
-
-  if (sameOrigin) {
-    tpWorldSelect.disabled = false
-    tpWorldSelect.innerHTML = '<option value="">-- Select your world --</option>'
-    // Add "The commons" option
-    const opt = document.createElement('option')
-    opt.value = '/'
-    opt.textContent = 'The commons'
-    tpWorldSelect.appendChild(opt)
-
-    fetch('/api/worlds').then(res => {
-      if (!res.ok) return null
-      return res.json()
-    }).then(worlds => {
-      if (!worlds) return
-      for (const w of worlds) {
-        const opt = document.createElement('option')
-        const username = currentUser?.username || ''
-        opt.value = `/worlds/${encodeURIComponent(username)}/${encodeURIComponent(w.slug)}`
-        opt.textContent = `${w.name || w.slug}${w.visibility === 'private' ? ' (private)' : ''}`
-        tpWorldSelect.appendChild(opt)
-      }
-    }).catch(() => {})
-  } else {
-    tpWorldSelect.disabled = true
-    tpWorldSelect.innerHTML = '<option value="">-- Manual entry only (different server) --</option>'
-  }
-
-  // Spawn warning
-  if (pendingPosition && nearSpawn(pendingPosition)) {
-    tpSpawnWarn.style.display = ''
-  } else {
-    tpSpawnWarn.style.display = 'none'
-  }
-
-  tpFormError.style.display = 'none'
-  tpDestInput.value = ''
-  tpSaveBtn.textContent = 'Save'
-  tpSaveBtn.disabled = true
   tpFormCancel.disabled = false
-  tpCancelBtn.disabled = false
+  formWaitSeq = null
+
+  // Spawn warning for the position this click took
+  tpSpawnWarn.style.display = (pendingPosition && nearSpawn(pendingPosition)) ? '' : 'none'
   tpForm.style.display = ''
 }
 
@@ -1392,6 +1334,10 @@ tpDestInput.addEventListener('input', () => {
 })
 
 tpSaveBtn.addEventListener('click', () => {
+  // Z3 — refused unless Edit mode is on and nothing blocks, as a palette add
+  if (!modes.edit || editDispatchBlocked()) return
+  if (formWaitSeq != null) return
+
   const dest = tpWorldSelect.value || tpDestInput.value.trim()
   if (!dest) {
     tpFormError.textContent = 'Select a world or enter a destination'
@@ -1413,62 +1359,42 @@ tpSaveBtn.addEventListener('click', () => {
     return
   }
 
+  // L4 — the pad's name, `Teleporter`, `Teleporter 2`… like the palette's Cube
+  const name = teleporterName(isNameFree)
+  if (!name) {
+    tpFormError.textContent = 'No free name for a new teleporter'
+    tpFormError.style.display = ''
+    return
+  }
+
   tpSaveBtn.disabled = true
   tpFormCancel.disabled = true
-  tpCancelBtn.disabled = true
 
-  const name = 'teleporter-' + crypto.randomUUID()
   try {
     const descriptor = buildTeleporterDescriptor({
       name,
       position: pendingPosition,
       destination: dest.trim(),
     })
-    pendingName = name
-    pendingSeq = client.addNode(descriptor)
-    updateEditControls()
+    const seq = client.addNode(descriptor)
+    // The answer can't be handled before this handler returns (one thread).
+    structure.begin('add', seq, { name, descriptor, teleporter: true })
+    // Y7 — recorded from its answer, whatever the Edit mode then
+    undo.registerAdd(seq, { name, duplicate: false })
+    formWaitSeq = seq
     tpSaveBtn.textContent = 'Saving...'
+    clearEditError()
+    refreshEditActions()
   } catch (err) {
     tpFormError.textContent = 'Failed to place teleporter: ' + err.message
     tpFormError.style.display = ''
     tpSaveBtn.disabled = false
     tpSaveBtn.textContent = 'Save'
     tpFormCancel.disabled = false
-    tpCancelBtn.disabled = false
   }
 })
 
-tpFormCancel.addEventListener('click', () => {
-  exitTeleporterMode()
-})
-
-// Listen for som:add echo of our placement to close the form
-client.on('som:add', ({ nodeName }) => {
-  if (pendingName && nodeName === pendingName) {
-    tpForm.style.display = 'none'
-    pendingPosition = null
-    pendingName = null
-    pendingSeq = null
-    tpSaveBtn.textContent = 'Save'
-    exitTeleporterMode()
-  }
-})
-
-// Listen for error carrying our placement's seq
-client.on('error', (err) => {
-  if (pendingSeq != null && err.seq === pendingSeq) {
-    // Placement save error — clear pending, restore Save, re-enable cancels
-    tpFormError.textContent = err.message || 'Failed to place teleporter'
-    tpFormError.style.display = ''
-    tpSaveBtn.disabled = false
-    tpSaveBtn.textContent = 'Save'
-    tpFormCancel.disabled = false
-    tpCancelBtn.disabled = false
-    pendingSeq = null
-    pendingName = null
-    updateEditControls()
-  }
-})
+tpFormCancel.addEventListener('click', closeTeleporterForm)
 
 // ---------------------------------------------------------------------------
 // Edit mode (Phase 3 step 1b-1) — devtasks/PREBRIEF-edit-mode-ui-1.md
@@ -1603,7 +1529,9 @@ const undo = createEditUndo({
   isDragging: () => !!activeGesture || !!gizmo?.dragging,
   isRenamePending: () => !!pendingRename,
   hasPendingSend: () => editTracker.pendingCount > 0,
-  hasPendingStructural: () => !!structure.pending || teleporterRequestPending(),
+  // Z4 — the structure tracker holds the pending add, including a pad's: there
+  // is no second pending-seq bookkeeping in the app.
+  hasPendingStructural: () => !!structure.pending,
 })
 
 // E4 — the local avatar and peers' avatars are never selectable. The server
@@ -1615,21 +1543,14 @@ function isEditExcluded(node) {
 function updateEditControls() {
   const allowed = canEditNow()
   editToggleBtn.style.display = allowed ? '' : 'none'
-  // Entering Edit mode closes the teleporter modes; don't let it abandon a
-  // save or delete whose answer (or refusal message) is still to come.
-  editToggleBtn.disabled = teleporterRequestPending()
+  // Z4 — a pad's save no longer disables the Edit toggle: the structural request
+  // is one at a time like any other, and the button's state follows `modes`.
   if (!allowed && modes.edit) setEditMode(false)
-}
-
-function teleporterRequestPending() {
-  return pendingSeq != null
 }
 
 function setEditMode(on) {
   if (on) {
-    if (!canEditNow() || modes.edit || teleporterRequestPending()) return
-    // E6 — Edit mode closes the teleporter mode; triggers follow from `modes`.
-    if (modes.placement || tpForm.style.display !== 'none') exitTeleporterMode()
+    if (!canEditNow() || modes.edit) return
     modes.setEdit(true)
     if (document.pointerLockElement) document.exitPointerLock()
     ensureGizmo()
@@ -1638,6 +1559,10 @@ function setEditMode(on) {
     editToggleBtn.classList.add('active')
   } else {
     if (!modes.edit) return
+    // Z3 — leaving Edit mode closes the destination form. Closing while a save
+    // is unanswered forgets the form's wait only: the answer is still recorded
+    // by undo (Y7).
+    closeTeleporterForm()
     selectForEdit(null)          // ends a drag with its final send
     // Y7 (Rev 2) — the structure tracker is NOT reset here: it holds 1b-2's
     // one-at-a-time rule and the S1 evidence, and a request answered while
@@ -1649,7 +1574,7 @@ function setEditMode(on) {
   }
   clearEditError()
   refreshEditPanel()
-  updateTeleporterControls()
+  updateEditControls()
   updateHintText()
 }
 
@@ -2114,7 +2039,9 @@ function refreshEditActions() {
   const nameProblem = nameFieldProblem(selected)
   epName.disabled = locked || !!nameProblem
   epName.title = nameProblem
-  for (const b of epPaletteBtns) b.disabled = blocked || !modes.edit
+  // Z3 — the Teleporter button joins the palette's enable rule. It is not a
+  // palette button (no data-kind), so it is added to the list here.
+  for (const b of [...epPaletteBtns, epTeleporter]) b.disabled = blocked || !modes.edit
   const block = structuralBlock()
   epDelete.disabled = !!block
   epDelete.title = block ?? 'Delete the selected object'
@@ -2300,6 +2227,24 @@ function onStructureAnswer(seq, status, message) {
     }
     refreshEditActions()
     return
+  }
+  if (request.teleporter) {
+    // Z3 — the destination form's own add. A rejection it is still waiting on
+    // belongs in the form; otherwise close the form (accepted and unknown both
+    // end its wait) and let the usual branches below decide the message and the
+    // selection. There is no `retryAdd` for a pad: it has no `primitive`, so a
+    // name taken meanwhile shows in the form and the next Save picks a fresh one.
+    if (status === 'rejected' && formWaitSeq === seq) {
+      formWaitSeq = null
+      tpFormError.textContent = message || 'Failed to place teleporter'
+      tpFormError.style.display = ''
+      tpSaveBtn.textContent = 'Save'
+      tpSaveBtn.disabled = false
+      tpFormCancel.disabled = false
+      refreshEditActions()
+      return
+    }
+    if (formWaitSeq === seq) closeTeleporterForm()
   }
   if (removedMessage === 'show') {
     showEditError(REMOVED_MESSAGE)             // another tab's delete won
