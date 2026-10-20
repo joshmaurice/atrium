@@ -11,6 +11,10 @@ export {
   readGlb, glbImages, createTextureBudget, templateKey, createTemplateCache, parseTemplate,
   rewriteGltfJson, createUrlModifier, revokeBlobs, objectUrlApi, countVertices, disposeTemplate, measureBounds,
 } from './model-parse.js'
+export {
+  buildInstance, buildPlaceholder, disposeInstance, retargetClip,
+  MODEL_WRAPPER_FLAG, MODEL_NAME_KEY, PLACEHOLDER_COLOURS,
+} from './model-instances.js'
 export { AnimationBridge } from './AnimationBridge.js'
 export { Stage } from './Stage.js'
 export {

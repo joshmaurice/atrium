@@ -142,7 +142,7 @@ export function modelGlb({
   const timeView = bin.view(times)
   accessors.push({ bufferView: timeView, componentType: 5126, count: 2, type: 'SCALAR', min: [0], max: [1] })
   const input = accessors.length - 1
-  const values = new Float32Array([0, 0, 0, 0, 1, 0])
+  const values = new Float32Array([0, 0, 0, 1, 0, 0])
   const valueView = bin.view(values)
   accessors.push({ bufferView: valueView, componentType: 5126, count: 2, type: 'VEC3' })
   const output = accessors.length - 1
