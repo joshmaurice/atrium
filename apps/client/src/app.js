@@ -19,7 +19,11 @@ import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-ges
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
-import { palettePlacement, paletteName, teleporterName, copyName } from './edit-palette.js'
+import { palettePlacement, paletteName, teleporterName, copyName, firstFreeName } from './edit-palette.js'
+import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
+import { createDiagnosticListeners } from './model-listeners.js'
+import { fetchModel, sha256Hex } from '@atrium/client/model-fetch'
+import { createModelBridge, countVertices, measureBounds, parseTemplate, templateKey, MODEL_STATUS } from '@atrium/renderer-three'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
@@ -635,8 +639,14 @@ client.on('world:loaded', ({ name, description, author }) => {
   // B1 — the old sceneGroup (and anything attached to it) is about to go.
   endEditSession()
 
+  // A9 — a view change keeps the model cache: detach every wrapper from its
+  // old host BEFORE the view is rebuilt, and re-attach after the new
+  // sceneGroup is in place. `world:loaded` repeats on the SAME SOM for an
+  // external reference, so this is the path that must not refetch.
+  modelBridge.detachView()
   ;({ docView, sceneGroup } = initDocumentView(renderer, threeScene, client.som, { prevDocView: docView, prevSceneGroup: sceneGroup }))
   stage.setSceneGroup(sceneGroup)
+  modelBridge.attachView(docView, sceneGroup)
 
   loadBackground(threeScene, client.som.extras?.atrium?.background, bgBaseUrl)
 
@@ -648,14 +658,15 @@ client.on('world:loaded', ({ name, description, author }) => {
   if (description) console.log(`[app]   ${description}`)
 
   // ── Diagnostic pointer-event handlers (all non-ephemeral nodes) ──────────
-  for (const node of client.som.nodes) {
-    if (node.extras?.atrium?.ephemeral) continue   // skip avatars
-    node.addEventListener('pointerover', () => console.log('[pointer] over',  node.name))
-    node.addEventListener('pointerout',  () => console.log('[pointer] out',   node.name))
-    node.addEventListener('pointerdown', (e) => console.log('[pointer] down', node.name, 'button', e.detail.button))
-    node.addEventListener('pointerup',   () => console.log('[pointer] up',    node.name))
-    node.addEventListener('click',       (e) => console.log('[pointer] click', node.name, 'at', e.detail.point))
-  }
+  // A11 — registered ONCE per SOM node: this event repeats on the same SOM
+  // when an external reference loads, and the listeners used to pile up.
+  diagnosticListeners.registerAll(client.som)
+
+  // ── Models (Z5, models-by-url) ──────────────────────────────────────────
+  // The scene matches the SOM: a model node's host gets a placeholder, then
+  // the model. `attachView` above re-attached everything the cache already
+  // holds, so an external ref's repeat costs no download.
+  modelBridge.reconcile()
 
   // R2.2: rebuild pads after world finishes loading so pads saved in a world
   // trigger and show labels for joiners and after reload (session:ready fires
@@ -717,6 +728,13 @@ client.on('connecting', () => {
   currentWorldUrl = null
   trigger.setReady(false)
   trigger.reset()
+  // A9 — a new world generation: abort every model request and parse, drop the
+  // ledger and dispose every template and instance. It does NOT wait for a new
+  // client.som (the client emits `connecting` long before the next som-dump).
+  modelBridge.resetWorld()
+  // Z7 — the Model form goes with the panel.
+  modelForm.reset()
+  refreshModelRow()
   // Close the destination form (the panel is going with the session)
   closeTeleporterForm()
   // Hide failure panel (connecting covers teleport/Go back retry)
@@ -727,13 +745,17 @@ client.on('disconnected', () => {
   endEditSession()
   teardownWorld()
   setConnectionState('disconnected')
+  // A9 — the same world reset the connecting path takes.
+  modelBridge.resetWorld()
+  modelForm.reset()
+  refreshModelRow()
   // Close the destination form (the panel is going with the session)
   closeTeleporterForm()
 
   // Reload the world in static mode — clears avatar/peer nodes from the scene
   // and restores NavigationController's localNode for input to work again.
   const url = worldUrlInput.value.trim()
-  if (url) client.loadWorld(url)
+  if (url) { beginNewWorld(); client.loadWorld(url) }
 })
 
 client.on('error', (err) => {
@@ -865,6 +887,7 @@ async function loadAtriumConfig(config, baseUrl) {
   let userMessage = null
 
   if (gltfUrl) {
+    beginNewWorld()
     await client.loadWorld(gltfUrl)
     worldUrlInput.value = gltfUrl
   } else if (config.world.gltf) {
@@ -898,12 +921,14 @@ async function loadDroppedFile(file) {
 
   if (name.endsWith('.glb')) {
     const buffer = await file.arrayBuffer()
+    beginNewWorld()
     await client.loadWorldFromData(buffer, file.name)
     return
   }
 
   if (name.endsWith('.gltf')) {
     const text = await file.text()
+    beginNewWorld()
     await client.loadWorldFromData(text, file.name)
     return
   }
@@ -1053,6 +1078,7 @@ loadBtn.addEventListener('click', async () => {
         showOverlay(msg ?? '')
       } else {
         const absoluteUrl = new URL(url, window.location.href).href
+        beginNewWorld()
         await client.loadWorld(absoluteUrl)
         showOverlay('')
       }
@@ -1144,6 +1170,7 @@ function closeTeleporterForm() {
   // still recorded by undo (Y7), exactly as a palette add whose answer lands
   // after Edit mode is off.
   formWaitSeq = null
+  modelGate.release('teleporter')
   pendingPosition = null
   tpForm.style.display = 'none'
   tpFormError.style.display = 'none'
@@ -1223,6 +1250,11 @@ document.addEventListener('keydown', (e) => {
     }
     // Ignore Escape while a save is pending
     if (formWaitSeq != null) return
+    // Z7 — the Model form, same order as the destination form's.
+    if (modelForm.isOpen()) {
+      modelForm.close()
+      return
+    }
     if (tpForm.style.display !== 'none') {
       closeTeleporterForm()
       return
@@ -1271,6 +1303,8 @@ epTeleporter.addEventListener('click', () => {
  */
 function openTeleporterForm() {
   const alreadyOpen = tpForm.style.display !== 'none'
+  // Z7 — only one form at a time: opening this one closes the Model form.
+  modelGate.claim('teleporter')
 
   if (!alreadyOpen) {
     // Populate world list — only when same origin as account server
@@ -1428,6 +1462,7 @@ const epRedo         = document.getElementById('ep-redo')           // step 2, Y
 // so they stay visible with no selection; the ids and this wiring are unchanged.
 
 let selected      = null   // the selected SOMNode, held by object (B2)
+let modelForm     = null   // the Edit panel's Model form (Z7), wired at the end of this file
 let selectedObj   = null   // its three.js object, owned by DocumentView
 let gizmo         = null   // TransformControls (r163: an Object3D in the scene)
 let outline       = null   // BoxHelper on selectedObj
@@ -1587,6 +1622,8 @@ function endEditSession() {
   structure.reset()
   undo.endSession()
   pendingRename = null
+  // Z7 — Edit off closes the Model form too (it lives in the Edit panel).
+  if (modelForm?.isOpen()) modelForm.close()
 }
 
 editToggleBtn.addEventListener('click', () => setEditMode(!modes.edit))
@@ -1770,6 +1807,7 @@ function refreshEditPanel() {
   epFields.style.display = ''
   refreshEditVectors()
   refreshNameField()
+  refreshModelRow()
 }
 
 // Position, rotation (degrees) and scale. A field being typed in is left alone.
@@ -1973,10 +2011,14 @@ client.on('som:remove', () => {
     refreshNameField()             // a duplicate name may have gone
   }
   resetStaleWorldCamera()
+  // Z5 — the scene follows the SOM: a removed model node loses its instance.
+  modelBridge.reconcile()
+  refreshModelRow()
 })
 
 client.on('som:add', () => {
   if (selected) refreshNameField()
+  modelBridge.reconcile()
 })
 
 // ── Add palette, Duplicate, Delete (Phase 3 step 1b-2) ──────────────────
@@ -2039,9 +2081,9 @@ function refreshEditActions() {
   const nameProblem = nameFieldProblem(selected)
   epName.disabled = locked || !!nameProblem
   epName.title = nameProblem
-  // Z3 — the Teleporter button joins the palette's enable rule. It is not a
-  // palette button (no data-kind), so it is added to the list here.
-  for (const b of [...epPaletteBtns, epTeleporter]) b.disabled = blocked || !modes.edit
+  // Z3/Z7 — the Teleporter and Model buttons join the palette's enable rule.
+  // They are not palette buttons (no data-kind), so they are added here.
+  for (const b of [...epPaletteBtns, epTeleporter, epModel]) b.disabled = blocked || !modes.edit
   const block = structuralBlock()
   epDelete.disabled = !!block
   epDelete.title = block ?? 'Delete the selected object'
@@ -2246,6 +2288,21 @@ function onStructureAnswer(seq, status, message) {
     }
     if (formWaitSeq === seq) closeTeleporterForm()
   }
+  if (request.model) {
+    // Z7 — the Model form's own add, exactly as the destination form's is:
+    // a rejection it is still waiting on shows in it; otherwise the form's
+    // wait ends (accepted and unknown both end it) and the usual branches
+    // below decide the message and the selection. There is no `retryAdd` for a
+    // model either: a name taken meanwhile shows in the form and the next Save
+    // picks a fresh one.
+    if (modelForm.onAnswer(seq, status, message)) {
+      if (status !== 'accepted' && status !== 'rejected') {
+        showEditError(`Couldn’t add: ${message ?? 'the world did not answer'}`)
+      }
+      refreshEditActions()
+      return
+    }
+  }
   if (removedMessage === 'show') {
     showEditError(REMOVED_MESSAGE)             // another tab's delete won
   } else if (removedMessage === 'replaced') {
@@ -2308,8 +2365,13 @@ client.on('edit:unknown',  ({ seq }) => onStructureAnswer(seq, 'unknown'))
 
 // A remote change to the selection, or to a material it shares, can change
 // whether it may be duplicated.
-client.on('som:set', () => { if (modes.edit) refreshEditActions() })
-client.on('som:rename', () => { if (modes.edit) refreshEditActions() })
+client.on('som:set', () => { if (modes.edit) refreshEditActions(); refreshModelRow() })
+client.on('som:rename', () => {
+  if (modes.edit) refreshEditActions()
+  // A rename changes the name an instance is keyed on, so the scene catches up.
+  modelBridge.reconcile()
+  refreshModelRow()
+})
 
 // J8 — the world camera being rendered from is stale once its host is gone,
 // or once its three.js camera no longer hangs under the scene (a shared
@@ -2526,3 +2588,205 @@ me().then(user => {
     }
   }
 })
+
+// ---------------------------------------------------------------------------
+// Models by URL (Phase 3 step 3a) — devtasks/PREBRIEF-models-by-url.md
+//
+// Z5–Z7: the bridge keeps the scene matching the SOM; this section wires it to
+// the client, the stage and the Edit panel, and gives the Model form its real
+// calls. Every decision the form makes lives in model-form.js; what is here is
+// wiring: elements, the client calls, the placement and the panel refreshers.
+// ---------------------------------------------------------------------------
+
+const epModel = document.getElementById('ep-model')
+
+const modelFormEls = {
+  form: document.getElementById('model-form'),
+  url: document.getElementById('model-url-input'),
+  privacy: document.getElementById('model-privacy'),
+  check: document.getElementById('model-check-btn'),
+  status: document.getElementById('model-status'),
+  pinRow: document.getElementById('model-pin-row'),
+  pin: document.getElementById('model-pin-check'),
+  error: document.getElementById('model-form-error'),
+  save: document.getElementById('model-save-btn'),
+  cancel: document.getElementById('model-form-cancel'),
+}
+
+const epModelRow = document.getElementById('ep-model-row')
+const epModelUrl = document.getElementById('ep-model-url')
+const epModelPinned = document.getElementById('ep-model-pinned')
+const epModelStatus = document.getElementById('ep-model-status')
+
+// Z7 — only one of the destination and Model forms is open at a time.
+const modelGate = createFormGate()
+modelGate.register('teleporter', () => closeTeleporterForm())
+
+// A11 — the diagnostic pointer listeners, once per SOM node.
+const diagnosticListeners = createDiagnosticListeners()
+
+/**
+ * Z5/A9 — the bridge. Its hosts come from DocumentView's own view objects
+ * (`listViews(node._node)`), its `worldBaseUrl` from the client, and its
+ * statuses reach the Edit panel when the node is the selected one.
+ */
+const modelBridge = createModelBridge({
+  som: () => client.som,
+  listViews: (node) => (node?._node && docView?.listViews ? docView.listViews(node._node) : []),
+  worldBaseUrl: () => client.worldBaseUrl ?? null,
+  nextFrame: (fn) => requestAnimationFrame(fn),
+  onStatus: (node, status) => { modelStatuses.set(node, status); if (node === selected) refreshModelRow() },
+})
+
+/** The last status the bridge reported for a node (Z5/L11). */
+const modelStatuses = new WeakMap()
+
+const statusText = (status) => {
+  if (!status) return ''
+  if (status.status === MODEL_STATUS.loaded) return status.message || 'ready'
+  if (status.status === MODEL_STATUS.loading) return 'loading…'
+  return status.message || status.reason || 'failed'
+}
+
+/**
+ * Z5/L11 — the selected model node's row: the URL, whether it follows the URL
+ * or is pinned, and the bridge's status or reason.
+ */
+function refreshModelRow() {
+  if (!epModelRow) return
+  const spec = selected?.extras?.atrium?.model
+  if (!selected || !spec) {
+    epModelRow.style.display = 'none'
+    if (epModelStatus) epModelStatus.textContent = ''
+    return
+  }
+  epModelRow.style.display = ''
+  if (epModelUrl) {
+    epModelUrl.textContent = middleTruncate(spec.url)
+    epModelUrl.title = spec.url
+  }
+  if (epModelPinned) epModelPinned.textContent = spec.sha256 ? 'pinned' : 'follows the URL'
+  if (epModelStatus) {
+    const status = modelStatuses.get(selected)
+    epModelStatus.textContent = statusText(status)
+    epModelStatus.style.color = status?.status === MODEL_STATUS.failed ? '#f87171' : ''
+  }
+}
+
+// ── The checked template (Z7/A8) ─────────────────────────────────────────
+
+// A successful Check holds its template (and its bytes' hash) until Save,
+// Cancel, a URL edit, the form closing or a world change. The held entry IS
+// the cache entry the new node's instance then finds, so Save costs no second
+// download.
+let heldCheck = null
+
+function releaseHeldCheck() {
+  if (!heldCheck) return
+  for (const key of heldCheck.keys) {
+    const entry = modelBridge.cache.get(key)
+    if (entry && entry.refs === 0) {
+      modelBridge.textureBudget.release(entry.textureBytes ?? 0)
+      modelBridge.cache.delete(key)
+    }
+  }
+  heldCheck = null
+}
+
+function holdCheckedTemplate({ effectiveUrl, template, textureBytes, bytesSha256 }) {
+  releaseHeldCheck()
+  const keys = [templateKey(effectiveUrl, bytesSha256)]
+  const unpinned = templateKey(effectiveUrl, null)
+  if (!keys.includes(unpinned)) keys.push(unpinned)
+  if (textureBytes > 0 && !modelBridge.textureBudget.reserve(textureBytes)) return
+  for (const key of keys) modelBridge.cache.set(key, { ...template, textureBytes })
+  heldCheck = { keys, textureBytes }
+}
+
+/** Z7/L9 — Check: the client's spec rules first (in the form), then the real
+ *  loader through the same limits the bridge uses. */
+async function checkModelNow({ url, worldBaseUrl }) {
+  const fetched = await fetchModel({ url, worldBaseUrl, ledger: modelBridge.ledger })
+  if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'the download was cancelled' }
+  if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
+
+  const key = templateKey(fetched.effectiveUrl ?? url, null)
+  const cached = modelBridge.cache.get(key)
+  let template = cached?.template ?? null
+  if (!template) {
+    const parsed = await parseTemplate({
+      kind: fetched.kind, bytes: fetched.bytes, json: fetched.json,
+      dependencies: fetched.dependencies ?? new Map(),
+    })
+    if (!parsed.ok) return { ok: false, reason: parsed.reason, message: parsed.message }
+    template = parsed.template
+    holdCheckedTemplate({
+      effectiveUrl: fetched.effectiveUrl ?? url,
+      template,
+      textureBytes: parsed.textureBytes ?? 0,
+      bytesSha256: fetched.kind === 'glb' ? await sha256Hex(fetched.bytes) : null,
+    })
+  }
+
+  // A12 — the bounds are a Box3 of the model at rest, rounded up to 1 mm and
+  // clamped into [0.001, 1000].
+  const bounds = measureBounds(template.scene, THREE.Box3, THREE.Vector3)
+  return {
+    ok: true,
+    vertices: countVertices(template.scene),
+    bytes: fetched.totalBytes ?? 0,
+    bounds,
+    sha256: fetched.kind === 'glb' ? await sha256Hex(fetched.bytes) : null,
+    kind: fetched.kind,
+  }
+}
+
+// ── The Model form (Z7) ──────────────────────────────────────────────────
+
+modelForm = createModelForm({
+  elements: modelFormEls,
+  gate: modelGate,
+  deps: {
+    checkModel: checkModelNow,
+    worldBaseUrl: () => client.worldBaseUrl ?? null,
+    placement: () => {
+      const origin = avatar.localNode?.translation ?? [0, 0, 0]
+      const forward = new THREE.Vector3()
+      stage.camera.getWorldDirection(forward)
+      // Exactly as a palette add.
+      return palettePlacement(origin, forward.toArray())
+    },
+    isNameFree,
+    // Z7 — the URL's file name, made free and cut to the name rules.
+    firstFreeName: (text) => firstFreeName(text, '', isNameFree),
+    addNode: (descriptor) => client.addNode(descriptor),
+    structureBegin: (seq, pending) => structure.begin('add', seq, pending),
+    undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
+    refreshActions: () => refreshEditActions(),
+    selectNode: (name) => selectAdded(name),
+    onDropResult: () => releaseHeldCheck(),
+  },
+})
+modelForm.wire()
+// Z7 — the other direction: the destination form's own open closes this one.
+modelGate.register('model', () => modelForm.close())
+
+// Z7 — the Model button: the palette's placement, no data-kind, its own form.
+epModel.addEventListener('click', () => {
+  if (!modes.edit || editDispatchBlocked()) return
+  // Closing the destination form is the gate's job (only one form at a time).
+  closeTeleporterForm()
+  modelForm.open()
+})
+
+/**
+ * A9 — a new world generation, called immediately before every
+ * `loadWorld`/`loadWorldFromData` (the client's `connecting` and `disconnected`
+ * events call the same pair).
+ */
+function beginNewWorld() {
+  releaseHeldCheck()
+  modelBridge.resetWorld()
+  modelForm.reset()
+  refreshModelRow()
+}

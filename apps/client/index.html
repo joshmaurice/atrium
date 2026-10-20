@@ -441,6 +441,11 @@
   #edit-panel #tp-form select,
   #edit-panel #tp-form input[type="text"] { min-width: 0; }
   #edit-panel #tp-form button { padding: 3px 8px; font-size: 11px; }
+  #edit-panel #model-form { margin-bottom: 8px; }
+  #edit-panel #model-form .ep-title { margin-bottom: 6px; }
+  #edit-panel #model-form input[type="text"] { min-width: 0; }
+  #edit-panel #model-form button { padding: 3px 8px; font-size: 11px; }
+  #edit-panel #ep-model-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #edit-panel .ep-actions { margin-top: 6px; margin-bottom: 0; }
   #edit-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
   #edit-panel .ep-buttons button.ep-danger:not(:disabled) { border-color: #7f1d1d; color: #fca5a5; }
@@ -570,6 +575,10 @@
            unknown kind. It has its own handler and joins the palette's enable
            rule (`!blocked && modes.edit`). -->
       <button id="ep-teleporter" title="Add a teleporter pad in front of you">Teleporter</button>
+      <!-- models-by-url (Z7, P8) — the Model button, last in the Add row. It
+           has NO data-kind either: it has its own handler and joins the
+           palette's enable rule (`!blocked && modes.edit`). -->
+      <button id="ep-model" title="Add a model from a URL in front of you">Model</button>
     </div>
     <!-- The destination form (T5, edit-polish-2 L2/Z3) — the same element and
          ids, moved out of the viewport's bottom-left corner and into the panel
@@ -588,6 +597,24 @@
         <button id="tp-form-cancel">Cancel</button>
       </div>
     </div>
+    <!-- models-by-url (Z7, L9/L12) — the Model form, in the panel under the Add
+         row, as the destination form is. Only one of the two is open at a time
+         (the form gate in the app). -->
+    <div id="model-form" style="display:none">
+      <div class="ep-title" style="margin-bottom:6px">New model</div>
+      <input id="model-url-input" type="text" placeholder="https://host/model.glb or /models/model.glb" style="width:100%;background:#222;border:1px solid #444;color:#e2e8f0;padding:4px 8px;border-radius:4px;margin-bottom:6px" spellcheck="false" autocomplete="off" />
+      <div id="model-privacy" style="color:#94a3b8;font-size:11px;margin-bottom:6px"></div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <button id="model-check-btn">Check</button>
+        <span id="model-status" style="font-size:11px;color:#94a3b8;display:none"></span>
+      </div>
+      <label id="model-pin-row" style="display:none;font-size:11px;margin-bottom:6px"><input type="checkbox" id="model-pin-check" /> Pin this version</label>
+      <div id="model-form-error" style="color:#f87171;font-size:11px;margin-bottom:6px;display:none"></div>
+      <div style="display:flex;gap:6px">
+        <button id="model-save-btn" class="primary" disabled>Save</button>
+        <button id="model-form-cancel">Cancel</button>
+      </div>
+    </div>
     <!-- R1 — Undo and Redo in their own row, outside #ep-fields, so they stay
          visible with no selection (right after a delete). Edit mode alone
          shows this row; the ids are unchanged (Y5). -->
@@ -599,6 +626,14 @@
     <div id="ep-fields" style="display:none">
       <div class="ep-row"><span>Name</span><input type="text" id="ep-name" spellcheck="false" autocomplete="off" /></div>
       <div class="ep-status" id="ep-name-status"></div>
+      <!-- models-by-url (Z7, L11) — one read-only row for a selected model node:
+           the URL (middle-truncated, full text in the title), whether it follows
+           the URL or is pinned, and its status or reason. -->
+      <div class="ep-row" id="ep-model-row" style="display:none"><span>Model</span>
+        <span id="ep-model-url" title=""></span>
+        <span id="ep-model-pinned" style="color:#94a3b8;font-size:11px;margin-left:4px"></span>
+      </div>
+      <div class="ep-status" id="ep-model-status"></div>
       <div class="ep-row"><span>Position</span>
         <input type="text" data-field="translation" data-i="0" aria-label="Position x" />
         <input type="text" data-field="translation" data-i="1" aria-label="Position y" />

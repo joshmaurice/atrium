@@ -410,6 +410,14 @@ export function createTemplateCache() {
       entries.clear()
     },
 
+    /** Drop one entry (the form's held Check ended, Z7/A8). */
+    delete(key) {
+      const entry = entries.get(key)
+      if (!entry) return null
+      entries.delete(key)
+      return entry
+    },
+
     keys: () => [...entries.keys()],
   }
 }
