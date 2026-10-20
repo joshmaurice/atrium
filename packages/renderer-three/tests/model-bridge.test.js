@@ -12,6 +12,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Group, Object3D } from 'three'
 import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
+import { parseTemplate, createTextureBudget, estimateTextureBytes } from '../src/model-parse.js'
+import { imageGlb } from './glb-fixture.js'
 import { validateModelHost } from '@atrium/client/model-spec'
 
 /** A SOM node stand-in: identity, name, a glTF node object and model extras. */
@@ -19,7 +21,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
   return { name, _node: { def: name }, mesh, extras: { atrium: { model } } }
 }
 
-function harness({ nextFrame = null, parseResult = null, fetchGate = null } = {}) {
+function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null } = {}) {
   const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
@@ -50,16 +52,20 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null } = {}
           return { ok: false, reason: 'aborted', message: 'cancelled' }
         }
         return {
-          ok: true, kind: 'glb', bytes: new Uint8Array([1]), json: null,
+          ok: true, kind: 'glb', bytes: modelBytes ?? new Uint8Array([1]), json: null,
           dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
         }
       },
       parseTemplate: async (args) => {
         state.parses += 1
         if (parseResult) return parseResult
+        // `parseLoader` runs the REAL parseTemplate (and so the real preflight)
+        // with a loader stand-in: no image decoding, no GLTFLoader (W1, round 3).
+        if (parseLoader) return parseTemplate({ ...args, loader: parseLoader })
         args?.reserveTexture?.(0)
         return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
       },
+      ...(textureBudget ? { textureBudget } : {}),
     },
   })
   bridge.attachView({}, state.sceneGroup)
@@ -401,4 +407,56 @@ test('A9/A8: removing one of two instances keeps the other’s instance and temp
   assert.equal(h.childrenOf('Bench').length, 1, 'the other instance is still attached')
   assert.equal(h.bridge.cache.size, 2, 'both templates are still there')
   assert.ok([...h.bridge.cache.keys()].some((key) => key.startsWith('https://h/bench.glb')))
+})
+
+// ── W1 (round 3): the world texture budget, at bridge level ─────────────────
+//
+// Round 2's `preflightFor` hid the preflight's byte count under `problem`, so
+// `parseTemplate` reserved nothing and this budget was never charged: five
+// textured 2048² models in one world stayed at `taken === 0`. Here the bridge
+// runs the REAL `parseTemplate` (with a loader stand-in, no image decoding)
+// against a counting budget, three times over.
+
+/** A loader stand-in: no image decoding, no GLTFLoader (P5). */
+const hostlessLoader = { parseAsync: async () => ({ scene: new Group(), animations: [] }) }
+
+/** Let the fetch → parse → admit chain run to the end (microtasks only). */
+async function settle() {
+  for (let i = 0; i < 8; i++) await tick()
+}
+
+test('W1/A5/A10: the budget is charged once per template, and refuses the model that no longer fits', async () => {
+  const per = estimateTextureBytes(2048, 2048)
+  const budget = createTextureBudget({ bytes: per * 2 })
+  const h = harness({
+    textureBudget: budget,
+    modelBytes: imageGlb({ width: 2048, height: 2048 }),
+    parseLoader: hostlessLoader,
+  })
+
+  // The same URL placed twice: one download, one parse, ONE reservation.
+  h.addNode(somNode('Twin A', { url: 'https://h/twin.glb' }))
+  h.addNode(somNode('Twin B', { url: 'https://h/twin.glb' }))
+  await settle()
+  assert.equal(h.state.parses, 1, 'one parse for one URL')
+  assert.equal(budget.taken, per, 'and one reservation for it')
+  assert.equal(h.bridge.status('Twin A').status, MODEL_STATUS.loaded)
+
+  // A second distinct model fits the budget sized for two.
+  h.addNode(somNode('Second', { url: 'https://h/second.glb' }))
+  await settle()
+  assert.equal(h.bridge.status('Second').status, MODEL_STATUS.loaded)
+  assert.equal(budget.taken, per * 2, 'two models, two reservations')
+
+  // A third distinct model does not fit, and reserves nothing.
+  h.addNode(somNode('Third', { url: 'https://h/third.glb' }))
+  await settle()
+  const status = h.bridge.status('Third')
+  assert.equal(status.status, MODEL_STATUS.failed)
+  assert.equal(status.reason, 'world-texture-budget')
+  assert.equal(budget.taken, per * 2, 'a refused model leaves the budget untouched')
+
+  // The two that fit are still charged, and still attached.
+  assert.equal(h.childrenOf('Twin A').length, 1)
+  assert.equal(h.childrenOf('Second').length, 1)
 })

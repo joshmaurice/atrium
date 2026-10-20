@@ -566,7 +566,7 @@ function preflightFor(kind, bytes, json, dependencies) {
     const glb = readGlb(bytes)
     if (!glb) return { problem: { reason: 'parse', message: 'the file is not a GLB' } }
     const images = glbImages(glb.json, glb.bin)
-    return { problem: preflightProblem(glb.json, images) }
+    return outcomeOf(preflightProblem(glb.json, images))
   }
   if (!json) return { problem: { reason: 'parse', message: 'the .gltf JSON is missing' } }
   // A3: a .gltf's images are either `data:` URIs (already in the counted file)
@@ -577,7 +577,21 @@ function preflightFor(kind, bytes, json, dependencies) {
     const dependency = dependencies.get(image.uri)
     if (dependency) images.push({ bytes: dependency.bytes })
   }
-  return { problem: preflightProblem(json, images) }
+  return outcomeOf(preflightProblem(json, images))
+}
+
+/**
+ * W1 (round 3) — a passed preflight's byte count travels BESIDE `problem`,
+ * never inside it. `preflightProblem` answers `{ reason: null, message: null,
+ * textureBytes }` when it passes, and `parseTemplate` reads
+ * `preflight.textureBytes`; wrapping the outcome as `{ problem }` put the
+ * number at `preflight.problem.textureBytes`, which nothing reads, so the
+ * world texture budget was never charged (the refusals were unaffected: they
+ * carry a `reason`, which `parseTemplate` does read).
+ */
+function outcomeOf(outcome) {
+  if (outcome.reason) return { problem: outcome }
+  return { problem: null, textureBytes: outcome.textureBytes }
 }
 
 function bufferOf(bytes) {

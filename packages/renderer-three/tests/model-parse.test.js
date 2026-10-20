@@ -17,7 +17,7 @@ import {
   templateKey, createTemplateCache, countVertices, disposeTemplate, measureBounds,
   parseTemplate, MODEL_PARSE_LIMITS,
 } from '../src/model-parse.js'
-import { simpleGlb, modelGlb, packGlb } from './glb-fixture.js'
+import { simpleGlb, modelGlb, packGlb, imageGlb } from './glb-fixture.js'
 
 // ---------------------------------------------------------------------------
 // Image headers (A5) — hand-built, no decoding
@@ -361,4 +361,84 @@ test('modelGlb writes a parts-and-clip fixture the loader accepts', async () => 
   result.template.scene.traverse((o) => o.name && names.push(o.name))
   assert.ok(names.includes('Door') && names.includes('Cube'), names.join(','))
   assert.equal(result.template.animations.length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// W1 (round 3) — the world texture budget is actually charged
+//
+// Round 2 shipped `preflightFor` wrapping the whole preflight outcome as
+// `{ problem }`, so `parseTemplate` read `preflight.textureBytes` — always
+// `undefined` — and reserved nothing: five textured models in one world left
+// `textureBudget.taken` at 0. Measured numbers and a loader stand-in only
+// (P5: no image decoding).
+// ---------------------------------------------------------------------------
+
+/** A loader stand-in: these tests are about the reservation, not the parse. */
+function quietLoader() {
+  const calls = { parseAsync: 0 }
+  return {
+    calls,
+    loader: { parseAsync: async () => { calls.parseAsync += 1; return { scene: {}, animations: [] } } },
+  }
+}
+
+test('W1: a GLB holding a 2048×2048 PNG reserves estimateTextureBytes(2048, 2048), once', async () => {
+  const { loader, calls } = quietLoader()
+  const reservations = []
+  const result = await parseTemplate({
+    kind: 'glb',
+    bytes: imageGlb({ width: 2048, height: 2048 }),
+    reserveTexture: (n) => { reservations.push(n); return true },
+    releaseTexture: () => {},
+    loader,
+  })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(calls.parseAsync, 1, 'the GLB was parsed through the injected loader')
+  assert.deepEqual(reservations, [estimateTextureBytes(2048, 2048)], 'one reservation, of the header’s estimate')
+  assert.equal(result.textureBytes, estimateTextureBytes(2048, 2048))
+})
+
+test('W1/A5: with a one-byte budget the same GLB is refused world-texture-budget, before parsing', async () => {
+  const { loader, calls } = quietLoader()
+  const budget = createTextureBudget({ bytes: 1 })
+  const result = await parseTemplate({
+    kind: 'glb',
+    bytes: imageGlb({ width: 2048, height: 2048 }),
+    reserveTexture: (n) => budget.reserve(n),
+    releaseTexture: (n) => budget.release(n),
+    loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'world-texture-budget')
+  assert.equal(calls.parseAsync, 0, 'the reservation is taken before the loader sees anything')
+  assert.equal(budget.taken, 0, 'a refused reservation leaves the budget where it was')
+})
+
+test('W1/A5: a .gltf whose fetched texture does not fit is refused the same way', async () => {
+  const { loader, calls } = quietLoader()
+  const dependencyBytes = new Uint8Array(33)
+  dependencyBytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+  dependencyBytes.set([0x49, 0x48, 0x44, 0x52], 12)
+  const view = new DataView(dependencyBytes.buffer)
+  view.setUint32(16, 1024)
+  view.setUint32(20, 1024)
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    images: [{ uri: 'textures/a.png' }],
+  }
+  const budget = createTextureBudget({ bytes: 1 })
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    dependencies: new Map([['textures/a.png', { url: 'https://h/textures/a.png', bytes: dependencyBytes }]]),
+    urls: fakeUrls().api,
+    reserveTexture: (n) => budget.reserve(n),
+    releaseTexture: (n) => budget.release(n),
+    loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'world-texture-budget')
+  assert.equal(calls.parseAsync, 0)
 })

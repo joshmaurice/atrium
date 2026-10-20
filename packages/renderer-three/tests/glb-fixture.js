@@ -190,3 +190,47 @@ export function simpleGlb({ name = 'Part', vertices = 3 } = {}) {
   }
   return packGlb(json, bin.bin())
 }
+
+// ---------------------------------------------------------------------------
+// W1 (round 3) — a model whose texture the world budget has to be charged for
+// ---------------------------------------------------------------------------
+
+/**
+ * A PNG signature and `IHDR`, header only — enough for the A5 header checks,
+ * with no pixel data and nothing to decode (P5).
+ */
+export function pngHeaderBytes(width, height, colorType = 2) {
+  const bytes = new Uint8Array(33)
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+  const view = new DataView(bytes.buffer)
+  view.setUint32(8, 13)
+  bytes.set([0x49, 0x48, 0x44, 0x52], 12)   // 'IHDR'
+  view.setUint32(16, width)
+  view.setUint32(20, height)
+  bytes[24] = 8
+  bytes[25] = colorType
+  return bytes
+}
+
+/**
+ * A `.glb` whose one image is a header-only PNG held in a buffer view: the
+ * shape `parseTemplate` must charge the world texture budget for. Parsing it
+ * needs no image decoding (the bytes are only ever measured) — callers inject
+ * a loader stand-in.
+ *
+ * @returns {Uint8Array}
+ */
+export function imageGlb({ width = 2048, height = 2048, mimeType = 'image/png' } = {}) {
+  const bin = binBuilder()
+  const view = bin.view(pngHeaderBytes(width, height))
+  const json = {
+    asset: { version: '2.0', generator: 'atrium-test-fixture' },
+    scene: 0,
+    scenes: [{ nodes: [] }],
+    nodes: [],
+    images: [{ bufferView: view, mimeType }],
+    bufferViews: bin.bufferViews,
+    buffers: [{ byteLength: bin.length }],
+  }
+  return packGlb(json, bin.bin())
+}
