@@ -334,14 +334,34 @@ export function redirectProblem(finalUrl, rootRelative, worldBaseUrl) {
 }
 
 /**
- * Read a response's body in chunks, charging the model budget and the world
- * ledger as they arrive. Content-Length is only used to refuse early.
+ * A4/L4a — read a response's body in chunks, charging every budget in `budgets`
+ * and the world ledger as they arrive. Content-Length is only used to refuse
+ * early.
+ *
+ * `budgets` has ONE entry for a model's own transfer, and one per live consumer
+ * for a SHARED transfer (Z3/L4a): every consumer's 25 MiB model budget is
+ * charged per chunk as it arrives, so a consumer joining a transfer already
+ * under way is charged for the bytes it missed, and a download only one model
+ * wants stops at that model's 25 MiB plus one chunk — exactly as before.
+ *
+ * @param {(budget: object) => void} [onBudgetOver]  Z3 — a shared transfer names
+ *   the consumer that went over and carries on for the others; without it (a
+ *   model's own transfer) going over is `too-large` and the request is cancelled.
  */
-async function readBody(response, { budget, ledger, limits, signal }) {
+async function readBody(response, { budgets, ledger, limits, signal, onBudgetOver = null, onChunk = null }) {
+  // `budgets` may be a LIST (a model's own transfer) or a FUNCTION returning the
+  // live list (a shared transfer's consumers, which change as they join).
+  const live = () => (typeof budgets === 'function' ? budgets() : budgets)
   const declared = Number(response.headers?.get?.('content-length'))
-  if (Number.isFinite(declared) && budget.bytes + declared > limits.modelBytes) {
-    try { await response.body?.cancel?.() } catch { /* ignore */ }
-    return failure('too-large')
+  if (Number.isFinite(declared)) {
+    const over = live().filter((budget) => budget.bytes + declared > limits.modelBytes)
+    if (over.length > 0) {
+      for (const budget of over) onBudgetOver?.(budget)
+      if (!onBudgetOver) {
+        try { await response.body?.cancel?.() } catch { /* ignore */ }
+        return failure('too-large')
+      }
+    }
   }
 
   const reader = response.body?.getReader?.()
@@ -354,10 +374,15 @@ async function readBody(response, { budget, ledger, limits, signal }) {
     // path could hand a visitor a body of any size.
     const buffer = await response.arrayBuffer()
     const bytes = new Uint8Array(buffer)
-    budget.bytes += bytes.byteLength
+    for (const budget of live()) budget.bytes += bytes.byteLength
     const worldOver = ledger ? ledger.charge(bytes.byteLength) : false
+    onChunk?.(bytes.byteLength)
     if (signal?.aborted) return { aborted: true }
-    if (budget.bytes > limits.modelBytes) return failure('too-large')
+    const over = live().filter((budget) => budget.bytes > limits.modelBytes)
+    if (over.length > 0) {
+      for (const budget of over) onBudgetOver?.(budget)
+      if (!onBudgetOver) return failure('too-large')
+    }
     if (worldOver) return failure('world-download-budget')
     return { ok: true, bytes }
   }
@@ -376,12 +401,17 @@ async function readBody(response, { budget, ledger, limits, signal }) {
     const chunk = step.value
     const length = chunk.byteLength ?? chunk.length ?? 0
     total += length
-    budget.bytes += length
+    for (const budget of live()) budget.bytes += length
     const worldOver = ledger ? ledger.charge(length) : false
+    onChunk?.(length)
     // The model's budget is shared by the file and every dependency (Z2).
-    if (budget.bytes > limits.modelBytes) {
-      try { await reader.cancel() } catch { /* ignore */ }
-      return failure('too-large')
+    const over = live().filter((budget) => budget.bytes > limits.modelBytes)
+    if (over.length > 0) {
+      for (const budget of over) onBudgetOver?.(budget)
+      if (!onBudgetOver) {
+        try { await reader.cancel() } catch { /* ignore */ }
+        return failure('too-large')
+      }
     }
     if (worldOver) {
       try { await reader.cancel() } catch { /* ignore */ }
@@ -405,7 +435,9 @@ async function readBody(response, { budget, ledger, limits, signal }) {
  *
  * @returns {Promise<{ok: true, bytes: Uint8Array, url: string} | {ok: false, reason: string, message: string}>}
  */
-async function fetchOne(target, { fetchFn, signal, budget, ledger, limits, rootRelative, worldBaseUrl }) {
+async function fetchOne(target, {
+  fetchFn, signal, budgets, ledger, limits, rootRelative, worldBaseUrl, onBudgetOver = null, onChunk = null,
+}) {
   let response
   try {
     response = await fetchFn(target, { ...FETCH_OPTIONS, signal })
@@ -434,7 +466,7 @@ async function fetchOne(target, { fetchFn, signal, budget, ledger, limits, rootR
     return failure('http', String(response.status))
   }
 
-  const body = await readBody(response, { budget, ledger, limits, signal })
+  const body = await readBody(response, { budgets, ledger, limits, signal, onBudgetOver, onChunk })
   if (!body.ok) return body
   // M2 (round 6) — the validated FINAL url travels with the bytes. Round 5
   // checked `response.url` after a redirect and then dropped it: `readBody`
@@ -543,6 +575,9 @@ export async function fetchModel({
   ledger = null,
   limits = MODEL_LIMITS,
   deadline = null,
+  limiter = null,
+  priority = 0,
+  sharedTransfers = null,
 } = {}) {
   const problem = modelUrlProblem(url)
   if (problem) return failure('bad-spec', problem)
@@ -559,19 +594,14 @@ export async function fetchModel({
     deadline.start()
     if (deadline.expired()) return failure('timeout')
   }
-  const timer = setTimeout(() => controller.abort(TIMEOUT), deadline ? deadline.remainingMs() : limits.timeoutMs)
   const onExternalAbort = () => controller.abort('external')
   if (signal) {
-    if (signal.aborted) {
-      clearTimeout(timer)
-      return failure('aborted')
-    }
+    if (signal.aborted) return failure('aborted')
     signal.addEventListener('abort', onExternalAbort)
   }
 
   const release = ledger?.registerController?.(controller) ?? null
   const done = () => {
-    clearTimeout(timer)
     release?.()
     signal?.removeEventListener?.('abort', onExternalAbort)
   }
@@ -582,10 +612,44 @@ export async function fetchModel({
   }
 
   const budget = { bytes: 0 }
+  // Z3/L4a — the timer is RE-ARMED per transfer (with whatever is left of the
+  // job's deadline) rather than set once for the whole call.
+  let timer = null
+  const armTimer = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => controller.abort(TIMEOUT), deadline ? deadline.remainingMs() : limits.timeoutMs)
+  }
+
   try {
-    const first = await fetchOne(resolved.url, {
-      fetchFn, signal: controller.signal, budget, ledger, limits, rootRelative, worldBaseUrl,
-    })
+    /**
+     * L4a — one HTTP request on this job's account: its slot is held from before
+     * `fetchFn` until the body is read or cancelled, and the job's clock stops
+     * while the job waits for that slot (waiting is not the job's own work).
+     */
+    const request = async (target, requestSignal = controller.signal, budgets = [budget], onBudgetOver = null) => {
+      let slot = null
+      if (limiter) {
+        deadline?.pause()
+        slot = await limiter.acquire(requestSignal, priority)
+        deadline?.resume()
+        if (requestSignal.aborted) {
+          slot()
+          return abortOrTimeout(controller, signal)
+        }
+      }
+      armTimer()
+      try {
+        return await fetchOne(target, {
+          fetchFn, signal: requestSignal, budgets, ledger, limits, rootRelative, worldBaseUrl, onBudgetOver,
+        })
+      } finally {
+        clearTimeout(timer)
+        timer = null
+        slot?.()
+      }
+    }
+
+    const first = await request(resolved.url)
     if (first.aborted) return abortOrTimeout(controller, signal)
     if (!first.ok) return first
 
@@ -614,12 +678,95 @@ export async function fetchModel({
     if (sha256 && external.length > 0) return failure('pin-needs-glb')
     if (sha256 && (await sha256Hex(first.bytes)) !== sha256) return failure('hash-mismatch')
 
+    /**
+     * L4a — the transfer one shared-dependency task performs. Its own controller
+     * is registered with the world's ledger (the chunk that crosses the 150 MiB
+     * cap aborts every in-flight transfer), it holds ONE limiter slot, and it
+     * has NO timer of its own: each consumer's own deadline ends that consumer's
+     * wait, and the task is aborted when its last consumer leaves.
+     */
+    const runTransfer = async (taskSignal, target, bag) => {
+      const transfer = new AbortController()
+      const onAbandon = () => transfer.abort('abandoned')
+      taskSignal.addEventListener('abort', onAbandon, { once: true })
+      const unregister = ledger?.registerController?.(transfer) ?? null
+      let slot = null
+      try {
+        if (limiter) {
+          deadline?.pause()
+          slot = await limiter.acquire(transfer.signal, priority)
+          deadline?.resume()
+        }
+        if (transfer.signal.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+        bag.received = 0
+        const got = await fetchOne(target, {
+          fetchFn,
+          signal: transfer.signal,
+          // Every LIVE consumer's budget is charged ·per chunk·, so a consumer
+          // that joined the transfer under way is charged the rest as it comes.
+          budgets: () => [...bag.consumers].map((consumer) => consumer.budget),
+          ledger,
+          limits,
+          rootRelative,
+          worldBaseUrl,
+          onChunk: (length) => { bag.received += length },
+          onBudgetOver: (overBudget) => {
+            for (const consumer of bag.consumers) {
+              if (consumer.budget !== overBudget || consumer.over) continue
+              consumer.over = true
+              consumer.settle(failure('too-large'))
+              consumer.abort()          // leaves the transfer; the others carry on
+            }
+          },
+        })
+        if (got.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+        return got
+      } finally {
+        unregister?.()
+        slot?.()
+        taskSignal.removeEventListener?.('abort', onAbandon)
+      }
+    }
+
+    /** L4a — this job's share of a dependency transfer, joined or started. */
+    const depend = async (target) => {
+      // The key is the canonical URL AND the redirect policy: an absolute model
+      // may follow any `https` redirect, a root-relative one must stay on the
+      // world's origin, so their bytes are not interchangeable.
+      const key = `${target}\u0000${rootRelative ? 'world' : 'absolute'}`
+      const bag = bagFor(sharedTransfers, key)
+      const consumer = {
+        budget, over: false, settle: null, result: null, abort: () => controller.abort('too-large'),
+      }
+      consumer.result = new Promise((resolve) => { consumer.settle = resolve })
+      bag.consumers.add(consumer)
+      try {
+        // A consumer joining a transfer already under way is charged the bytes
+        // it missed AT ONCE.
+        if (sharedTransfers.has(key)) {
+          budget.bytes += bag.received
+          if (budget.bytes > limits.modelBytes) {
+            consumer.over = true
+            return failure('too-large')
+          }
+        }
+        const joined = sharedTransfers.join(key, (taskSignal) => runTransfer(taskSignal, target, bag), controller.signal)
+        const got = await Promise.race([joined, consumer.result])
+        if (consumer.over) return failure('too-large')
+        return got
+      } finally {
+        bag.consumers.delete(consumer)
+      }
+    }
+
     const dependencies = new Map()
     for (const dependency of listed.dependencies) {
       if (dependency.isData) continue
-      const fetched = await fetchOne(dependency.url, {
-        fetchFn, signal: controller.signal, budget, ledger, limits, rootRelative, worldBaseUrl,
-      })
+      // L4a — a dependency transfer is shared with every other job that wants
+      // those bytes while it is in flight (A4 amendment: in flight ONLY).
+      const fetched = sharedTransfers
+        ? await depend(dependency.url)
+        : await request(dependency.url)
       if (fetched.aborted) return abortOrTimeout(controller, signal)
       if (!fetched.ok) return fetched
       // Z1 — every original URI that resolved to this canonical URL gets an
@@ -636,6 +783,22 @@ export async function fetchModel({
   } finally {
     done()
   }
+}
+
+/**
+ * Z3/L4a — per shared-transfer task, the consumers whose budgets the transfer
+ * charges as each chunk arrives. Keyed by the shared-tasks helper and the
+ * transfer key, and kept outside the helper so its own API stays the small thing
+ * `createSharedTasks` promises.
+ */
+const TRANSFER_BAGS = new WeakMap()
+
+function bagFor(shared, key) {
+  let bags = TRANSFER_BAGS.get(shared)
+  if (!bags) { bags = new Map(); TRANSFER_BAGS.set(shared, bags) }
+  let bag = bags.get(key)
+  if (!bag) { bag = { consumers: new Set(), received: 0 }; bags.set(key, bag) }
+  return bag
 }
 
 /**

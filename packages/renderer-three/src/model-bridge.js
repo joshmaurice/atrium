@@ -37,7 +37,7 @@
  * one whose download lost the race rather than the last in document order.
  */
 
-import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline, createSharedTasks } from '@atrium/client/model-fetch'
+import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline, createSharedTasks, createTransferLimiter } from '@atrium/client/model-fetch'
 import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
 import { buildInstance, buildPlaceholder, PLACEHOLDER_COLOURS } from './model-instances.js'
@@ -116,12 +116,18 @@ export function createModelBridge(deps = {}) {
   // world change. A new world generation gets a new helper; the old generation's
   // tasks are abandoned by their requesters' aborts and cannot be joined again.
   let loads = createSharedTasks()
+  // L4a — ONE transfer limiter per PAGE: it outlives world changes (only the
+  // signals it queued for change), and it counts HTTP TRANSFERS, not jobs: a
+  // Check waits for a slot exactly as a model does, and a model waiting to be
+  // admitted or parsed holds none.
+  const limiter = hooks.limiter ?? createTransferLimiter({ concurrent: MODEL_LIMITS.concurrent })
+  // L4a — the in-flight dependency transfers, shared across the world's jobs. A
+  // world generation gets a new one, as its `loads` does.
+  let sharedTransfers = hooks.sharedTransfers ?? createSharedTasks()
   // L3a — which MODEL records are waiting on each key's task. W5's admission
   // turn is measured from the EARLIEST remaining requester here, and a join or a
   // leave wakes every admission waiter so the turn is recomputed.
   const waiting = new Map()        // template key → Set<record>
-  const queue = []
-  let running = 0
   const controllers = new Set()
 
   // W5 (round 5) — admission is ordered by `som.allNodes`, not by the order the
@@ -312,10 +318,11 @@ export function createModelBridge(deps = {}) {
     for (const record of instances.values()) record.controller?.abort('world-change')
     for (const controller of controllers) controller.abort('world-change')
     controllers.clear()
-    queue.length = 0
     waiting.clear()
-    // A new generation gets a new helper: no later join can reach an old task.
+    // A new generation gets new helpers: no later join can reach an old task,
+    // and no transfer of the old world can be joined by the new one.
     loads = createSharedTasks()
+    sharedTransfers = createSharedTasks()
     ledger.reset()
     for (const record of instances.values()) { settle(record); removeWrapper(record) }
     instances.clear()
@@ -327,21 +334,34 @@ export function createModelBridge(deps = {}) {
     notifyAdmission()
   }
 
-  /** Z5 — fetches queue at L8's concurrency; the order is A10's. */
-  function enqueue(record) {
-    queue.push(record)
-    pump()
+  /**
+   * L4a — the bridge no longer caps JOBS. Round 6 ran four loads at a time and
+   * let a Check run outside that cap, so four jobs could hold eight HTTP
+   * transfers while a Check held none at all. There is ONE transfer limiter per
+   * page now; every load starts here, in `som.allNodes` order, so its first
+   * transfer queues in that order (A10).
+   */
+  function start(record) {
+    load(record).catch(() => {})
   }
 
-  function pump() {
-    while (running < MODEL_LIMITS.concurrent && queue.length > 0) {
-      const record = queue.shift()
-      if (record.worldGeneration !== worldGeneration) continue
-      running += 1
-      load(record)
-        .catch(() => {})
-        .finally(() => { running -= 1; pump() })
+  /**
+   * L4a — the priority a job's transfers queue with: the `som.allNodes` index of
+   * its EARLIEST requester when it asks. A Check's is after every model node.
+   */
+  function jobPriority(key) {
+    const set = waiting.get(key)
+    const order = som()?.allNodes
+    let best = null
+    if (set && order) {
+      for (const requester of set) {
+        if (!requester.node) continue
+        const at = order.indexOf(requester.node)
+        if (at >= 0 && (best === null || at < best)) best = at
+      }
     }
+    if (best !== null) return best
+    return (order?.length ?? 0) + 1
   }
 
   /**
@@ -486,6 +506,9 @@ export function createModelBridge(deps = {}) {
       const fetched = await fetchModel({
         url: spec.url, sha256: spec.sha256 ?? null, signal: taskSignal,
         worldBaseUrl: token.worldBaseUrl, ledger, deadline,
+        // L4a — one limiter per page (loads and Checks alike) and the world's one
+        // set of shared dependency transfers.
+        limiter, priority: jobPriority(key), sharedTransfers,
       })
       if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'cancelled' }
       if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
@@ -780,7 +803,7 @@ export function createModelBridge(deps = {}) {
       if (validated.ok) {
         setStatus(record, MODEL_STATUS.loading)
         showPlaceholder(record)
-        enqueue(record)
+        start(record)
       } else {
         // A bad spec never loads: it is terminal at once, so it cannot hold up
         // the model nodes behind it in `allNodes` order (W5).
@@ -828,6 +851,9 @@ export function createModelBridge(deps = {}) {
     /** The cache and its budget, for tests and for the form's Check (Z7). */
     cache,
     ledger,
+    /** L4a — the page's ONE transfer limiter, and the world's shared transfers. */
+    limiter,
+    get sharedTransfers() { return sharedTransfers; },
     /** M4 — the CURRENT generation's budget (a new object after a world change). */
     get textureBudget() { return textureBudget },
     get instanceCount() { return instances.size },
