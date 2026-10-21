@@ -21,7 +21,8 @@ id atrium-smoke >/dev/null 2>&1 \
 
 install -d -o root -g root -m 755 "$D"
 [[ -x "$D/venv/bin/python" ]] || python3 -m venv "$D/venv"
-"$D/venv/bin/pip" install --quiet --disable-pip-version-check 'playwright==1.56.0'
+# 1.61 or later: the first Playwright that supports Ubuntu 26.04, the host's OS.
+"$D/venv/bin/pip" install --quiet --disable-pip-version-check 'playwright==1.64.0'
 # Chromium and the system libraries it needs (apt), under the check's own folder.
 PLAYWRIGHT_BROWSERS_PATH="$D/browsers" "$D/venv/bin/python" -m playwright install --with-deps chromium
 install -o root -g root -m 755 "$HERE/atrium-client-smoke" "$D/atrium-client-smoke"
