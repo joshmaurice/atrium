@@ -119,6 +119,168 @@ export function createWorldLedger({ worldBytes = MODEL_LIMITS.worldBytes } = {})
 const TIMEOUT = Symbol('timeout')
 
 /**
+ * L3a — one task per key, shared by every requester, with a lifetime that
+ * belongs to the requester SET rather than to whoever asked first.
+ *
+ * Round 6 built the one shared job from its first requester: that requester's
+ * `controller` and `wanted()`. Removing the first node therefore aborted a
+ * fetch every other node was still waiting for, and every other node ended
+ * `loading`/`aborted` with no placeholder and no model until a world change.
+ *
+ * The contract:
+ *   - `join(key, start, signal)` returns this requester's promise of the task's
+ *     result; `start(taskSignal)` runs ONCE per key while the task is live.
+ *   - a requester whose `signal` aborts gets `{ ok: false, reason: 'aborted' }`
+ *     at once; the others are untouched;
+ *   - a task is `live` while it has at least one requester and has not settled;
+ *     when its LAST requester leaves it is `abandoned` at once — it leaves the
+ *     map, its controller aborts, and nobody can join it again;
+ *   - a join after that starts a NEW task with a new identity, even while the
+ *     old one is still settling. An old task's settle removes only its own
+ *     entry, never a newer task under the same key.
+ */
+export function createSharedTasks() {
+  const tasks = new Map()
+  const noop = () => {}
+
+  /** One requester's promise, settled exactly once. */
+  function request(task, key, signal) {
+    const requester = { done: false, resolve: null }
+    const promise = new Promise((resolve) => { requester.resolve = resolve })
+    const finish = (result) => {
+      if (requester.done) return
+      requester.done = true
+      task.requesters.delete(requester)
+      signal?.removeEventListener?.('abort', onAbort)
+      requester.resolve(result)
+    }
+    const onAbort = () => {
+      finish({ ok: false, reason: 'aborted' })
+      // The last requester left before the task settled: the task is abandoned
+      // AT ONCE — it leaves the map and its controller aborts. The abort is
+      // what stops the work the other requesters gave up on.
+      if (task.requesters.size === 0 && !task.settled) {
+        if (tasks.get(key) === task) tasks.delete(key)
+        try { task.controller.abort('abandoned') } catch { /* already aborted */ }
+      }
+    }
+    task.requesters.add(requester)
+    if (signal) signal.addEventListener?.('abort', onAbort)
+    task.result.then(finish, finish)
+    return promise
+  }
+
+  return {
+    /**
+     * @param {string} key
+     * @param {(signal: AbortSignal) => Promise<any>} start  runs once per key
+     * @param {AbortSignal|null} [signal]  this requester's own signal
+     */
+    join(key, start, signal = null) {
+      if (signal?.aborted) return Promise.resolve({ ok: false, reason: 'aborted' })
+      let task = tasks.get(key)
+      if (!task) {
+        const controller = new AbortController()
+        task = { key, controller, requesters: new Set(), settled: false }
+        task.result = (async () => {
+          // Abandoned before the first microtask ran: never start the work.
+          if (controller.signal.aborted) return { ok: false, reason: 'aborted' }
+          try {
+            return await start(controller.signal)
+          } catch (error) {
+            return { ok: false, reason: 'network', message: error?.message ?? 'the download failed' }
+          }
+        })()
+        task.result.then(noop, noop).finally(() => {
+          task.settled = true
+          // Only THIS task's entry, never a newer task under the same key.
+          if (tasks.get(key) === task) tasks.delete(key)
+        })
+        tasks.set(key, task)
+      }
+      return request(task, key, signal)
+    },
+    has: (key) => tasks.has(key),
+    get size() { return tasks.size },
+  }
+}
+
+/**
+ * L4a — one transfer limiter per page: at most `concurrent` HTTP requests at a
+ * time, across every model AND every Check. Round 6 capped JOBS, so four jobs
+ * could hold eight transfers and a Check held none at all.
+ *
+ * Order: lowest `priority` first, then first-come. The job's priority is the
+ * `som.allNodes` index of its earliest requester; a Check's is after every node.
+ *
+ * `acquire(signal, priority)` resolves to an idempotent `release`. A waiter
+ * whose signal aborts (or whose job the world's ledger aborts) leaves the queue
+ * and is handed a no-op release, so its caller can see the aborted signal and
+ * stop; a caller that has already been granted a slot must hold the release in
+ * a `try/finally` from the moment of the grant.
+ */
+export function createTransferLimiter({ concurrent = MODEL_LIMITS.concurrent } = {}) {
+  let active = 0
+  let order = 0
+  const queue = []
+
+  function pump() {
+    while (active < concurrent && queue.length > 0) {
+      const waiter = queue.shift()
+      if (waiter.done) continue
+      active += 1
+      waiter.settle(grant(waiter))
+    }
+  }
+
+  /** Hand a waiter its slot: an idempotent release, held once. */
+  function grant(waiter) {
+    waiter.done = true
+    waiter.signal?.removeEventListener?.('abort', waiter.onAbort)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      active -= 1
+      pump()
+    }
+  }
+
+  return {
+    get active() { return active },
+    get queued() { return queue.length },
+    get limit() { return concurrent },
+    acquire(signal = null, priority = 0) {
+      return new Promise((resolve) => {
+        const waiter = {
+          priority, order: ++order, signal, done: false, settle: resolve, onAbort: null,
+        }
+        waiter.onAbort = () => {
+          if (waiter.done) return
+          waiter.done = true
+          const at = queue.indexOf(waiter)
+          if (at >= 0) queue.splice(at, 1)
+          // No slot was ever held: hand back a release that does nothing, so the
+          // caller is not left waiting and no slot is created or lost.
+          resolve(() => {})
+        }
+        if (signal?.aborted) { waiter.onAbort(); return }
+        signal?.addEventListener?.('abort', waiter.onAbort)
+        // Lowest priority first, then first-come (equal priorities keep arrival order).
+        let at = queue.length
+        while (at > 0) {
+          const other = queue[at - 1]
+          if (other.priority < waiter.priority || (other.priority === waiter.priority && other.order < waiter.order)) break
+          at -= 1
+        }
+        queue.splice(at, 0, waiter)
+        pump()
+      })
+    },
+  }
+}
+
+/**
  * M3 (round 6) — ONE deadline per job, set at its first request. The fetch, the
  * preflight and the parse all run against it, so a model's own work totals 30 s
  * (L8) rather than 30 s of download plus 30 s of parse.
