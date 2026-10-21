@@ -14,7 +14,7 @@ import { Group, Object3D, BoxGeometry, MeshBasicMaterial } from 'three'
 import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
 import { disposeInstance } from '../src/model-instances.js'
 import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonText, MODEL_PARSE_LIMITS } from '../src/model-parse.js'
-import { createJobDeadline } from '@atrium/client/model-fetch'
+import { createJobDeadline, fetchModel, createWorldLedger, createSharedTasks, createTransferLimiter, MODEL_LIMITS } from '@atrium/client/model-fetch'
 import { imageGlb, multiImageGlb } from './glb-fixture.js'
 import { validateModelHost } from '@atrium/client/model-spec'
 
@@ -23,7 +23,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
   return { name, _node: { def: name }, mesh, extras: { atrium: { model } } }
 }
 
-function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null, newDeadline = null, parseHook = null } = {}) {
+function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null, newDeadline = null, parseHook = null, ledger = null, limiter = null, sharedTransfers = null } = {}) {
   const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
@@ -70,6 +70,9 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
       ...(textureBudget ? { textureBudget } : {}),
       ...(newDeadline ? { newDeadline } : {}),
       ...(disposeTemplate ? { disposeTemplate } : {}),
+      ...(ledger ? { ledger } : {}),
+      ...(limiter ? { limiter } : {}),
+      ...(sharedTransfers ? { sharedTransfers } : {}),
     },
   })
   bridge.attachView({}, state.sceneGroup)
@@ -1370,6 +1373,110 @@ test('Z4: disposeInstance frees each distinct skeleton once and never the templa
   assert.equal(material.n, 0, 'nor the shared material')
   assert.equal(clips[0].disposed, 1, 'the retargeted clips are disposed')
   assert.equal(host.children.length, 0, 'the wrapper left its host')
+})
+
+// ── R1/R7: the bridge fails a node it still wants, and never parks it ────────
+
+const glTfJson = (json) => new TextEncoder().encode(JSON.stringify({ asset: { version: '2.0' }, ...json }))
+const GLB_BYTES = Uint8Array.from([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 1, 2, 3, 4])
+
+/** A response whose body is served in `chunk`-sized pieces. */
+function bodyResponse(body, url, { chunk = 0 } = {}) {
+  const data = body instanceof Uint8Array ? body : new TextEncoder().encode(String(body))
+  const stream = new ReadableStream({
+    start(controller) {
+      const size = chunk > 0 ? chunk : data.length || 1
+      for (let at = 0; at < data.length; at += size) controller.enqueue(data.subarray(at, at + size))
+      controller.close()
+    },
+  })
+  return { ok: true, status: 200, redirected: false, url, headers: new Headers(), body: stream }
+}
+
+/** A response that sends its headers and then stalls until its signal aborts. */
+function stalledResponse(url, signal) {
+  const stream = new ReadableStream({
+    start(controller) {
+      signal?.addEventListener?.('abort', () => {
+        try { controller.error(new Error('aborted')) } catch { /* already closed */ }
+      }, { once: true })
+    },
+  })
+  return { ok: true, status: 200, redirected: false, url, headers: new Headers(), body: stream }
+}
+
+/** A fetch stub for the REAL `fetchModel`, recording every call in order. */
+function tableFetch(table) {
+  const calls = []
+  const fn = async (url, options) => {
+    calls.push({ url, options })
+    const entry = table[url]
+    if (entry === undefined) throw new Error(`unexpected request: ${url}`)
+    return typeof entry === 'function' ? entry(url, options) : entry
+  }
+  fn.calls = calls
+  return fn
+}
+
+/** Poll with ticks until `check()` holds, or the budget runs out. */
+async function until(check, ms = 5000) {
+  const stop = Date.now() + ms
+  while (Date.now() < stop) { if (check()) return true; await tick() }
+  return check()
+}
+
+test('R1 (t5): a stalled dependency fails its own node as timeout, and the model after it still loads', { timeout: 15_000 }, async () => {
+  const stub = tableFetch({
+    'https://h/a.gltf': () => bodyResponse(glTfJson({ images: [{ uri: 'a.png' }] }), 'https://h/a.gltf'),
+    // The dependency sends headers and never a byte of body.
+    'https://h/a.png': (url, options) => stalledResponse(url, options.signal),
+    'https://h/b.glb': () => bodyResponse(GLB_BYTES, 'https://h/b.glb'),
+  })
+  const h = harness({
+    newDeadline: () => createJobDeadline({ timeoutMs: 300 }),
+    fetchModel: (args) => fetchModel({ ...args, fetchFn: stub, limits: { ...MODEL_LIMITS, timeoutMs: 300 } }),
+  })
+  h.addNode(somNode('A', { url: 'https://h/a.gltf' }))
+  h.addNode(somNode('B', { url: 'https://h/b.glb' }))
+
+  await until(() => h.bridge.status('A').status === MODEL_STATUS.failed)
+  const a = h.bridge.status('A')
+  assert.equal(a.status, MODEL_STATUS.failed, `A ended ${JSON.stringify(a)}`)
+  assert.equal(a.reason, 'timeout', `A ended ${JSON.stringify(a)}`)
+
+  await until(() => h.bridge.status('B').status === MODEL_STATUS.loaded)
+  const b = h.bridge.status('B')
+  assert.equal(b.status, MODEL_STATUS.loaded, `the model after the stalled one ended ${JSON.stringify(b)}`)
+})
+
+test('R7 (t7): a dependency that crosses the world ledger fails its node as world-download-budget', { timeout: 5000 }, async () => {
+  const ledger = createWorldLedger({ worldBytes: 1000 })
+  const stub = tableFetch({
+    'https://h/a.gltf': () => bodyResponse(glTfJson({ images: [{ uri: 'a.png' }] }), 'https://h/a.gltf'),
+    'https://h/a.png': () => bodyResponse(new Uint8Array(4000), 'https://h/a.png', { chunk: 1000 }),
+  })
+  const h = harness({
+    ledger,
+    fetchModel: (args) => fetchModel({ ...args, fetchFn: stub, limits: { ...MODEL_LIMITS, timeoutMs: 5000 } }),
+  })
+  h.addNode(somNode('A', { url: 'https://h/a.gltf' }))
+
+  await until(() => h.bridge.status('A').status !== MODEL_STATUS.loading)
+  const a = h.bridge.status('A')
+  assert.equal(a.status, MODEL_STATUS.failed, `A ended ${JSON.stringify(a)}`)
+  assert.equal(a.reason, 'world-download-budget', `A ended ${JSON.stringify(a)}`)
+  assert.ok(h.childrenOf('A').length > 0, 'the failed placeholder is shown')
+  assert.ok(ledger.over, 'the world is over its budget')
+})
+
+test('R7 (t8): a task that reports `aborted` while its node is still wanted FAILS that node', async () => {
+  const h = harness({ fetchModel: async () => ({ ok: false, reason: 'aborted', message: 'cancelled' }) })
+  h.addNode(somNode('A'))
+  await tick()
+  const a = h.bridge.status('A')
+  assert.equal(a.status, MODEL_STATUS.failed, `A ended ${JSON.stringify(a)}`)
+  assert.notEqual(a.status, MODEL_STATUS.loading, 'the node is never parked loading/aborted')
+  assert.ok(h.childrenOf('A').length > 0, 'the failed placeholder is shown')
 })
 
 

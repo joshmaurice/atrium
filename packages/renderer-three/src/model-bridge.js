@@ -425,7 +425,15 @@ export function createModelBridge(deps = {}) {
       const token = { spec: record.spec, worldBaseUrl: record.worldBaseUrl, key: null }
       joinWaiting(key, record)
       const got = await loads.join(key, (taskSignal) => fetchAndParse(key, taskSignal, token), controller.signal)
-      if (got.reason === 'aborted') return drop(record)
+      // R7 — `drop` is for a node NOBODY wants any more. An `aborted` from the
+      // TASK while this node is still in the SOM (its own controller is live and
+      // the spec is unchanged) is a FAILURE with its reason: treating it as
+      // "nobody wants this" parked the node `loading`/`aborted`, with no
+      // placeholder and no model, for good.
+      if (got.reason === 'aborted') {
+        if (controller.signal.aborted || !stillWanted(record)) return drop(record)
+        return fail(record, got.reason, got.message)
+      }
       if (!got.ok) return fail(record, got.reason, got.message)
       if (!stillWanted(record)) return drop(record)
 
