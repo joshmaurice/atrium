@@ -216,6 +216,10 @@ test('Z3/L4a: the job’s clock stops while it waits for a limiter slot', async 
 
   assert.equal(result.ok, true, 'the queue wait is not the job’s own time')
   assert.equal(fetchFn.calls.length, 1)
+  // R4 — the shipped test could not fail: it only checked `result.ok`, and the
+  // stub resolved before the re-armed 0 ms timer could fire. The clock is read
+  // here so a charged queue wait shows up as a named failure.
+  assert.ok(deadline.elapsedMs < 1000, `the 20 s queue wait was not charged (elapsed ${deadline.elapsedMs} ms)`)
 })
 
 test('Z3/L4a: the timer is re-armed per transfer, so a dependency gets the rest of the deadline', async () => {
@@ -503,6 +507,7 @@ test('R5 (S4): a waiter aborted in the tick its slot is granted leaks nothing', 
 test('R5 (M3): a consumer that goes over its budget on its own second file leaves mid-transfer', { timeout: 10_000 }, async () => {
   const MiB = 1024 * 1024
   const shared = createSharedTasks()
+  const ledger = createWorldLedger()
   const limits = { ...MODEL_LIMITS, modelBytes: 25 * MiB, timeoutMs: 5000 }
   const xJson = GLTF_JSON({ buffers: [{ uri: 'shared.bin' }], images: [{ uri: 'x2.bin' }] })
   const yJson = GLTF_JSON({ buffers: [{ uri: 'shared.bin' }] })
@@ -515,8 +520,8 @@ test('R5 (M3): a consumer that goes over its budget on its own second file leave
   })
 
   const [x, y] = await Promise.all([
-    fetchModel({ url: 'https://h/x.gltf', fetchFn, sharedTransfers: shared, limits }),
-    fetchModel({ url: 'https://h/y.gltf', fetchFn, sharedTransfers: shared, limits }),
+    fetchModel({ url: 'https://h/x.gltf', fetchFn, ledger, sharedTransfers: shared, limits }),
+    fetchModel({ url: 'https://h/y.gltf', fetchFn, ledger, sharedTransfers: shared, limits }),
   ])
 
   assert.equal(x.ok, false, 'X goes over its own 25 MiB and leaves')
@@ -525,6 +530,13 @@ test('R5 (M3): a consumer that goes over its budget on its own second file leave
   assert.equal(y.totalBytes, yJson.length + 20 * MiB, 'Y’s budget is the shared file once')
   assert.equal(counts.shared, 1, 'the shared 20 MiB file is ONE transfer')
   assert.equal(counts.x2, 1)
+  // The world ledger is the shared file ONCE (20 MiB) plus what X had read of its
+  // own second file when it left — measured 29 MiB, a few chunks past X’s 25 MiB
+  // cap because a shared transfer only stops charging a consumer when that
+  // consumer has left it. (The brief's "about 40 MiB" holds only when the cap
+  // lets X read its second file in full; see the handoff.)
+  assert.ok(ledger.charged > 20 * MiB && ledger.charged < 35 * MiB,
+    `the shared file is charged once (${(ledger.charged / MiB).toFixed(1)} MiB)`)
 })
 
 test('R5: a job whose own clock is past its 30 s ends `timeout`', { timeout: 5000 }, async () => {

@@ -1529,4 +1529,152 @@ test('R9: a node joining a Check-started job queues that job’s NEXT transfer w
   assert.equal(order.filter((url) => url === 'https://h/a.png').length, 1, 'one transfer')
 })
 
+// ── R2/R3/R5: the tests that could not catch these regressions ──────────────
+
+test('Z2/L3a: a node deleted while its parse is queued behind a Check, then re-added, still loads', { timeout: 10_000 }, async () => {
+  // R2 — the shipped test held the second node at ADMISSION, so its job ended at
+  // once and a reintroduced per-key `parses` map was empty again before the
+  // Undo. Because admission is in document order, only a CHECK's parse can hold
+  // a node's job in the parse queue, and that is what this one does.
+  let releaseCheck = null
+  const checkGate = new Promise((resolve) => { releaseCheck = resolve })
+  const h = harness({
+    parseHook: async (args) => {
+      if (args.bytes?.[0] === 9) await checkGate      // the Check's parse is slow
+      args.reserveTexture?.(0)
+      return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
+    },
+    fetchModel: async ({ url }) => ({
+      ok: true, kind: 'glb', bytes: new Uint8Array([url.includes('checked') ? 9 : 1]), json: null,
+      dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
+    }),
+  })
+  const checked = h.bridge.loadTemplate({ url: 'https://h/checked.glb' })   // its parse runs, gated
+  await settle()
+  h.addNode(somNode('X', { url: 'https://h/x.glb' }))   // admitted at once; its parse queues behind the Check's
+  await settle()
+  assert.equal(h.bridge.status('X').status, MODEL_STATUS.loading, 'X waits behind the Check')
+  h.removeNode('X')                                      // abandoned while its parse is QUEUED
+  h.addNode(somNode('X', { url: 'https://h/x.glb' }))    // Undo: same URL, a new task
+  await settle()
+  releaseCheck()
+  await checked
+  await settle(); await settle()
+  assert.equal(h.bridge.status('X').status, MODEL_STATUS.loaded, `X ended ${JSON.stringify(h.bridge.status('X'))}`)
+})
+
+test('Z3/L4a: a Check takes its transfers through the same limiter as the model nodes', async () => {
+  const seen = []
+  const h = harness({
+    fetchModel: async (args) => {
+      seen.push({ url: args.url, limiter: args.limiter })
+      return { ok: true, kind: 'glb', bytes: new Uint8Array([1]), json: null, dependencies: new Map(), effectiveUrl: args.url, totalBytes: 1 }
+    },
+  })
+  h.addNode(somNode('A', { url: 'https://h/a.glb' }))
+  await h.bridge.loadTemplate({ url: 'https://h/checked.glb' })
+  await settle()
+  const node = seen.find((s) => s.url.endsWith('a.glb'))
+  const check = seen.find((s) => s.url.endsWith('checked.glb'))
+  assert.ok(node?.limiter, 'the node passes a limiter')
+  assert.equal(check?.limiter, node.limiter, 'the Check passes the SAME limiter')
+})
+
+test('Z3/L4a behavioural: a Check waits for a real limiter slot when four transfers hold them all', { timeout: 15_000 }, async () => {
+  const limiter = createTransferLimiter({ concurrent: 4 })
+  const releases = new Map()
+  const names = ['a', 'b', 'c', 'd']
+  const table = { 'https://h/checked.glb': () => bodyResponse(GLB_BYTES, 'https://h/checked.glb') }
+  for (const name of names) {
+    table[`https://h/${name}.glb`] = async (url) => {
+      await new Promise((resolve) => releases.set(url, resolve))
+      return bodyResponse(GLB_BYTES, url)
+    }
+  }
+  const stub = tableFetch(table)
+  const h = harness({
+    limiter,
+    fetchModel: (args) => fetchModel({ ...args, fetchFn: stub, limits: { ...MODEL_LIMITS, timeoutMs: 10_000 } }),
+  })
+  for (const name of names) h.addNode(somNode(name.toUpperCase(), { url: `https://h/${name}.glb` }))
+  await until(() => limiter.active === 4)
+  assert.equal(limiter.active, 4, 'the four model transfers hold every slot')
+
+  const check = h.bridge.loadTemplate({ url: 'https://h/checked.glb' })
+  await settle()
+  assert.equal(stub.calls.some((call) => call.url.endsWith('checked.glb')), false,
+    'the Check waits for a slot instead of bypassing the limiter')
+
+  releases.get('https://h/a.glb')()                      // one slot frees
+  await until(() => stub.calls.some((call) => call.url.endsWith('checked.glb')))
+  assert.ok(limiter.active <= 4, 'never more than four transfers at once')
+
+  for (const name of names) releases.get(`https://h/${name}.glb`)?.()
+  await check
+  await until(() => h.bridge.status('D').status === MODEL_STATUS.loaded)
+  assert.equal(limiter.active, 0, 'every slot was given back')
+})
+
+test('R5: with every slot busy, a later node’s file queues first and an earlier node’s dependency starts first', { timeout: 15_000 }, async () => {
+  const limiter = createTransferLimiter({ concurrent: 2 })
+  let filler = null
+  const stub = tableFetch({
+    'https://h/a.gltf': () => {
+      filler = limiter.acquire(null, 0)                  // takes the slot this request frees
+      return bodyResponse(glTfJson({ images: [{ uri: 'a.png' }] }), 'https://h/a.gltf')
+    },
+    'https://h/a.png': () => bodyResponse(new Uint8Array(8), 'https://h/a.png'),
+    'https://h/b.glb': () => bodyResponse(GLB_BYTES, 'https://h/b.glb'),
+  })
+  const h = harness({
+    limiter,
+    fetchModel: (args) => fetchModel({ ...args, fetchFn: stub, limits: { ...MODEL_LIMITS, timeoutMs: 10_000 } }),
+  })
+  const held = await limiter.acquire(null, 0)
+  h.addNode(somNode('A', { url: 'https://h/a.gltf' }))
+  await until(() => limiter.queued === 1)              // A's dependency queues for the second slot
+  h.addNode(somNode('B', { url: 'https://h/b.glb' }))  // the later node's file queues after it
+
+  held()
+  const releaseFiller = await filler
+  releaseFiller()
+
+  await until(() => h.bridge.status('B').status === MODEL_STATUS.loaded)
+  const order = stub.calls.map((call) => call.url)
+  assert.ok(order.indexOf('https://h/a.png') < order.indexOf('https://h/b.glb'),
+    `the earlier node's dependency starts first: ${order.join(' → ')}`)
+})
+
+test('R5: three models waiting to parse hold no transfer slots', { timeout: 15_000 }, async () => {
+  const limiter = createTransferLimiter({ concurrent: 4 })
+  let releaseParse = null
+  const parseGate = new Promise((resolve) => { releaseParse = resolve })
+  const stub = tableFetch({
+    'https://h/a.glb': () => bodyResponse(GLB_BYTES, 'https://h/a.glb'),
+    'https://h/b.glb': () => bodyResponse(GLB_BYTES, 'https://h/b.glb'),
+    'https://h/c.glb': () => bodyResponse(GLB_BYTES, 'https://h/c.glb'),
+  })
+  const h = harness({
+    limiter,
+    parseHook: async (args) => {
+      await parseGate
+      args.reserveTexture?.(0)
+      return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
+    },
+    fetchModel: (args) => fetchModel({ ...args, fetchFn: stub, limits: { ...MODEL_LIMITS, timeoutMs: 10_000 } }),
+  })
+  for (const name of ['A', 'B', 'C']) h.addNode(somNode(name, { url: `https://h/${name.toLowerCase()}.glb` }))
+  await until(() => stub.calls.length === 3)
+  await settle()
+  assert.equal(limiter.active, 0, 'waiting to parse holds no slot')
+  assert.equal(limiter.queued, 0)
+  assert.equal(h.bridge.status('A').status, MODEL_STATUS.loading, 'the first parse is still running')
+
+  releaseParse()
+  await until(() => h.bridge.status('C').status === MODEL_STATUS.loaded)
+  for (const name of ['A', 'B', 'C']) {
+    assert.equal(h.bridge.status(name).status, MODEL_STATUS.loaded, `${name} ended ${JSON.stringify(h.bridge.status(name))}`)
+  }
+})
+
 
