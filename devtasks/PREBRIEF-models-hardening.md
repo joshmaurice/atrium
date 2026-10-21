@@ -429,7 +429,8 @@ standing rule stays: no uploads to `main` from DEV acceptance until PROD.
   does all of this and is safe to re-run; `smoke-now.sh` then runs the check
   once by hand, exactly as a deploy will:
   - a system user `atrium-smoke`;
-  - a venv at `/usr/local/lib/atrium-smoke/venv` with `playwright==1.56.0`;
+  - a venv at `/usr/local/lib/atrium-smoke/venv` with `playwright==1.64.0` (the host runs Ubuntu 26.04, which Playwright
+    supports from 1.61; 1.56 refused it at the first install, 2026-10-21);
   - `playwright install --with-deps chromium`, with the browsers path under
     `/usr/local/lib/atrium-smoke`;
   - the script at `/usr/local/lib/atrium-smoke/atrium-client-smoke`, root-owned.
