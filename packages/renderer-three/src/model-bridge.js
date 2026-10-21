@@ -40,7 +40,7 @@
 import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline, createSharedTasks, createTransferLimiter } from '@atrium/client/model-fetch'
 import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
-import { buildInstance, buildPlaceholder, PLACEHOLDER_COLOURS } from './model-instances.js'
+import { buildInstance, buildPlaceholder, disposeInstance, PLACEHOLDER_COLOURS } from './model-instances.js'
 
 /** L8 — the most model nodes one world renders (A10: in `som.allNodes` order). */
 export const MODEL_INSTANCE_LIMIT = 256
@@ -301,10 +301,37 @@ export function createModelBridge(deps = {}) {
     record.viewGeneration = null
   }
 
-  function removeWrapper(record) {
-    detachWrapper(record)
+  /**
+   * Z4 — a record holds at most ONE visual, a placeholder or an instance, and
+   * this is the one place that takes it away: detached AND disposed. Round 6
+   * dropped the wrapper and left the geometry, the material and (for a skinned
+   * model) the cloned skeleton's bone texture on the GPU for the life of the
+   * page.
+   *
+   * A placeholder's geometry and material belong to it alone, so both are
+   * disposed. An instance goes through `disposeInstance`, which frees its own
+   * skeleton and clips and NEVER touches the template's geometries, materials or
+   * textures (A9) — those are shared with every other instance.
+   *
+   * NOT called from `detachView`: a view change KEEPS the wrappers so they can be
+   * re-attached without a fetch (A9).
+   */
+  function clearVisual(record) {
+    if (!record) return
+    if (record.placeholder) {
+      const placeholder = record.placeholder
+      placeholder.wrapper?.parent?.remove(placeholder.wrapper)
+      placeholder.box?.geometry?.dispose?.()
+      placeholder.box?.material?.dispose?.()
+      record.placeholder = null
+    }
+    if (record.instance) {
+      disposeInstance(record.instance, { removeFromHost: true })
+      record.instance = null
+      record.clips = []
+    }
+    if (record.wrapper) detachWrapper(record)
     record.wrapper = null
-    record.attachedGeneration = null
   }
 
   // ── the world (A9) ─────────────────────────────────────────────────────
@@ -324,7 +351,7 @@ export function createModelBridge(deps = {}) {
     loads = createSharedTasks()
     sharedTransfers = createSharedTasks()
     ledger.reset()
-    for (const record of instances.values()) { settle(record); removeWrapper(record) }
+    for (const record of instances.values()) { settle(record); clearVisual(record) }
     instances.clear()
     // M4 — the new generation gets a budget OBJECT of its own, so a reservation
     // taken by the old world (and released by a parse that finishes late) can
@@ -564,7 +591,10 @@ export function createModelBridge(deps = {}) {
       record.key = null
       return drop(record)
     }
-    record.wrapper?.parent?.remove(record.wrapper)
+    // Z4 — the placeholder (or a previous instance) is detached AND disposed
+    // before the new one goes in.
+    clearVisual(record)
+    record.instance = built
     record.wrapper = built.wrapper
     record.clips = built.clips
     record.droppedTracks = built.droppedTracks
@@ -681,14 +711,14 @@ export function createModelBridge(deps = {}) {
   }
 
   function drop(record) {
-    removeWrapper(record)
+    clearVisual(record)
     if (record.key) { cache.release(record.key); record.key = null }
     setStatus(record, MODEL_STATUS.loading, 'aborted', null)
     settle(record)
   }
 
   function fail(record, reason, message) {
-    removeWrapper(record)
+    clearVisual(record)
     if (record.key) { cache.release(record.key); record.key = null }
     setStatus(record, MODEL_STATUS.failed, reason, message)
     showPlaceholder(record)
@@ -792,7 +822,7 @@ export function createModelBridge(deps = {}) {
       admitted += 1
       const record = {
         node, spec, specKey: key, status: null, reason: null, message: null,
-        wrapper: null, placeholder: null, clips: [], droppedTracks: 0, key: null,
+        wrapper: null, placeholder: null, instance: null, clips: [], droppedTracks: 0, key: null,
         worldGeneration, viewGeneration: null, attachedGeneration: null,
         worldBaseUrl: deps.worldBaseUrl?.() ?? null,
         // L3a — this node's OWN requester controller, made when its load starts.
@@ -823,7 +853,8 @@ export function createModelBridge(deps = {}) {
   function removeInstance(name) {
     const record = instances.get(name)
     if (!record) return
-    removeWrapper(record)
+    // Z4 — the visual goes with the record: detached and disposed.
+    clearVisual(record)
     // L3a — this requester leaves the job: its own controller aborts, so its join
     // resolves `aborted` at once. The other requesters of the same key are
     // untouched, and the shared task is aborted only when the LAST one leaves.

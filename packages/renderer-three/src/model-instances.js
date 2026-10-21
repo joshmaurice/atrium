@@ -147,10 +147,18 @@ export function buildPlaceholder(bounds = null) {
 /** Z6's two colours: muted grey while loading, amber after a failure. */
 export const PLACEHOLDER_COLOURS = Object.freeze({ loading: 0x6b7280, failed: 0xd97706 })
 
-/** Disposing an instance removes its wrapper and its cloned skeleton only (A9). */
+/** Z4 — dispose an instance: its wrapper, its skeletons and its retargeted clips (A9). */
 export function disposeInstance(instance, { removeFromHost = true } = {}) {
   if (!instance?.wrapper) return
   if (removeFromHost) instance.wrapper.parent?.remove(instance.wrapper)
   else instance.wrapper.removeFromParent?.()
+  // Z4 — every `SkeletonUtils.clone` carries its OWN `Skeleton`, whose bone
+  // texture only `skeleton.dispose()` frees. The template's geometries,
+  // materials and textures are NEVER touched here: `clone` shares them (A9).
+  const skeletons = new Set()
+  instance.scene?.traverse?.((object) => {
+    if (object.skeleton && !skeletons.has(object.skeleton)) skeletons.add(object.skeleton)
+  })
+  for (const skeleton of skeletons) skeleton.dispose?.()
   for (const clip of instance.clips ?? []) clip.dispose?.()
 }

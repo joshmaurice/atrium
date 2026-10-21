@@ -10,8 +10,9 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Group, Object3D } from 'three'
+import { Group, Object3D, BoxGeometry, MeshBasicMaterial } from 'three'
 import { createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specTemplateKey } from '../src/model-bridge.js'
+import { disposeInstance } from '../src/model-instances.js'
 import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonText, MODEL_PARSE_LIMITS } from '../src/model-parse.js'
 import { createJobDeadline } from '@atrium/client/model-fetch'
 import { imageGlb, multiImageGlb } from './glb-fixture.js'
@@ -1262,4 +1263,113 @@ test('Z2/L3a: over a random add/remove sequence every node ends loaded or failed
     )
   }
 })
+
+// ---------------------------------------------------------------------------
+// Z4 (this round) — what is built is disposed. Round 6 dropped a record's
+// wrapper and left the placeholder's geometry and material (and a skinned
+// instance's cloned skeleton, whose bone texture only `skeleton.dispose()`
+// frees) on the GPU for the life of the page.
+// ---------------------------------------------------------------------------
+
+/** Count the `dispose` events on a three object without changing its behaviour. */
+function disposedOnce(object) {
+  const counts = { n: 0 }
+  object.addEventListener?.('dispose', () => { counts.n += 1 })
+  return counts
+}
+
+test('Z4: the loading placeholder goes, disposed, when the model arrives', async () => {
+  const h = harness()
+  h.addNode(somNode('Chair'))
+  const first = h.bridge.instances.get('Chair').placeholder
+  const geometry = disposedOnce(first.box.geometry)
+  const material = disposedOnce(first.box.material)
+
+  await settle()
+  assert.equal(geometry.n, 1, 'the placeholder’s geometry is disposed once')
+  assert.equal(material.n, 1, 'and its material')
+  assert.equal(h.childrenOf('Chair').length, 1, 'only the instance is under the host')
+})
+
+test('Z4: the placeholder goes, disposed, on a failure, on removal and on a world change', async () => {
+  const h = harness({ parseResult: { ok: false, reason: 'parse', message: 'the file is not a glTF model' } })
+  h.addNode(somNode('Failed'))
+  const failed = h.bridge.instances.get('Failed').placeholder
+  const failedGeometry = disposedOnce(failed.box.geometry)
+  await settle()
+  assert.equal(failedGeometry.n, 1, 'the loading placeholder went for the failed one')
+
+  const shown = h.bridge.instances.get('Failed').placeholder
+  const shownGeometry = disposedOnce(shown.box.geometry)
+  const shownMaterial = disposedOnce(shown.box.material)
+  h.removeNode('Failed')
+  assert.equal(shownGeometry.n, 1, 'removing the node disposes the failed placeholder')
+  assert.equal(shownMaterial.n, 1, 'and its material')
+
+  h.addNode(somNode('Again'))
+  const world = h.bridge.instances.get('Again').placeholder
+  const worldGeometry = disposedOnce(world.box.geometry)
+  const worldMaterial = disposedOnce(world.box.material)
+  h.bridge.resetWorld()
+  assert.equal(worldGeometry.n, 1, 'a world change disposes it too')
+  assert.equal(worldMaterial.n, 1, 'and its material')
+})
+
+test('Z4: a spec change disposes the old instance and its skeleton', async () => {
+  const h = harness()
+  h.addNode(somNode('Chair', { url: 'https://h/a.glb' }))
+  await settle()
+  const instance = h.bridge.instances.get('Chair').instance
+  const skeleton = { disposed: 0, dispose() { this.disposed += 1 } }
+  instance.scene.add(Object.assign(new Object3D(), { skeleton }))
+  const wrapper = instance.wrapper
+
+  h.state.nodes[0].extras.atrium.model = { url: 'https://h/b.glb' }
+  h.bridge.reconcile()
+  await settle()
+
+  assert.equal(skeleton.disposed, 1, 'the old instance’s skeleton was disposed')
+  assert.equal(wrapper.parent, null, 'and its wrapper left the scene')
+})
+
+test('Z4: fifty add/remove cycles leave no placeholder geometry undisposed', async () => {
+  const h = harness()
+  for (let i = 0; i < 50; i++) {
+    h.addNode(somNode('Chair'))
+    const geometry = disposedOnce(h.bridge.instances.get('Chair').placeholder.box.geometry)
+    h.removeNode('Chair')
+    assert.equal(geometry.n, 1, `cycle ${i}: the placeholder geometry was disposed`)
+  }
+})
+
+test('Z4: disposeInstance frees each distinct skeleton once and never the template’s resources', () => {
+  const sharedGeometry = new BoxGeometry(1, 1, 1)
+  const sharedMaterial = new MeshBasicMaterial()
+  const geometry = disposedOnce(sharedGeometry)
+  const material = disposedOnce(sharedMaterial)
+  const shared = Object.assign(new Object3D(), { geometry: sharedGeometry, material: sharedMaterial })
+  const one = { disposed: 0, dispose() { this.disposed += 1 } }
+  const two = { disposed: 0, dispose() { this.disposed += 1 } }
+  const scene = new Group()
+  const first = Object.assign(new Object3D(), { skeleton: one, geometry: sharedGeometry })
+  const second = Object.assign(new Object3D(), { skeleton: one, geometry: sharedGeometry })
+  const third = Object.assign(new Object3D(), { skeleton: two })
+  scene.add(first, second, third)
+  const wrapper = new Object3D()
+  wrapper.add(scene)
+  const host = new Object3D()
+  host.add(wrapper)
+  const clips = [{ disposed: 0, dispose() { this.disposed += 1 } }]
+
+  disposeInstance({ wrapper, scene, clips })
+
+  assert.equal(one.disposed, 1, 'a skeleton shared by two meshes is disposed once') 
+  assert.equal(two.disposed, 1, 'and every distinct skeleton is disposed')
+  assert.equal(shared.disposed, undefined, 'the template object itself is never disposed')
+  assert.equal(geometry.n, 0, 'the shared geometry is untouched')
+  assert.equal(material.n, 0, 'nor the shared material')
+  assert.equal(clips[0].disposed, 1, 'the retargeted clips are disposed')
+  assert.equal(host.children.length, 0, 'the wrapper left its host')
+})
+
 
