@@ -37,7 +37,7 @@
  * one whose download lost the race rather than the last in document order.
  */
 
-import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline } from '@atrium/client/model-fetch'
+import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline, createSharedTasks } from '@atrium/client/model-fetch'
 import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
 import { buildInstance, buildPlaceholder, PLACEHOLDER_COLOURS } from './model-instances.js'
@@ -108,8 +108,18 @@ export function createModelBridge(deps = {}) {
   let viewGeneration = 1
   let currentView = null
   const instances = new Map()      // node name → instance record
-  const parses = new Map()         // template key → the parse in flight
-  const loads = new Map()          // template key → the fetch+parse in flight (V4)
+  // L3a (this round) — ONE task per template key, shared by its REQUESTER SET
+  // through `createSharedTasks`. Round 6 built the one shared job from its first
+  // requester (that requester's `controller` and `wanted()`), so removing the
+  // first node aborted a fetch every other node was still waiting for: the
+  // others ended `loading`/`aborted` with no placeholder and no model until a
+  // world change. A new world generation gets a new helper; the old generation's
+  // tasks are abandoned by their requesters' aborts and cannot be joined again.
+  let loads = createSharedTasks()
+  // L3a — which MODEL records are waiting on each key's task. W5's admission
+  // turn is measured from the EARLIEST remaining requester here, and a join or a
+  // leave wakes every admission waiter so the turn is recomputed.
+  const waiting = new Map()        // template key → Set<record>
   const queue = []
   let running = 0
   const controllers = new Set()
@@ -172,14 +182,85 @@ export function createModelBridge(deps = {}) {
     return wanted()
   }
 
+  // ── L3a: the job's admission turn ────────────────────────────────────────
+
+  /** A model record joined the job for `key`: membership changed, so re-evaluate. */
+  function joinWaiting(key, record) {
+    let set = waiting.get(key)
+    if (!set) { set = new Set(); waiting.set(key, set) }
+    set.add(record)
+    notifyAdmission()
+  }
+
+  /** A requester left the job for `key` (settled, dropped, removed, aborted). */
+  function leaveWaiting(key, record) {
+    const set = waiting.get(key)
+    if (!set) return
+    if (!set.delete(record)) return
+    if (set.size === 0) waiting.delete(key)
+    notifyAdmission()
+  }
+
   /**
-   * W5 — a Check (`loadTemplate`) is not a node: it goes after every model node
-   * that is loading. The snapshot is the set loading when the Check's turn came.
+   * L3a — does ANY remaining requester still want the job's result? A model
+   * record wants it while its node is in the SOM with an unchanged spec (A9); a
+   * Check (a token with no `node`) wants it until its own signal aborts. This is
+   * what stops a node that left the SOM — with or without a reconcile — from
+   * holding the job's turn and its temporary status forever.
    */
-  async function waitForLoading(wanted) {
-    const pending = [...instances.values()].filter((r) => !r.settled)
-    while (wanted() && pending.some((r) => !r.settled)) await admissionChanged()
-    return wanted()
+  function anyRequesterWants(key) {
+    const set = waiting.get(key)
+    if (!set || set.size === 0) return false
+    for (const requester of set) {
+      if (!requester.node) return true
+      if (stillWanted(requester)) return true
+    }
+    return false
+  }
+
+  /**
+   * The EARLIEST remaining requester of `key` in the current `som.allNodes`
+   * order — the node whose turn the job's one parse takes. `null` when only
+   * Checks (or no requester at all) remain: then the job waits for the nodes
+   * loading at that moment instead.
+   */
+  function earliestRequester(key) {
+    const set = waiting.get(key)
+    if (!set || set.size === 0) return null
+    const order = som()?.allNodes
+    if (!order) return null
+    let earliest = null
+    let earliestAt = Infinity
+    for (const record of set) {
+      const at = order.indexOf(record.node)
+      if (at < 0) continue
+      if (at < earliestAt) { earliestAt = at; earliest = record }
+    }
+    return earliest
+  }
+
+  /**
+   * W5 (as amended by L3a) — the job's turn at reserving texture bytes. The turn
+   * belongs to the job, measured from its earliest REMAINING requester, and is
+   * re-evaluated on every membership change: a job that becomes Check-only takes
+   * `waitForLoading`'s snapshot at that moment (bounded by what is loading then)
+   * and never keeps a departed node's turn.
+   */
+  async function waitForJobTurn(key, wanted) {
+    let snapshot = null
+    for (;;) {
+      if (!wanted()) return false
+      const earliest = earliestRequester(key)
+      if (earliest) {
+        snapshot = null
+        if (earlierPending(earliest).length === 0) return true
+      } else {
+        // Check-only: the set loading when the job's turn became the Checks'.
+        if (!snapshot) snapshot = [...instances.values()].filter((record) => !record.settled)
+        if (!snapshot.some((record) => !record.settled)) return true
+      }
+      await admissionChanged()
+    }
   }
 
   const statusOf = (record) => ({ status: record.status, reason: record.reason, message: record.message })
@@ -225,11 +306,16 @@ export function createModelBridge(deps = {}) {
   /** Abort everything, drop the ledger, dispose every template and instance. */
   function resetWorld() {
     worldGeneration += 1
+    // L3a — every requester's OWN controller aborts: each join resolves
+    // `aborted`, and the shared task's controller aborts when its LAST requester
+    // leaves, so no fetch outlives the world that asked for it.
+    for (const record of instances.values()) record.controller?.abort('world-change')
     for (const controller of controllers) controller.abort('world-change')
     controllers.clear()
     queue.length = 0
-    parses.clear()
-    loads.clear()
+    waiting.clear()
+    // A new generation gets a new helper: no later join can reach an old task.
+    loads = createSharedTasks()
     ledger.reset()
     for (const record of instances.values()) { settle(record); removeWrapper(record) }
     instances.clear()
@@ -270,40 +356,40 @@ export function createModelBridge(deps = {}) {
 
   /** The whole job for one node: look up, fetch, parse, admit, attach (A3/A4/A5/A8/A9). */
   async function load(record) {
+    // L3a — each record has its OWN controller. Removing this node, a spec change
+    // and a world change abort THIS requester and no one else; the shared task is
+    // aborted only when its last requester leaves.
     const controller = new AbortController()
+    record.controller = controller
     controllers.add(controller)
+    const key = keyFor(record)
     try {
       // V4 — the cache and the in-flight loads are consulted BEFORE the fetch,
       // under the key the spec determines. Round 1 fetched first and keyed the
       // cache on the fetched `effectiveUrl` only afterwards, so a Duplicate, a
       // Redo or a Save after a held Check downloaded the same bytes again — a
       // repeat charged to the world's ledger, which never refunds.
-      const key = keyFor(record)
       const cached = cache.get(key)
       if (cached) {
         if (!stillWanted(record)) return drop(record)
         return useEntry(record, key, cached)
       }
 
-      let job = loads.get(key)
-      if (!job) {
-        job = fetchAndParse(record, key, controller, () => stillWanted(record))
-        loads.set(key, job)
-        job.then(noop, noop).finally(() => { if (loads.get(key) === job) loads.delete(key) })
-      }
-
-      const got = await job
+      const token = { spec: record.spec, worldBaseUrl: record.worldBaseUrl, key: null }
+      joinWaiting(key, record)
+      const got = await loads.join(key, (taskSignal) => fetchAndParse(key, taskSignal, token), controller.signal)
       if (got.reason === 'aborted') return drop(record)
       if (!got.ok) return fail(record, got.reason, got.message)
       if (!stillWanted(record)) return drop(record)
 
-      return useEntry(record, key, got.entry, got.createdFor === record)
+      return useEntry(record, key, got.entry, got)
     } catch (error) {
       // W5 — every node must end in a status: a later node's turn waits on this
       // one, so a thrown fetch or parse has to settle it, not leave it loading.
       fail(record, 'network', error?.message ?? 'the model could not be loaded')
       return undefined
     } finally {
+      leaveWaiting(key, record)
       controllers.delete(controller)
     }
   }
@@ -323,11 +409,9 @@ export function createModelBridge(deps = {}) {
    * @returns {Promise<{ok: true, key: string, entry: object, fetched: object|null}
    *                   | {ok: false, reason: string, message: string}>}
    */
-  async function loadTemplate({ url, sha256 = null } = {}) {
+  async function loadTemplate({ url, sha256 = null, signal = null } = {}) {
     const token = { spec: { url, sha256 }, worldBaseUrl: deps.worldBaseUrl?.() ?? null, key: null }
     const key = specTemplateKey(token.spec, token.worldBaseUrl)
-    const generation = worldGeneration
-    const wanted = () => generation === worldGeneration
 
     const cached = cache.get(key)
     if (cached) {
@@ -336,25 +420,33 @@ export function createModelBridge(deps = {}) {
       return { ok: true, key, entry: held, fetched: null }
     }
 
+    // Z2/Z5 — the Check's OWN controller: a world change aborts it, and so does
+    // the caller's own signal (`app.js`'s `endCheck`). The join's signal is this
+    // controller, never the shared task's: ending one Check leaves the nodes'
+    // task and every other requester alone.
     const controller = new AbortController()
     controllers.add(controller)
+    const onExternalAbort = () => controller.abort('external')
+    if (signal) {
+      if (signal.aborted) controller.abort('external')
+      else signal.addEventListener?.('abort', onExternalAbort)
+    }
     try {
-      let job = loads.get(key)
-      if (!job) {
-        job = fetchAndParse(token, key, controller, wanted)
-        loads.set(key, job)
-        job.then(noop, noop).finally(() => { if (loads.get(key) === job) loads.delete(key) })
-      }
-
-      const got = await job
+      // L3a — the Check is a requester of the job too: it joins the set before
+      // the task starts, so `wanted()` is answered by the whole set.
+      joinWaiting(key, token)
+      const got = await loads.join(key, (taskSignal) => fetchAndParse(key, taskSignal, token), controller.signal)
       if (got.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'the download was cancelled' }
       if (!got.ok) return { ok: false, reason: got.reason, message: got.message }
 
-      // W3 — an entry created for this very check is already held by it.
-      const entry = got.createdFor === token ? got.entry : (cache.acquire(key) ?? got.entry)
+      // W3/L3a — the entry the job's own parse created is handed to its FIRST
+      // remaining requester; everyone else acquires a reference of their own.
+      const entry = takeReference(key, got) ?? got.entry
       await settleHash(entry)
       return { ok: true, key, entry, fetched: got.fetched ?? null }
     } finally {
+      leaveWaiting(key, token)
+      signal?.removeEventListener?.('abort', onExternalAbort)
       controllers.delete(controller)
     }
   }
@@ -371,7 +463,7 @@ export function createModelBridge(deps = {}) {
    * through `templateFor`'s own map). `token` is `{ spec, worldBaseUrl, key }`;
    * `wanted()` answers whether the requester still wants the result.
    */
-  function fetchAndParse(token, key, controller, wanted) {
+  function fetchAndParse(key, taskSignal, token) {
     const { spec } = token
     // M3 (round 6) — ONE deadline per job, set at its first request. Round 5's
     // fetcher timer stopped when `fetchModel` returned and `parseTemplate`
@@ -379,15 +471,26 @@ export function createModelBridge(deps = {}) {
     // work; a job past its deadline is `timeout`, and a parse that outlives it
     // is disposed when it settles.
     const deadline = newDeadline()
+    // L3a — the job's own state. The deadline, the entry it creates and the one
+    // reference that entry carries all belong to the TASK, not to any requester.
+    const job = { key, created: false, handedOver: false, released: false, generation: worldGeneration }
+    // `wanted()` asks about the requester SET: `taskSignal` aborts when the last
+    // requester leaves, `job.generation` names the world that asked, and the set
+    // itself is consulted so a requester that stopped wanting the result (its
+    // node left the SOM) no longer holds the job's turn.
+    const wanted = () => !taskSignal.aborted && job.generation === worldGeneration && anyRequesterWants(key)
+    // The parse's one reference belongs to the job until a requester takes it; a
+    // job abandoned first gives it back exactly once (the guard does that).
+    taskSignal.addEventListener('abort', () => releaseJobReference(job))
     return (async () => {
       const fetched = await fetchModel({
-        url: spec.url, sha256: spec.sha256 ?? null, signal: controller.signal,
+        url: spec.url, sha256: spec.sha256 ?? null, signal: taskSignal,
         worldBaseUrl: token.worldBaseUrl, ledger, deadline,
       })
       if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'cancelled' }
       if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
 
-      const got = await templateFor(key, token, fetched, wanted, deadline)
+      const got = await parseForJob(key, job, token, fetched, wanted, deadline)
       if (!got.ok) return got
 
       // V4/W3 — when a redirect changed the URL the bytes came from, the
@@ -397,20 +500,47 @@ export function createModelBridge(deps = {}) {
       const effective = templateKey(fetched.effectiveUrl ?? spec.url, spec.sha256 ?? null)
       if (effective !== key) cache.alias(effective, key)
 
-      return { ok: true, entry: got.entry, createdFor: got.createdFor, fetched }
+      return { ok: true, entry: got.entry, created: got.created, job, fetched }
     })()
   }
 
+  /** L3a — the one reference a parse created goes back exactly once. */
+  function releaseJobReference(job) {
+    if (!job.created || job.handedOver || job.released) return
+    job.released = true
+    cache.release(job.key)
+  }
+
+  /**
+   * L3a — take this requester's reference to the entry. The entry the job's OWN
+   * parse created (`acquired: true`, W3) is handed to its FIRST remaining
+   * requester and never to a second one; every other requester acquires its own.
+   * A task that found the entry already in the cache has nothing to hand over.
+   */
+  function takeReference(key, got) {
+    if (got.created && got.job && !got.job.handedOver) {
+      got.job.handedOver = true
+      return got.entry
+    }
+    return cache.acquire(key)
+  }
+
   /** Everything after the entry exists: acquire it, build an instance, attach. */
-  function useEntry(record, key, entry, adopted = false) {
+  function useEntry(record, key, entry, got = null) {
     record.key = key
-    // W3 — an entry created for THIS load is already acquired by it (see
-    // `templateFor`), so the load adopts that reference instead of taking a
-    // second one. Every other caller acquires.
-    if (!adopted) cache.acquire(key)
+    // W3/L3a — the ONE reference the job's own parse created is adopted by its
+    // first remaining requester (see `takeReference`); every other caller
+    // acquires a reference of its own.
+    takeReference(key, got ?? {})
     const held = cache.get(key) ?? entry
     const built = makeInstance(held.template)
-    if (!stillWanted(record)) { cache.release(key); return drop(record) }
+    if (!stillWanted(record)) {
+      // Give the reference back, and forget it: `drop` must not release the same
+      // reference a second time (round 6's latent double release).
+      cache.release(key)
+      record.key = null
+      return drop(record)
+    }
     record.wrapper?.parent?.remove(record.wrapper)
     record.wrapper = built.wrapper
     record.clips = built.clips
@@ -422,33 +552,35 @@ export function createModelBridge(deps = {}) {
   }
 
   /**
-   * Z3/A8/A10 — the template for `key`, parsed once: two nodes with one URL
-   * share one parse, and the texture reservation is taken before the parse
-   * (A5), in `allNodes` order. W3: the entry is created ACQUIRED by the load
-   * that parsed it, and that load is named in the answer (`createdFor`).
+   * Z3/A8/A10 — the template for `key`, parsed once per TASK: every requester of
+   * the key's task shares this one parse, and the texture reservation is taken
+   * before the parse (A5), at the turn of the job's earliest remaining requester.
+   * W3/L3a: the entry is created ACQUIRED by the job that parsed it, and the job
+   * hands that one reference to its first remaining requester.
+   *
+   * There is no per-key `parses` map any more (L3a): one task per key makes it
+   * redundant, and a map would hand a NEW task the abandoned task's parse — the
+   * re-added node would then end `loading`/`aborted`, which the invariant below
+   * forbids.
    */
-  function templateFor(key, token, fetched, wanted, deadline = null) {
+  function parseForJob(key, job, token, fetched, wanted, deadline = null) {
     const existing = cache.get(key)
-    if (existing) return Promise.resolve({ ok: true, entry: existing })
+    if (existing) return Promise.resolve({ ok: true, entry: existing, created: false })
 
-    const inFlight = parses.get(key)
-    if (inFlight) return inFlight
-
-    const promise = (async () => {
+    return (async () => {
       // W5 (round 5) — the reservation waits its turn: every model node before
-      // this one in the current `som.allNodes` order must have been admitted,
-      // failed or dropped first, so the same models win on every visitor's
-      // screen. The fetch already ran in parallel; only the parse is ordered.
-      // A Check (`token` has no node) goes after every model node loading.
+      // the job's EARLIEST remaining requester in the current `som.allNodes`
+      // order must have been admitted, failed or dropped first, so the same
+      // models win on every visitor's screen. The fetch already ran in parallel;
+      // only the parse is ordered. A job with no node requester left (Checks
+      // only) goes after every model node loading at that moment.
       //
       // M3 — waiting does not count against the job's deadline: the clock stops
       // for the admission wait and for the serialized parse queue, and starts
       // again when the turn comes. Those waits are bounded because each earlier
       // job has a deadline of its own.
       deadline?.pause()
-      const allowed = token.node
-        ? await waitForEarlier(token, wanted)
-        : await waitForLoading(wanted)
+      const allowed = await waitForJobTurn(key, wanted)
       if (!allowed) return { ok: false, reason: 'aborted', message: 'cancelled' }
 
       return serialize(async () => {
@@ -456,7 +588,7 @@ export function createModelBridge(deps = {}) {
         // M4 — the budget of THIS generation, captured before the parse starts.
         const budget = textureBudget
         const again = cache.get(key)
-        if (again) return { ok: true, entry: again }
+        if (again) return { ok: true, entry: again, created: false }
         if (!wanted()) return { ok: false, reason: 'aborted', message: 'cancelled' }
 
         const parsed = await parse({
@@ -473,21 +605,22 @@ export function createModelBridge(deps = {}) {
 
         const textureBytes = parsed.textureBytes ?? 0
         // W3 — the world may have moved on while the parse ran (a world change, the
-        // node removed, the form closed): give the reservation back rather than
-        // charging a world that no longer wants the template, and M4 — dispose the
-        // template the old world's parse made, exactly once.
+        // node removed, the form closed, the job abandoned): give the reservation
+        // back rather than charging a world that no longer wants the template, and
+        // M4 — dispose the template the old world's parse made, exactly once.
         if (!wanted()) {
           dispose(parsed.template)
           budget.release(textureBytes)
           return { ok: false, reason: 'aborted', message: 'cancelled' }
         }
 
-        // W3 — the entry is created already acquired by the load that parsed it
+        // W3 — the entry is created already acquired by the job that parsed it
         // (`refs: 1`, not idle) INSIDE the serialized parse. Round 3 created it
         // idle and the load acquired it a microtask later, so the next model's
         // `reserveTexture` → `evictIdleFor` could dispose a template that was
         // about to be, or already was, on screen.
         const entry = cache.set(key, { ...parsed.template, textureBytes }, { acquired: true })
+        job.created = true
         // V4/W4 — what the form's Check reads back off a held entry: the kind, the
         // bytes it came from, and (a .glb's) hash, the one Save pins with. The
         // digest runs OFF the model-load critical path — a placed model must not
@@ -502,12 +635,9 @@ export function createModelBridge(deps = {}) {
             .catch(() => null)
         }
         token.key = key
-        return { ok: true, entry, createdFor: token }
+        return { ok: true, entry, created: true }
       })
     })()
-    parses.set(key, promise)
-    promise.then(noop, noop).finally(() => { if (parses.get(key) === promise) parses.delete(key) })
-    return promise
   }
 
   /** A5/A8/M4 — reserve from `budget` (the generation the caller named), evicting
@@ -642,6 +772,8 @@ export function createModelBridge(deps = {}) {
         wrapper: null, placeholder: null, clips: [], droppedTracks: 0, key: null,
         worldGeneration, viewGeneration: null, attachedGeneration: null,
         worldBaseUrl: deps.worldBaseUrl?.() ?? null,
+        // L3a — this node's OWN requester controller, made when its load starts.
+        controller: null,
         settled: false,
       }
       instances.set(node.name, record)
@@ -669,6 +801,10 @@ export function createModelBridge(deps = {}) {
     const record = instances.get(name)
     if (!record) return
     removeWrapper(record)
+    // L3a — this requester leaves the job: its own controller aborts, so its join
+    // resolves `aborted` at once. The other requesters of the same key are
+    // untouched, and the shared task is aborted only when the LAST one leaves.
+    record.controller?.abort('removed')
     if (record.key) { cache.release(record.key); record.key = null }
     instances.delete(name)
     settle(record)

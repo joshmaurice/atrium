@@ -2696,6 +2696,11 @@ let heldCheck = null
 // template the form had already let go was held until the next URL edit.
 let checkGeneration = 0
 
+// S3/Z2 — the in-flight Check's own controller. `endCheck` aborts it, so the
+// Check's requester leaves the bridge's shared job exactly as a removed node's
+// does: an `endCheck` with no node waiting on the same key stops its fetch.
+let checkController = null
+
 function releaseHeldCheck() {
   if (!heldCheck) return
   // W4 — the entry was acquired by `loadTemplate`; giving the reference back
@@ -2706,9 +2711,15 @@ function releaseHeldCheck() {
   heldCheck = null
 }
 
-/** S3 — end the check in flight: a late result is ignored and nothing is held. */
+/** S3/Z2 — end the check in flight: a late result is ignored and nothing is held. */
 function endCheck() {
   checkGeneration += 1
+  // Z2 — the in-flight Check has its OWN controller, aborted here: its requester
+  // leaves the shared job at once (as a removed node's does), so the fetch the
+  // Check started stops when no one else wants it, and no other requester is
+  // touched.
+  checkController?.abort('check-ended')
+  checkController = null
   releaseHeldCheck()
 }
 
@@ -2732,13 +2743,17 @@ async function checkModelNow({ url, worldBaseUrl }) {
   // time it answers (an edited URL, Cancel, a close, a world change), the result
   // is not held and not reported: the entry goes straight back to the cache.
   const generation = checkGeneration
+  // Z2 — this Check's own controller, aborted by `endCheck`.
+  const controller = new AbortController()
+  checkController = controller
   // W4 — the Check goes through the bridge: it reserves the model's texture
   // estimate, takes its turn in the serialized parse, and holds the entry until
   // the form lets it go. Round 3 fetched and parsed here — outside the budget and
   // outside the parse queue — and seeded the cache with an uncharged entry, so
   // the owner's `textureBudget.taken` stayed at 0.0 MiB through all five
   // Check-then-Save cycles.
-  const loaded = await modelBridge.loadTemplate({ url, sha256: null })
+  const loaded = await modelBridge.loadTemplate({ url, sha256: null, signal: controller.signal })
+  if (checkController === controller) checkController = null
   if (generation !== checkGeneration) {
     if (loaded.ok) modelBridge.releaseTemplate(loaded.key)
     return { ok: false, reason: 'aborted', message: 'the check was cancelled' }

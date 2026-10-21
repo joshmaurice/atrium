@@ -22,7 +22,7 @@ function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {})
   return { name, _node: { def: name }, mesh, extras: { atrium: { model } } }
 }
 
-function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null, newDeadline = null } = {}) {
+function harness({ nextFrame = null, parseResult = null, fetchGate = null, textureBudget = null, modelBytes = null, parseLoader = null, disposeTemplate = null, redirectTo = null, fetchModel = null, newDeadline = null, parseHook = null } = {}) {
   const state = { nodes: [], hosts: new Map(), sceneGroup: new Group(), fetches: 0, parses: 0, aborts: 0 }
   const statuses = []
 
@@ -57,7 +57,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
           dependencies: new Map(), effectiveUrl: redirectTo ? redirectTo(url) : url, totalBytes: 1,
         }
       }),
-      parseTemplate: async (args) => {
+      parseTemplate: parseHook ?? (async (args) => {
         state.parses += 1
         if (parseResult) return parseResult
         // `parseLoader` runs the REAL parseTemplate (and so the real preflight)
@@ -65,7 +65,7 @@ function harness({ nextFrame = null, parseResult = null, fetchGate = null, textu
         if (parseLoader) return parseTemplate({ ...args, loader: parseLoader })
         args?.reserveTexture?.(0)
         return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
-      },
+      }),
       ...(textureBudget ? { textureBudget } : {}),
       ...(newDeadline ? { newDeadline } : {}),
       ...(disposeTemplate ? { disposeTemplate } : {}),
@@ -1065,3 +1065,201 @@ test('S7: a rejected node does not hold up the model behind it in allNodes order
   assert.equal(h.bridge.status('Good').status, MODEL_STATUS.loaded,
     'the rejected node settles at once, so W5 admission is not blocked')
 })
+
+// ---------------------------------------------------------------------------
+// L3a (this round) — a shared load belongs to its KEY, not to its first
+// requester. Round 6 built the one job per key from the requester that asked
+// first: that requester's controller and `wanted()`. Removing it therefore
+// aborted a fetch every other requester was still waiting for, and every other
+// node ended `loading`/`aborted` with no placeholder and no model until a world
+// change. The invariant: while its node is in the SOM, every model node ends
+// `loaded` or `failed` — never `loading`/`aborted`.
+// ---------------------------------------------------------------------------
+
+test('Z2/L3a: removing the FIRST of two requesters leaves the shared load alone', async () => {
+  let release = null
+  const gate = new Promise((resolve) => { release = resolve })
+  const h = harness({ fetchGate: gate })
+  h.addNode(somNode('Chair'))
+  h.addNode(somNode('Bench'))
+  await tick()
+  assert.equal(h.state.fetches, 1, 'one URL, one task')
+
+  h.removeNode('Chair')            // the requester that started the task leaves
+  release()
+  await settle()
+
+  assert.equal(h.state.aborts, 0, 'the survivor’s fetch was never aborted')
+  assert.equal(h.state.fetches, 1, 'and nothing was fetched a second time')
+  assert.equal(h.bridge.status('Bench').status, MODEL_STATUS.loaded, 'B loads')
+  assert.equal(h.childrenOf('Bench').length, 1)
+})
+
+test('Z2/L3a: the last requester leaving aborts the shared load, and no parse runs', async () => {
+  let release = null
+  const gate = new Promise((resolve) => { release = resolve })
+  let taskSignal = null
+  let fetches = 0
+  const h = harness({
+    fetchModel: async ({ url, signal }) => {
+      fetches += 1
+      taskSignal = signal
+      await gate
+      if (signal.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+      return {
+        ok: true, kind: 'glb', bytes: new Uint8Array([1]), json: null,
+        dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
+      }
+    },
+  })
+  h.addNode(somNode('Chair'))
+  await tick()
+  assert.equal(fetches, 1)
+  assert.equal(taskSignal.aborted, false)
+
+  h.removeNode('Chair')
+  assert.equal(taskSignal.aborted, true, 'the shared task aborted AT ONCE')
+  release()
+  await settle()
+  assert.equal(h.state.parses, 0, 'the abandoned job never parsed')
+  assert.equal(h.bridge.cache.size, 0, 'and it left no template behind')
+})
+
+test('Z2/L3a: an earlier requester leaving frees a later node’s admission turn at once', async () => {
+  let releaseA = null
+  const gateA = new Promise((resolve) => { releaseA = resolve })
+  const h = harness({
+    fetchModel: async ({ url, signal }) => {
+      if (url.includes('/a.glb')) {
+        await gateA
+        if (signal.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+      }
+      return {
+        ok: true, kind: 'glb', bytes: new Uint8Array([1]), json: null,
+        dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
+      }
+    },
+  })
+  h.addNode(somNode('A', { url: 'https://h/a.glb' }))
+  await tick()
+  h.addNode(somNode('B', { url: 'https://h/b.glb' }))
+  await settle()
+  assert.equal(h.bridge.status('B').status, MODEL_STATUS.loading, 'B waits behind A’s turn')
+
+  h.removeNode('A')
+  await settle()
+  assert.equal(h.bridge.status('B').status, MODEL_STATUS.loaded, 'the turn is recomputed at once')
+  releaseA()
+  await settle()
+})
+
+test('Z2/L3a: a Check and a node share one job; ending the Check leaves the node loading', async () => {
+  let release = null
+  const gate = new Promise((resolve) => { release = resolve })
+  let taskSignal = null
+  let fetches = 0
+  const h = harness({
+    fetchModel: async ({ url, signal }) => {
+      fetches += 1
+      taskSignal = signal
+      await gate
+      if (signal.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+      return {
+        ok: true, kind: 'glb', bytes: new Uint8Array([1]), json: null,
+        dependencies: new Map(), effectiveUrl: url, totalBytes: 1,
+      }
+    },
+  })
+  const own = new AbortController()
+  const check = h.bridge.loadTemplate({ url: 'https://h/m.glb', signal: own.signal })
+  h.addNode(somNode('Chair', { url: 'https://h/m.glb' }))
+  await tick()
+  assert.equal(fetches, 1, 'the Check started the job and the node joined it')
+
+  own.abort()                       // `endCheck`
+  const checked = await check
+  assert.deepEqual(checked, { ok: false, reason: 'aborted', message: 'the download was cancelled' })
+  assert.equal(taskSignal.aborted, false, 'the node’s job is untouched')
+
+  release()
+  await settle()
+  assert.equal(h.bridge.status('Chair').status, MODEL_STATUS.loaded, 'the node still loads')
+  assert.equal(fetches, 1)
+})
+
+test('Z2/L3a: a parse that outlives every requester is disposed once, its reservation released once', async () => {
+  let releaseParse = null
+  const parseGate = new Promise((resolve) => { releaseParse = resolve })
+  const disposed = []
+  const h = harness({
+    disposeTemplate: (template) => disposed.push(template),
+    parseHook: async (args) => {
+      args.reserveTexture?.(64)
+      await parseGate
+      return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 64 }, textureBytes: 64 }
+    },
+  })
+  h.addNode(somNode('Chair'))
+  await settle()
+  assert.equal(h.bridge.textureBudget.taken, 64, 'the parse reserved before it ran')
+
+  h.removeNode('Chair')             // every requester is gone while the parse runs
+  releaseParse()
+  await settle()
+
+  assert.equal(disposed.length, 1, 'the template the abandoned parse built is disposed once')
+  assert.equal(h.bridge.textureBudget.taken, 0, 'and its reservation is given back once')
+  assert.equal(h.bridge.cache.size, 0, 'no entry was left, so no reference was held')
+})
+
+test('Z2/L3a: a node deleted and re-added (Undo) while its parse waits still loads', async () => {
+  let releaseFirst = null
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve })
+  const h = harness({
+    parseHook: async (args) => {
+      if (args.json === null) await firstGate     // the first model’s parse is slow
+      args.reserveTexture?.(0)
+      return { ok: true, template: { scene: new Group(), animations: [], textureBytes: 0 }, textureBytes: 0 }
+    },
+  })
+  h.addNode(somNode('First', { url: 'https://h/first.glb' }))
+  await settle()
+  h.addNode(somNode('Second', { url: 'https://h/second.glb' }))
+  await settle()
+  assert.equal(h.bridge.status('Second').status, MODEL_STATUS.loading, 'Second waits behind First')
+
+  h.removeNode('Second')            // abandoned while its parse waits
+  h.addNode(somNode('Second'))      // Undo: the same URL, a NEW task
+  releaseFirst()
+  await settle()
+
+  assert.equal(h.bridge.status('Second').status, MODEL_STATUS.loaded,
+    'the re-added node parses for itself instead of awaiting the abandoned parse')
+  assert.equal(h.childrenOf('Second').length, 1)
+})
+
+test('Z2/L3a: over a random add/remove sequence every node ends loaded or failed', async () => {
+  const h = harness()
+  const names = ['A', 'B', 'C', 'D']
+  let seed = 7
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+
+  for (let step = 0; step < 30; step++) {
+    const name = names[Math.floor(rand() * names.length)]
+    const live = h.state.nodes.some((node) => node.name === name)
+    if (live) h.removeNode(name)
+    else h.addNode(somNode(name))
+    await settle()
+  }
+
+  assert.ok(h.state.nodes.length > 0, 'the sequence left at least one node')
+  for (const node of h.state.nodes) {
+    const status = h.bridge.status(node.name)
+    assert.ok(status, `${node.name} has a status`)
+    assert.ok(
+      status.status === MODEL_STATUS.loaded || status.status === MODEL_STATUS.failed,
+      `${node.name} ended ${status.status}/${status.reason}`,
+    )
+  }
+})
+
