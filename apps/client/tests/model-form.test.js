@@ -378,7 +378,83 @@ test('S3: a Check whose result arrives after the URL changed is ignored, and not
   assert.equal(h.form.canSave(), false, 'Save stays disabled: new.glb was never checked')
   assert.equal(h.form.specForSave(), null)
   assert.equal(h.elements.status.style.display, 'none', 'the late result is not shown')
-  assert.ok(h.calls.dropped >= 2, 'the late result gave its reference back as well as the URL edit')
+  // Z5 (this round) — the stale result changes NOTHING, `onDropResult` included.
+  // Both drops here are the two URL edits; the late settle adds none.
+  assert.equal(h.calls.dropped, 2, 'the URL edits gave the reference back; the stale result holds nothing')
+})
+
+// ---------------------------------------------------------------------------
+// Z5 (this round) — the S3 residual in the form: a result whose generation is
+// no longer current changes NOTHING. Round 6 called `onDropResult` on a stale
+// result and then cleared `checking` in `finally`, so a stale Check could
+// release the reference a NEWER Check was still holding and re-enable the Check
+// button under it.
+// ---------------------------------------------------------------------------
+
+test('Z5: the sequence — A waits, a world change, B starts, A settles, B settles', async () => {
+  const pending = []
+  const h = harness({ checkResult: () => new Promise((resolve) => pending.push(resolve)) })
+  h.form.open()
+  h.form.onUrlInput('https://host/a.glb')
+  const first = h.form.check()
+  await tick()
+  assert.equal(pending.length, 1, 'A is in flight')
+
+  h.form.reset()                       // the world change: the form forgets everything
+  h.form.open()
+  h.form.onUrlInput('https://host/b.glb')
+  const second = h.form.check()
+  await tick()
+  assert.equal(pending.length, 2, 'B is in flight too')
+  const droppedBeforeStale = h.calls.dropped
+
+  pending[0]({ ok: true, vertices: 1, bytes: 1, bounds: [1, 1, 1], sha256: null, kind: 'glb' })
+  await first
+
+  assert.equal(h.form.state.checking, true, 'checking still belongs to B')
+  assert.equal(h.elements.check.disabled, true, 'so Check is still disabled')
+  assert.equal(h.form.canSave(), false, 'and A’s result is not held')
+  assert.equal(h.calls.dropped, droppedBeforeStale, 'a stale result drops nothing')
+
+  pending[1]({ ok: true, vertices: 2, bytes: 2, bounds: [2, 2, 2], sha256: null, kind: 'glb' })
+  await second
+  assert.equal(h.form.state.checking, false)
+  assert.equal(h.form.canSave(), true, 'B’s result IS held')
+  assert.equal(h.form.specForSave().url, 'https://host/b.glb')
+})
+
+test('Z5: a stale ERROR changes nothing either', async () => {
+  const pending = []
+  const h = harness({ checkResult: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) })
+  h.form.open()
+  h.form.onUrlInput('https://host/a.glb')
+  const checking = h.form.check()
+  await tick()
+
+  h.form.onUrlInput('https://host/b.glb')
+  const droppedBeforeStale = h.calls.dropped
+  pending[0].reject(new Error('502 from /api/auth/me'))
+  await checking
+  await tick()
+
+  assert.equal(h.form.state.problem, null, 'the stale error is not shown')
+  assert.equal(h.elements.status.textContent, '', 'and nothing was rendered')
+  assert.equal(h.calls.dropped, droppedBeforeStale)
+})
+
+test('Z5: the form owns `checking` again after an edit or a close', async () => {
+  const pending = []
+  const h = harness({ checkResult: () => new Promise((resolve) => pending.push(resolve)) })
+  h.form.open()
+  h.form.onUrlInput('https://host/a.glb')
+  const checking = h.form.check()
+  await tick()
+  h.form.onUrlInput('https://host/b.glb')
+  assert.equal(h.form.state.checking, false, 'the edit ended the Check in flight')
+  assert.equal(h.elements.check.disabled, false, 'so Check can be pressed again')
+  pending[0]({ ok: true, vertices: 1, bytes: 1, bounds: [1, 1, 1], sha256: null, kind: 'glb' })
+  await checking
+  assert.equal(h.form.state.checking, false, 'and the stale settle did not re-enable anything')
 })
 
 test('S3: closing the form ends a Check in flight', async () => {

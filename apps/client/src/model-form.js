@@ -188,8 +188,11 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
 
   function onUrlInput(value) {
     state.url = value ?? ''
-    // S3 — editing the URL ends a Check that is in flight.
+    // S3/Z5 — editing the URL ends a Check that is in flight: this Check no
+    // longer owns `checking` (the generation moved), so nothing else would ever
+    // clear it.
     state.generation += 1
+    state.checking = false
     // Editing the URL clears the result and disables Save (Z7).
     state.result = null
     state.problem = null
@@ -238,24 +241,29 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
         url: state.url.trim(),
         worldBaseUrl: deps.worldBaseUrl?.() ?? null,
       })
-      if (state.generation !== generation) {
-        deps.onDropResult?.()
-        return false
-      }
+      // Z5/L6a — a result whose generation is no longer current changes NOTHING:
+      // no `onDropResult` (the reference was already given back when the
+      // generation moved — an edit, Cancel, a close or the world), no `checking`,
+      // no render. Round 6 called `onDropResult` again here and then cleared
+      // `checking` in `finally`, so a stale result could release a reference a
+      // NEWER Check was still holding.
+      if (state.generation !== generation) return false
       if (result?.ok) {
         state.result = checkResult(result)
       } else {
         state.problem = { reason: result?.reason ?? 'network', message: result?.message ?? null }
       }
     } catch (error) {
-      if (state.generation !== generation) {
-        deps.onDropResult?.()
-        return false
-      }
+      // Z5 — a stale ERROR changes nothing either.
+      if (state.generation !== generation) return false
       state.problem = { reason: 'network', message: error?.message ?? null }
     } finally {
-      state.checking = false
-      render()
+      // Z5 — `finally` resets `checking` and renders only while this Check is
+      // still the current one; a newer Check owns both.
+      if (state.generation === generation) {
+        state.checking = false
+        render()
+      }
     }
     return Boolean(state.result)
   }
@@ -337,8 +345,10 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     state.saving = false
     state.waitSeq = null
     state.error = null
-    // S3 — closing the form ends a Check that is in flight.
+    // S3/Z5 — closing the form ends a Check that is in flight, and the form owns
+    // `checking` again: the stale Check's `finally` will not touch it.
     state.generation += 1
+    state.checking = false
     // A8 — the Check's held template and its hash end with the form.
     state.result = null
     state.problem = null

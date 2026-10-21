@@ -2591,6 +2591,12 @@ me().then(user => {
       autoConnectToHomeWorld(user)
     }
   }
+}).catch((error) => {
+  // Z5 — `auth.js`'s `me()` throws on any status but 401 and on a network error,
+  // so a transient 502 from `/api/auth/me` was an UNHANDLED REJECTION: a page
+  // error, which the smoke check reports and which would roll a DEV deploy back.
+  // A visitor we cannot identify is a signed-out visitor.
+  console.warn('the sign-in check failed; staying signed out', error)
 })
 
 // ---------------------------------------------------------------------------
