@@ -195,6 +195,71 @@ test('A3 step 4: buffer and image URIs become blob: URLs; data: URIs are left al
   assert.equal(blobUrls.size, 2)
 })
 
+/** A 33-byte PNG header (signature + IHDR) of the given pixel size. */
+function pngBytes(width, height) {
+  const out = new Uint8Array(33)
+  out.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+  out.set([0x49, 0x48, 0x44, 0x52], 12)
+  const view = new DataView(out.buffer)
+  view.setUint32(8, 13)
+  view.setUint32(16, width)
+  view.setUint32(20, height)
+  return out
+}
+
+test('Z1: a .gltf naming one image three ways passes preflight and shares ONE blob: URL', async () => {
+  const png = pngBytes(64, 64)
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    images: [{ uri: './a.png' }, { uri: 'a.png' }, { uri: 'x/../a.png' }],
+  }
+  const one = { url: 'https://h/a.png', bytes: png }
+  const dependencies = new Map([['./a.png', one], ['a.png', one], ['x/../a.png', one]])
+  const created = []
+  const api = {
+    createObjectURL: (blob) => { created.push(blob); return `blob:test/${created.length}` },
+    revokeObjectURL: () => {},
+  }
+  let seen = null
+  const loader = { parseAsync: async (data) => { seen = JSON.parse(data); return { scene: {}, animations: [] } } }
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    dependencies,
+    urls: api,
+    loader,
+  })
+  assert.equal(result.ok, true, result.message)
+  const uris = seen.images.map((image) => image.uri)
+  assert.equal(new Set(uris).size, 1, 'one blob URL answers for the three spellings')
+  assert.match(uris[0], /^blob:test\//)
+  assert.equal(created.filter((blob) => blob.size > 0).length, 1, 'one object URL for the one file')
+})
+
+test('Z1: a .gltf image whose bytes are truly not here is still refused unsupported-image', async () => {
+  const png = pngBytes(64, 64)
+  const json = {
+    asset: { version: '2.0' },
+    scenes: [{ nodes: [] }],
+    images: [{ uri: './a.png' }, { uri: 'a.png' }],
+  }
+  const { loader, calls } = quietLoader()
+  const result = await parseTemplate({
+    kind: 'gltf',
+    bytes: new TextEncoder().encode(JSON.stringify(json)),
+    json,
+    // Only one of the two spellings has bytes: the other image is still refused.
+    dependencies: new Map([['./a.png', { url: 'https://h/a.png', bytes: png }]]),
+    urls: fakeUrls().api,
+    loader,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'unsupported-image')
+  assert.equal(calls.parseAsync, 0, 'refused before the loader')
+})
+
 test('A3 step 5: the URL modifier passes this load’s blob URLs and data:, and refuses anything else', () => {
   const { api } = fakeUrls()
   const blobUrls = new Map([['m.bin', 'blob:test/1']])

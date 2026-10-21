@@ -321,9 +321,20 @@ export function listDependencies(json, effectiveUrl, { rootRelative = false, wor
   for (const entry of json?.images ?? []) if (typeof entry?.uri === 'string') uris.push(entry.uri)
 
   const out = []
-  const seen = new Set()
+  // Z1 — the distinct canonical URL is the identity: each is returned ONCE,
+  // carrying every original URI that resolved to it (`uris`). Round 6 dropped
+  // the second URI, so `./a.png` and `a.png` in one .gltf fetched the file once
+  // and the parser then refused the model `unsupported-image`.
+  const byUrl = new Map()
   for (const uri of uris) {
-    if (uri.startsWith('data:')) { out.push({ uri, url: uri, isData: true }); continue }
+    if (uri.startsWith('data:')) {
+      const already = byUrl.get(uri)
+      if (already) { if (!already.uris.includes(uri)) already.uris.push(uri); continue }
+      const entry = { uri, url: uri, isData: true, uris: [uri] }
+      byUrl.set(uri, entry)
+      out.push(entry)
+      continue
+    }
     let resolved
     try { resolved = new URL(uri, effectiveUrl).href } catch { return failure('bad-dependency', uri) }
     // S2 (round 6) — A1 itself validates every resolved dependency, not only a
@@ -336,9 +347,11 @@ export function listDependencies(json, effectiveUrl, { rootRelative = false, wor
       try { origin = new URL(worldBaseUrl).origin } catch { return failure('bad-dependency', uri) }
       if (new URL(resolved).origin !== origin) return failure('bad-dependency', uri)
     }
-    if (seen.has(resolved)) continue
-    seen.add(resolved)
-    out.push({ uri, url: resolved, isData: false })
+    const already = byUrl.get(resolved)
+    if (already) { if (!already.uris.includes(uri)) already.uris.push(uri); continue }
+    const entry = { uri, url: resolved, isData: false, uris: [uri] }
+    byUrl.set(resolved, entry)
+    out.push(entry)
   }
   return { ok: true, dependencies: out }
 }
@@ -447,7 +460,11 @@ export async function fetchModel({
       })
       if (fetched.aborted) return abortOrTimeout(controller, signal)
       if (!fetched.ok) return fetched
-      dependencies.set(dependency.uri, { url: dependency.url, bytes: fetched.bytes })
+      // Z1 — every original URI that resolved to this canonical URL gets an
+      // entry, all pointing at the ONE `{ url, bytes }` object, so the parser
+      // finds bytes for each declared image.
+      const entry = { url: dependency.url, bytes: fetched.bytes }
+      for (const uri of dependency.uris ?? [dependency.uri]) dependencies.set(uri, entry)
     }
 
     return {

@@ -386,9 +386,10 @@ export function createTextureBudget({ bytes = MODEL_PARSE_LIMITS.worldTextureByt
 // ---------------------------------------------------------------------------
 
 /**
- * A3 step 4 — rewrite every declared buffer and image URI to the `blob:` URL of
- * its fetched bytes. `data:` URIs are left alone (their bytes are already in the
- * counted file).
+ * A3 step 4 / Z1 — rewrite every declared buffer and image URI to the `blob:` URL
+ * of its fetched bytes. The blob URLs are keyed by the dependency's CANONICAL
+ * url, so two spellings of one file (`./a.png`, `a.png`) share ONE blob URL.
+ * `data:` URIs are left alone (their bytes are already in the counted file).
  *
  * @param {object} json
  * @param {Map<string, {url: string, bytes: Uint8Array}>} dependencies  by original URI
@@ -403,10 +404,13 @@ export function rewriteGltfJson(json, dependencies, urls) {
     if (entry.uri.startsWith('data:')) return
     const dependency = dependencies.get(entry.uri)
     if (!dependency) return
-    let blobUrl = blobUrls.get(entry.uri)
+    // Z1 — the key is the dependency's canonical url, so aliases of one file
+    // share a single blob URL (and a single revoke).
+    const key = dependency.url ?? entry.uri
+    let blobUrl = blobUrls.get(key)
     if (!blobUrl) {
       blobUrl = urls.createObjectURL(new Blob([dependency.bytes]))
-      blobUrls.set(entry.uri, blobUrl)
+      blobUrls.set(key, blobUrl)
     }
     entry.uri = blobUrl
   }

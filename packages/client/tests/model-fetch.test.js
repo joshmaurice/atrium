@@ -334,9 +334,11 @@ test('A3: a dependency URI with dots resolves against the file, and duplicates a
   const result = await fetchModel({ url: gltfUrl, fetchFn })
   assert.equal(result.ok, true, result.message)
   assert.equal(fetchFn.calls.length, 2, 'the file, then the one distinct dependency')
-  assert.equal(result.dependencies.size, 1)
+  // Z1 — BOTH spellings answer, and they answer with the ONE object.
+  assert.equal(result.dependencies.size, 2)
   assert.ok(result.dependencies.has('textures/../images/a.png'))
   assert.equal(result.dependencies.get('textures/../images/a.png').url, image)
+  assert.equal(result.dependencies.get('images/a.png'), result.dependencies.get('textures/../images/a.png'))
 })
 
 test('A3: an http: dependency, and an off-host one on a root-relative model, are bad-dependency', async () => {
@@ -367,7 +369,40 @@ test('listDependencies keeps the raw JSON and the resolved URL apart', () => {
   const listed = listDependencies({ buffers: [{ uri: 'a.bin' }], images: [{ uri: 'a.bin' }] }, 'https://h/m/m.gltf')
   assert.equal(listed.ok, true)
   assert.equal(listed.dependencies.length, 1)
-  assert.deepEqual(listed.dependencies[0], { uri: 'a.bin', url: 'https://h/m/a.bin', isData: false })
+  assert.deepEqual(listed.dependencies[0], { uri: 'a.bin', url: 'https://h/m/a.bin', isData: false, uris: ['a.bin'] })
+})
+
+test('Z1: listDependencies carries EVERY original URI for each canonical URL', () => {
+  const listed = listDependencies(
+    { images: [{ uri: './a.png' }, { uri: 'a.png' }, { uri: 'x/../a.png' }] },
+    'https://h/chair.gltf',
+  )
+  assert.equal(listed.ok, true)
+  assert.equal(listed.dependencies.length, 1, 'one distinct file')
+  assert.deepEqual(listed.dependencies[0], {
+    uri: './a.png', url: 'https://h/a.png', isData: false,
+    uris: ['./a.png', 'a.png', 'x/../a.png'],
+  })
+})
+
+test('Z1: one file named three ways is fetched once and every URI answers for it', async () => {
+  const url = 'https://h/chair.gltf'
+  const image = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+  const fetchFn = stubFetch({
+    [url]: response(GLTF_JSON({ images: [{ uri: './a.png' }, { uri: 'a.png' }, { uri: 'x/../a.png' }] })),
+    'https://h/a.png': response(image),
+  })
+  const result = await fetchModel({ url, fetchFn })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(fetchFn.calls.length, 2, 'the model and the ONE distinct file')
+  assert.deepEqual([...result.dependencies.keys()], ['./a.png', 'a.png', 'x/../a.png'])
+  const first = result.dependencies.get('./a.png')
+  assert.equal(result.dependencies.get('a.png'), first, 'the three keys share one object')
+  assert.equal(result.dependencies.get('x/../a.png'), first)
+  assert.equal(first.url, 'https://h/a.png')
+  assert.equal(first.bytes.byteLength, image.byteLength)
+  assert.equal(result.totalBytes, bytes(GLTF_JSON({ images: [{ uri: './a.png' }, { uri: 'a.png' }, { uri: 'x/../a.png' }] })).byteLength + image.byteLength,
+    'the bytes are counted once')
 })
 
 // ---------------------------------------------------------------------------
@@ -571,7 +606,7 @@ test('S2: listDependencies validates every non-data dependency with A1', () => {
   assert.equal(result.ok, false)
   assert.equal(result.reason, 'bad-dependency')
   assert.deepEqual(listDependencies({ images: [{ uri: 'data:image/png;base64,AAAA' }] }, 'https://h/c.gltf').dependencies,
-    [{ uri: 'data:image/png;base64,AAAA', url: 'data:image/png;base64,AAAA', isData: true }])
+    [{ uri: 'data:image/png;base64,AAAA', url: 'data:image/png;base64,AAAA', isData: true, uris: ['data:image/png;base64,AAAA'] }])
 })
 
 /** A response with NO readable stream: only `arrayBuffer()`, as a stub server sends. */
