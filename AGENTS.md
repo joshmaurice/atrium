@@ -79,7 +79,22 @@ open apps/playground/index.html        # pointer-event test bench
 - 3016: `rate-limit.test.js`
 - 3017: `world-crud.test.js`
 - 3018: `session.test.js` keepalive grace counter test (normal-pong case)
+- 3019: `avatar.test.js` (`AVATAR_PORT`)
+- 3020: `world-crud.test.js` (`WS_ADM_PORT`)
 - 3050–3052, 3055, 3056: `world-visibility.test.js` (refusal server, PUT/eviction server, no-root server, close-terminates test, teardown test)
+- 3060, 3061: `teleporter.test.js`
+- 3070: `model-extras.test.js`
+- 3117: `apps/client/tests/auth.test.js`
+- 3183, 3184: `reconnect-session.test.js`
+- 3991, 3992: `http-integration.test.js` (`REG_PORT`)
+- 4100–4108: `packages/client/tests/client.test.js` (`BASE_PORT` + 0…8)
+- 9011–9020: `autosave.test.js`
+- 9021–9025, 9030, 9031: `multi-world-mutation.test.js`
+- 9051: `home-world.test.js`
+- 9200–9203: `commons.test.js`
+- Port 0 (assigned by the OS): `edit-plumbing.test.js`. New tests should prefer this.
+
+Ports listed as of 2026-10-20 (`a1eb65b`), from every test that listens on a fixed port.
 
 ## Key Files
 

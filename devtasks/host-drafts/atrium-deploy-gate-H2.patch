@@ -1,0 +1,23 @@
+--- atrium-deploy-gate
++++ atrium-deploy-gate
+@@ -11,8 +11,19 @@
+   exec /usr/local/sbin/atrium-deploy status
+ fi
+
++# H2 (pre-brief models-hardening, L1a): the deployer's `dev` makes the release
++# merge first. atrium-release-merge prints RELEASE_SHA= (the reviewed SHA itself
++# when main is already in it), and DEV gets that SHA. Its exit code passes
++# through unchanged: 77 refused, 75 failed before the push, 70 critical, 64
++# usage. The operator's own `atrium-deploy dev <sha>` never merges.
+ if [[ "$cmd" =~ ^dev[[:space:]]+([0-9a-f]{40})$ ]]; then
+-  exec /usr/local/sbin/atrium-deploy dev "${BASH_REMATCH[1]}"
++  SHA="${BASH_REMATCH[1]}"
++  rc=0; OUT="$(/usr/local/sbin/atrium-release-merge "$SHA" 2>&1)" || rc=$?
++  printf '%s\n' "$OUT"
++  (( rc == 0 )) || exit "$rc"
++  REL="$(sed -n 's/^RELEASE_SHA=\([0-9a-f]\{40\}\)$/\1/p' <<<"$OUT" | tail -n 1)"
++  [[ "$REL" =~ ^[0-9a-f]{40}$ ]] || { echo "DENIED: the release merge printed no RELEASE_SHA" >&2; exit 70; }
++  exec /usr/local/sbin/atrium-deploy dev "$REL"
+ fi
+
+ if [[ "$cmd" =~ ^dev-force[[:space:]]+([0-9a-f]{40})$ ]]; then

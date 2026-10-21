@@ -1,0 +1,63 @@
+--- atrium-deploy
++++ atrium-deploy
+@@ -36,6 +36,10 @@
+ PUBLIC_CLIENT_BASE=https://dev.5-78-232-73.sslip.io/apps/client/src
+ LOCAL_HEALTH=http://127.0.0.1:3100/api/health
+ PUBLIC_HEALTH=https://dev.5-78-232-73.sslip.io/api/health
++# H3 (pre-brief models-hardening): the page the browser smoke check opens, the
++# one the operator opens for DEV acceptance, and where the check is installed.
++PUBLIC_CLIENT_PAGE=https://dev.ewwb.dev/
++SMOKE_DIR=/usr/local/lib/atrium-smoke
+ H=/usr/local/lib/atrium-host/sbin
+ HOST="$H/atrium-host"
+ BUILD="$H/atrium-build-run"
+@@ -62,6 +66,33 @@
+     echo "public client asset OK: $asset"
+   done
+ }
++
++# H3 (pre-brief models-hardening, L5a): load the client page in headless
++# Chromium and require it to start. It runs as a transient unit that never runs
++# as root. Two attempts; a second failure returns 1, so in the deploy path the
++# ERR trap rolls back exactly as for a failed public health check, and in the
++# same-SHA path the script exits non-zero.
++# The shape matters (second review, S8): `run` gets systemd-run (an external
++# command) directly, inside an `if`, so a first failure neither rolls back nor
++# runs the ERR trap inside the child. RuntimeMaxSec bounds a unit that a
++# rollback leaves behind.
++check_client_smoke() {
++  local attempt
++  for attempt in 1 2; do
++    if run systemd-run --quiet --pipe --wait --collect \
++        --unit="atrium-smoke-$$-$attempt" \
++        --uid=atrium-smoke --gid=atrium-smoke \
++        -p RuntimeMaxSec=120 -p MemoryMax=1G -p NoNewPrivileges=yes -p PrivateTmp=yes \
++        -p ProtectSystem=strict -p ProtectHome=yes \
++        -E PLAYWRIGHT_BROWSERS_PATH="$SMOKE_DIR/browsers" -E HOME=/tmp \
++        "$SMOKE_DIR/venv/bin/python" "$SMOKE_DIR/atrium-client-smoke" \
++        "$PUBLIC_CLIENT_PAGE" --require-id ep-model --timeout 40; then
++      return 0
++    fi
++    echo "SMOKE attempt $attempt of 2 failed"
++  done
++  return 1
++}
+
+ wait_for_health() {
+   local name="$1" url="$2" attempts="${3:-20}" response i
+@@ -556,6 +587,7 @@
+   curl -fsS "$LOCAL_HEALTH"
+   echo
+   check_public_client_assets
++  check_client_smoke
+   echo "Same-SHA health check: preserving existing release state."
+   echo "DEV ALREADY AT TARGET_SHA=$TARGET_SHA"
+   exit 0
+@@ -627,6 +659,7 @@
+ wait_for_health "local"  "$LOCAL_HEALTH" 20
+ wait_for_health "public" "$PUBLIC_HEALTH" 20
+ check_public_client_assets
++check_client_smoke
+
+ HEALTHY=1
+ mark

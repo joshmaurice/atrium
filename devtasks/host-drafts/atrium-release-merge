@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# atrium-release-merge <reviewed-sha>
+#
+# devtasks/PREBRIEF-models-hardening.md, H1 (Rev 3). Prints RELEASE_SHA=<sha>
+# for the DEV deploy of a reviewed SHA:
+#   - the reviewed SHA itself when origin/main is already an ancestor of it;
+#   - otherwise a two-parent merge commit (reviewed SHA, origin/main) that brings
+#     ONLY devtasks/ changes, built without a checkout (git merge-tree), pushed
+#     to origin release/<sha12>, and verified after the push.
+# A re-run reuses the release branch when it already contains origin/main, and
+# otherwise merges the newer main onto it. Every existing link on the branch is
+# re-verified as exactly what this script would have built (review M2).
+#
+# Rev 3 (second outside review):
+#   - S6: before anything is pushed, the same up-front refusals as atrium-deploy
+#     (the release state must accept set-dev, no interrupted deploy recorded,
+#     not in legacy mode), so a deploy that will be refused leaves no branch;
+#   - S7: only regular files (mode 100644 or 100755) may be added or changed,
+#     so a symlink or a submodule under devtasks/ is refused before the push;
+#   - N1: a merge-tree that fails for a reason other than a conflict is 75;
+#   - N5: no child inherits the deploy lock (fd 8).
+#
+# Exit codes:
+#   0   RELEASE_SHA printed
+#   64  usage
+#   75  an operation failed before anything was pushed (nothing changed but git objects)
+#   77  refused: a check failed before anything was pushed
+#   70  critical: a failure at or after the push; inspect origin/release/<sha12>
+# Every check fails closed: a check that cannot run is a failure (review M1).
+# Needs git >= 2.38 (merge-tree --write-tree).
+set -Eeuo pipefail
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+DEV_DIR=/srv/atrium-dev
+DEPLOY_LOCK=/run/lock/atrium-deploy.lock
+ATRIUM_HOST=/usr/local/lib/atrium-host/sbin/atrium-host   # as atrium-deploy's $HOST
+ALLOWED_RE='^devtasks/'          # the only paths a release merge may bring in
+MAX_CHAIN=10                     # release merges stacked on one reviewed SHA
+IDENT_NAME='Atrium release'
+IDENT_EMAIL='atrium-release@users.noreply.github.com'
+
+PUSHING=0
+TMPFILES=()
+cleanup() { (( ${#TMPFILES[@]} == 0 )) || rm -f "${TMPFILES[@]}"; }
+on_error() {
+  local rc=$?
+  cleanup
+  if (( PUSHING )); then
+    echo "CRITICAL (release merge): a step failed at or after the push (exit $rc); inspect origin/${BRANCH:-release/?}" >&2
+    exit 70
+  fi
+  echo "FAILED (release merge): a step failed (exit $rc) before anything was pushed" >&2
+  exit 75
+}
+trap on_error ERR
+trap cleanup EXIT
+
+rgit() {   # as atrium-main-push's rgit (S22 D7), on the DEV checkout's repository
+  env -i HOME=/root PATH=/usr/bin:/bin LANG=C.UTF-8 \
+      GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+    /usr/bin/git -C "$DEV_DIR" \
+      -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+      -c protocol.allow=never -c protocol.https.allow=always \
+      -c credential.helper= -c credential.helper=store \
+      -c core.askPass= -c gc.auto=0 -c maintenance.auto=false \
+      -c user.name="$IDENT_NAME" -c user.email="$IDENT_EMAIL" \
+      --no-pager "$@" 8>&-
+}
+
+# A failed operation (not a refusal): 75 before the push, 70 at or after it.
+fail_op() {
+  cleanup
+  if (( PUSHING )); then
+    echo "CRITICAL (release merge): $* (after the push; inspect origin/${BRANCH:-release/?})" >&2
+    exit 70
+  fi
+  echo "FAILED (release merge): $* (nothing was pushed)" >&2
+  exit 75
+}
+
+refuse() {
+  cleanup
+  if (( PUSHING )); then
+    echo "CRITICAL (release merge): $* (after the push; inspect origin/${BRANCH:-release/?})" >&2
+    exit 70
+  fi
+  echo "REFUSED (release merge): $*" >&2
+  exit 77
+}
+
+SHA="${1:-}"
+[[ $# -eq 1 && "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Usage: atrium-release-merge <40-character-lowercase-sha>" >&2; exit 64; }
+BRANCH="release/${SHA:0:12}"
+
+# Refuse unless every path between $1 and $2 is under ALLOWED_RE, and every
+# entry it adds or changes is a regular file (S7, Rev 3: no symlink, no
+# submodule; a deletion is mode 000000). The raw diff is written to a file and
+# git's exit status checked BEFORE it is read, so a diff that fails can never
+# look like an empty, acceptable one (review M1). Raw -z records are
+# ":<old mode> <new mode> <old sha> <new sha> <status>" NUL "<path>" NUL.
+only_docs() {
+  local from=$1 to=$2 what=$3 list meta path mode
+  local -a bad=() kinds=() fields=()
+  list=$(mktemp); TMPFILES+=("$list")
+  if ! rgit diff --no-renames --raw --no-abbrev -z "$from" "$to" >"$list"; then
+    refuse "could not list the paths between $from and $to ($what)"
+  fi
+  while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+    read -r -a fields <<<"$meta"
+    mode=${fields[1]:-}
+    [[ "$path" =~ $ALLOWED_RE ]] || bad+=("$path")
+    [[ "$mode" =~ ^(100644|100755|000000)$ ]] || kinds+=("$path (mode ${mode:-?})")
+  done <"$list"
+  if (( ${#bad[@]} > 0 )); then
+    echo "REFUSED (release merge): $what touches paths outside devtasks/:" >&2
+    printf '  %q\n' "${bad[@]:0:20}" >&2
+    refuse "non-docs paths ($what)"
+  fi
+  if (( ${#kinds[@]} > 0 )); then
+    echo "REFUSED (release merge): $what adds something that is not a regular file:" >&2
+    printf '  %s\n' "${kinds[@]:0:20}" >&2
+    refuse "a symlink or submodule under devtasks/ ($what); remove it from main first"
+  fi
+}
+
+# The parents of a commit, as "first second"; refuses unless there are exactly two.
+# (Called in $(...): its refusal exits the subshell, and the caller passes the
+# exit code on with `|| exit $?`, so 77 stays 77.)
+two_parents() {
+  local commit=$1 line
+  local -a p=()
+  line=$(rgit rev-list --parents -n 1 "$commit") || refuse "cannot read the parents of $commit"
+  read -r -a p <<<"$line"
+  (( ${#p[@]} == 3 )) || refuse "$commit is not a two-parent merge"
+  echo "${p[1]} ${p[2]}"
+}
+
+# The tree a clean merge of $1 and $2 gives; refuses (77) on a conflict, and
+# fails (75) when merge-tree itself fails (N1, Rev 3: git's rc 1 is a conflict).
+merged_tree() {
+  local out tree rc=0
+  out=$(rgit merge-tree --write-tree "$1" "$2") || rc=$?
+  if (( rc == 1 )); then
+    refuse "merging $2 into $1 conflicts"
+  elif (( rc != 0 )); then
+    fail_op "merge-tree failed (exit $rc) for $1 + $2"
+  fi
+  tree=${out%%$'\n'*}
+  [[ "$tree" =~ ^[0-9a-f]{40}$ ]] || refuse "merge-tree returned no tree for $1 + $2"
+  echo "$tree"
+}
+
+# Review M2 — the release branch's tip must be the reviewed SHA plus a chain of
+# links, each EXACTLY what this script builds: two parents; the second already
+# in the current origin/main; the link's tree equal to the clean merge of its
+# parents; and only devtasks/ changed against its first parent. A hand-made or
+# force-pushed commit fails one of these, whatever its shape.
+check_chain() {
+  local at=$1 n=0 first second parents tree want
+  while [[ "$at" != "$SHA" ]]; do
+    (( n < MAX_CHAIN )) || refuse "$BRANCH is more than $MAX_CHAIN links past $SHA"
+    n=$((n + 1))
+    parents=$(two_parents "$at") || exit $?
+    first=${parents% *}; second=${parents#* }
+    rgit merge-base --is-ancestor "$SHA" "$first" \
+      || refuse "$BRANCH does not lead back to $SHA through first parents (at $at)"
+    rgit merge-base --is-ancestor "$second" "$MAIN" \
+      || refuse "$BRANCH link $at merged $second, which is not in origin/main"
+    tree=$(rgit rev-parse --verify "$at^{tree}") || refuse "cannot read the tree of $at"
+    want=$(merged_tree "$first" "$second") || exit $?
+    [[ "$tree" == "$want" ]] || refuse "$BRANCH link $at is not the clean merge of its parents"
+    only_docs "$first" "$at" "release link $at"
+    at=$first
+  done
+}
+
+# S6 (Rev 3) — atrium-deploy's up-front refusals, checked BEFORE anything leaves
+# this host, so a deploy that will be refused leaves no release branch behind.
+# atrium-deploy checks them again under its own lock; this copy keeps GitHub
+# tidy. It runs only when a push is about to happen: with nothing to push,
+# atrium-deploy decides alone, as today. Every check fails closed.
+deploy_would_accept() {
+  local out k v state='' mrc=0
+  out=$("$ATRIUM_HOST" release-record 2>/dev/null 8>&-) || refuse "the release record can't be read; nothing was pushed"
+  while IFS='=' read -r k v; do
+    if [[ "$k" == STATE ]]; then state=$v; fi
+  done <<<"$out"
+  case "$state" in
+    UNINITIALIZED|WAITING_FOR_HUMAN_DEV_ACCEPTANCE|COMPLETE) ;;
+    '') refuse "the release record names no state; nothing was pushed" ;;
+    *)  refuse "the release is in $state, so DEV can't change until PROD completes; nothing was pushed" ;;
+  esac
+  "$ATRIUM_HOST" deploy-mark read >/dev/null 2>&1 8>&- || mrc=$?
+  case $mrc in
+    10) ;;
+    0)  refuse "an interrupted DEV deploy is recorded (run: atrium-deploy recover); nothing was pushed" ;;
+    *)  refuse "the deploy marker exists but can't be read; nothing was pushed" ;;
+  esac
+  if "$ATRIUM_HOST" legacy-mode 8>&-; then
+    refuse "DEV is in the emergency legacy mode; nothing was pushed"
+  fi
+}
+
+# Do not race a DEV or PROD deploy, or a MAIN push, in the same repository.
+exec 8>>"$DEPLOY_LOCK"
+[[ "$(stat -L -c '%u %a %F' /proc/self/fd/8 2>/dev/null)" =~ ^0\ 600\ regular ]] \
+  || refuse "$DEPLOY_LOCK is not a root-only regular file; inspect it"
+flock -n 8 || refuse "an Atrium deployment is currently running"
+
+rgit fetch origin --prune --quiet
+rgit cat-file -e "${SHA}^{commit}" 2>/dev/null || refuse "commit $SHA is not present after fetching origin"
+CONTAINING=$(rgit for-each-ref --contains "$SHA" --format='%(refname)' refs/remotes/origin/)
+[[ -n "$CONTAINING" ]] || refuse "$SHA is not on any origin branch (publish it first)"
+MAIN=$(rgit rev-parse --verify 'refs/remotes/origin/main^{commit}') || refuse "origin/main unavailable"
+
+# Where the release builds from: the release branch when an earlier run made
+# one (verified link by link), else the reviewed SHA.
+if BASE=$(rgit rev-parse --verify -q "refs/remotes/origin/$BRANCH^{commit}"); then
+  check_chain "$BASE"
+else
+  BASE=$SHA
+fi
+
+if rgit merge-base --is-ancestor "$MAIN" "$BASE"; then
+  RELEASE=$BASE
+  echo "origin/main ($MAIN) is already in $BASE: no merge needed."
+else
+  MB=$(rgit merge-base "$BASE" "$MAIN") || refuse "no merge base between $BASE and origin/main"
+  only_docs "$MB" "$MAIN" "origin/main since $MB"
+  TREE=$(merged_tree "$BASE" "$MAIN") || exit $?
+  RELEASE=$(rgit commit-tree "$TREE" -p "$BASE" -p "$MAIN" \
+    -m "release: merge main (${MAIN:0:8}, devtasks/ only) into ${SHA:0:8} so MAIN can fast-forward" \
+    -m "Reviewed SHA: $SHA" -m "origin/main: $MAIN")
+  [[ "$(two_parents "$RELEASE")" == "$BASE $MAIN" ]] || refuse "the new merge $RELEASE does not have the expected parents"
+  # The final invariants, on the new commit, BEFORE anything leaves this host.
+  only_docs "$SHA" "$RELEASE" "the release $RELEASE against $SHA"
+  # S6 (Rev 3): would atrium-deploy accept this deploy? Refuse here if not.
+  deploy_would_accept
+
+  PUSHING=1
+  if [[ "$BASE" == "$SHA" ]]; then
+    # A new branch: the lease requires that it still does not exist.
+    rgit push --quiet --force-with-lease="refs/heads/$BRANCH:" origin "$RELEASE:refs/heads/$BRANCH"
+  else
+    rgit push --quiet --force-with-lease="refs/heads/$BRANCH:$BASE" origin "$RELEASE:refs/heads/$BRANCH"
+  fi
+  rgit fetch origin --quiet "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  [[ "$(rgit rev-parse "refs/remotes/origin/$BRANCH")" == "$RELEASE" ]] \
+    || refuse "pushed $RELEASE but origin/$BRANCH differs"
+  logger -t atrium-release-merge "SHA=$SHA main=$MAIN release=$RELEASE branch=$BRANCH" 2>/dev/null 8>&- || true
+fi
+
+# The invariants every release SHA must meet, checked on the final commit.
+only_docs "$SHA" "$RELEASE" "the release $RELEASE against $SHA"
+rgit merge-base --is-ancestor "$SHA" "$RELEASE" || refuse "$RELEASE does not contain $SHA"
+rgit merge-base --is-ancestor "$MAIN" "$RELEASE" || refuse "$RELEASE does not contain origin/main"
+
+echo "REVIEWED_SHA=$SHA"
+echo "RELEASE_SHA=$RELEASE"
+echo "MAIN_AT_RELEASE=$MAIN"

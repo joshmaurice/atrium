@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""atrium-client-smoke <page-url> — devtasks/PREBRIEF-models-hardening.md, H3 (Rev 3).
+
+A STARTUP smoke check, not a functional test: it loads the Atrium client page in
+headless Chromium and fails when the page does not start. It does not click,
+connect to a world, place a model or save; those stay with the browser checks
+each round runs before DEV acceptance.
+
+It fails when:
+  - the page throws (an uncaught error or rejection: `pageerror`);
+  - a module fails to resolve through the import map, or a script, module or
+    the document itself fails to load (network failure or HTTP >= 400);
+  - within the limit, the page is not READY: `window.atriumClient` and
+    `window.stage` exist and the stage's renderer has a live WebGL context
+    (app.js sets both early in its setup, once its imports have loaded; an
+    error later in its setup is caught as a page error, a hang is not);
+  - an element the page must have is missing (`--require-id`, repeatable).
+It reads nothing from the host and writes nothing.
+
+Exit codes:
+  0  pass
+  1  fail (the page did not start)
+  4  fail, with a third-party network failure among the causes (for example a
+     CDN outage); the deploy treats it like 1, the label tells the operator a
+     re-run after the outage may pass (review S4)
+  2  usage
+  3  the browser could not start
+"""
+import argparse
+import math
+import sys
+from urllib.parse import urlsplit
+
+from playwright.sync_api import sync_playwright, Error as PlaywrightError
+
+MODULE_HINTS = ("Failed to resolve module specifier", "Failed to fetch dynamically imported module",
+                "error loading dynamically imported module", "does not provide an export named")
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+READY = """() => {
+  const stage = window.stage
+  const gl = stage && stage._renderer && typeof stage._renderer.getContext === 'function'
+    ? stage._renderer.getContext() : null
+  return !!window.atriumClient && !!stage && !!gl && !(gl.isContextLost && gl.isContextLost())
+}"""
+
+
+def finite(value, low, name, inclusive):
+    number = float(value)
+    if not math.isfinite(number) or number < low or (not inclusive and number == low):
+        raise argparse.ArgumentTypeError(f"{name} must be a finite number {'>=' if inclusive else '>'} {low}")
+    return number
+
+
+def page_url(value):
+    parts = urlsplit(value)
+    host = (parts.hostname or "").lower()
+    if not host or parts.username or parts.password:
+        raise argparse.ArgumentTypeError("the page URL needs a host and no credentials")
+    if parts.scheme == "https" or (parts.scheme == "http" and host in LOCAL_HOSTS):
+        return value
+    raise argparse.ArgumentTypeError("the page URL must be https:// (or http:// on localhost)")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("url", type=page_url)
+    parser.add_argument("--timeout", type=lambda v: finite(v, 0, "--timeout", False), default=45.0,
+                        help="seconds for load and readiness (> 0)")
+    parser.add_argument("--settle", type=lambda v: finite(v, 0, "--settle", True), default=3.0,
+                        help="seconds to keep listening after ready (>= 0)")
+    parser.add_argument("--require-id", action="append", default=[], help="element id that must exist")
+    args = parser.parse_args()
+    page_host = urlsplit(args.url).hostname.lower()
+
+    problems = []
+    third_party = []
+    answered = set()   # URLs that got an HTTP response: their status decides, not the abort after it
+
+    def foreign(url):
+        return (urlsplit(url).hostname or "").lower() not in (page_host, "")
+
+    def on_console(message):
+        if message.type == "error" and any(h in message.text for h in MODULE_HINTS):
+            problems.append(f"module error: {message.text}")
+
+    def on_failed(request):
+        if request.resource_type in ("document", "script"):
+            problems.append(f"request failed: {request.url} ({request.failure})")
+            if foreign(request.url) and request.url not in answered:
+                third_party.append(request.url)
+
+    def on_response(response):
+        answered.add(response.url)
+        if response.status >= 400 and response.request.resource_type in ("document", "script"):
+            problems.append(f"HTTP {response.status}: {response.url}")
+            # A third-party 5xx is an outage; a 4xx is a wrong URL, which is ours.
+            if response.status >= 500 and foreign(response.url):
+                third_party.append(response.url)
+
+    with sync_playwright() as p:
+        try:
+            # SwiftShader gives headless Chromium a software WebGL context, so the
+            # renderer starts as it does in a real browser.
+            browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        except PlaywrightError as error:
+            print(f"SMOKE: the browser could not start: {error}", file=sys.stderr)
+            return 3
+        try:
+            page = browser.new_page()
+            page.on("pageerror", lambda error: problems.append(f"page error: {error}"))
+            page.on("console", on_console)
+            page.on("requestfailed", on_failed)
+            page.on("response", on_response)
+            ms = int(args.timeout * 1000)
+            try:
+                page.goto(args.url, wait_until="load", timeout=ms)
+                page.wait_for_function(READY, timeout=ms)
+            except PlaywrightError as error:
+                problems.append(f"not ready (client, stage and a live WebGL context): {str(error).splitlines()[0]}")
+            else:
+                page.wait_for_timeout(int(args.settle * 1000))
+                for element_id in args.require_id:
+                    if not page.evaluate("(id) => !!document.getElementById(id)", element_id):
+                        problems.append(f"missing element: #{element_id}")
+        finally:
+            browser.close()
+
+    if problems:
+        label = "SMOKE FAILED (third-party network failure among the causes)" if third_party else "SMOKE FAILED"
+        print(f"{label}: {args.url}")
+        for problem in dict.fromkeys(problems):
+            print(f"  - {problem}")
+        if third_party:
+            print("  A CDN or other outside host failed. If the outage is the only cause, re-run the deploy once it recovers.")
+        return 4 if third_party else 1
+    print(f"SMOKE OK: {args.url} (window.atriumClient, window.stage and a live WebGL context"
+          + (f"; #{', #'.join(args.require_id)}" if args.require_id else "") + ")")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
