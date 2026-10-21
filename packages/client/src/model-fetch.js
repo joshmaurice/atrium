@@ -182,6 +182,10 @@ export function createSharedTasks() {
       if (!task) {
         const controller = new AbortController()
         task = { key, controller, requesters: new Set(), settled: false }
+        // The task is in the map BEFORE `start` runs, so a helper that hangs
+        // per-task state off it — a shared transfer's consumer bag (R8) — can
+        // reach the task from inside its own `start` and from a late joiner.
+        tasks.set(key, task)
         task.result = (async () => {
           // Abandoned before the first microtask ran: never start the work.
           if (controller.signal.aborted) return { ok: false, reason: 'aborted' }
@@ -196,11 +200,12 @@ export function createSharedTasks() {
           // Only THIS task's entry, never a newer task under the same key.
           if (tasks.get(key) === task) tasks.delete(key)
         })
-        tasks.set(key, task)
       }
       return request(task, key, signal)
     },
     has: (key) => tasks.has(key),
+    /** The live task for `key`, or null — for state hung off the task itself. */
+    taskFor: (key) => tasks.get(key) ?? null,
     get size() { return tasks.size },
   }
 }
@@ -683,7 +688,10 @@ export async function fetchModel({
      * is registered with the world's ledger (the chunk that crosses the 150 MiB
      * cap aborts every in-flight transfer), it holds ONE limiter slot, and it
      * has NO timer of its own: each consumer's own deadline ends that consumer's
-     * wait, and the task is aborted when its last consumer leaves.
+     * wait (R1), and the task is aborted when its last consumer leaves.
+     *
+     * Its bag belongs to the TASK (R8), not to the URL: the bytes of an earlier
+     * transfer under the same key say nothing about this one.
      */
     const runTransfer = async (taskSignal, target, bag) => {
       const transfer = new AbortController()
@@ -692,13 +700,12 @@ export async function fetchModel({
       const unregister = ledger?.registerController?.(transfer) ?? null
       let slot = null
       try {
-        if (limiter) {
-          deadline?.pause()
-          slot = await limiter.acquire(transfer.signal, priority)
-          deadline?.resume()
-        }
-        if (transfer.signal.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+        if (limiter) slot = await limiter.acquire(transfer.signal, priority)
+        // R1 — the transfer has its slot (or needs none): every consumer's clock
+        // runs again from here, and each arms a timer of its own.
         bag.received = 0
+        bag.grantSlot()
+        if (transfer.signal.aborted) return abortedTransfer(transfer)
         const got = await fetchOne(target, {
           fetchFn,
           signal: transfer.signal,
@@ -719,7 +726,7 @@ export async function fetchModel({
             }
           },
         })
-        if (got.aborted) return { ok: false, reason: 'aborted', message: 'cancelled' }
+        if (got.aborted) return abortedTransfer(transfer)
         return got
       } finally {
         unregister?.()
@@ -733,28 +740,61 @@ export async function fetchModel({
       // The key is the canonical URL AND the redirect policy: an absolute model
       // may follow any `https` redirect, a root-relative one must stay on the
       // world's origin, so their bytes are not interchangeable.
-      const key = `${target}\u0000${rootRelative ? 'world' : 'absolute'}`
-      const bag = bagFor(sharedTransfers, key)
+      const key = `${target}\u0000${rootRelative ? worldPolicy(worldBaseUrl) : 'absolute'}`
       const consumer = {
-        budget, over: false, settle: null, result: null, abort: () => controller.abort('too-large'),
+        budget, over: false, done: false, settle: null, result: null, timer: null,
+        abort: () => controller.abort('too-large'),
       }
       consumer.result = new Promise((resolve) => { consumer.settle = resolve })
+      // R8 — the bag is the TASK's: `bagForTask` is reached through the task the
+      // helper just made (or the live one this consumer is joining).
+      const joined = sharedTransfers.join(
+        key,
+        (taskSignal) => runTransfer(taskSignal, target, bagForTask(sharedTransfers.taskFor(key))),
+        controller.signal,
+      )
+      const task = sharedTransfers.taskFor(key)
+      if (!task) return abortOrTimeout(controller, signal)
+      const bag = bagForTask(task)
       bag.consumers.add(consumer)
+      // R1 — a consumer's clock stops while it waits for the transfer's slot: the
+      // wait is the transfer's, not this job's, and every consumer waits for the
+      // same slot (`bag.grantSlot` resolves when the transfer has it).
+      deadline?.pause()
+      ;(async () => {
+        await bag.slotGranted
+        if (consumer.done || controller.signal.aborted) return
+        deadline?.resume()
+        // R1 — this consumer's OWN deadline ends its wait on the shared
+        // transfer: at zero it aborts its own controller with the TIMEOUT
+        // reason, so `depend` answers `timeout` (R7's mapping) and the consumer
+        // leaves while the transfer goes on for the others.
+        consumer.timer = setTimeout(
+          () => controller.abort(TIMEOUT),
+          deadline ? deadline.remainingMs() : limits.timeoutMs,
+        )
+      })()
       try {
         // A consumer joining a transfer already under way is charged the bytes
-        // it missed AT ONCE.
-        if (sharedTransfers.has(key)) {
-          budget.bytes += bag.received
-          if (budget.bytes > limits.modelBytes) {
-            consumer.over = true
-            return failure('too-large')
-          }
+        // it missed AT ONCE — the bytes of THIS task's transfer, never those of
+        // an earlier download under the same URL (R8).
+        budget.bytes += bag.received
+        if (budget.bytes > limits.modelBytes) {
+          consumer.over = true
+          return failure('too-large')
         }
-        const joined = sharedTransfers.join(key, (taskSignal) => runTransfer(taskSignal, target, bag), controller.signal)
         const got = await Promise.race([joined, consumer.result])
         if (consumer.over) return failure('too-large')
+        // R7 — an abort is named by THIS consumer's own controller: the join's
+        // bare `{ ok: false, reason: 'aborted' }` would travel to the bridge as
+        // "nobody wants this" and park a wanted node for good.
+        if (controller.signal.aborted || got.reason === 'aborted') return abortOrTimeout(controller, signal)
         return got
       } finally {
+        consumer.done = true
+        clearTimeout(consumer.timer)
+        consumer.timer = null
+        deadline?.resume()
         bag.consumers.delete(consumer)
       }
     }
@@ -786,19 +826,41 @@ export async function fetchModel({
 }
 
 /**
- * Z3/L4a — per shared-transfer task, the consumers whose budgets the transfer
- * charges as each chunk arrives. Keyed by the shared-tasks helper and the
- * transfer key, and kept outside the helper so its own API stays the small thing
- * `createSharedTasks` promises.
+ * Z3/L4a — per shared-transfer TASK, the consumers whose budgets the transfer
+ * charges as each chunk arrives. R8: the bag's `received` is the bytes of the
+ * task's OWN transfer, so a model that joins a transfer queued under a URL an
+ * earlier model already downloaded is never charged those earlier bytes.
+ *
+ * The bag also carries `slotGranted`/`grantSlot`: the one promise every consumer
+ * of the task waits on, resolved when the transfer takes its limiter slot. That
+ * is what lets EACH consumer pause its own clock for the same wait (R1).
  */
-const TRANSFER_BAGS = new WeakMap()
+const TASK_BAGS = new WeakMap()
 
-function bagFor(shared, key) {
-  let bags = TRANSFER_BAGS.get(shared)
-  if (!bags) { bags = new Map(); TRANSFER_BAGS.set(shared, bags) }
-  let bag = bags.get(key)
-  if (!bag) { bag = { consumers: new Set(), received: 0 }; bags.set(key, bag) }
+function bagForTask(task) {
+  let bag = TASK_BAGS.get(task)
+  if (!bag) {
+    let grantSlot = null
+    const slotGranted = new Promise((resolve) => { grantSlot = resolve })
+    bag = { consumers: new Set(), received: 0, started: false, slotGranted, grantSlot }
+    TASK_BAGS.set(task, bag)
+  }
   return bag
+}
+
+/**
+ * R10 — the redirect-policy half of a shared transfer's key: an absolute model
+ * may follow any `https` redirect, a root-relative one must stay on the world's
+ * ORIGIN. The origin, not a literal, so two worlds never share a key.
+ */
+function worldPolicy(worldBaseUrl) {
+  try { return new URL(worldBaseUrl).origin } catch { return 'world' }
+}
+
+/** R7 — why an aborted shared transfer ended, named for the consumer. */
+function abortedTransfer(transfer) {
+  if (transfer.signal.reason === 'over-budget') return failure('world-download-budget')
+  return { ok: false, reason: 'aborted', message: 'cancelled' }
 }
 
 /**
