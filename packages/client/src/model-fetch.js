@@ -624,6 +624,10 @@ export async function fetchModel({
     clearTimeout(timer)
     timer = setTimeout(() => controller.abort(TIMEOUT), deadline ? deadline.remainingMs() : limits.timeoutMs)
   }
+  // R9 — Z3 says a job's priority is its EARLIEST requester's `som.allNodes`
+  // index WHEN IT ASKS, so the bridge passes a function and it is asked at each
+  // acquire. A plain number stays accepted, for the existing callers.
+  const priorityNow = () => (typeof priority === 'function' ? priority() : priority)
 
   try {
     /**
@@ -635,7 +639,7 @@ export async function fetchModel({
       let slot = null
       if (limiter) {
         deadline?.pause()
-        slot = await limiter.acquire(requestSignal, priority)
+        slot = await limiter.acquire(requestSignal, priorityNow())
         deadline?.resume()
         if (requestSignal.aborted) {
           slot()
@@ -700,7 +704,7 @@ export async function fetchModel({
       const unregister = ledger?.registerController?.(transfer) ?? null
       let slot = null
       try {
-        if (limiter) slot = await limiter.acquire(transfer.signal, priority)
+        if (limiter) slot = await limiter.acquire(transfer.signal, priorityNow())
         // R1 — the transfer has its slot (or needs none): every consumer's clock
         // runs again from here, and each arms a timer of its own.
         bag.received = 0

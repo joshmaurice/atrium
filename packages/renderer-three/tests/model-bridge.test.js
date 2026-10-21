@@ -1479,4 +1479,54 @@ test('R7 (t8): a task that reports `aborted` while its node is still wanted FAIL
   assert.ok(h.childrenOf('A').length > 0, 'the failed placeholder is shown')
 })
 
+// ── R9: a job's priority is asked for at each acquire ───────────────────────
+
+test('R9: a node joining a Check-started job queues that job’s NEXT transfer with the node’s priority', { timeout: 15_000 }, async () => {
+  const stub = tableFetch({
+    'https://h/c.glb': () => bodyResponse(GLB_BYTES, 'https://h/c.glb'),
+    'https://h/a.gltf': () => {
+      // Hand the slot this request is about to give back to a filler of ours, so
+      // the job's dependency still has to QUEUE when it asks.
+      filler = limiter.acquire(null, 0)
+      return bodyResponse(glTfJson({ images: [{ uri: 'a.png' }] }), 'https://h/a.gltf')
+    },
+    'https://h/a.png': () => bodyResponse(new Uint8Array(8), 'https://h/a.png'),
+    'https://h/b.glb': () => bodyResponse(GLB_BYTES, 'https://h/b.glb'),
+  })
+  const limiter = createTransferLimiter({ concurrent: 2 })
+  let filler = null
+  const h = harness({
+    limiter,
+    fetchModel: (args) => fetchModel({ ...args, fetchFn: stub, limits: { ...MODEL_LIMITS, timeoutMs: 10_000 } }),
+  })
+  // One node exists when the Check starts its job: the Check's own turn is
+  // therefore AFTER every node, and a later node's file beats it on a plain
+  // number. Only a function can tell the story straight.
+  h.addNode(somNode('C', { url: 'https://h/c.glb' }))
+  await until(() => h.bridge.status('C').status === MODEL_STATUS.loaded)
+
+  const held = [await limiter.acquire(null, 0), await limiter.acquire(null, 0)]
+  const check = h.bridge.loadTemplate({ url: 'https://h/a.gltf' })
+  await tick()
+  h.addNode(somNode('A', { url: 'https://h/a.gltf' }))          // joins the Check's job
+  h.addNode(somNode('B', { url: 'https://h/b.glb' }))          // a LATER node
+  await tick()
+
+  held[1]()                                                     // the Check's file request may run
+  await until(() => limiter.queued === 2)                       // …and its dependency queues
+  const queuedOrder = stub.calls.map((call) => call.url).join(' → ')
+  assert.ok(queuedOrder.includes('https://h/a.gltf'), `the file ran: ${queuedOrder}`)
+
+  held[0]()
+  const releaseFiller = await filler
+  releaseFiller()
+
+  await check
+  await until(() => h.bridge.status('B').status === MODEL_STATUS.loaded)
+  const order = stub.calls.map((call) => call.url)
+  assert.ok(order.indexOf('https://h/a.png') < order.indexOf('https://h/b.glb'),
+    `the earlier node's dependency starts before the later node's file: ${order.join(' → ')}`)
+  assert.equal(order.filter((url) => url === 'https://h/a.png').length, 1, 'one transfer')
+})
+
 

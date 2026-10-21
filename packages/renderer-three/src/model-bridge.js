@@ -542,8 +542,10 @@ export function createModelBridge(deps = {}) {
         url: spec.url, sha256: spec.sha256 ?? null, signal: taskSignal,
         worldBaseUrl: token.worldBaseUrl, ledger, deadline,
         // L4a — one limiter per page (loads and Checks alike) and the world's one
-        // set of shared dependency transfers.
-        limiter, priority: jobPriority(key), sharedTransfers,
+        // set of shared dependency transfers. R9 — the priority is asked FOR at
+        // each acquire: a node that joins a Check-started job must queue its
+        // dependency with the NODE's turn, not the Check's.
+        limiter, priority: () => jobPriority(key), sharedTransfers,
       })
       if (fetched.reason === 'aborted') return { ok: false, reason: 'aborted', message: 'cancelled' }
       if (!fetched.ok) return { ok: false, reason: fetched.reason, message: fetched.message }
@@ -595,6 +597,10 @@ export function createModelBridge(deps = {}) {
     if (!stillWanted(record)) {
       // Give the reference back, and forget it: `drop` must not release the same
       // reference a second time (round 6's latent double release).
+      // R10 — the instance was built before this check, so it is DISPOSED here:
+      // the branch is unreachable today (nothing awaits in between), and this
+      // keeps it from leaking a skeleton if a future await makes it reachable.
+      disposeInstance(built, { removeFromHost: true })
       cache.release(key)
       record.key = null
       return drop(record)
