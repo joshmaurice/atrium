@@ -25,6 +25,8 @@ import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 // module's exports that appears in app.js to be in its import list (V2).
 import { palettePlacement, paletteName, teleporterName, copyName, modelName, firstFreeName } from './edit-palette.js'
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
+import { createLibraryGrid, libraryAnswerError } from './library-grid.js'
+import { loadCatalog, storedUrl, EMPTY_CATALOG } from './library-catalog.js'
 import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
@@ -745,6 +747,8 @@ client.on('connecting', () => {
   sky.resetWorld()
   // Z7 — the Model form goes with the panel.
   modelForm.reset()
+  // Z2 — and the Library grid.
+  libraryGrid?.close()
   refreshModelRow()
   // Close the destination form (the panel is going with the session)
   closeTeleporterForm()
@@ -760,6 +764,7 @@ client.on('disconnected', () => {
   modelBridge.resetWorld()
   sky.resetWorld()
   modelForm.reset()
+  libraryGrid?.close()
   refreshModelRow()
   // Close the destination form (the panel is going with the session)
   closeTeleporterForm()
@@ -1262,6 +1267,12 @@ document.addEventListener('keydown', (e) => {
     }
     // Ignore Escape while a save is pending
     if (formWaitSeq != null) return
+    // Z2 — the Library grid, before the forms: it is the panel's last-opened
+    // section and the only one with no text field to swallow the key.
+    if (libraryGrid?.isOpen()) {
+      libraryGrid.close()
+      return
+    }
     // Z7 — the Model form, same order as the destination form's.
     if (modelForm.isOpen()) {
       modelForm.close()
@@ -1466,6 +1477,18 @@ const epError        = document.getElementById('ep-error')
 const epVectorInputs = [...epFields.querySelectorAll('input[data-field]')]
 const epPalette      = document.getElementById('ep-palette')        // 1b-2 N1
 const epPaletteBtns  = [...epPalette.querySelectorAll('button[data-kind]')]
+
+// ── The Library grid's elements (Z2, library-sky) ────────────────────────
+const epLibrary       = document.getElementById('ep-library')
+const libraryGridEl   = document.getElementById('library-grid')
+const libraryTilesEl  = document.getElementById('library-tiles')
+const libraryCreditEl = document.getElementById('library-credit')
+const libraryStatusEl = document.getElementById('library-status')
+const libraryCancel   = document.getElementById('library-cancel')
+// Assigned below, once the model form and the gate exist. Declared here so the
+// enable-rule refresher (which runs early) can read them.
+let libraryGrid = null
+let libraryCatalog = EMPTY_CATALOG
 const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
@@ -1636,6 +1659,8 @@ function endEditSession() {
   pendingRename = null
   // Z7 — Edit off closes the Model form too (it lives in the Edit panel).
   if (modelForm?.isOpen()) modelForm.close()
+  // Z2 — and the Library grid, which lives there as well.
+  if (libraryGrid?.isOpen()) libraryGrid.close()
 }
 
 editToggleBtn.addEventListener('click', () => setEditMode(!modes.edit))
@@ -2093,9 +2118,16 @@ function refreshEditActions() {
   const nameProblem = nameFieldProblem(selected)
   epName.disabled = locked || !!nameProblem
   epName.title = nameProblem
-  // Z3/Z7 — the Teleporter and Model buttons join the palette's enable rule.
-  // They are not palette buttons (no data-kind), so they are added here.
-  for (const b of [...epPaletteBtns, epTeleporter, epModel]) b.disabled = blocked || !modes.edit
+  // Z3/Z7/Z2 — the Teleporter, Model and Library buttons join the palette's
+  // enable rule. They are not palette buttons (no data-kind), so they are added
+  // here. The Library button is HIDDEN when the catalog has no models (Z1).
+  const hasLibraryModels = (libraryCatalog.models?.length ?? 0) > 0
+  if (epLibrary) epLibrary.style.display = hasLibraryModels ? '' : 'none'
+  for (const b of [...epPaletteBtns, epTeleporter, epModel, epLibrary]) b.disabled = blocked || !modes.edit
+  // Z2 — the grid re-reads the tile rule wherever the palette refreshes its
+  // buttons: a tile is enabled only while !blocked && modes.edit AND no library
+  // add is in flight.
+  libraryGrid?.refresh()
   const block = structuralBlock()
   epDelete.disabled = !!block
   epDelete.title = block ?? 'Delete the selected object'
@@ -2279,6 +2311,19 @@ function onStructureAnswer(seq, status, message) {
       // S1: ours was already gone; the server removed a newer object of that name.
       showEditError(`This object was removed elsewhere, and a newer “${request.name}” was deleted instead.`)
     }
+    refreshEditActions()
+    return
+  }
+  if (request.library) {
+    // Z2 — the Library grid's own add. `onAnswer` returns whether the grid still
+    // owned this wait: a CLOSED grid's rejection is the generic error, and a
+    // closed grid's acceptance selects NOTHING. Either way this branch returns,
+    // so the generic `selectAdded` and the palette's `retryAdd` never run for a
+    // library add; the undo registration above is untouched, so a closed grid's
+    // add stays undoable.
+    const owned = libraryGrid?.onAnswer(seq, status, message) ?? false
+    const error = libraryAnswerError(owned, status, message)
+    if (error) showEditError(error)
     refreshEditActions()
     return
   }
@@ -2845,5 +2890,134 @@ function beginNewWorld() {
   modelBridge.resetWorld()
   sky.resetWorld()
   modelForm.reset()
+  libraryGrid?.close()
   refreshModelRow()
 }
+
+// ---------------------------------------------------------------------------
+// The Library grid (Phase 3 step 3b, Z2) — devtasks/PREBRIEF-library-sky.md
+//
+// The logic lives in library-grid.js; this is the wiring: the tiles' DOM, the
+// panel's status line, the client calls and the catalog. A tile adds at once,
+// exactly as the Model form's Save does, and the grid stays open for more.
+// ---------------------------------------------------------------------------
+
+/** The grid's status line (a refusal or "the world did not answer"). */
+function renderLibraryStatus(text, kind = null) {
+  if (!libraryStatusEl) return
+  libraryStatusEl.style.display = text ? '' : 'none'
+  libraryStatusEl.style.color = kind === 'error' ? '#f87171' : '#94a3b8'
+  libraryStatusEl.textContent = text ?? ''
+}
+
+/**
+ * Build the tiles: one group per category, each tile a thumbnail and its name.
+ * `enabled` is the grid's rule (`!blocked && modes.edit` AND no add in flight),
+ * re-read on every refresh.
+ */
+function renderLibraryTiles(groups, { enabled, reason, credit, creditUrl, onPick }) {
+  if (!libraryTilesEl) return
+  libraryTilesEl.textContent = ''
+
+  for (const group of groups) {
+    const heading = document.createElement('div')
+    heading.className = 'lg-category'
+    heading.textContent = group.category
+    libraryTilesEl.appendChild(heading)
+
+    const row = document.createElement('div')
+    row.className = 'lg-tiles'
+    for (const entry of group.entries) {
+      const tile = document.createElement('button')
+      tile.className = 'lg-tile'
+      tile.disabled = !enabled
+      tile.title = enabled ? entry.name : (reason ?? entry.name)
+
+      const thumb = document.createElement('img')
+      thumb.loading = 'lazy'
+      thumb.alt = entry.name
+      thumb.src = storedUrl(entry.thumbnail, client.worldBaseUrl ?? null, window.location.origin)
+
+      const label = document.createElement('span')
+      label.className = 'lg-name'
+      label.textContent = entry.name
+
+      tile.append(thumb, label)
+      tile.addEventListener('click', () => onPick(entry.id))
+      row.appendChild(tile)
+    }
+    libraryTilesEl.appendChild(row)
+  }
+
+  if (!libraryCreditEl) return
+  libraryCreditEl.textContent = ''
+  if (!credit) return
+  libraryCreditEl.append(credit)
+  if (creditUrl) {
+    libraryCreditEl.append(' — ')
+    const link = document.createElement('a')
+    link.href = creditUrl
+    link.target = '_blank'
+    link.rel = 'noopener'
+    link.textContent = creditUrl
+    libraryCreditEl.appendChild(link)
+  }
+}
+
+libraryGrid = createLibraryGrid({
+  gate: modelGate,
+  name: 'library',
+  deps: {
+    catalog: () => libraryCatalog,
+    canEdit: () => ({ edit: modes.edit, blocked: editDispatchBlocked() }),
+    firstFreeName: (text) => modelName(text, isNameFree),
+    isNameFree,
+    // The palette's own placement, exactly as the Model form's.
+    placement: () => {
+      const origin = avatar.localNode?.translation ?? [0, 0, 0]
+      const forward = new THREE.Vector3()
+      stage.camera.getWorldDirection(forward)
+      return palettePlacement(origin, forward.toArray())
+    },
+    storedUrl: (path) => storedUrl(path, client.worldBaseUrl ?? null, window.location.origin),
+    addNode: (descriptor) => client.addNode(descriptor),
+    structureBegin: (seq, pending) => structure.begin('add', seq, pending),
+    undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
+    selectNode: (name) => selectAdded(name),
+    refreshActions: () => refreshEditActions(),
+    renderTiles: renderLibraryTiles,
+    setStatus: renderLibraryStatus,
+  },
+})
+// Z2 — the other direction: opening another form closes the grid.
+modelGate.register('library', () => libraryGrid.close())
+
+libraryCancel?.addEventListener('click', () => libraryGrid.close())
+
+// Z2 — the Library button: the palette's placement, no data-kind, its own panel.
+// Opening it closes the Model or teleporter form through the gate.
+epLibrary?.addEventListener('click', () => {
+  if (!modes.edit || editDispatchBlocked()) return
+  if (libraryGrid.isOpen()) { libraryGrid.close(); return }
+  libraryGrid.open()
+})
+
+/**
+ * Z1 — the catalog, once, at startup. A missing or broken catalog leaves the
+ * Library button hidden and Sky with None only; the rest of Edit mode is
+ * unaffected. The grid is re-rendered so an already-open one shows the tiles.
+ */
+loadCatalog().then((loaded) => {
+  if (!loaded.ok) {
+    console.warn(`[app] the library catalog could not be read: ${loaded.message}`)
+    return
+  }
+  if (loaded.dropped.models > 0 || loaded.dropped.skies > 0) {
+    console.warn(`[app] the library catalog dropped ${loaded.dropped.models} model and ${loaded.dropped.skies} sky entries`)
+  }
+  libraryCatalog = loaded.catalog
+  refreshEditActions()
+  if (libraryGrid.isOpen()) libraryGrid.render()
+}, (error) => {
+  console.warn('[app] the library catalog could not be read', error)
+})

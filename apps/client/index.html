@@ -446,6 +446,23 @@
   #edit-panel #model-form input[type="text"] { min-width: 0; }
   #edit-panel #model-form button { padding: 3px 8px; font-size: 11px; }
   #edit-panel #ep-model-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* library-sky Z2 — the Library grid: a panel section under the Add row, with
+     a scrolling tile list grouped by category. */
+  #edit-panel #library-grid { margin-bottom: 8px; }
+  #edit-panel #library-tiles { max-height: 260px; overflow-y: auto; }
+  #edit-panel #library-tiles .lg-category { font-size: 10px; color: #94a3b8; margin: 6px 0 3px; }
+  #edit-panel #library-tiles .lg-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  #edit-panel #library-tiles .lg-tile {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 4px; background: #222; border: 1px solid #444; border-radius: 4px;
+    color: #e2e8f0; font-size: 10px; cursor: pointer;
+  }
+  #edit-panel #library-tiles .lg-tile img { width: 100%; height: 52px; object-fit: contain; }
+  #edit-panel #library-tiles .lg-tile:disabled { opacity: 0.45; cursor: default; }
+  #edit-panel #library-tiles .lg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  #edit-panel #library-credit { font-size: 10px; color: #94a3b8; margin: 6px 0; }
+  #edit-panel #library-credit a { color: #93c5fd; }
+  #edit-panel #library-status { font-size: 11px; margin-bottom: 6px; }
   #edit-panel .ep-actions { margin-top: 6px; margin-bottom: 0; }
   #edit-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
   #edit-panel .ep-buttons button.ep-danger:not(:disabled) { border-color: #7f1d1d; color: #fca5a5; }
@@ -581,6 +598,11 @@
            has NO data-kind either: it has its own handler and joins the
            palette's enable rule (`!blocked && modes.edit`). -->
       <button id="ep-model" title="Add a model from a URL in front of you">Model</button>
+      <!-- library-sky (Z2) — the Library button, last in the Add row. Like the
+           Teleporter and Model buttons it has NO data-kind: it has its own
+           handler and joins the palette's enable rule (`!blocked && modes.edit`).
+           It is hidden when the catalog has no models. -->
+      <button id="ep-library" title="Place a model from the Atrium library in front of you">Library</button>
     </div>
     <!-- The destination form (T5, edit-polish-2 L2/Z3) — the same element and
          ids, moved out of the viewport's bottom-left corner and into the panel
@@ -615,6 +637,18 @@
       <div style="display:flex;gap:6px">
         <button id="model-save-btn" class="primary" disabled>Save</button>
         <button id="model-form-cancel">Cancel</button>
+      </div>
+    </div>
+    <!-- library-sky (Z2) — the Library grid: a panel section under the Add row,
+         as the destination and Model forms are. Tiles are built by app.js from
+         the committed catalog; the app's form gate keeps only one open. -->
+    <div id="library-grid" style="display:none">
+      <div class="ep-title" style="margin-bottom:6px">Library</div>
+      <div id="library-tiles"></div>
+      <div id="library-credit"></div>
+      <div id="library-status" style="display:none"></div>
+      <div style="display:flex;gap:6px">
+        <button id="library-cancel">Cancel</button>
       </div>
     </div>
     <!-- R1 — Undo and Redo in their own row, outside #ep-fields, so they stay
