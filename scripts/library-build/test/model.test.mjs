@@ -144,3 +144,14 @@ test('the re-pivot uses world bounds: a box under a rotated, scaled, translated 
   assert.ok(Math.abs((min[0] + max[0]) / 2) < 1e-5 && Math.abs((min[2] + max[2]) / 2) < 1e-5)
   assert.deepEqual(m.bounds, [2, 2, 2])
 })
+
+test('author names with a lone surrogate or a bidi control are refused at lookup', async () => {
+  const fake = await createFakePolyHaven({ models: ['Box_01'], skies: [] })
+  const fetcher = createFetcher({ fetchFn: fake.fetchFn })
+  for (const bad of ['Test \ud800 Author', 'a‮b', 'a\u0085b']) {
+    fake.api.Box_01.info.authors = { [bad]: 'All' }
+    await assert.rejects(lookUp(fetcher, 'model', 'Box_01'), /bad author name/, JSON.stringify(bad))
+  }
+  fake.api.Box_01.info.authors = { 'Jérôme Ünicode': 'All' }
+  await lookUp(fetcher, 'model', 'Box_01')
+})

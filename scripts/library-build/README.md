@@ -11,7 +11,7 @@ outside the pnpm workspace on purpose: its dependencies (`sharp`, glTF-Transform
 | `items.json` | the chosen items (pre-brief Appendix A): 34 models, 6 skies | — |
 | `install-library.sh` | installs a verified staging directory into `/srv/atrium-library` | **root**, from a pinned copy only |
 | `lib/` | network rules, name checks, model and sky conversion, catalog rules | — |
-| `test/` | `npm test` (66 tests; the installer's need root) | — |
+| `test/` | `npm test` (73 tests; the installer's need root) | — |
 
 ## Build (as `atrium-build`)
 

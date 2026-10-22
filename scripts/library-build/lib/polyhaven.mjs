@@ -14,8 +14,12 @@ export const SIZE_FLAG_MM = Object.freeze({ min: 100, max: 10_000 })
 
 export class ItemRefused extends Error {}
 
-/** An author name, as the installer accepts it: 1–100 characters, no control characters, no `<` or `>`. */
-export const AUTHOR_RE = /^[^\u0000-\u001f\u007f<>]{1,100}$/
+/**
+ * An author name, as the installer accepts it: 1–100 characters; no control
+ * characters (C0, DEL, C1), line or paragraph separators, bidi controls, lone
+ * surrogates, `<` or `>`. (`u` flag: a lone surrogate is one code point here.)
+ */
+export const AUTHOR_RE = /^[^\u0000-\u001f\u007f-\u009f<>\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\ud800-\udfff]{1,100}$/u
 
 /**
  * Validate `/info/<id>` for the expected kind and pull out what the catalog

@@ -276,3 +276,82 @@ test('it leaves no private copy behind, after success or refusal', opts, async (
   assert.deepEqual((await readdir(s.work)).filter((n) => n.startsWith('stage.')), [])
   await rm(s.root, { recursive: true, force: true })
 })
+
+test('an author name the kept catalog could not carry is refused before anything is installed (re-review N1)', opts, async () => {
+  for (const author of ['\\ud800', 'a\\u202eb', 'a\\u0085b', 'a\\u2028b']) {
+    const s = await stagingCopy()
+    const raw = (await readFile(join(s.staging, 'catalog.json'), 'utf8')).replace('"Test Author"', `"Test ${author} Author"`)
+    await writeFile(join(s.staging, 'catalog.json'), raw)
+    const r = install(s)
+    assert.equal(r.code, 1, author)
+    assert.match(r.err, /bad authors/, author)
+    assert.doesNotMatch(r.err, /Traceback/, author)
+    assert.deepEqual(await installedFiles(s), [], author)
+  }
+})
+
+test('a present destination with the right bytes but the wrong mode stops the run before anything is installed (N2)', opts, async () => {
+  const s = await stagingCopy()
+  for (const d of ['', 'models', 'skies', 'thumbs']) { await mkdir(join(s.target, d), { recursive: true }); await chmod(join(s.target, d), 0o755) }
+  await cp(join(s.staging, s.rel.sky), join(s.target, s.rel.sky))
+  await chmod(join(s.target, s.rel.sky), 0o666)
+  const r = install(s)
+  assert.equal(r.code, 1)
+  assert.match(r.err, /not a root:root 0644 file with one link; nothing was installed/)
+  assert.deepEqual(await installedFiles(s), [s.rel.sky])
+})
+
+test('a catalog whose bytes differ from the file is refused (N3)', opts, async () => {
+  const s = await stagingCopy()
+  await editCatalog(s, (c) => { c.models[0].bytes = 1 })
+  const r = install(s)
+  assert.equal(r.code, 1)
+  assert.match(r.err, /the catalog says 1 bytes/)
+  assert.deepEqual(await installedFiles(s), [])
+})
+
+test('a leftover temporary file from an interrupted run is refused, not overwritten', opts, async () => {
+  const s = await stagingCopy()
+  for (const d of ['', 'models', 'skies', 'thumbs']) { await mkdir(join(s.target, d), { recursive: true }); await chmod(join(s.target, d), 0o755) }
+  const name = s.rel.glb.split('/')[1]
+  await writeFile(join(s.target, 'models', '.tmp-' + name), 'partial')
+  const r = install(s)
+  assert.equal(r.code, 1)
+  assert.match(r.err, /a leftover .*\.tmp-/)
+  assert.deepEqual(await installedFiles(s), ['models/.tmp-' + name], 'only the planted leftover; nothing installed')
+  assert.equal(await readFile(join(s.target, 'models', '.tmp-' + name), 'utf8'), 'partial')
+})
+
+test('owner checks with a staging tree owned by the build account (here: nobody)', opts, async () => {
+  const s = await stagingCopy()
+  assert.equal(spawnSync('chown', ['-R', '65534:65534', s.staging]).status, 0)
+  let r = install(s, { owner: 'nobody' })
+  assert.equal(r.code, 0, r.err)
+  assert.match(r.out, /OK 4 files/)
+
+  const t = await stagingCopy()
+  assert.equal(spawnSync('chown', ['-R', '65534:65534', t.staging]).status, 0)
+  await chown(join(t.staging, t.rel.thumb), 0, 0)
+  r = install(t, { owner: 'nobody' })
+  assert.equal(r.code, 1)
+  assert.match(r.err, /not owned by nobody: thumbs\//)
+
+  const u = await stagingCopy()
+  assert.equal(spawnSync('chown', ['-R', '65534:65534', u.staging]).status, 0)
+  await chown(join(u.staging, 'skies'), 0, 0)
+  r = install(u, { owner: 'nobody' })
+  assert.equal(r.code, 1)
+  assert.match(r.err, /staging skies\/ is not owned by nobody/)
+  assert.deepEqual(await installedFiles(u), [])
+})
+
+test('an ancestor writable by others is refused unless it has the sticky bit (N5)', opts, async () => {
+  const s = await stagingCopy()
+  await chmod(s.root, 0o777)
+  let r = install(s)
+  assert.equal(r.code, 1)
+  assert.match(r.err, /writable by group or others without the sticky bit/)
+  await chmod(s.root, 0o1777)
+  r = install(s)
+  assert.equal(r.code, 0, r.err)
+})

@@ -105,6 +105,8 @@ def check_ancestors(path):
         if stat.S_ISLNK(st.st_mode): fail('%s is a symlink' % cur)
         if not stat.S_ISDIR(st.st_mode): fail('%s is not a directory' % cur)
         if st.st_uid != 0: fail('%s is not owned by root' % cur)
+        if (st.st_mode & 0o022) and not (st.st_mode & stat.S_ISVTX):
+            fail('%s is writable by group or others without the sticky bit' % cur)
 
 def open_dir(name, dir_fd=None, what=None):
     try:
@@ -195,7 +197,9 @@ SHA = re.compile(r'[0-9a-f]{64}')
 ID = re.compile(r'[A-Za-z0-9_]{1,64}')
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()'.,&-]{0,47}")
 CATEGORY = re.compile(r'[A-Z][A-Za-z ]{0,23}')
-AUTHOR = re.compile(r'[^\x00-\x1f\x7f<>]{1,100}')
+# No control characters (C0, DEL, C1), line or paragraph separators, bidi
+# controls, lone surrogates, or < >. polyhaven.mjs's AUTHOR_RE is the same rule.
+AUTHOR = re.compile('[^\x00-\x1f\x7f-\x9f<>\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\ud800-\udfff]{1,100}')
 CREDIT, CREDIT_URL, GENERATOR = 'Models and skies from Poly Haven (CC0)', 'https://polyhaven.com', 'atrium-library-build/1'
 
 def is_int(v, lo, hi): return type(v) is int and lo <= v <= hi
@@ -204,15 +208,15 @@ def keys_exactly(obj, keys, where):
     if type(obj) is not dict: fail('catalog: %s is not an object' % where)
     if set(obj) != set(keys): fail('catalog: %s must have exactly the keys %s' % (where, ', '.join(sorted(keys))))
 
-files = []      # (kind, filename, sha256)
-def path_field(kind, url, sha, entry_id, where):
+files = []      # (kind, filename, sha256, expected bytes or None)
+def path_field(kind, url, sha, entry_id, where, nbytes=None):
     if type(url) is not str: fail('catalog: %s: bad %s path' % (where, kind))
     m = PATTERN[kind].fullmatch(url)
     if not m: fail('catalog: %s: bad %s path %r' % (where, kind, url))
     if type(sha) is not str or not SHA.fullmatch(sha): fail('catalog: %s: bad sha256' % where)
     if m.group(1) != entry_id: fail('catalog: %s: path id differs from the entry id' % where)
     if m.group(2) != sha[:12]: fail('catalog: %s: name hash differs from sha256' % where)
-    files.append((kind, url.rsplit('/', 1)[1], sha))
+    files.append((kind, url.rsplit('/', 1)[1], sha, nbytes))
 
 def common(e, where):
     if type(e['id']) is not str or not ID.fullmatch(e['id']): fail('catalog: %s: bad id' % where)
@@ -243,7 +247,7 @@ for i, e in enumerate(cat['models']):
     if not is_int(e['bytes'], 1, CAPS['model']): fail('catalog: %s: bad bytes' % where)
     if not is_int(e['vertices'], 0, 500000): fail('catalog: %s: bad vertices' % where)
     if not is_int(e['textureBytes'], 0, 64 << 20): fail('catalog: %s: bad textureBytes' % where)
-    path_field('model', e['url'], e['sha256'], e['id'], where)
+    path_field('model', e['url'], e['sha256'], e['id'], where, e['bytes'])
     path_field('thumb', e['thumbnail'], e['thumbnailSha256'], e['id'], where + '.thumbnail')
     canon['models'].append({k: e[k] for k in MODEL_KEYS})
 for i, e in enumerate(cat['skies']):
@@ -254,15 +258,25 @@ for i, e in enumerate(cat['skies']):
     seen.add(('sky', e['id']))
     if not (is_int(e['width'], 4096, 4096) and is_int(e['height'], 2048, 2048)): fail('catalog: %s: a sky must be 4096 x 2048' % where)
     if not is_int(e['bytes'], 1, CAPS['sky']): fail('catalog: %s: bad bytes' % where)
-    path_field('sky', e['url'], e['sha256'], e['id'], where)
+    path_field('sky', e['url'], e['sha256'], e['id'], where, e['bytes'])
     path_field('thumb', e['thumbnail'], e['thumbnailSha256'], e['id'], where + '.thumbnail')
     canon['skies'].append({k: e[k] for k in SKY_KEYS})
 if not files: fail('catalog: names no files')
 names_by_sub = {'models': set(), 'skies': set(), 'thumbs': set()}
-for kind, name, sha in files:
+for kind, name, sha, nbytes in files:
     sub = SUBDIR[kind]
     if name in names_by_sub[sub]: fail('catalog: duplicate file %s/%s' % (sub, name))
     names_by_sub[sub].add(name)
+
+# The catalog that will be kept (and uploaded), rebuilt from checked fields
+# only, is encoded now: a value that can't be written fails here, before
+# anything is copied or installed.
+try:
+    text = (json.dumps(canon, indent=2, ensure_ascii=False) + '\n').encode('utf-8')
+except (UnicodeEncodeError, ValueError) as e:
+    fail('catalog cannot be written back: %s' % e)
+csha = hashlib.sha256(text).hexdigest()
+kept_name = 'catalog-%s.json' % csha[:12]
 
 # --- the staging tree holds exactly what the catalog names ----------------------------
 top = set(os.listdir(sfd))
@@ -280,20 +294,37 @@ for sub, wanted in names_by_sub.items():
     if wanted - present: fail('the catalog names files staging does not hold: %r' % sorted('%s/%s' % (sub, n) for n in wanted - present)[:5])
     sub_fd[sub] = fd
 
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if n <= 0: fail('a write made no progress')
+        view = view[n:]
+
+def hash_fd(fd):
+    os.lseek(fd, 0, os.SEEK_SET)
+    h = hashlib.sha256()
+    while True:
+        b = os.read(fd, 1 << 20)
+        if not b: break
+        h.update(b)
+    return h.hexdigest()
+
 # --- pass 1: copy every named file into a root-only directory, hashing it -------
 import tempfile
 priv = tempfile.mkdtemp(prefix='stage.', dir=work)
 try:
     pfd = open_dir(priv)
     total = 0
-    for kind, name, sha in files:
+    for kind, name, sha, nbytes in files:
         sub = SUBDIR[kind]
         data = read_regular(sub_fd[sub], name, CAPS[kind], sub + '/' + name)
         total += len(data)
         if total > TOTAL_CAP: fail('staging is larger than %d bytes in all' % TOTAL_CAP)
         if hashlib.sha256(data).hexdigest() != sha: fail('sha256 differs from the catalog: %s/%s' % (sub, name))
+        if nbytes is not None and len(data) != nbytes: fail('the catalog says %d bytes but the file has %d: %s/%s' % (nbytes, len(data), sub, name))
         out = os.open(sub + '-' + name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=pfd)
-        try: os.write(out, data)
+        try: write_all(out, data)
         finally: os.close(out)
         del data
 
@@ -313,7 +344,7 @@ try:
             os.close(fd)
 
     to_install, present_count = [], 0
-    for kind, name, sha in files:
+    for kind, name, sha, nbytes in files:
         sub = SUBDIR[kind]
         dst = '%s/%s/%s' % (target, sub, name)
         try:
@@ -321,6 +352,8 @@ try:
         except FileNotFoundError:
             to_install.append((sub, name, sha)); continue
         if not stat.S_ISREG(st.st_mode): fail('destination is not a regular file: %s' % dst)
+        if (st.st_uid, st.st_gid, stat.S_IMODE(st.st_mode), st.st_nlink) != (0, 0, 0o644, 1):
+            fail('%s exists but is not a root:root 0644 file with one link; nothing was installed' % dst)
         if hash_installed(sub, name) != sha:
             fail('%s already exists with DIFFERENT content (expected %s); nothing was installed' % (dst, sha))
         present_count += 1
@@ -345,18 +378,21 @@ try:
             os.close(src)
         if hashlib.sha256(data).hexdigest() != sha: fail('private copy changed: %s/%s' % (sub, name))
         tmp = '.tmp-' + name
-        out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=tsub[sub])
+        out = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=tsub[sub])
         try:
-            os.write(out, data)
+            write_all(out, data)
             os.fchown(out, 0, 0)
             os.fchmod(out, 0o644)
             os.fsync(out)
+            if hash_fd(out) != sha:
+                os.unlink(tmp, dir_fd=tsub[sub])
+                fail('the written copy of %s/%s differs (disk full?); nothing was renamed into place' % (sub, name))
         finally:
             os.close(out)
         os.rename(tmp, name, src_dir_fd=tsub[sub], dst_dir_fd=tsub[sub])
 
     # --- pass 4: re-hash what is installed ---------------------------------------
-    for kind, name, sha in files:
+    for kind, name, sha, nbytes in files:
         sub = SUBDIR[kind]
         st = os.stat(name, dir_fd=tsub[sub], follow_symlinks=False)
         if not stat.S_ISREG(st.st_mode) or (st.st_uid, st.st_gid, stat.S_IMODE(st.st_mode)) != (0, 0, 0o644):
@@ -365,14 +401,11 @@ try:
 finally:
     shutil.rmtree(priv, ignore_errors=True)
 
-# --- the checked catalog, rebuilt from checked fields only -----------------------------
-text = (json.dumps(canon, indent=2, ensure_ascii=False) + '\n').encode('utf-8')
-csha = hashlib.sha256(text).hexdigest()
-kept_name = 'catalog-%s.json' % csha[:12]
+# --- keep the checked catalog (encoded before pass 1) -----------------------------------
 try:
     fd = os.open(kept_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=wfd)
     try:
-        os.write(fd, text); os.fchmod(fd, 0o644); os.fsync(fd)
+        write_all(fd, text); os.fchmod(fd, 0o644); os.fsync(fd)
     finally:
         os.close(fd)
 except FileExistsError:
@@ -385,7 +418,7 @@ except FileExistsError:
     if not same: fail('%s/%s exists with different content' % (work, kept_name))
 
 print('URLs to check after the Caddy step (expect 200 and Access-Control-Allow-Origin: *):')
-for kind, name, sha in files:
+for kind, name, sha, nbytes in files:
     print('  /assets/library/%s/%s' % (SUBDIR[kind], name))
 print('catalog: %s/%s' % (work, kept_name))
 print('catalog sha256: %s' % csha)
