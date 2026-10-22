@@ -1,7 +1,9 @@
 # Pre-brief: Phase 3 step 3b — the starter library, the sky, and library hosting
 
-Status: **DRAFT, Revision 0.4 (2026-10-22, ~09:55 PT). Decisions L21–L31 (§3)
-await the operator.** Rev 0.1 takes the operator's answer to Q1 (no live world
+Status: **FINAL, Revision 1 (2026-10-22, ~10:20 PT). Decisions L21–L31 (§3)
+approved by the operator, all as recommended (2026-10-22, ~09:39 PT), and
+the §9.5 deferral accepted.** Rev 1 also records how the host tool was built
+(H1's implementation note). Rev 0.1 takes the operator's answer to Q1 (no live world
 has a sky) into P2, L25, L26, Z3, §5 and §9, and adds L31. Rev 0.2 adds a
 Misc category of ten models (Appendix A, L28, §5.1). **Rev 0.3 takes an
 outside review of Rev 0.2 (NOT YET GO; findings R1–R7 and three smaller
@@ -291,8 +293,17 @@ lighting path to keep in step with the sky.
 - **`--check`:** for each id, `GET /info/<id>` and `/files/<id>`; applies
   every rule above that doesn't need the files (hosts, include keys, claimed
   sizes); refuses an id with no `gltf.1k` (models) or no `tonemapped` (skies);
-  prints a table. Downloads nothing else.
-- **Include keys become paths only through one function** (R3):
+  flags a model whose largest side in `/info`'s `dimensions` (millimetres) is
+  under 0.1 m or over 10 m; prints a table. Downloads nothing else.
+- **Implementation note (Rev 1, `scripts/library-build`):** the tool never
+  writes a downloaded file to disk. The `.gltf` and its includes stay in
+  memory and go to glTF-Transform's `readJSON` as a resource map (a
+  null-prototype object), so no name from the API or the JSON reaches the
+  file system. The `itemDir`, `wx` and directory-reuse rules below therefore
+  have nothing to apply to. The key rules still apply to every include key,
+  and outputs go into the new staging directory with exclusive creates. This
+  is stricter than the contract, not looser.
+- **Include keys are checked by one function** (R3):
   - relative, `/`-separated, each segment `^[A-Za-z0-9._-]{1,128}$` and not
     `.` or `..`; no empty segment, backslash, `%` or leading `/`;
   - unique after lower-casing;
@@ -775,6 +786,11 @@ L568–583.
 - **Rev 0.4 (2026-10-22, ~09:55 PT):** the re-review of Rev 0.3 ("almost
   ready, not yet GO"; two must-fix, four should-fix, one nit). All taken
   (§14). Decisions unchanged.
+- **Rev 1 FINAL (2026-10-22, ~10:20 PT):** the operator approved L21–L31 as
+  recommended and accepted the §9.5 deferral. H1 gains its implementation
+  note (in-memory conversion) and `--check`'s size flag from `/info`. The
+  tool and installer are on `claude/library-build`; the pinned installer
+  commit and sha256 go in the handoff.
 
 ## 13. Outside review of Rev 0.2 (2026-10-22) and what Rev 0.3 did
 
