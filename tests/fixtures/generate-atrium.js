@@ -500,7 +500,9 @@ async function main() {
         updateRate: { positionInterval: 1000, maxViewRate: 20 },
       },
       background: {
-        texture: 'skyboxtest1.png',
+        // library-sky (L25a): a root path, never a document-relative one. A
+        // document-relative value is now refused like any other non-A1 value.
+        texture: '/tests/fixtures/skyboxtest1.png',
         type: 'equirectangular',
       },
     },

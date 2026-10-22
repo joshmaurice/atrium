@@ -29,7 +29,7 @@
         }
       },
       "background": {
-        "texture": "skyboxtest1.png",
+        "texture": "/tests/fixtures/skyboxtest1.png",
         "type": "equirectangular"
       }
     }
