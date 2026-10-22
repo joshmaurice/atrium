@@ -436,4 +436,12 @@ describe('app.js wiring (read as a file)', () => {
     assert.match(source, /epSky\?\.addEventListener\('change'/)
     assert.match(source, /epSkyRetry\?\.addEventListener\('click'/)
   })
+
+  test('beginNewWorld resets the sky controller, beside the bridge (Z3)', () => {
+    const at = source.indexOf('function beginNewWorld()')
+    assert.ok(at > 0, 'beginNewWorld exists')
+    const body = source.slice(at, at + 400)
+    assert.match(body, /sky\.resetWorld\(\)/, 'a static .gltf load resets the sky too')
+    assert.match(body, /modelBridge\.resetWorld\(\)/)
+  })
 })
