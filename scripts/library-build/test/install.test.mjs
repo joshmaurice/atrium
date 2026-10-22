@@ -164,7 +164,11 @@ test('it refuses to run as anyone but root', opts, async () => {
   const probe = spawnSync('setpriv', ['--version'])
   if (probe.status !== 0) return
   await chmod(s.root, 0o755)
-  const r = spawnSync('setpriv', ['--reuid=65534', '--regid=65534', '--clear-groups', 'bash', SCRIPT, '--target', s.target, '--work', s.work, s.staging], { encoding: 'utf8' })
+  // A copy nobody can read, wherever this checkout lives.
+  const copy = join(s.root, 'install-library.sh')
+  await cp(SCRIPT, copy)
+  await chmod(copy, 0o644)
+  const r = spawnSync('setpriv', ['--reuid=65534', '--regid=65534', '--clear-groups', 'bash', copy, '--target', s.target, '--work', s.work, s.staging], { encoding: 'utf8' })
   assert.equal(r.status, 1, r.stderr)
   assert.match(r.stderr, /must run as root/)
 })
