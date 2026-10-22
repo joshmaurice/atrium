@@ -176,3 +176,13 @@ test('--verify refuses what the installer would: a top-level extra, a nested dir
   assert.match(lines.join('\n'), /EXTRA: stray\.txt/)
   assert.match(lines.join('\n'), /EXTRA: models\/nested/)
 })
+
+test('the build summary shows a rescale from the API\'s dimensions', async () => {
+  const s = await setup()
+  s.fake.api.Box_01.info.dimensions = [10000, 10000, 10000]
+  const out = join(s.dir, 'stage')
+  assert.equal(await run(['--out', out, s.itemsPath], { fetchFn: s.fake.fetchFn, log: s.log }), 0)
+  assert.match(s.lines.join('\n'), /Box_01.*10\.00 × 10\.00 × 10\.00.*rescaled ×10\.0/)
+  const catalog = JSON.parse(await readFile(join(out, 'catalog.json'), 'utf8'))
+  assert.deepEqual(catalog.models[0].bounds, [10, 10, 10])
+})

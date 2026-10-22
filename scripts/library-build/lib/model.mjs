@@ -13,6 +13,41 @@ import { loadAtriumChecks } from './atrium-checks.mjs'
 export const LIBRARY_TEXTURE_LIMIT = 64 * 1024 * 1024
 
 /**
+ * Size against Poly Haven's own `dimensions` (H1 step 7, added after the first
+ * real build: one model carried a ×10 scale). Sides are compared sorted, so
+ * axis conventions don't matter.
+ *  - every side within ±10% of the API's: fine;
+ *  - all three off by the same factor (within 2% of each other): a units or
+ *    scale slip, fixed by one uniform rescale before the re-pivot;
+ *  - otherwise: built as is, and flagged for the operator.
+ */
+export const SIZE_TOLERANCE = 0.10
+export const UNIFORM_AGREEMENT = 0.02
+
+/** @returns {{action: 'ok'|'rescale'|'flag', factor?: number, detail?: string}} */
+export function compareToApi(measured, expectedMm) {
+  if (!expectedMm) return { action: 'ok' }
+  const m = [...measured].sort((a, b) => a - b)
+  const e = expectedMm.map((n) => n / 1000).sort((a, b) => a - b)
+  if (m.some((n) => !(n > 0))) return { action: 'flag', detail: 'a side measures zero' }
+  const ratios = e.map((n, i) => n / m[i])
+  if (ratios.every((r) => Math.abs(r - 1) <= SIZE_TOLERANCE)) return { action: 'ok' }
+  const lo = Math.min(...ratios)
+  const hi = Math.max(...ratios)
+  const describe = (v) => v.map((n) => n.toFixed(2)).join(' × ')
+  if (hi / lo <= 1 + UNIFORM_AGREEMENT) {
+    const factor = Math.sqrt(lo * hi)
+    return { action: 'rescale', factor, detail: `measured ${describe(m)} m; Poly Haven says ${describe(e)} m` }
+  }
+  return { action: 'flag', detail: `measures ${describe(m)} m; Poly Haven says ${describe(e)} m` }
+}
+
+function sceneSize(scene) {
+  const { min, max } = getBounds(scene)
+  return [0, 1, 2].map((i) => max[i] - min[i])
+}
+
+/**
  * Every external file a `.gltf` names, each of which must be exactly one of
  * the API's include keys (H1 step 2). Returns `Map<uri, key>`; throws
  * ItemRefused for anything else (another path, `data:`, a URL, a buffer with
@@ -51,7 +86,7 @@ export function referencedIncludes(json, include) {
  * @param {object} args.fetcher
  * @param {object} [args.limits]  test overrides: { parse, modelBytes, textureBytes }
  */
-export async function buildModel({ id, files, fetcher, limits = {} }) {
+export async function buildModel({ id, files, fetcher, limits = {}, expectedMm = null }) {
   const checks = await loadAtriumChecks()
   const parseLimits = limits.parse ?? checks.MODEL_PARSE_LIMITS
   const modelBytesLimit = limits.modelBytes ?? checks.MODEL_LIMITS.modelBytes
@@ -87,6 +122,28 @@ export async function buildModel({ id, files, fetcher, limits = {} }) {
     throw new ItemRefused(`glTF-Transform could not read it: ${err.message}`)
   }
 
+  const firstScene = doc.getRoot().getDefaultScene() ?? doc.getRoot().listScenes()[0]
+  if (!firstScene) throw new ItemRefused('no scene')
+
+  // 3b. size against Poly Haven's dimensions; a uniform slip is rescaled
+  let rescaled = null
+  let sizeNote = null
+  const before = compareToApi(sceneSize(firstScene), expectedMm)
+  if (before.action === 'rescale') {
+    for (const scene of doc.getRoot().listScenes()) {
+      const wrapper = doc.createNode('atrium-library-scale').setScale([before.factor, before.factor, before.factor])
+      for (const child of scene.listChildren()) {
+        scene.removeChild(child)
+        wrapper.addChild(child)
+      }
+      scene.addChild(wrapper)
+    }
+    rescaled = before.factor
+    sizeNote = `rescaled ×${before.factor.toPrecision(3)} (${before.detail})`
+  } else if (before.action === 'flag') {
+    sizeNote = before.detail
+  }
+
   // 4. re-pivot: origin at the centre of the base
   await doc.transform(center({ pivot: 'below' }))
 
@@ -118,6 +175,9 @@ export async function buildModel({ id, files, fetcher, limits = {} }) {
   if (Math.abs(min[1]) > tolerance || Math.abs(cx) > tolerance || Math.abs(cz) > tolerance) {
     throw new ItemRefused('the re-pivot did not put the base centre at the origin')
   }
+  if (rescaled !== null && compareToApi(size, expectedMm).action !== 'ok') {
+    throw new ItemRefused('the rescale did not bring it to Poly Haven\'s dimensions')
+  }
   const bounds = size.map((n) => Math.min(checks.BOUNDS_MAX, Math.max(checks.BOUNDS_MIN, Math.round(n * 10000) / 10000)))
   if (checks.modelBoundsProblem(bounds)) throw new ItemRefused('bounds out of range')
 
@@ -129,5 +189,7 @@ export async function buildModel({ id, files, fetcher, limits = {} }) {
     vertices: checks.positionVertexTotal(parsed.json),
     textureBytes,
     downloaded: total,
+    rescaled,
+    sizeNote,
   }
 }

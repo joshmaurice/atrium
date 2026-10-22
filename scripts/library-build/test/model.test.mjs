@@ -155,3 +155,35 @@ test('author names with a lone surrogate or a bidi control are refused at lookup
   fake.api.Box_01.info.authors = { 'Jérôme Ünicode': 'All' }
   await lookUp(fetcher, 'model', 'Box_01')
 })
+
+test('size against Poly Haven\'s dimensions: ok, rescale a uniform slip, or flag', async () => {
+  const { compareToApi } = await import('../lib/model.mjs')
+  assert.equal(compareToApi([0.85, 1.07, 0.77], [848, 765, 1065]).action, 'ok')
+  assert.equal(compareToApi([1, 1, 1], null).action, 'ok')
+  const slip = compareToApi([10.97, 21.41, 5.02], [1097.4, 502.1, 2140.5])
+  assert.equal(slip.action, 'rescale')
+  assert.ok(Math.abs(slip.factor - 0.1) < 0.001, String(slip.factor))
+  assert.equal(compareToApi([1, 2, 3], [1000, 2000, 6000]).action, 'flag')
+})
+
+test('a model built ten times too large is rescaled to Poly Haven\'s size before the re-pivot', async () => {
+  const fake = await createFakePolyHaven({ models: ['Box_01'], skies: [] })
+  const fetcher = createFetcher({ fetchFn: fake.fetchFn })
+  const { files } = await lookUp(fetcher, 'model', 'Box_01')
+  const m = await buildModel({ id: 'Box_01', files, fetcher, expectedMm: [100, 100, 100] })
+  assert.deepEqual(m.bounds, [0.1, 0.1, 0.1])
+  assert.match(m.sizeNote, /rescaled ×0\.100/)
+  const doc = await new NodeIO().readBinary(new Uint8Array(m.glb))
+  const { min, max } = getBounds(doc.getRoot().listScenes()[0])
+  assert.ok(Math.abs(min[1]) < 1e-6 && Math.abs((min[0] + max[0]) / 2) < 1e-6, 'still on its base centre')
+})
+
+test('a model whose shape disagrees with Poly Haven\'s is built as is and flagged', async () => {
+  const fake = await createFakePolyHaven({ models: ['Box_01'], skies: [] })
+  const fetcher = createFetcher({ fetchFn: fake.fetchFn })
+  const { files } = await lookUp(fetcher, 'model', 'Box_01')
+  const m = await buildModel({ id: 'Box_01', files, fetcher, expectedMm: [1000, 1000, 3000] })
+  assert.deepEqual(m.bounds, [1, 1, 1])
+  assert.equal(m.rescaled, null)
+  assert.match(m.sizeNote, /Poly Haven says/)
+})

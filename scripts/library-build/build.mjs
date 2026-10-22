@@ -96,7 +96,7 @@ async function build(items, outDir, fetcher, log, limits) {
   for (const item of items.models) {
     try {
       const { info, files } = await lookUp(fetcher, 'model', item.id)
-      const model = await buildModel({ id: item.id, files, fetcher, limits })
+      const model = await buildModel({ id: item.id, files, fetcher, limits, expectedMm: info.dimensionsMm })
       const thumb = await buildModelThumbnail({ url: info.thumbnailUrl, fetcher })
       const glbRel = contentName('models', item.id, model.sha256, 'glb')
       const thumbRel = contentName('thumbs', item.id, thumb.sha256, 'webp')
@@ -110,7 +110,7 @@ async function build(items, outDir, fetcher, log, limits) {
         license: 'CC0-1.0', authors: info.authors, source: `https://polyhaven.com/a/${item.id}`,
       })
       textureTotal += model.textureBytes
-      const flag = sizeFlag(Math.max(...model.bounds))
+      const flag = [model.sizeNote, sizeFlag(Math.max(...model.bounds))].filter(Boolean).join('; ')
       rows.push(['model', item.id, mb(model.bytes), model.vertices, mb(model.textureBytes), model.bounds.map((n) => n.toFixed(2)).join(' × '), flag ?? '', 'ok'])
     } catch (err) {
       if (!(err instanceof ItemRefused) && !(err instanceof FetchRefused)) throw err
