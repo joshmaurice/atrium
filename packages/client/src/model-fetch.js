@@ -877,3 +877,119 @@ function abortOrTimeout(controller, externalSignal) {
   if (reason === 'over-budget') return failure('world-download-budget')
   return failure('timeout')
 }
+
+// ---------------------------------------------------------------------------
+// L26 — the sky's own transfer. A sky image is NOT a model and NOT a world
+// download: it has its own 16 MiB cap and its own 30 s deadline, and it is
+// charged to neither the model's 25 MiB nor the world's 150 MiB ledger. It
+// still uses A2's request policy and L17's redirect rule, because those are
+// about the request, not the budget.
+// ---------------------------------------------------------------------------
+
+/** L26's numbers, in bytes and milliseconds. */
+export const IMAGE_LIMITS = Object.freeze({
+  imageBytes: 16 * 1024 * 1024,
+  timeoutMs: 30_000,
+})
+
+/** The sky's reason codes and their plain text (L26). */
+export const IMAGE_REASONS = Object.freeze({
+  'bad-spec': 'the sky URL is not valid',
+  'no-base':  'this world has no address to resolve a /path against',
+  'http':     'the server refused the request',
+  'network':  'the sky could not be reached (offline, or the host does not allow this page to read it)',
+  'too-large': 'the sky is larger than the limit',
+  'timeout':  'the sky took too long to download',
+  'redirect': 'the download was redirected somewhere it may not go',
+  'aborted':  'the download was cancelled',
+})
+
+/** A sky refusal with its code; `aborted` is the quiet case. */
+function imageFailure(reason, detail) {
+  const base = IMAGE_REASONS[reason] ?? 'the sky could not be loaded'
+  return { ok: false, reason, message: detail ? `${base} (${detail})` : base }
+}
+
+/**
+ * L26 — name a sky abort: a caller's cancellation is quiet (`aborted`), our own
+ * 30 s timer is `timeout`. A sky transfer has no world ledger, so there is no
+ * `world-download-budget` case to name.
+ */
+function imageAbortOrTimeout(controller, externalSignal) {
+  if (externalSignal?.aborted) return imageFailure('aborted')
+  const reason = controller.signal.reason
+  if (reason === 'external') return imageFailure('aborted')
+  return imageFailure('timeout')
+}
+
+/**
+ * L26 — fetch one sky image under its own limits. Renderer-neutral: the bytes go
+ * back to the caller, and the caller checks the header (`imageHeader`) and hands
+ * them to three. The deadline is ONE timer for the whole transfer, so a server
+ * that drips a body slowly cannot stretch the 30 s past its end.
+ *
+ * A sky URL follows A1 like a model URL: `https://` or a single-slash root path,
+ * resolved against the world's base (L25a). A document-relative value never
+ * reaches this function — the sky URL rule refuses it first — and a redirect's
+ * final URL is checked before the body is read.
+ *
+ * @param {object} args
+ * @param {string} args.url                 the stored sky URL
+ * @param {string|null} [args.worldBaseUrl]
+ * @param {AbortSignal|null} [args.signal]  external cancellation
+ * @param {typeof fetch} [args.fetchFn]
+ * @param {{imageBytes?: number, timeoutMs?: number}} [args.limits]
+ * @returns {Promise<{ok: true, bytes: Uint8Array, url: string} | {ok: false, reason: string, message: string}>}
+ */
+export async function fetchImage({
+  url,
+  worldBaseUrl = null,
+  signal = null,
+  fetchFn = globalThis.fetch,
+  limits = IMAGE_LIMITS,
+} = {}) {
+  const imageBytes = limits?.imageBytes ?? IMAGE_LIMITS.imageBytes
+  const timeoutMs = limits?.timeoutMs ?? IMAGE_LIMITS.timeoutMs
+
+  const problem = modelUrlProblem(url)
+  if (problem) return imageFailure('bad-spec', problem)
+
+  const rootRelative = isRootRelative(url)
+  const resolved = resolveModelUrl(url, worldBaseUrl)
+  if (!resolved.ok) return imageFailure(resolved.reason)
+
+  const controller = new AbortController()
+  const onExternalAbort = () => controller.abort('external')
+  if (signal) {
+    if (signal.aborted) return imageFailure('aborted')
+    signal.addEventListener('abort', onExternalAbort)
+  }
+
+  // L26 — ONE timer for the whole transfer: the request, the redirect check and
+  // every chunk. Re-arming it per chunk would let a dripping body run forever.
+  const timer = setTimeout(() => controller.abort(TIMEOUT), timeoutMs)
+  const budget = { bytes: 0 }
+  try {
+    const got = await fetchOne(resolved.url, {
+      fetchFn,
+      signal: controller.signal,
+      budgets: [budget],
+      // A sky is outside the world's ledger: a 16 MiB sky must never eat a
+      // model's 150 MiB world allowance, and vice versa.
+      ledger: null,
+      limits: { modelBytes: imageBytes },
+      rootRelative,
+      worldBaseUrl,
+    })
+    if (got.aborted) return imageAbortOrTimeout(controller, signal)
+    if (!got.ok) {
+      // The transfer's message carries its detail in parentheses (`(404)`).
+      const detail = typeof got.message === 'string' ? got.message.match(/\(([^)]*)\)$/)?.[1] : undefined
+      return imageFailure(got.reason, detail)
+    }
+    return { ok: true, bytes: got.bytes, url: got.url ?? resolved.url }
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener?.('abort', onExternalAbort)
+  }
+}
