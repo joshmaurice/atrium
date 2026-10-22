@@ -1,0 +1,142 @@
+{
+  "note": "Shared by the server's and the client's sky-URL tests (library-sky Z5/Z3, L25a). 'value' is an extras.atrium.background.texture value; 'ok' is whether it is a legal new value; 'reason' is the shared reason code when it is not. '' clears the sky.",
+  "vectors": [
+    {
+      "label": "empty string clears the sky",
+      "value": "",
+      "ok": true
+    },
+    {
+      "label": "an absolute https URL",
+      "value": "https://cdn.example.com/assets/library/skies/a-0123456789ab.jpg",
+      "ok": true
+    },
+    {
+      "label": "an https URL with a query and a fragment",
+      "value": "https://cdn.example.com/sky.jpg?v=2#top",
+      "ok": true
+    },
+    {
+      "label": "a root path",
+      "value": "/assets/library/skies/a-0123456789ab.jpg",
+      "ok": true
+    },
+    {
+      "label": "the root itself",
+      "value": "/",
+      "ok": true
+    },
+    {
+      "label": "a percent-escaped root path",
+      "value": "/assets/library/skies/a%20b.jpg",
+      "ok": true
+    },
+    {
+      "label": "an https URL with a port",
+      "value": "https://cdn.example.com:8443/sky.jpg",
+      "ok": true
+    },
+    {
+      "label": "http is refused",
+      "value": "http://cdn.example.com/sky.jpg",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "uppercase HTTPS is refused",
+      "value": "HTTPS://cdn.example.com/sky.jpg",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a data: URI is refused",
+      "value": "data:image/jpeg;base64,AAAA",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a javascript: URL is refused",
+      "value": "javascript:alert(1)",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a protocol-relative //host is refused",
+      "value": "//cdn.example.com/sky.jpg",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a document-relative name is refused",
+      "value": "skyboxtest1.png",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a ../ value is refused",
+      "value": "../x.png",
+      "ok": false,
+      "reason": "url-scheme"
+    },
+    {
+      "label": "a backslash is refused",
+      "value": "https://cdn.example.com\\sky.jpg",
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "a space is refused",
+      "value": "https://cdn.example.com/sky file.jpg",
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "a control character is refused",
+      "value": "https://cdn.example.com/sky\u0001.jpg",
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "a leading space is refused",
+      "value": " https://cdn.example.com/sky.jpg",
+      "ok": false,
+      "reason": "url-chars"
+    },
+    {
+      "label": "credentials are refused",
+      "value": "https://user:pass@cdn.example.com/sky.jpg",
+      "ok": false,
+      "reason": "url-credentials"
+    },
+    {
+      "label": "a bare username is refused",
+      "value": "https://user@cdn.example.com/sky.jpg",
+      "ok": false,
+      "reason": "url-credentials"
+    },
+    {
+      "label": "over the length cap is refused",
+      "value": "https://cdn.example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": false,
+      "reason": "url-length"
+    },
+    {
+      "label": "a null value is refused",
+      "value": null,
+      "ok": false,
+      "reason": "url-type"
+    },
+    {
+      "label": "a number is refused",
+      "value": 42,
+      "ok": false,
+      "reason": "url-type"
+    },
+    {
+      "label": "https:// alone is refused",
+      "value": "https://",
+      "ok": false,
+      "reason": "url-parse"
+    }
+  ]
+}

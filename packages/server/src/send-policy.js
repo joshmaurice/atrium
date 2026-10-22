@@ -249,6 +249,25 @@ export function modelUrlProblem(url) {
   return 'url-scheme'
 }
 
+/**
+ * L25a — the sky URL rule (library-sky Z5), mirroring the client's
+ * `skyUrlProblem` (`packages/client/src/model-spec.js`).
+ *
+ * `extras.atrium.background.texture` may be a valid A1 URL, or `''` to clear
+ * the sky. There are no legacy forms: a document-relative value is refused like
+ * any other non-A1 value. The same reason codes as A1's, and the same vectors:
+ * `tests/fixtures/sky-url-vectors.json` is read by this package's test and by
+ * the client's, so the two implementations cannot drift.
+ *
+ * @param {*} texture
+ * @returns {string|null}  a reason code, or null when the value is legal
+ */
+export function skyUrlProblem(texture) {
+  if (typeof texture !== 'string') return 'url-type'
+  if (texture === '') return null
+  return modelUrlProblem(texture)
+}
+
 /** The reason code for an `extras.atrium.model` value, or null. */
 export function modelValueProblem(model) {
   if (model === undefined) return null
@@ -348,7 +367,10 @@ const WORLD_INFO_LEAVES = {
   'atrium.description':                                 isBoundedString,
   'atrium.author':                                      isBoundedString,
   'atrium.background.type':                             (v) => v === 'equirectangular' || v === 'cubemap',
-  'atrium.background.texture':                          isBoundedString,
+  // library-sky Z5/L25a — a new sky value must be A1 or '' (which clears it).
+  // The value already stored in a world is never re-checked: only changed
+  // leaves are collected (authorizeDocumentSend).
+  'atrium.background.texture':                          (v) => v === '' || skyUrlProblem(v) === null,
   'atrium.navigation.speed.default':                    isFiniteNumber,
   'atrium.navigation.speed.min':                        isFiniteNumber,
   'atrium.navigation.speed.max':                        isFiniteNumber,

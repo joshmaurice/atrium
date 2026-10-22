@@ -136,6 +136,45 @@ export function resolveModelUrl(url, worldBaseUrl) {
   return { ok: true, url: resolved.href }
 }
 
+/**
+ * L25a — the sky URL rule (library-sky, Z3/Z5).
+ *
+ * `extras.atrium.background.texture` is a legal new value only when it is a
+ * valid A1 URL (an absolute `https://` URL or a single-slash root path, with no
+ * control characters, backslashes or credentials) or `''`, which clears the
+ * sky. There are no legacy forms: a document-relative value is refused exactly
+ * like any other non-A1 value, because no live world has a sky.
+ *
+ * The reason codes are A1's, shared with the server's mirror in
+ * `packages/server/src/send-policy.js` and pinned by
+ * `tests/fixtures/sky-url-vectors.json`, which both read.
+ *
+ * @param {*} texture
+ * @returns {string|null}  a reason code, or null when the value is legal
+ */
+export function skyUrlProblem(texture) {
+  if (typeof texture !== 'string') return 'url-type'
+  if (texture === '') return null
+  return modelUrlProblem(texture)
+}
+
+/**
+ * L25a — resolve a legal sky value against the world's base, exactly as a
+ * model URL resolves (A1/A13). A value that is not a legal new sky is refused
+ * with its reason; `''` is refused with `empty` because it means "no sky" and
+ * is handled by the caller before any resolve (Z3 step 1).
+ *
+ * @param {string} texture
+ * @param {string|null|undefined} worldBaseUrl
+ * @returns {{ok: true, url: string} | {ok: false, reason: string}}
+ */
+export function resolveSkyUrl(texture, worldBaseUrl) {
+  const problem = skyUrlProblem(texture)
+  if (problem) return { ok: false, reason: problem }
+  if (texture === '') return { ok: false, reason: 'empty' }
+  return resolveModelUrl(texture, worldBaseUrl)
+}
+
 /** The sha256 rule: 64 lowercase hex characters (Z1). */
 export function modelSha256Problem(value) {
   return typeof value === 'string' && SHA256_RE.test(value) ? null : 'sha256'

@@ -16,7 +16,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   parseModelSpec, validateModelHost, modelUrlProblem, modelExtrasProblem,
-  resolveModelUrl, isRootRelative, modelReasonText,
+  resolveModelUrl, isRootRelative, modelReasonText, skyUrlProblem, resolveSkyUrl,
 } from '../src/model-spec.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -132,5 +132,80 @@ describe('modelExtrasProblem — the reason code alone', () => {
 
   test('the code for a bad value', () => {
     assert.equal(modelExtrasProblem({ atrium: { model: { url: 'http://h/m.glb' } } }), 'url-scheme')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// library-sky Z3/Z5 — the sky URL rule, against the SAME shared vectors the
+// server's test reads (tests/fixtures/sky-url-vectors.json). L25a.
+// ---------------------------------------------------------------------------
+
+const SKY_VECTORS = JSON.parse(readFileSync(resolve(__dirname, '../../../tests/fixtures/sky-url-vectors.json'), 'utf8'))
+
+describe('skyUrlProblem — the shared sky-URL vectors (L25a)', () => {
+  assert.ok(SKY_VECTORS.vectors.length >= 20, 'the shared vectors are the adversarial set')
+  for (const vector of SKY_VECTORS.vectors) {
+    test(vector.label, () => {
+      const problem = skyUrlProblem(vector.value)
+      assert.equal(problem === null, vector.ok, problem ?? 'accepted')
+      if (!vector.ok) assert.equal(problem, vector.reason, 'the shared reason code')
+    })
+  }
+})
+
+describe('skyUrlProblem — the shape of the rule', () => {
+  test('the empty string clears the sky and is legal', () => {
+    assert.equal(skyUrlProblem(''), null)
+  })
+
+  test('a document-relative value is refused exactly like any other non-A1 value', () => {
+    assert.equal(skyUrlProblem('skyboxtest1.png'), 'url-scheme')
+    assert.equal(skyUrlProblem('../x.png'), 'url-scheme')
+    assert.equal(skyUrlProblem('skyboxtest1.png'), skyUrlProblem('http://h/x.png'),
+      'no legacy form survives (L25a)')
+  })
+
+  test('the cap is the model cap: 2048 characters', () => {
+    const prefix = 'https://h/'
+    assert.equal(skyUrlProblem(prefix + 'a'.repeat(2048 - prefix.length)), null)
+    assert.equal(skyUrlProblem(prefix + 'a'.repeat(2049 - prefix.length)), 'url-length')
+  })
+})
+
+describe('resolveSkyUrl — A1 resolution and refusals', () => {
+  test('an absolute https URL is returned as it is', () => {
+    assert.deepEqual(resolveSkyUrl('https://h/s.jpg', 'https://world.example/w'),
+      { ok: true, url: 'https://h/s.jpg' })
+    assert.deepEqual(resolveSkyUrl('https://h/s.jpg', null), { ok: true, url: 'https://h/s.jpg' })
+  })
+
+  test('a root path resolves against the world base, not the page', () => {
+    assert.deepEqual(resolveSkyUrl('/assets/library/skies/a.jpg', 'https://world.example/worlds/josh/room'),
+      { ok: true, url: 'https://world.example/assets/library/skies/a.jpg' })
+  })
+
+  test('a root path with no usable world base is no-base', () => {
+    for (const base of [null, undefined, '', 'not a url']) {
+      assert.deepEqual(resolveSkyUrl('/a.jpg', base), { ok: false, reason: 'no-base' }, String(base))
+    }
+  })
+
+  test('a document-relative value is refused with a reason', () => {
+    assert.deepEqual(resolveSkyUrl('skyboxtest1.png', 'https://world.example/w'),
+      { ok: false, reason: 'url-scheme' })
+    assert.deepEqual(resolveSkyUrl('../x.png', 'https://world.example/w'),
+      { ok: false, reason: 'url-scheme' })
+  })
+
+  test('the empty string is refused as empty (the caller handles it before resolve)', () => {
+    assert.deepEqual(resolveSkyUrl('', 'https://world.example/w'), { ok: false, reason: 'empty' })
+  })
+
+  test('every non-legal value is refused with its own reason code', () => {
+    for (const vector of SKY_VECTORS.vectors) {
+      if (vector.ok) continue
+      assert.deepEqual(resolveSkyUrl(vector.value, 'https://world.example/w'),
+        { ok: false, reason: vector.reason }, vector.label)
+    }
   })
 })
