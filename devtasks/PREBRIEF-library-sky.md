@@ -1,8 +1,9 @@
 # Pre-brief: Phase 3 step 3b — the starter library, the sky, and library hosting
 
-Status: **DRAFT, Revision 0.1 (2026-10-22, ~01:55 PT). Decisions L21–L31 (§3)
+Status: **DRAFT, Revision 0.2 (2026-10-22, ~08:55 PT). Decisions L21–L31 (§3)
 await the operator.** Rev 0.1 takes the operator's answer to Q1 (no live world
-has a sky) into P2, L25, L26, Z3, §5 and §9, and adds L31. L13–L15 were decided on 2026-10-19 (models-by-url
+has a sky) into P2, L25, L26, Z3, §5 and §9, and adds L31. Rev 0.2 adds a
+Misc category of ten models (Appendix A, L28, §5.1). L13–L15 were decided on 2026-10-19 (models-by-url
 pre-brief §3) and carry into this round; §3 refines L13's catalog path (L21).
 - **Drafted by Claude from a clone of `main` at `9e7478f`.** Its runtime code
   is identical to the released `82c1d40e` (DEV, MAIN record and PROD): the
@@ -29,7 +30,7 @@ pre-brief §3) and carry into this round; §3 refines L13's catalog path (L21).
 
 ## 1. What this round is
 
-An owner in Edit mode presses **Library**, sees a grid of 24 thumbnails
+An owner in Edit mode presses **Library**, sees a grid of 34 thumbnails
 ("Models and skies from Poly Haven, CC0"), and clicks one. The item appears
 2.5 m ahead like a Model add, already pinned (`sha256`) and with its bounds,
 without a Check: the catalog has done the checking. Everything 3a gives a
@@ -202,8 +203,9 @@ for more; one library add in flight at a time (tiles disabled until the
 answer); a refusal shows in the grid's status line. (b) Select a tile, then
 an Add button.
 
-**L28. Which items.** (a) **Appendix A's 24 models and 6 skies**, all
-checked to exist on 10-21; the operator strikes or swaps freely before the
+**L28. Which items.** (a) **Appendix A's 34 models (seven categories,
+including Misc) and 6 skies**, listed from the API on 10-21 and 10-22 (the
+Misc ten's 1k glTF files confirmed, 0.4–3.1 MB each); the operator strikes or swaps freely before the
 build. The build tool's `--check` re-verifies ids, sizes and limits before
 anything is downloaded. (b) Fewer, larger (2k) models.
 
@@ -443,8 +445,10 @@ object with an extra changed leaf.
 ### 5.1 Claude's browser checks (after publish, before DEV acceptance)
 With the harness of the 10-21 passdown §5.1, plus a copy of the real library
 files and catalog served under `/assets/library/`:
-- every catalog model places from the grid and reaches `loaded`; all 24 in
-  one world stay within 512 MiB (`__mb.textureBudget.taken`);
+- every catalog model places from the grid and reaches `loaded` (in
+  batches across fresh worlds: 34 distinct items exceed one world's 512 MiB);
+  in one world, placing distinct items until the budget refuses gives a
+  placeholder with the budget reason, and the count reached is recorded;
 - every sky loads; switching skies 10 times leaves
   `renderer.info.memory.textures` flat;
 - renaming the world causes no sky request;
@@ -528,10 +532,13 @@ L568–583.
   L25a drops the legacy document-relative form (old behaviour kept as
   option (b)); the fixture moves to a root path; P2, L26, Z3, §5, §5.1 and §9
   follow. New L31 (lighting without a sky), from §9.3.
+- **Rev 0.2 (2026-10-22, ~08:55 PT):** a Misc category of ten models
+  (operator request), 34 models in all; §5.1's budget check reworded, since
+  34 distinct items no longer fit one world.
 
 ## Appendix A. Proposed items (L28; ids verified on api.polyhaven.com, 10-21)
 
-**Models (24, 1k):**
+**Models (34, 1k):**
 - Seating: `ArmChair_01`, `GreenChair_01`, `Sofa_01`,
   `mid_century_lounge_chair`, `painted_wooden_bench`,
   `plastic_monobloc_chair_01`, `wooden_stool_02`
@@ -543,6 +550,10 @@ L568–583.
 - Lighting (meshes only; imported lights are dropped, 3a): `street_lamp_02`,
   `Lantern_01`, `wooden_lantern_01`
 - Plants: `potted_plant_04`, `fern_02`, `shrub_03`, `tree_stump_01`
+- Misc (Rev 0.2, operator request): `wooden_crate_01`, `Barrel_01`,
+  `standing_chalkboard_01`, `marble_bust_01`, `concrete_cat_statue`,
+  `rubber_duck_toy`, `boombox`, `Television_01`, `Ukulele_01`,
+  `ceramic_vase_01`. None is rigged.
 
 **Skies (6, pure-sky HDRIs, tonemapped, 4096 × 2048):**
 `kloofendal_48d_partly_cloudy_puresky`, `autumn_field_puresky`,
