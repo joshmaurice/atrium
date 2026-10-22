@@ -20,7 +20,17 @@ const THUMB_QUALITY = 80
 sharp.concurrency(1)
 sharp.cache(false)
 
-async function metadataOf(bytes, maxPixels, what) {
+/** The format from the bytes' own signature: only these three reach a decoder. */
+export function sniffImage(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg'
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png'
+  if (bytes.length >= 12 && bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP') return 'webp'
+  return null
+}
+
+async function metadataOf(bytes, maxPixels, what, allowed) {
+  const sniffed = sniffImage(bytes)
+  if (!sniffed || !allowed.includes(sniffed)) throw new ItemRefused(`${what} is not ${allowed.join(', ')} by its signature`)
   try {
     return await sharp(bytes, { limitInputPixels: maxPixels, failOn: 'error' }).metadata()
   } catch (err) {
@@ -31,7 +41,7 @@ async function metadataOf(bytes, maxPixels, what) {
 /** A model's thumbnail: fetched from the API's thumbnail URL, re-encoded. */
 export async function buildModelThumbnail({ url, fetcher }) {
   const bytes = await fetcher.get(url, { cap: CAPS.thumbnail })
-  const meta = await metadataOf(bytes, THUMB_SOURCE_MAX_PIXELS, 'the thumbnail')
+  const meta = await metadataOf(bytes, THUMB_SOURCE_MAX_PIXELS, 'the thumbnail', ['jpeg', 'png', 'webp'])
   if (!['jpeg', 'png', 'webp'].includes(meta.format)) throw new ItemRefused(`the thumbnail is ${meta.format}`)
   if (!(meta.width <= 4096 && meta.height <= 4096)) throw new ItemRefused('the thumbnail is too large')
   const out = await sharp(bytes, { limitInputPixels: THUMB_SOURCE_MAX_PIXELS })
@@ -47,7 +57,7 @@ export async function buildModelThumbnail({ url, fetcher }) {
  */
 export async function buildSky({ source, fetcher }) {
   const bytes = await fetcher.get(source.url, { cap: CAPS.skySource, size: source.size, md5: source.md5 })
-  const meta = await metadataOf(bytes, SKY_SOURCE_MAX_PIXELS, 'the sky')
+  const meta = await metadataOf(bytes, SKY_SOURCE_MAX_PIXELS, 'the sky source', ['jpeg'])
   if (meta.format !== 'jpeg') throw new ItemRefused(`the sky source is ${meta.format}, not JPEG`)
   if (meta.width !== meta.height * 2) throw new ItemRefused(`the sky source is ${meta.width}×${meta.height}, not 2:1`)
   if (meta.width < SKY_SIZE.width) throw new ItemRefused(`the sky source is narrower than ${SKY_SIZE.width}`)

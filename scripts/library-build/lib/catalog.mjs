@@ -84,11 +84,19 @@ export async function verifyStaging(dir, catalog) {
     if (sha256Hex(await readFile(path)) !== f.sha256) { problems.push(`sha256 differs: ${rel}`); continue }
     ok++
   }
+  // Exactly what the installer accepts: catalog.json, the three directories,
+  // and in them only files the catalog names.
   const extra = []
-  for (const sub of ['models', 'skies', 'thumbs']) {
-    let names = []
-    try { names = await readdir(join(dir, sub)) } catch { continue }
-    for (const n of names) if (!named.has(`${sub}/${n}`)) extra.push(`${sub}/${n}`)
+  const top = await readdir(dir, { withFileTypes: true })
+  for (const e of top) {
+    if (e.name === 'catalog.json' && e.isFile()) continue
+    if (['models', 'skies', 'thumbs'].includes(e.name) && e.isDirectory()) {
+      for (const f of await readdir(join(dir, e.name), { withFileTypes: true })) {
+        if (!(f.isFile() && named.has(`${e.name}/${f.name}`))) extra.push(`${e.name}/${f.name}`)
+      }
+      continue
+    }
+    extra.push(e.name)
   }
   return { ok, problems, extra }
 }

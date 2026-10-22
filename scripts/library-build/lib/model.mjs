@@ -24,6 +24,9 @@ export const LIBRARY_TEXTURE_LIMIT = 64 * 1024 * 1024
  */
 export function referencedIncludes(json, include) {
   if (json === null || typeof json !== 'object' || Array.isArray(json)) throw new ItemRefused('the .gltf is not a JSON object')
+  for (const key of ['buffers', 'images', 'extensionsRequired', 'extensionsUsed']) {
+    if (json[key] !== undefined && !Array.isArray(json[key])) throw new ItemRefused(`the .gltf's ${key} is not a list`)
+  }
   const out = new Map()
   const take = (uri, what) => {
     if (typeof uri !== 'string') throw new ItemRefused(`${what} has no file name`)
@@ -65,7 +68,8 @@ export async function buildModel({ id, files, fetcher, limits = {} }) {
   const unsupported = checks.unsupportedExtension(json)
   if (unsupported) throw new ItemRefused(`uses ${unsupported}`)
 
-  const resources = Object.create(null)   // a key such as `__proto__` stays a plain key
+  // Include keys can't be `__proto__`, `constructor` or `prototype` (keys.mjs).
+  const resources = Object.create(null)
   let total = gltfBytes.length
   for (const uri of uris.keys()) {
     const inc = files.include[uri]

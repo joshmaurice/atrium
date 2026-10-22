@@ -11,7 +11,7 @@ outside the pnpm workspace on purpose: its dependencies (`sharp`, glTF-Transform
 | `items.json` | the chosen items (pre-brief Appendix A): 34 models, 6 skies | — |
 | `install-library.sh` | installs a verified staging directory into `/srv/atrium-library` | **root**, from a pinned copy only |
 | `lib/` | network rules, name checks, model and sky conversion, catalog rules | — |
-| `test/` | `npm test` (52 tests; the installer's need root) | — |
+| `test/` | `npm test` (66 tests; the installer's need root) | — |
 
 ## Build (as `atrium-build`)
 
@@ -58,12 +58,22 @@ echo "$INSTALLER_SHA256  /root/lib-install/install-library.sh" | sha256sum -c -
 bash /root/lib-install/install-library.sh /var/tmp/library-<date>
 ```
 
-The installer works on a private root-owned copy of the staging directory. It
-installs each missing file and checks each present file's hash, stopping
-on any difference. Then it re-hashes everything, keeps the checked catalog
-as `/root/lib-install/catalog-<sha12>.json`, and prints the URLs to check after
-the Caddy step (H3). Upload **that** catalog to `main` as
-`apps/client/library/catalog.json`.
+The installer treats the staging directory, catalog included, as hostile. It
+works through file descriptors opened without following symlinks, and checks
+the following:
+- **The staging directory:** its tree must be owned by `atrium-build` (`--owner`),
+  sit under root-owned directories, and hold exactly `catalog.json`,
+  `models/`, `skies/` and `thumbs/`, with only the files the catalog names.
+- **Each named file:** a regular file with one link, under its size cap (and
+  1 GiB in all). It is copied into a root-only directory while being hashed.
+- **The catalog:** read as strict JSON, with every field checked.
+
+Every destination is checked (absent, or the same bytes) **before anything is
+installed**. A refused run installs nothing. Then missing files are installed,
+root:root 0644, and everything is re-hashed. The catalog kept at
+`/root/lib-install/catalog-<sha12>.json` is rebuilt from the checked fields
+only. Upload **that** file to `main` as `apps/client/library/catalog.json`,
+after the URLs it prints pass the Caddy check (H3).
 
 ## Tests
 

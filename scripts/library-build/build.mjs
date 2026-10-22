@@ -23,8 +23,9 @@ import { buildModel } from './lib/model.mjs'
 import { buildModelThumbnail, buildSky, SKY_SIZE } from './lib/images.mjs'
 import { CATALOG_VERSION, CREDIT, CREDIT_URL, URL_PREFIX, catalogFiles, contentName, verifyStaging } from './lib/catalog.mjs'
 
-const NAME_RE = /^[^\u0000-\u001f\u007f]{1,48}$/
-const CATEGORY_RE = /^[A-Za-z][A-Za-z ]{0,23}$/
+// The same rules install-library.sh applies to the catalog.
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ()'.,&-]{0,47}$/
+const CATEGORY_RE = /^[A-Z][A-Za-z ]{0,23}$/
 
 /** Read and check items.json: `{ models: [{id, name, category}], skies: [{id, name}] }`. */
 export function readItems(json) {

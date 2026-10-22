@@ -113,3 +113,34 @@ test('an API entry of the wrong kind is refused', async () => {
   await assert.rejects(lookUp(fetcher, 'sky', 'Box_01'), /not a sky/)
   await assert.rejects(lookUp(fetcher, 'model', 'Sky_01'), /not a model/)
 })
+
+test('a malformed .gltf refuses that item instead of crashing the build (review finding 6)', async () => {
+  for (const [fn, want] of [
+    [(j) => { j.buffers = {} }, /buffers is not a list/],
+    [(j) => { j.images = 'x' }, /images is not a list/],
+    [(j) => { j.extensionsRequired = 'KHR_x' }, /extensionsRequired is not a list/],
+    [(j) => { j.extensionsUsed = { a: 1 } }, /extensionsUsed is not a list/],
+  ]) {
+    const { result } = await buildOne({ extraJson: fn })
+    await assert.rejects(result, (err) => err instanceof ItemRefused && want.test(err.message), String(want))
+  }
+})
+
+test('authors given as a list, or with markup, are refused at lookup', async () => {
+  const fake = await createFakePolyHaven({ models: ['Box_01'], skies: [] })
+  const fetcher = createFetcher({ fetchFn: fake.fetchFn })
+  fake.api.Box_01.info.authors = ['A', 'B']
+  await assert.rejects(lookUp(fetcher, 'model', 'Box_01'), /authors is not an object/)
+  fake.api.Box_01.info.authors = { '<script>': 'All' }
+  await assert.rejects(lookUp(fetcher, 'model', 'Box_01'), /bad author name/)
+})
+
+test('the re-pivot uses world bounds: a box under a rotated, scaled, translated parent lands on its base centre', async () => {
+  const { result } = await buildOne({ nested: true })
+  const m = await result
+  const doc = await new NodeIO().readBinary(new Uint8Array(m.glb))
+  const { min, max } = getBounds(doc.getRoot().listScenes()[0])
+  assert.ok(Math.abs(min[1]) < 1e-5, `base at y=0, got ${min[1]}`)
+  assert.ok(Math.abs((min[0] + max[0]) / 2) < 1e-5 && Math.abs((min[2] + max[2]) / 2) < 1e-5)
+  assert.deepEqual(m.bounds, [2, 2, 2])
+})

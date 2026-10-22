@@ -9,6 +9,8 @@
 export const ITEM_ID_RE = /^[A-Za-z0-9_]{1,64}$/
 const SEGMENT_RE = /^[A-Za-z0-9._-]{1,128}$/
 const MAX_KEY_LENGTH = 512
+/** Names that mean something to a JavaScript object, refused as segments. */
+const RESERVED = new Set(['__proto__', 'constructor', 'prototype'])
 
 export const ALLOWED_HOSTS = Object.freeze(['api.polyhaven.com', 'dl.polyhaven.org', 'cdn.polyhaven.com'])
 
@@ -33,6 +35,7 @@ export function includeKeyProblem(key) {
   for (const segment of key.split('/')) {
     if (segment === '') return 'empty segment'
     if (segment === '.' || segment === '..') return 'dot segment'
+    if (RESERVED.has(segment)) return 'reserved name'
     if (!SEGMENT_RE.test(segment)) return 'bad characters'
   }
   return null

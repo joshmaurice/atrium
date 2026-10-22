@@ -25,7 +25,7 @@ export async function jpeg(width, height, rgb = [120, 80, 40]) {
  *
  * @returns {Promise<{json: object, resources: Record<string, Uint8Array>}>}
  */
-export async function boxGltf({ id = 'Box_01', textureSide = 64, extraJson = null } = {}) {
+export async function boxGltf({ id = 'Box_01', textureSide = 64, extraJson = null, nested = false } = {}) {
   const doc = new Document()
   const buffer = doc.createBuffer().setURI(`${id}.bin`)
   const positions = new Float32Array([
@@ -45,7 +45,14 @@ export async function boxGltf({ id = 'Box_01', textureSide = 64, extraJson = nul
   const prim = doc.createPrimitive().setAttribute('POSITION', pos).setAttribute('TEXCOORD_0', uv).setIndices(idx).setMaterial(mat)
   const mesh = doc.createMesh('box').addPrimitive(prim)
   const node = doc.createNode('box').setMesh(mesh)
-  doc.createScene('scene').addChild(node)
+  if (nested) {
+    // A rotated, scaled, translated parent: the re-pivot must use world bounds.
+    const s = Math.SQRT1_2
+    const parent = doc.createNode('parent').setRotation([0, s, 0, s]).setScale([2, 2, 2]).setTranslation([10, -7, 3]).addChild(node)
+    doc.createScene('scene').addChild(parent)
+  } else {
+    doc.createScene('scene').addChild(node)
+  }
   const { json, resources } = await new NodeIO().writeJSON(doc)
   if (extraJson) extraJson(json)
   return { json, resources }

@@ -14,6 +14,9 @@ export const SIZE_FLAG_MM = Object.freeze({ min: 100, max: 10_000 })
 
 export class ItemRefused extends Error {}
 
+/** An author name, as the installer accepts it: 1–100 characters, no control characters, no `<` or `>`. */
+export const AUTHOR_RE = /^[^\u0000-\u001f\u007f<>]{1,100}$/
+
 /**
  * Validate `/info/<id>` for the expected kind and pull out what the catalog
  * keeps. Throws ItemRefused.
@@ -21,10 +24,12 @@ export class ItemRefused extends Error {}
 export function readInfo(info, kind) {
   if (info === null || typeof info !== 'object') throw new ItemRefused('info is not an object')
   if (info.type !== TYPE[kind]) throw new ItemRefused(`info type ${info.type} is not a ${kind}`)
-  const authors = info.authors && typeof info.authors === 'object' ? Object.keys(info.authors) : []
+  const a = info.authors
+  if (a === null || typeof a !== 'object' || Array.isArray(a)) throw new ItemRefused('authors is not an object')
+  const authors = Object.keys(a)
   if (authors.length === 0 || authors.length > 10) throw new ItemRefused('bad authors')
-  for (const a of authors) {
-    if (a.length === 0 || a.length > 100 || /[\u0000-\u001f\u007f]/.test(a)) throw new ItemRefused('bad author name')
+  for (const name of authors) {
+    if (!AUTHOR_RE.test(name)) throw new ItemRefused('bad author name')
   }
   let thumbnailUrl = null
   if (kind === 'model') {

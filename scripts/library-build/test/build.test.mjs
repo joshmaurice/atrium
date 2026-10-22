@@ -124,7 +124,7 @@ test('skies: a 16k-style source is downsized; a non-2:1, too-narrow or non-JPEG 
   png.fake.api.Sky_01.files.tonemapped.size = pngBytes.length
   png.fake.api.Sky_01.files.tonemapped.md5 = (await import('./fake-polyhaven.mjs')).md5(pngBytes)
   assert.equal(await run(['--out', join(png.dir, 's'), png.itemsPath], { fetchFn: png.fake.fetchFn, log: png.log }), 1)
-  assert.match(png.lines.join('\n'), /not JPEG/)
+  assert.match(png.lines.join('\n'), /not jpeg by its signature/)
 })
 
 test('--verify catches a changed file, an extra file and a catalog path that escapes', async () => {
@@ -163,4 +163,16 @@ test('bad arguments and bad items.json', async () => {
     await writeFile(p, JSON.stringify(items))
     assert.equal(await run(['--check', p], { log: () => {} }), 65, JSON.stringify(items))
   }
+})
+
+test('--verify refuses what the installer would: a top-level extra, a nested directory', async () => {
+  const s = await setup()
+  const out = join(s.dir, 'stage')
+  assert.equal(await run(['--out', out, s.itemsPath], { fetchFn: s.fake.fetchFn, log: () => {} }), 0)
+  await writeFile(join(out, 'stray.txt'), 'x')
+  await mkdir(join(out, 'models', 'nested'))
+  const lines = []
+  assert.equal(await run(['--verify', out, join(out, 'catalog.json')], { log: (l) => lines.push(l) }), 1)
+  assert.match(lines.join('\n'), /EXTRA: stray\.txt/)
+  assert.match(lines.join('\n'), /EXTRA: models\/nested/)
 })

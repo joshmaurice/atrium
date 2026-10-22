@@ -55,3 +55,7 @@ test('item ids', () => {
   assert.equal(itemIdProblem('ArmChair_01'), null)
   for (const bad of ['', '../x', 'a b', 'a-b', 'x'.repeat(65), null]) assert.notEqual(itemIdProblem(bad), null, String(bad))
 })
+
+test('include keys: names that mean something to a JavaScript object are refused', () => {
+  for (const k of ['__proto__', 'a/__proto__', 'constructor/x', 'prototype']) assert.equal(includeKeyProblem(k), 'reserved name', k)
+})
