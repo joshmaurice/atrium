@@ -1,9 +1,10 @@
 # Pre-brief: Phase 3 step 3b — the starter library, the sky, and library hosting
 
-Status: **FINAL, Revision 1 (2026-10-22, ~10:20 PT). Decisions L21–L31 (§3)
+Status: **FINAL, Revision 1.1 (2026-10-22, ~11:00 PT). Decisions L21–L31 (§3)
 approved by the operator, all as recommended (2026-10-22, ~09:39 PT), and
 the §9.5 deferral accepted.** Rev 1 also records how the host tool was built
-(H1's implementation note). Rev 0.1 takes the operator's answer to Q1 (no live world
+(H1's implementation note). **Rev 1.1 records the installer as built and
+reviewed, with the pinned commit and sha256 (H2).** Rev 0.1 takes the operator's answer to Q1 (no live world
 has a sky) into P2, L25, L26, Z3, §5 and §9, and adds L31. Rev 0.2 adds a
 Misc category of ten models (Appendix A, L28, §5.1). **Rev 0.3 takes an
 outside review of Rev 0.2 (NOT YET GO; findings R1–R7 and three smaller
@@ -385,6 +386,30 @@ a reviewed commit, fetched by root into a root-only directory and checked
 against a known sha256; it is plain `bash` plus `sha256sum`, `install`, `cp`,
 `find` and `python3 -I` (to read `catalog.json` with the standard `json`
 module). Everything under `/var/tmp/library-<date>` is untrusted data.
+
+**Pinned for this install (Rev 1.1):**
+```
+INSTALLER_SHA=4d0e2a3d864470339b115c2edbe4e1bcd42fbcc1
+INSTALLER_SHA256=6a0dc0b0f25eb00d12bc8005002f143de039e73ab19ca02be058f440bf64ad65
+```
+The installer passed an independent security review in three rounds (seven
+findings, then five, all fixed; final verdict "fit for root to run on the
+host"), and 73 tests as root. **As built**, it is a bash preamble plus an
+embedded `python3 -I -S` program working through `O_NOFOLLOW` directory
+descriptors. It adds the following to the list below:
+- an `--owner` option (default `atrium-build`): the staging tree and every
+  named file must be owned by it;
+- ancestors root-owned, and not writable by group or others without the
+  sticky bit;
+- single-link regular files under per-kind caps (25/16/1 MiB) and 1 GiB in
+  all, refused before anything is read;
+- strict JSON (no NaN or Infinity, no duplicate keys) with every Z1 field
+  checked, `bytes` included;
+- the kept catalog rebuilt from checked fields and encoded before anything is
+  copied;
+- every destination checked (bytes, root:root 0644, one link) before
+  anything is installed;
+- installs written in full, re-hashed, then renamed into place.
 
 **`install-library.sh`** (in the tool's directory; tested by Claude locally):
 1. refuses unless run as root, and unless `/srv/atrium-library` and its three
@@ -791,6 +816,9 @@ L568–583.
   note (in-memory conversion) and `--check`'s size flag from `/info`. The
   tool and installer are on `claude/library-build`; the pinned installer
   commit and sha256 go in the handoff.
+- **Rev 1.1 (2026-10-22, ~11:00 PT):** H2 records the pinned installer
+  (`4d0e2a3d`, sha256 `6a0dc0b0…ad65`) after three rounds of independent
+  review, and the installer's as-built checks.
 
 ## 13. Outside review of Rev 0.2 (2026-10-22) and what Rev 0.3 did
 
