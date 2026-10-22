@@ -625,4 +625,24 @@ describe('resetWorld and dispose', () => {
     assert.equal(h.scene.background, tex)
     assert.equal(h.scene.environment, tex)
   })
+
+  test('resetWorld while a decode is pending revokes the blob URL and disposes the late texture', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    await arrive(h, 0)                        // the decode is in flight
+    assert.equal(h.created.length, 1)
+    assert.deepEqual(h.revoked, [], 'the blob URL lives until the decode settles')
+
+    h.sky.resetWorld()                        // a world change mid-decode
+    assert.equal(h.scene.background, null)
+
+    const late = texture('A')
+    h.decodes[0].resolve(late)
+    await tick()
+    assert.deepEqual(h.revoked, [h.created[0].url], 'the blob URL is revoked when it settles')
+    assert.equal(late.disposed, 1, 'and the texture it made is disposed')
+    assert.equal(h.scene.background, null, 'no slot is touched')
+    assert.deepEqual(await p, { ok: false, reason: 'superseded' })
+  })
 })
