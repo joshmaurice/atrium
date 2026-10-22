@@ -463,6 +463,13 @@
   #edit-panel #library-credit { font-size: 10px; color: #94a3b8; margin: 6px 0; }
   #edit-panel #library-credit a { color: #93c5fd; }
   #edit-panel #library-status { font-size: 11px; margin-bottom: 6px; }
+  /* library-sky Z4 — the World row and its sky select. */
+  #edit-panel #ep-sky-row select {
+    width: 100%; background: #222; border: 1px solid #444; color: #e2e8f0;
+    padding: 4px 8px; border-radius: 4px;
+  }
+  #edit-panel #ep-sky-status { font-size: 11px; color: #f87171; margin-bottom: 6px; }
+  #edit-panel #ep-sky-retry { padding: 3px 8px; font-size: 11px; }
   #edit-panel .ep-actions { margin-top: 6px; margin-bottom: 0; }
   #edit-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
   #edit-panel .ep-buttons button.ep-danger:not(:disabled) { border-color: #7f1d1d; color: #fca5a5; }
@@ -603,6 +610,17 @@
            handler and joins the palette's enable rule (`!blocked && modes.edit`).
            It is hidden when the catalog has no models. -->
       <button id="ep-library" title="Place a model from the Atrium library in front of you">Library</button>
+    </div>
+    <!-- library-sky (Z4) — the World row: one select for the sky every visitor
+         sees. None, the catalog's skies, and a disabled "Custom" entry while the
+         world's texture is not a catalog sky. Not undoable. -->
+    <div class="ep-label">World</div>
+    <div class="ep-row" id="ep-sky-row">
+      <select id="ep-sky" title="Choose the sky every visitor sees"></select>
+    </div>
+    <div id="ep-sky-status" style="display:none"></div>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <button id="ep-sky-retry" style="display:none" title="Try the sky again">Retry</button>
     </div>
     <!-- The destination form (T5, edit-polish-2 L2/Z3) — the same element and
          ids, moved out of the viewport's bottom-left corner and into the panel

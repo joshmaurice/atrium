@@ -27,6 +27,7 @@ import { palettePlacement, paletteName, teleporterName, copyName, modelName, fir
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
 import { createLibraryGrid, libraryAnswerError } from './library-grid.js'
 import { loadCatalog, storedUrl, EMPTY_CATALOG } from './library-catalog.js'
+import { createSkyPicker, SKY_NONE, SKY_CUSTOM } from './sky-picker.js'
 import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
@@ -658,7 +659,10 @@ client.on('world:loaded', ({ name, description, author }) => {
   stage.setSceneGroup(sceneGroup)
   modelBridge.attachView(docView, sceneGroup)
 
+  // Z4 — the Sky picker follows the world too.
+  skyPicker?.sync()
   sky.update(client.som.extras?.atrium?.background, bgBaseUrl)
+    .then((result) => skyPicker?.onSkyResult(result))
 
   // HUD world line
   hudWorldEl.textContent = name ? `World: ${name}` : ''
@@ -749,6 +753,8 @@ client.on('connecting', () => {
   modelForm.reset()
   // Z2 — and the Library grid.
   libraryGrid?.close()
+  // Z4 — and the Sky picker's failure.
+  skyPicker?.reset()
   refreshModelRow()
   // Close the destination form (the panel is going with the session)
   closeTeleporterForm()
@@ -765,6 +771,8 @@ client.on('disconnected', () => {
   sky.resetWorld()
   modelForm.reset()
   libraryGrid?.close()
+  // Z4 — the Sky picker's failure and any wait go with the world.
+  skyPicker?.reset()
   refreshModelRow()
   // Close the destination form (the panel is going with the session)
   closeTeleporterForm()
@@ -815,7 +823,11 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 client.on('som:set', ({ nodeName, path }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
+    // Z4 — a document change from another session, or the server's own update:
+    // the select follows the SOM, and a sky failure is reported under it.
+    skyPicker?.sync()
     sky.update(client.som.extras?.atrium?.background, client.worldBaseUrl)
+      .then((result) => skyPicker?.onSkyResult(result))
     return
   }
   // Rebuild pads if a teleporter node was modified (T4), or a transform of a
@@ -1489,6 +1501,13 @@ const libraryCancel   = document.getElementById('library-cancel')
 // enable-rule refresher (which runs early) can read them.
 let libraryGrid = null
 let libraryCatalog = EMPTY_CATALOG
+
+// ── The Sky picker's elements (Z4, library-sky) ──────────────────────────
+const epSky        = document.getElementById('ep-sky')
+const epSkyStatus  = document.getElementById('ep-sky-status')
+const epSkyRetry   = document.getElementById('ep-sky-retry')
+// Assigned below; declared here for the same reason as the grid.
+let skyPicker = null
 const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
@@ -2128,6 +2147,8 @@ function refreshEditActions() {
   // buttons: a tile is enabled only while !blocked && modes.edit AND no library
   // add is in flight.
   libraryGrid?.refresh()
+  // Z4 — the Sky picker's enable rule (the select and its Retry button).
+  skyPicker?.refresh()
   const block = structuralBlock()
   epDelete.disabled = !!block
   epDelete.title = block ?? 'Delete the selected object'
@@ -2416,9 +2437,20 @@ function selectAddedNode(node) {
 // S1 — a new node named like our held delete: our delete-by-name may hit it.
 client.on('som:add', ({ nodeName }) => structure.addSeen(nodeName))
 
-client.on('edit:accepted', ({ seq }) => onStructureAnswer(seq, 'accepted'))
-client.on('edit:rejected', ({ seq, code, message }) => onStructureAnswer(seq, 'rejected', message || code))
-client.on('edit:unknown',  ({ seq }) => onStructureAnswer(seq, 'unknown'))
+// Z4 — the document's own sky write. The picker owns the select's wait and the
+// rejection's rollback; a seq the picker does not own is ignored here.
+client.on('edit:accepted', ({ seq }) => {
+  skyPicker?.onAccepted(seq)
+  onStructureAnswer(seq, 'accepted')
+})
+client.on('edit:rejected', ({ seq, code, message }) => {
+  skyPicker?.onRejected(seq, message || code)
+  onStructureAnswer(seq, 'rejected', message || code)
+})
+client.on('edit:unknown',  ({ seq }) => {
+  skyPicker?.onUnknown(seq)
+  onStructureAnswer(seq, 'unknown')
+})
 
 // A remote change to the selection, or to a material it shares, can change
 // whether it may be duplicated.
@@ -2891,6 +2923,7 @@ function beginNewWorld() {
   sky.resetWorld()
   modelForm.reset()
   libraryGrid?.close()
+  skyPicker?.reset()
   refreshModelRow()
 }
 
@@ -3007,6 +3040,70 @@ epLibrary?.addEventListener('click', () => {
  * Library button hidden and Sky with None only; the rest of Edit mode is
  * unaffected. The grid is re-rendered so an already-open one shows the tiles.
  */
+/**
+ * Z4 — the select's options: None, the catalog's skies, and a disabled Custom
+ * entry only while the world's texture is not a catalog sky. Rebuilt on every
+ * render; the value is the SOM's, so another session's change shows up.
+ */
+function renderSkySelect({ value, options, custom, enabled }) {
+  if (!epSky) return
+  epSky.textContent = ''
+  const none = document.createElement('option')
+  none.value = SKY_NONE
+  none.textContent = 'None'
+  epSky.appendChild(none)
+  for (const option of options) {
+    const el = document.createElement('option')
+    el.value = option.id
+    el.textContent = option.name
+    epSky.appendChild(el)
+  }
+  if (custom) {
+    const el = document.createElement('option')
+    el.value = SKY_CUSTOM
+    el.textContent = 'Custom (set in the SOM Inspector)'
+    el.disabled = true
+    epSky.appendChild(el)
+  }
+  epSky.value = value
+  epSky.disabled = !enabled
+}
+
+function renderSkyStatus(text) {
+  if (!epSkyStatus) return
+  epSkyStatus.style.display = text ? '' : 'none'
+  epSkyStatus.textContent = text ?? ''
+}
+
+function setSkyRetryVisible(visible) {
+  if (!epSkyRetry) return
+  epSkyRetry.style.display = visible ? '' : 'none'
+}
+
+skyPicker = createSkyPicker({
+  deps: {
+    som: () => client.som,
+    catalog: () => libraryCatalog,
+    canEdit: () => modes.edit,
+    worldBaseUrl: () => client.worldBaseUrl ?? null,
+    pageOrigin: () => window.location.origin,
+    storedUrl: (path, worldBaseUrl, pageOrigin) => storedUrl(path, worldBaseUrl, pageOrigin),
+    // Assigning extras sends the document edit; lastSendSeq is its seq.
+    applyExtras: (extras) => {
+      client.som.extras = extras
+      return client.lastSendSeq
+    },
+    applyLocally: (fn) => client.applyLocally(fn),
+    sky,
+    renderSelect: renderSkySelect,
+    setStatus: renderSkyStatus,
+    setRetryVisible: setSkyRetryVisible,
+  },
+})
+
+epSky?.addEventListener('change', () => skyPicker.change(epSky.value))
+epSkyRetry?.addEventListener('click', () => skyPicker.retry())
+
 loadCatalog().then((loaded) => {
   if (!loaded.ok) {
     console.warn(`[app] the library catalog could not be read: ${loaded.message}`)
@@ -3017,6 +3114,7 @@ loadCatalog().then((loaded) => {
   }
   libraryCatalog = loaded.catalog
   refreshEditActions()
+  skyPicker?.sync()
   if (libraryGrid.isOpen()) libraryGrid.render()
 }, (error) => {
   console.warn('[app] the library catalog could not be read', error)
