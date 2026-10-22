@@ -1,0 +1,863 @@
+{
+  "version": 1,
+  "credit": "Models and skies from Poly Haven (CC0)",
+  "creditUrl": "https://polyhaven.com",
+  "generator": "atrium-library-build/1",
+  "models": [
+    {
+      "id": "ArmChair_01",
+      "name": "Arm Chair",
+      "category": "Seating",
+      "url": "/assets/library/models/ArmChair_01-b066909de731.glb",
+      "sha256": "b066909de7317ef4f520f56cbf69cc8420856b0cd69dbafec35e9876fd0c275c",
+      "bounds": [
+        0.8484,
+        1.0651,
+        0.7658
+      ],
+      "bytes": 768296,
+      "vertices": 3758,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/ArmChair_01-ffb2d7c97842.webp",
+      "thumbnailSha256": "ffb2d7c9784224f08c85841e5906501687e07008e8abdb94a2db760d8e8135d5",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "source": "https://polyhaven.com/a/ArmChair_01"
+    },
+    {
+      "id": "GreenChair_01",
+      "name": "Green Chair",
+      "category": "Seating",
+      "url": "/assets/library/models/GreenChair_01-aa39ae0ebf92.glb",
+      "sha256": "aa39ae0ebf927dd7ef1a00c8056ef57ae023bdc199a9f86c29ea7c03bfef964a",
+      "bounds": [
+        0.6731,
+        1.0585,
+        0.6644
+      ],
+      "bytes": 607196,
+      "vertices": 2934,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/GreenChair_01-82c76fda09c5.webp",
+      "thumbnailSha256": "82c76fda09c56ce4d0d819bce41d63500cbabfd67fa2c1a5131c30132e87ef20",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "source": "https://polyhaven.com/a/GreenChair_01"
+    },
+    {
+      "id": "Sofa_01",
+      "name": "Sofa",
+      "category": "Seating",
+      "url": "/assets/library/models/Sofa_01-3b1d9f6cee5c.glb",
+      "sha256": "3b1d9f6cee5c1e2961e4dac8b56bcd267242d6abe0b94e45bae98788caa34820",
+      "bounds": [
+        1.5715,
+        0.7965,
+        0.658
+      ],
+      "bytes": 517112,
+      "vertices": 2708,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/Sofa_01-cdfbbec297e6.webp",
+      "thumbnailSha256": "cdfbbec297e67e678b4aa44a3ea332f5cd27eca2cfd78a1f4581ba5a113c29db",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "source": "https://polyhaven.com/a/Sofa_01"
+    },
+    {
+      "id": "mid_century_lounge_chair",
+      "name": "Lounge Chair",
+      "category": "Seating",
+      "url": "/assets/library/models/mid_century_lounge_chair-19df39af3feb.glb",
+      "sha256": "19df39af3febeea3b9c75a336ea6527db663e3e8220a443aff0a289bdba6eb74",
+      "bounds": [
+        1.0086,
+        1.1691,
+        1.1903
+      ],
+      "bytes": 2086032,
+      "vertices": 4203,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/mid_century_lounge_chair-cda452d7270e.webp",
+      "thumbnailSha256": "cda452d7270ea9ad4561eaea419f9ebf662e28032b560b19c8fa3a2fa63fec91",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kuutti Siitonen"
+      ],
+      "source": "https://polyhaven.com/a/mid_century_lounge_chair"
+    },
+    {
+      "id": "painted_wooden_bench",
+      "name": "Painted Bench",
+      "category": "Seating",
+      "url": "/assets/library/models/painted_wooden_bench-f043cd1426ea.glb",
+      "sha256": "f043cd1426ea10f136d39ed217ea3a9fc470cad62e9c44286918e4b5f5f25bc2",
+      "bounds": [
+        1.1649,
+        0.8893,
+        0.4965
+      ],
+      "bytes": 1988660,
+      "vertices": 677,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/painted_wooden_bench-df6249f0718c.webp",
+      "thumbnailSha256": "df6249f0718cde7328c02df9e25c7357d3679b36ba8cef435f9bde3235f7eefa",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "source": "https://polyhaven.com/a/painted_wooden_bench"
+    },
+    {
+      "id": "plastic_monobloc_chair_01",
+      "name": "Plastic Chair",
+      "category": "Seating",
+      "url": "/assets/library/models/plastic_monobloc_chair_01-1748ec58b6fb.glb",
+      "sha256": "1748ec58b6fbdd025009fe007c14b9f3a5820d91fc061daf93e140885422ac9e",
+      "bounds": [
+        0.6419,
+        0.8798,
+        0.6276
+      ],
+      "bytes": 1951852,
+      "vertices": 3271,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/plastic_monobloc_chair_01-d06fde3e1f2f.webp",
+      "thumbnailSha256": "d06fde3e1f2f898520231e24f3ee2648a56f890e65e9a3e588f5a733a3c4c41b",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kuutti Siitonen"
+      ],
+      "source": "https://polyhaven.com/a/plastic_monobloc_chair_01"
+    },
+    {
+      "id": "wooden_stool_02",
+      "name": "Footstool",
+      "category": "Seating",
+      "url": "/assets/library/models/wooden_stool_02-f214ec13a265.glb",
+      "sha256": "f214ec13a2659446ed34cad6a98cbdb75f245c20a7d4ca7c76f33bbf8c0b7072",
+      "bounds": [
+        0.2652,
+        0.1819,
+        0.1831
+      ],
+      "bytes": 2654432,
+      "vertices": 6299,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/wooden_stool_02-9a65972003cd.webp",
+      "thumbnailSha256": "9a65972003cd4d81aaefd73873d03ed0b5c7671e8693babdd2ef2b6aa9634626",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kuutti Siitonen"
+      ],
+      "source": "https://polyhaven.com/a/wooden_stool_02"
+    },
+    {
+      "id": "WoodenTable_02",
+      "name": "Small Side Table",
+      "category": "Tables",
+      "url": "/assets/library/models/WoodenTable_02-2521cfad2f32.glb",
+      "sha256": "2521cfad2f325cacb8a82662a9fe16c2930954507a7e470be60d22656b073c72",
+      "bounds": [
+        0.3007,
+        0.4177,
+        0.3007
+      ],
+      "bytes": 502380,
+      "vertices": 1265,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/WoodenTable_02-e17cbf6b66e9.webp",
+      "thumbnailSha256": "e17cbf6b66e9db7029d23a4510410502d27dc9ebfb82ced026441de0cc6ba591",
+      "license": "CC0-1.0",
+      "authors": [
+        "Fran Calvente"
+      ],
+      "source": "https://polyhaven.com/a/WoodenTable_02"
+    },
+    {
+      "id": "coffee_table_round_01",
+      "name": "Round Coffee Table",
+      "category": "Tables",
+      "url": "/assets/library/models/coffee_table_round_01-4195d2e376c7.glb",
+      "sha256": "4195d2e376c7d27920381957578871aa8cace2142e23094304e8499bdbdab605",
+      "bounds": [
+        1.3013,
+        0.491,
+        1.3013
+      ],
+      "bytes": 1562252,
+      "vertices": 3339,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/coffee_table_round_01-900bd71f45ce.webp",
+      "thumbnailSha256": "900bd71f45ce14b596d8cd634a90919d7a253f1a75e597d5df4d48446316b3f5",
+      "license": "CC0-1.0",
+      "authors": [
+        "Ulan Cabanilla"
+      ],
+      "source": "https://polyhaven.com/a/coffee_table_round_01"
+    },
+    {
+      "id": "round_wooden_table_02",
+      "name": "Round Wooden Table",
+      "category": "Tables",
+      "url": "/assets/library/models/round_wooden_table_02-f580ba544548.glb",
+      "sha256": "f580ba5445480cff3eb421fc5c1f9a03c600ceb65ae4e0457a5673717d6c5c97",
+      "bounds": [
+        0.7962,
+        0.746,
+        0.7962
+      ],
+      "bytes": 1920244,
+      "vertices": 3434,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/round_wooden_table_02-720cb4273871.webp",
+      "thumbnailSha256": "720cb4273871fb2c59090ae05c6cf473d02a34a4187adf385e4bba618c5b1156",
+      "license": "CC0-1.0",
+      "authors": [
+        "Ulan Cabanilla"
+      ],
+      "source": "https://polyhaven.com/a/round_wooden_table_02"
+    },
+    {
+      "id": "modern_coffee_table_01",
+      "name": "Modern Coffee Table",
+      "category": "Tables",
+      "url": "/assets/library/models/modern_coffee_table_01-40a16e41cb36.glb",
+      "sha256": "40a16e41cb360572805a4c35746dc9b8147b274d63c6cc7eb2d6eeeaabf5c621",
+      "bounds": [
+        0.6,
+        0.39,
+        1.2018
+      ],
+      "bytes": 1330404,
+      "vertices": 3995,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/modern_coffee_table_01-824264efa9b7.webp",
+      "thumbnailSha256": "824264efa9b7b22713559ef65aafa53351ecbd1c9870df112778258907cb9e51",
+      "license": "CC0-1.0",
+      "authors": [
+        "Amin"
+      ],
+      "source": "https://polyhaven.com/a/modern_coffee_table_01"
+    },
+    {
+      "id": "wooden_picnic_table",
+      "name": "Picnic Table",
+      "category": "Tables",
+      "url": "/assets/library/models/wooden_picnic_table-8d2ba122c8a8.glb",
+      "sha256": "8d2ba122c8a8f7e72044ceaed2f844cd14a0f2d60f5f66f6aa4a234e96c18062",
+      "bounds": [
+        2.241,
+        0.746,
+        3.0223
+      ],
+      "bytes": 4306416,
+      "vertices": 6808,
+      "textureBytes": 33554436,
+      "thumbnail": "/assets/library/thumbs/wooden_picnic_table-a7ae124c84d8.webp",
+      "thumbnailSha256": "a7ae124c84d8bde4505e90f87c02c6d3f0fcda8b4ba07da8bd9394fe2ad24e0b",
+      "license": "CC0-1.0",
+      "authors": [
+        "Ulan Cabanilla"
+      ],
+      "source": "https://polyhaven.com/a/wooden_picnic_table"
+    },
+    {
+      "id": "side_table_01",
+      "name": "Side Table",
+      "category": "Tables",
+      "url": "/assets/library/models/side_table_01-54294345db5a.glb",
+      "sha256": "54294345db5a2c09dccb02f653eb78c1f28ecf3890774130421133502b7b0fd8",
+      "bounds": [
+        0.55,
+        0.5507,
+        0.45
+      ],
+      "bytes": 504380,
+      "vertices": 3164,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/side_table_01-aecab600d8a5.webp",
+      "thumbnailSha256": "aecab600d8a559905a02aa2021446b204807234db9cbcae441cb3de67c70b977",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/side_table_01"
+    },
+    {
+      "id": "Shelf_01",
+      "name": "Wall Shelf",
+      "category": "Storage",
+      "url": "/assets/library/models/Shelf_01-51d05eef604c.glb",
+      "sha256": "51d05eef604cadacf3628fc1a7bbbb4c9ca70da355f53c5f9af7f1092c5ccdea",
+      "bounds": [
+        1.0034,
+        2.0803,
+        0.257
+      ],
+      "bytes": 604580,
+      "vertices": 362,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/Shelf_01-bb09956b96a4.webp",
+      "thumbnailSha256": "bb09956b96a41526ba1adaa783269e47efd379d7aa849e882e7f88a6af212184",
+      "license": "CC0-1.0",
+      "authors": [
+        "Gabriel Radić"
+      ],
+      "source": "https://polyhaven.com/a/Shelf_01"
+    },
+    {
+      "id": "wooden_display_shelves_01",
+      "name": "Display Shelves",
+      "category": "Storage",
+      "url": "/assets/library/models/wooden_display_shelves_01-df2d1772bb17.glb",
+      "sha256": "df2d1772bb17d2a6abb1a9ac5eac6bb08f243030c2189240141cbd8f8b6a81dc",
+      "bounds": [
+        0.3715,
+        1.5562,
+        1.0778
+      ],
+      "bytes": 468496,
+      "vertices": 2717,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/wooden_display_shelves_01-89a27767f73a.webp",
+      "thumbnailSha256": "89a27767f73add5ff70b623b4fb22e22a5751d5644ff7468c61fbb1e6313070b",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/wooden_display_shelves_01"
+    },
+    {
+      "id": "steel_frame_shelves_01",
+      "name": "Steel Shelves",
+      "category": "Storage",
+      "url": "/assets/library/models/steel_frame_shelves_01-063594dde33d.glb",
+      "sha256": "063594dde33d53655ee965bd121b8bc9b875ff564ea23622239ef69357c07b27",
+      "bounds": [
+        1.0974,
+        2.1405,
+        0.5021
+      ],
+      "bytes": 1596572,
+      "vertices": 3632,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/steel_frame_shelves_01-7cd52cc942c3.webp",
+      "thumbnailSha256": "7cd52cc942c30df0eaf9b873972c1d40132401d115a2367509fdbb4ee3efc3f8",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/steel_frame_shelves_01"
+    },
+    {
+      "id": "painted_wooden_cabinet",
+      "name": "Painted Cabinet",
+      "category": "Storage",
+      "url": "/assets/library/models/painted_wooden_cabinet-0bc1edec06c0.glb",
+      "sha256": "0bc1edec06c0ef5ee1e979b80e883b882578de2492bba0865500b3eadc05fdab",
+      "bounds": [
+        1.1947,
+        1.1819,
+        0.6166
+      ],
+      "bytes": 1857728,
+      "vertices": 2022,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/painted_wooden_cabinet-6acab5902950.webp",
+      "thumbnailSha256": "6acab5902950dce703c2992e424627a681796f8976df1500d7fad56b86730455",
+      "license": "CC0-1.0",
+      "authors": [
+        "Kirill Sannikov"
+      ],
+      "source": "https://polyhaven.com/a/painted_wooden_cabinet"
+    },
+    {
+      "id": "street_lamp_02",
+      "name": "Street Lamp",
+      "category": "Lighting",
+      "url": "/assets/library/models/street_lamp_02-adf04babacaa.glb",
+      "sha256": "adf04babacaad489b008ac58e606aafa69f2e5cee9ebab06e41a49bc413fe218",
+      "bounds": [
+        0.3865,
+        1.675,
+        0.8068
+      ],
+      "bytes": 2171196,
+      "vertices": 12752,
+      "textureBytes": 22369624,
+      "thumbnail": "/assets/library/thumbs/street_lamp_02-fabb881a5be0.webp",
+      "thumbnailSha256": "fabb881a5be09ae4ceec55663b2b4e3bd6db1943ba8ef9acb8266ed8d1dc390d",
+      "license": "CC0-1.0",
+      "authors": [
+        "Josh Dean"
+      ],
+      "source": "https://polyhaven.com/a/street_lamp_02"
+    },
+    {
+      "id": "Lantern_01",
+      "name": "Lantern",
+      "category": "Lighting",
+      "url": "/assets/library/models/Lantern_01-76333be84ff3.glb",
+      "sha256": "76333be84ff34ae6ea980e8df50130304221a5c45783c5644668f04751d68353",
+      "bounds": [
+        0.1221,
+        0.2942,
+        0.0972
+      ],
+      "bytes": 1559636,
+      "vertices": 20670,
+      "textureBytes": 22369624,
+      "thumbnail": "/assets/library/thumbs/Lantern_01-dec5d46ef2f6.webp",
+      "thumbnailSha256": "dec5d46ef2f6f1d523795195ccf09404269ff70aec5c1b67eca1b3540abb4ca6",
+      "license": "CC0-1.0",
+      "authors": [
+        "Rajil Jose Macatangay"
+      ],
+      "source": "https://polyhaven.com/a/Lantern_01"
+    },
+    {
+      "id": "wooden_lantern_01",
+      "name": "Wooden Lantern",
+      "category": "Lighting",
+      "url": "/assets/library/models/wooden_lantern_01-b8b1a6d2d031.glb",
+      "sha256": "b8b1a6d2d031ba33eda6addec3cfb1a07afed49560866f44bde1c32359eb8181",
+      "bounds": [
+        0.221,
+        0.5301,
+        0.2347
+      ],
+      "bytes": 3764736,
+      "vertices": 6819,
+      "textureBytes": 33554436,
+      "thumbnail": "/assets/library/thumbs/wooden_lantern_01-ec0054171a8a.webp",
+      "thumbnailSha256": "ec0054171a8a447b09896b4f144d53d83d846b96b8376ef48255611cdd71c5b5",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/wooden_lantern_01"
+    },
+    {
+      "id": "potted_plant_04",
+      "name": "Potted Plant",
+      "category": "Plants",
+      "url": "/assets/library/models/potted_plant_04-b983b620e15c.glb",
+      "sha256": "b983b620e15c4d34c0bbe8fa8a981de9eea1ba9cb0bf9a8b85a0d9895892d9d3",
+      "bounds": [
+        0.1679,
+        0.2675,
+        0.1848
+      ],
+      "bytes": 2119812,
+      "vertices": 5882,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/potted_plant_04-87a948370585.webp",
+      "thumbnailSha256": "87a9483705851e6685c70b624e1725b018f9587ae27e129870726ecd0dca0999",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/potted_plant_04"
+    },
+    {
+      "id": "fern_02",
+      "name": "Fern",
+      "category": "Plants",
+      "url": "/assets/library/models/fern_02-812a8f7d4fe2.glb",
+      "sha256": "812a8f7d4fe2a9573e44bb5f95d0894a787a59260a2e60a12c72031b695c17a3",
+      "bounds": [
+        1.9725,
+        0.4277,
+        1.724
+      ],
+      "bytes": 1143656,
+      "vertices": 4337,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/fern_02-b5b6ffd9eb29.webp",
+      "thumbnailSha256": "b5b6ffd9eb2968a13399f546b1e374440e3ec67d95b9aeaffc2df8b6e7b57f91",
+      "license": "CC0-1.0",
+      "authors": [
+        "Rob Tuytel",
+        "Rico Cilliers"
+      ],
+      "source": "https://polyhaven.com/a/fern_02"
+    },
+    {
+      "id": "shrub_03",
+      "name": "Shrub",
+      "category": "Plants",
+      "url": "/assets/library/models/shrub_03-2076ebff67f6.glb",
+      "sha256": "2076ebff67f66033b5c7e1baeb648dc4d3882d33179e053b783dcc7c84c049ee",
+      "bounds": [
+        1.3669,
+        0.4028,
+        0.1512
+      ],
+      "bytes": 1625732,
+      "vertices": 5905,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/shrub_03-f98d024f8dea.webp",
+      "thumbnailSha256": "f98d024f8dea6b7b440a9cf2b3f7846ae1a0fefe5b1f390af8676105e1d61ec4",
+      "license": "CC0-1.0",
+      "authors": [
+        "Rico Cilliers"
+      ],
+      "source": "https://polyhaven.com/a/shrub_03"
+    },
+    {
+      "id": "tree_stump_01",
+      "name": "Tree Stump",
+      "category": "Plants",
+      "url": "/assets/library/models/tree_stump_01-8da5b3481807.glb",
+      "sha256": "8da5b3481807e2f9d6a18c41fccea91539ba975109263721c19fb7428df00c97",
+      "bounds": [
+        1.4256,
+        0.5727,
+        1.5903
+      ],
+      "bytes": 3938716,
+      "vertices": 22472,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/tree_stump_01-a189344469f5.webp",
+      "thumbnailSha256": "a189344469f53e81a5f6b1a6ae75caf968c1e2c2a356fa9ff2547a2e51ed755b",
+      "license": "CC0-1.0",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "source": "https://polyhaven.com/a/tree_stump_01"
+    },
+    {
+      "id": "wooden_crate_01",
+      "name": "Wooden Crate",
+      "category": "Misc",
+      "url": "/assets/library/models/wooden_crate_01-bf5d95346ecc.glb",
+      "sha256": "bf5d95346ecc26e6304035b56286ad86e6b8637c3ce9b506f7de1e5be5ab4054",
+      "bounds": [
+        0.8253,
+        0.3496,
+        0.409
+      ],
+      "bytes": 2274840,
+      "vertices": 4686,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/wooden_crate_01-f7902936217e.webp",
+      "thumbnailSha256": "f7902936217ecd30283ade67956ffe54e6c11199917c5b87cdac9072e730985a",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/wooden_crate_01"
+    },
+    {
+      "id": "Barrel_01",
+      "name": "Barrel",
+      "category": "Misc",
+      "url": "/assets/library/models/Barrel_01-6585bda5b5bb.glb",
+      "sha256": "6585bda5b5bb775e5db43e43b640e3e0f3ed34302a26df102a6e11ecbac51a34",
+      "bounds": [
+        0.563,
+        0.88,
+        0.563
+      ],
+      "bytes": 692084,
+      "vertices": 2052,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/Barrel_01-fad811d51f4e.webp",
+      "thumbnailSha256": "fad811d51f4ec761e15aaabb0736c40f69139fd4008e0ee3f3fb9b78ff26da26",
+      "license": "CC0-1.0",
+      "authors": [
+        "Jorge Camacho"
+      ],
+      "source": "https://polyhaven.com/a/Barrel_01"
+    },
+    {
+      "id": "standing_chalkboard_01",
+      "name": "Chalkboard",
+      "category": "Misc",
+      "url": "/assets/library/models/standing_chalkboard_01-555a40bee28f.glb",
+      "sha256": "555a40bee28f12482498073f3d12956e22d734d115ec70031911f46116766be7",
+      "bounds": [
+        0.9195,
+        1.509,
+        0.7587
+      ],
+      "bytes": 2615368,
+      "vertices": 2684,
+      "textureBytes": 33554436,
+      "thumbnail": "/assets/library/thumbs/standing_chalkboard_01-002f37a87c7a.webp",
+      "thumbnailSha256": "002f37a87c7a8ea5e73da34ca2b47ce18a0c4eca67b5b2f13b7d432f4c70638a",
+      "license": "CC0-1.0",
+      "authors": [
+        "ParzivalCG"
+      ],
+      "source": "https://polyhaven.com/a/standing_chalkboard_01"
+    },
+    {
+      "id": "marble_bust_01",
+      "name": "Marble Bust",
+      "category": "Misc",
+      "url": "/assets/library/models/marble_bust_01-01e2592057d1.glb",
+      "sha256": "01e2592057d194d9a09bd68e234e1fd87c8ea630105b8f810af2b7940ab09352",
+      "bounds": [
+        0.2717,
+        0.5149,
+        0.2997
+      ],
+      "bytes": 897332,
+      "vertices": 9746,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/marble_bust_01-d8009553c38e.webp",
+      "thumbnailSha256": "d8009553c38e286759f0ed94fde35acaffc15eb3eef434bbd0fe6261bc10cf19",
+      "license": "CC0-1.0",
+      "authors": [
+        "Rico Cilliers"
+      ],
+      "source": "https://polyhaven.com/a/marble_bust_01"
+    },
+    {
+      "id": "concrete_cat_statue",
+      "name": "Cat Statue",
+      "category": "Misc",
+      "url": "/assets/library/models/concrete_cat_statue-b01b286f6293.glb",
+      "sha256": "b01b286f629300d5ea356d10c365970e8e63947f02971807881bca6535dbb648",
+      "bounds": [
+        0.153,
+        0.283,
+        0.25
+      ],
+      "bytes": 3097376,
+      "vertices": 6863,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/concrete_cat_statue-8133e3b5ae66.webp",
+      "thumbnailSha256": "8133e3b5ae66aeb8dfa842022ee7374bee779d0dec51583a24fcbd7d2c4ad501",
+      "license": "CC0-1.0",
+      "authors": [
+        "Rico Cilliers",
+        "Riley Queen"
+      ],
+      "source": "https://polyhaven.com/a/concrete_cat_statue"
+    },
+    {
+      "id": "rubber_duck_toy",
+      "name": "Rubber Duck",
+      "category": "Misc",
+      "url": "/assets/library/models/rubber_duck_toy-f4668f6f71c4.glb",
+      "sha256": "f4668f6f71c4d2747cb10f4a4346178ddc8b3e939324e275826e7142245a87a8",
+      "bounds": [
+        0.2135,
+        0.2855,
+        0.3
+      ],
+      "bytes": 733968,
+      "vertices": 2489,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/rubber_duck_toy-0820ac886266.webp",
+      "thumbnailSha256": "0820ac886266d7365013a18a1a5938c4415ff323d7e641c5fc77c223184b0829",
+      "license": "CC0-1.0",
+      "authors": [
+        "Plat251"
+      ],
+      "source": "https://polyhaven.com/a/rubber_duck_toy"
+    },
+    {
+      "id": "boombox",
+      "name": "Boombox",
+      "category": "Misc",
+      "url": "/assets/library/models/boombox-7bd27d820ce7.glb",
+      "sha256": "7bd27d820ce787c850b6d63ca6b83a97b7c62430e06b86ead1064e081af3b740",
+      "bounds": [
+        0.7238,
+        0.4701,
+        0.1865
+      ],
+      "bytes": 3066528,
+      "vertices": 8367,
+      "textureBytes": 27962030,
+      "thumbnail": "/assets/library/thumbs/boombox-b766f5813076.webp",
+      "thumbnailSha256": "b766f58130769a0faa55298840416472dec6a3e5bf618f88656ce45dc7e8eda9",
+      "license": "CC0-1.0",
+      "authors": [
+        "Thomas Paul Mouilleron"
+      ],
+      "source": "https://polyhaven.com/a/boombox"
+    },
+    {
+      "id": "Television_01",
+      "name": "Old Television",
+      "category": "Misc",
+      "url": "/assets/library/models/Television_01-bbb1616f3c85.glb",
+      "sha256": "bbb1616f3c85697b79dce3f441670e356e365cc60739f61bdd00831378e1cf0f",
+      "bounds": [
+        0.6,
+        0.4568,
+        0.4708
+      ],
+      "bytes": 530288,
+      "vertices": 1976,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/Television_01-12e349af0e47.webp",
+      "thumbnailSha256": "12e349af0e47088c9e121cb49388fb9ee89ee6ea358f07df0edd8c8725596c58",
+      "license": "CC0-1.0",
+      "authors": [
+        "Gabriel Radić"
+      ],
+      "source": "https://polyhaven.com/a/Television_01"
+    },
+    {
+      "id": "Ukulele_01",
+      "name": "Ukulele",
+      "category": "Misc",
+      "url": "/assets/library/models/Ukulele_01-19bd3e335ce4.glb",
+      "sha256": "19bd3e335ce4e6ff5b3794e3e74ca0fd4e49e4095acbabc3d078f0406b81e684",
+      "bounds": [
+        0.1779,
+        0.527,
+        0.0508
+      ],
+      "bytes": 806440,
+      "vertices": 8235,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/Ukulele_01-0729195b653a.webp",
+      "thumbnailSha256": "0729195b653af470d9df7f43c6d0e327e3ebd71f7c05e9797236a7f8041b307f",
+      "license": "CC0-1.0",
+      "authors": [
+        "Joseph Burgan"
+      ],
+      "source": "https://polyhaven.com/a/Ukulele_01"
+    },
+    {
+      "id": "ceramic_vase_01",
+      "name": "Ceramic Vase",
+      "category": "Misc",
+      "url": "/assets/library/models/ceramic_vase_01-ff5296288687.glb",
+      "sha256": "ff529628868786dc11b88b8932f6b50c9077313a7d198f31be88c73bf8f8e756",
+      "bounds": [
+        0.2036,
+        0.4003,
+        0.2036
+      ],
+      "bytes": 417564,
+      "vertices": 6590,
+      "textureBytes": 16777218,
+      "thumbnail": "/assets/library/thumbs/ceramic_vase_01-b11c1ce80fd8.webp",
+      "thumbnailSha256": "b11c1ce80fd8122cc9ecec37d005e53c35f19bcc5da2e190e1bbdb38056638ed",
+      "license": "CC0-1.0",
+      "authors": [
+        "James Ray Cock"
+      ],
+      "source": "https://polyhaven.com/a/ceramic_vase_01"
+    }
+  ],
+  "skies": [
+    {
+      "id": "kloofendal_48d_partly_cloudy_puresky",
+      "name": "Partly Cloudy",
+      "url": "/assets/library/skies/kloofendal_48d_partly_cloudy_puresky-317922459683.jpg",
+      "sha256": "3179224596839e25fa1d41ac38905445fc44335b118f737a85f367a87488e634",
+      "width": 4096,
+      "height": 2048,
+      "bytes": 403898,
+      "thumbnail": "/assets/library/thumbs/kloofendal_48d_partly_cloudy_puresky-e89cc9b3b47c.webp",
+      "thumbnailSha256": "e89cc9b3b47c356ab7f29c808adfadb896602fd1d52e69c111e5d533b70ac7e3",
+      "license": "CC0-1.0",
+      "authors": [
+        "Greg Zaal",
+        "Jarod Guest"
+      ],
+      "source": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky"
+    },
+    {
+      "id": "autumn_field_puresky",
+      "name": "Autumn Field",
+      "url": "/assets/library/skies/autumn_field_puresky-97dde68dafe3.jpg",
+      "sha256": "97dde68dafe3e7a8d849ee6404c9a079fd58f181c27ce5a864149c7c2d288853",
+      "width": 4096,
+      "height": 2048,
+      "bytes": 171369,
+      "thumbnail": "/assets/library/thumbs/autumn_field_puresky-8d4c0da51d81.webp",
+      "thumbnailSha256": "8d4c0da51d81245797c133e0b2dd21294448ab7692fb8f8fba505a59abad1a8f",
+      "license": "CC0-1.0",
+      "authors": [
+        "Jarod Guest",
+        "Sergej Majboroda"
+      ],
+      "source": "https://polyhaven.com/a/autumn_field_puresky"
+    },
+    {
+      "id": "farm_field_puresky",
+      "name": "Farm Field",
+      "url": "/assets/library/skies/farm_field_puresky-75424c665351.jpg",
+      "sha256": "75424c665351d7b526356cbc945eec92494a8231d47ee132f77131c02d89cee4",
+      "width": 4096,
+      "height": 2048,
+      "bytes": 324242,
+      "thumbnail": "/assets/library/thumbs/farm_field_puresky-bfddf2e7273c.webp",
+      "thumbnailSha256": "bfddf2e7273c7691a13c48625d97a4ba3058eed89ae8320e168cd093db844787",
+      "license": "CC0-1.0",
+      "authors": [
+        "Dimitrios Savva",
+        "Jarod Guest"
+      ],
+      "source": "https://polyhaven.com/a/farm_field_puresky"
+    },
+    {
+      "id": "drakensberg_solitary_mountain_puresky",
+      "name": "Clear Mountain Sky",
+      "url": "/assets/library/skies/drakensberg_solitary_mountain_puresky-86b1eb7c015a.jpg",
+      "sha256": "86b1eb7c015a3dfaeaf4c8106b60b6d2fa24687c5a0683950c41c4f6ef050214",
+      "width": 4096,
+      "height": 2048,
+      "bytes": 165028,
+      "thumbnail": "/assets/library/thumbs/drakensberg_solitary_mountain_puresky-29d2bfacc8c6.webp",
+      "thumbnailSha256": "29d2bfacc8c6094c331e6906566f74cccf4fa5a1e864de276af375f4569ab075",
+      "license": "CC0-1.0",
+      "authors": [
+        "Dimitrios Savva",
+        "Jarod Guest"
+      ],
+      "source": "https://polyhaven.com/a/drakensberg_solitary_mountain_puresky"
+    },
+    {
+      "id": "belfast_sunset_puresky",
+      "name": "Belfast Sunset",
+      "url": "/assets/library/skies/belfast_sunset_puresky-1ddcb6704c1f.jpg",
+      "sha256": "1ddcb6704c1f2663737bab34cd408fb709c2eabdc8164c87e81758bf6b76bb29",
+      "width": 4096,
+      "height": 2048,
+      "bytes": 264847,
+      "thumbnail": "/assets/library/thumbs/belfast_sunset_puresky-f1eb08e2e8fc.webp",
+      "thumbnailSha256": "f1eb08e2e8fc0badf7223452733aad650bd6e025b068ca781f9bf4b8972c1a3b",
+      "license": "CC0-1.0",
+      "authors": [
+        "Greg Zaal",
+        "Dimitrios Savva",
+        "Jarod Guest"
+      ],
+      "source": "https://polyhaven.com/a/belfast_sunset_puresky"
+    },
+    {
+      "id": "evening_road_01_puresky",
+      "name": "Evening",
+      "url": "/assets/library/skies/evening_road_01_puresky-7a707e079746.jpg",
+      "sha256": "7a707e079746de14707224246e24b626be59a0d5ddc4a31199cede1bd83dea1c",
+      "width": 4096,
+      "height": 2048,
+      "bytes": 410101,
+      "thumbnail": "/assets/library/thumbs/evening_road_01_puresky-585553ac2bd0.webp",
+      "thumbnailSha256": "585553ac2bd05e851f7b798f74fedb72dd4750f4d58c45fec023aebc9b830f57",
+      "license": "CC0-1.0",
+      "authors": [
+        "Jarod Guest",
+        "Sergej Majboroda"
+      ],
+      "source": "https://polyhaven.com/a/evening_road_01_puresky"
+    }
+  ]
+}
