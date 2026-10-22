@@ -1,9 +1,13 @@
 # Pre-brief: Phase 3 step 3b — the starter library, the sky, and library hosting
 
-Status: **DRAFT, Revision 0.2 (2026-10-22, ~08:55 PT). Decisions L21–L31 (§3)
+Status: **DRAFT, Revision 0.3 (2026-10-22, ~09:40 PT). Decisions L21–L31 (§3)
 await the operator.** Rev 0.1 takes the operator's answer to Q1 (no live world
 has a sky) into P2, L25, L26, Z3, §5 and §9, and adds L31. Rev 0.2 adds a
-Misc category of ten models (Appendix A, L28, §5.1). L13–L15 were decided on 2026-10-19 (models-by-url
+Misc category of ten models (Appendix A, L28, §5.1). **Rev 0.3 takes an
+outside review of Rev 0.2 (NOT YET GO; findings R1–R7 and three smaller
+notes, §13): H1, H2, Z1–Z4, §5 and §9 are amended in place, and §13 maps
+each finding to its change.** No decision changed; the reviewer agreed with
+L21–L31 as recommended. L13–L15 were decided on 2026-10-19 (models-by-url
 pre-brief §3) and carry into this round; §3 refines L13's catalog path (L21).
 - **Drafted by Claude from a clone of `main` at `9e7478f`.** Its runtime code
   is identical to the released `82c1d40e` (DEV, MAIN record and PROD): the
@@ -20,7 +24,7 @@ pre-brief §3) and carry into this round; §3 refines L13's catalog path (L21).
   §4.1, §6.3.
 - **Scope:** a **Library** button and thumbnail grid in Edit mode that places
   pinned, self-hosted Poly Haven models through 3a's loader; a **Sky** picker
-  writing the existing `extras.atrium.background`; `loadBackground` brought
+  writing the existing `extras.atrium.background`; the sky loader brought
   under 3a's request policy and limits, with the server checking new sky
   values; the library build tool and the Caddy route (host steps).
 - **Out of scope:** model animations (step 4); the richer `add` and the copy
@@ -64,6 +68,15 @@ and hands it to `THREE.TextureLoader`. Then:
 - Called from `app.js` on `world:loaded` (L655) and on **every**
   `som:set` of `__document__` (L804–806): renaming the world re-downloads the
   sky. Also from the SOM Inspector (`app.js` L81, L245, L329).
+- **`world:loaded` clears both slots itself first** (`app.js` L639–641; the
+  Inspector at L217–218), and it **repeats on the same SOM** when an external
+  reference loads (comment at L645). So "skip an unchanged URL" inside the
+  loader would leave such a world with no sky (review R1).
+- A texture that arrives after a newer request is dropped by the token check
+  but **never disposed** (a second leak, review R4).
+- The world boundary the model bridge uses is `connecting` and
+  `disconnected` (`modelBridge.resetWorld()`, `app.js` L738, L753), not
+  `world:loaded`.
 
 ### P2. What a sky URL can be today (*probe*)
 - **Server** (`send-policy.js` L350–351): `atrium.background.type` is
@@ -91,6 +104,14 @@ change **only** the two `background` leaves. A missing `background` object is
 created leaf by leaf, so a world without a sky can gain one. Clearing is
 `texture: ''` (a removed key is a refused change). Only the main client has
 no World Info UI yet; the SOM Inspector edits these leaves as free text.
+- **Every World Info write sends the whole extras object** (*probe*), and the
+  server allows any changed World Info leaf in it. So a write built from a
+  copy that hasn't yet received another owner's change reverts that change on
+  the server. Today this applies to the SOM Inspector's World Info too; it is
+  pre-existing and needs a protocol change to remove (§9).
+- `AtriumClient.applyLocally(fn)` (L234) runs a SOM change **without
+  sending**; `edit:rejected` carries the edit it rejects (`{ node, field,
+  value }`, L866–875).
 
 ### P4. 3a's loader already does everything a library model needs
 `fetchModel` (`packages/client/src/model-fetch.js` L574) applies A1, A2, the
@@ -250,50 +271,110 @@ lighting path to keep in step with the sky.
   `/extensions`, `/functions` 4.3, `sharp`) must never enter a deploy. It has
   its own `package.json` and `package-lock.json`, SPDX headers, and its own
   `node --test` tests.
+- **It treats every API response as untrusted input** (review R3). Poly Haven
+  isn't expected to be hostile; the tool still runs on the host and writes
+  files from what it's told.
 - **Input:** `scripts/library-build/items.json` (Appendix A's ids, display
-  names, categories).
-- **`--check`:** for each id, `GET /info/<id>` and `/files/<id>`; refuses an
-  id with no `gltf.1k` (models) or no `tonemapped` (skies); sums sizes;
+  names, categories). An id must match `^[A-Za-z0-9_]{1,64}$`.
+- **Network rules (every request, the API included):**
+  - `https:` only, to exactly `api.polyhaven.com`, `dl.polyhaven.org` and
+    `cdn.polyhaven.com`; any other URL in a response refuses that item;
+  - redirects followed by hand (`redirect: 'manual'`), at most 3, each hop
+    re-checked against the same list;
+  - bytes counted while streaming, aborted past the cap, whatever `size` the
+    API claimed: a model include 32 MiB, a model's total 64 MiB, a sky source
+    96 MiB, a thumbnail 2 MiB, an API response 1 MiB;
+  - then the API's `size` and `md5` must match too;
+  - `User-Agent: atrium-library-build/1 (+https://ewwb.dev)`, one request at a
+    time, one retry on 5xx, 60 s per request.
+- **`--check`:** for each id, `GET /info/<id>` and `/files/<id>`; applies
+  every rule above that doesn't need the files (hosts, include keys, claimed
+  sizes); refuses an id with no `gltf.1k` (models) or no `tonemapped` (skies);
   prints a table. Downloads nothing else.
+- **Include keys become paths only through one function** (R3):
+  - relative, `/`-separated, each segment `^[A-Za-z0-9._-]{1,128}$` and not
+    `.` or `..`; no empty segment, backslash, `%` or leading `/`;
+  - unique after lower-casing;
+  - `path.resolve(itemDir, key)` must stay inside `itemDir`, a fresh
+    `mkdtemp` directory per item;
+  - files are created with `open(…, 'wx')` (fails if anything, a symlink
+    included, is already there) and directories with `mkdir` that refuses an
+    existing one, so nothing outside `itemDir` can be written.
 - **Build, per model:**
-  1. download the 1k `.gltf` and every `include` into a fresh temp directory
-     at the include's **key** path (P7), checking each `md5` and size;
-  2. `NodeIO.read` the `.gltf` (`ALL_EXTENSIONS` registered), refuse any
-     `extensionsRequired` outside a short allowlist (none expected) and any
-     Draco, meshopt or KTX2 (L7);
-  3. write one `.glb` with every image and buffer embedded (3a's GLB rule);
-  4. measure with the same rules 3a enforces, and **refuse** above: 25 MiB,
-     500,000 vertices, 10,000 nodes, 64 MiB of accessor data, any image side
-     over 4096, or a texture estimate over 64 MiB (a library item should
-     never take an eighth of a world's budget);
-  5. compute `sha256`, `bounds` (`getBounds` of the scene, size per axis,
-     clamped to 3a's 0.001–1000), vertices, bytes and texture estimate;
-  6. fetch `thumbnail_url`, resize to 256 × 256 WebP.
-- **Build, per sky:** download `tonemapped` (checking `md5`), resize to
-  4096 × 2048 JPEG q85 (L24), thumbnail 256 × 128 WebP.
+  1. download the 1k `.gltf` and every `include` under the rules above;
+  2. **every `uri` in the `.gltf` JSON** (buffers, images) must equal one of
+     the include keys exactly; anything else (another path, `data:`, an
+     absolute URL) refuses the item, so `NodeIO` never reads outside `itemDir`;
+  3. `NodeIO.read` (`ALL_EXTENSIONS` registered); refuse any
+     `extensionsRequired`, and any Draco, meshopt or KTX2 (L7);
+  4. **re-pivot** with `@gltf-transform/functions` `center(doc, { pivot:
+     'below' })`, so every item's origin is the centre of its base and it
+     lands on the floor at the placement point, whatever the source's origin
+     was (review's placement note);
+  5. write one `.glb` with every image and buffer embedded (3a's GLB rule);
+  6. **run 3a's own checks on that `.glb`** (R3): import `readGlb`,
+     `glbDependencyProblem`, `glbImages` and `preflightProblem` from
+     `packages/renderer-three/src/model-parse.js` (the clone's
+     renderer-three is installed first, H2) and refuse on any problem; then
+     the tool's own stricter limits: 25 MiB, and a texture estimate over
+     64 MiB (no library item may take an eighth of a world's budget);
+  7. compute `sha256`, `bounds` (size per axis, clamped to 0.001–1000),
+     vertices, bytes and texture estimate; `--check`'s table flags any item
+     whose largest side is under 0.1 m or over 10 m, for the operator to
+     look at;
+  8. fetch `thumbnail_url` under the rules above, check it with `sharp`'s
+     metadata (JPEG, PNG or WebP, ≤ 4096 px), resize to 256 × 256 WebP.
+- **Build, per sky:** download `tonemapped` under the rules above, check its
+  header is JPEG, resize to 4096 × 2048 JPEG q85 (L24) with `sharp`
+  (`limitInputPixels` set to 16384 × 8192), thumbnail 256 × 128 WebP.
 - **Output:** a staging directory with `models/`, `skies/`, `thumbs/` under
-  content-addressed names (L23) and `catalog.json` (Z1's shape). It never
+  content-addressed names (L23; `<id>-<first 12 hex of sha256>.<ext>`) and
+  `catalog.json` (Z1's shape, a `sha256` for **every** file). It never
   writes into `/srv/atrium-library` itself.
 - **`--verify <dir> <catalog>`:** re-hashes every file the catalog names.
-- **Network etiquette:** `User-Agent: atrium-library-build/1 (+https://ewwb.dev)`,
-  one request at a time, retry once on 5xx.
-- **Tests (Claude, local):** a mock API and file server with tiny generated
-  assets; cases for the include-path rule, an `md5` mismatch, each refusal,
-  determinism (two builds, same hashes), and `--verify`.
+- **Tests (Claude, local, against a mock API and file server):** the
+  include-path rule (`../x`, `/abs`, `a//b`, `a\b`, `%2e%2e`, a duplicate in
+  another case); a symlink planted where a file would go; a `.gltf` `uri`
+  that isn't an include key; a redirect to another host and to `http:`; a
+  body larger than its claimed size; an `md5` mismatch; each 3a refusal on a
+  built `.glb`; the re-pivot (an off-centre fixture lands with its base at
+  y = 0); determinism (two builds, same hashes); `--verify`.
 
-#### H2. Running it (operator, host)
+#### H2. Running it, and installing the files (operator, host)
 ```bash
-# as an unprivileged user (atrium-build), in a scratch clone of the tool's branch
+# 1. as atrium-build, in a scratch clone of the tool's branch
 git clone -q -b claude/library-build https://github.com/joshmaurice/atrium /var/tmp/lib-src
-cd /var/tmp/lib-src/scripts/library-build && npm ci && node build.mjs --check items.json
+cd /var/tmp/lib-src && pnpm install --frozen-lockfile --filter @atrium/renderer-three   # for H1 step 6
+cd scripts/library-build && npm ci
+node build.mjs --check items.json          # read the table; strike anything flagged
 node build.mjs --out /var/tmp/library-<date> items.json
 node build.mjs --verify /var/tmp/library-<date> /var/tmp/library-<date>/catalog.json
-# as root: append-only install
-install -d -m 0755 /srv/atrium-library/{models,skies,thumbs}
-cp -n -p /var/tmp/library-<date>/{models,skies,thumbs}/* …    # -n: never overwrite
+
+# 2. as root: the install script (review R6), never cp
+bash /var/tmp/lib-src/scripts/library-build/install-library.sh /var/tmp/library-<date>
 ```
-Then upload `catalog.json` to `main` as `apps/client/library/catalog.json`
-(L21), before kickoff.
+**`install-library.sh`** (in the tool's directory; tested by Claude locally):
+1. refuses unless run as root, and unless `/srv/atrium-library` and its three
+   subdirectories are root-owned, mode 0755, and not symlinks (it creates
+   them that way on first run);
+2. copies the staging directory into a fresh root-owned `mktemp -d`
+   (`cp -R --no-dereference`), then refuses if the copy holds any symlink,
+   device, or file not named by its `catalog.json`; everything after this
+   works on the private copy, so the build account can't change files
+   between check and install;
+3. for each file the catalog names: its name must match Z1's pattern for its
+   kind and its sha256 must match the catalog; then
+   - destination missing → `install -m 0644 -o root -g root` it;
+   - destination present → its sha256 must equal the catalog's, **else stop
+     with an error** (never skip silently);
+4. re-hashes every installed destination against the catalog;
+5. prints the catalog's sha256 and `OK <n> files`. Exit non-zero on any
+   refusal, with the path named.
+
+Then, after H3: `curl -sI https://dev.ewwb.dev/<each url>` returns 200 with
+the CORS header (the script prints these URLs). **Only then** upload
+`catalog.json` to `main` as `apps/client/library/catalog.json` (L21), before
+kickoff.
 
 #### H3. Caddy (both site blocks, DEV and PROD)
 ```
@@ -324,29 +405,44 @@ listing; `/assets/library/../` can't escape.
     "sha256": "<64 hex>", "bounds": [0.8, 0.9, 0.8],
     "bytes": 0, "vertices": 0, "textureBytes": 0,
     "thumbnail": "/assets/library/thumbs/ArmChair_01-<sha12>.webp",
+    "thumbnailSha256": "<64 hex>",
     "license": "CC0-1.0", "authors": ["…"],
     "source": "https://polyhaven.com/a/ArmChair_01" }],
   "skies": [{ "id": "…", "name": "…", "url": "/assets/library/skies/<id>-<sha12>.jpg",
-    "width": 4096, "height": 2048, "bytes": 0, "thumbnail": "…",
+    "sha256": "<64 hex>", "width": 4096, "height": 2048, "bytes": 0,
+    "thumbnail": "…", "thumbnailSha256": "<64 hex>",
     "license": "CC0-1.0", "authors": ["…"], "source": "…" }] }
 ```
-- `loadCatalog(fetchFn)`: same-origin `fetch`, at most 256 KiB, `version`
-  must be 1. **Every entry is validated** and an invalid one is dropped with
-  a console warning: `url` and `thumbnail` are root paths under
-  `/assets/library/` that pass A1; models need `sha256` and `bounds` that
-  pass 3a's rules (`model-spec.js`); skies need `width`/`height` within L26.
+- `loadCatalog(fetchFn)`: same-origin `fetch` with `credentials: 'omit'`;
+  the 256 KiB cap is **enforced while reading** (abort past it, using the
+  same streaming reader as 3a), then `JSON.parse`; `version` must be 1.
+- **Every entry is validated** and an invalid one is dropped with a console
+  warning (review R5). Paths are checked **as exact strings, never by prefix
+  or after URL parsing**:
+  - model `url`: `^/assets/library/models/[A-Za-z0-9_]{1,64}-[0-9a-f]{12}\.glb$`
+  - sky `url`: `^/assets/library/skies/[A-Za-z0-9_]{1,64}-[0-9a-f]{12}\.jpg$`
+  - `thumbnail`: `^/assets/library/thumbs/[A-Za-z0-9_]{1,64}-[0-9a-f]{12}\.webp$`
+  - the 12 hex in each name equal the first 12 of that file's `sha256`
+    (`sha256` for the url, `thumbnailSha256` for the thumbnail);
+  - these patterns admit no `.`-segment, `%`, query or fragment, so no
+    normalization can move a path out of its directory;
+  - models also need `bounds` that pass 3a's rules (`model-spec.js`); skies
+    need `width`/`height` within L26; `id`s are unique per kind.
   A missing or broken catalog hides the Library button and leaves Sky with
   None only; the rest of Edit mode is unaffected.
 - `storedUrl(path, worldBaseUrl, pageOrigin)` (L22): the path when
   `new URL(path, worldBaseUrl).origin === pageOrigin`, else
   `new URL(path, pageOrigin).href`.
 - A test reads the **committed** catalog and checks every entry against these
-  rules, so a bad upload fails the suite.
+  rules (and that none was dropped), so a bad upload fails the suite.
 
 #### Z2. The Library grid (`apps/client/src/library-grid.js`; `index.html`; `app.js` wiring only)
 - **Button:** `#ep-library` after `#ep-model`, **no `data-kind`**, the
   palette's enable rule (`!blocked && modes.edit`). Hidden when the catalog
   has no models.
+- **Tiles follow the same rule** (review note): a tile is enabled only while
+  `!blocked && modes.edit` **and** no library add is waiting. The grid
+  re-reads the rule wherever the palette refreshes its buttons.
 - **Grid:** a panel under the Add row (like `#tp-form`), registered in the
   form gate as `'library'` (opening it closes the Model or teleporter form
   and vice versa). Tiles: thumbnail (`<img loading="lazy">`, alt = name),
@@ -360,6 +456,12 @@ listing; `/assets/library/../` can't escape.
   `onStructureAnswer`; the new node is selected. While waiting, tiles are
   disabled; a refusal shows in the grid's status line; the grid stays open
   after success.
+- **Closing the grid while an add waits** (Cancel, Escape, another form):
+  as the Model form does when closed while saving. The structural tracker
+  and undo still take the answer (the node exists and can be undone); the
+  grid only forgets its wait, so nothing is shown in a closed grid and the
+  node isn't selected. Edit off and reconnect are unchanged (the forms'
+  existing paths).
 - No Check, no fetch by the grid itself: the bridge loads the model like any
   other, pinned.
 
@@ -373,43 +475,98 @@ listing; `/assets/library/../` can't escape.
 - **`fetchImage({ url, worldBaseUrl, signal, fetchFn, limits })`** exported
   from `model-fetch.js`, built on the existing internal `fetchOne`/`readBody`:
   `FETCH_OPTIONS`, redirect check (`redirectProblem`), 16 MiB cap counted per
-  chunk, its own 30 s `createJobDeadline`. It does **not** use the world
-  ledger or the transfer limiter (one sky; L26). Returns bytes or a reason.
-- **`loadBackground`** becomes:
-  1. clear (`''`, missing, or `type` other than `equirectangular`) →
-     dispose the current sky texture, null both slots;
-  2. if the resolved URL equals the current one → nothing (P1's reload on
-     every World Info change goes away);
-  3. bump the token, abort the previous sky fetch, `fetchImage`;
-  4. `imageHeader` (from `model-parse.js`): PNG/JPEG/WebP only, sides ≤ 4096,
-     area ≤ 4096 × 2048;
-  5. decode via a `blob:` URL and `TextureLoader` (same decode and `flipY`
-     as today), revoke the blob URL, check the token, set
-     `EquirectangularReflectionMapping` and sRGB, dispose the previous
-     texture, set both slots;
-  6. on any refusal: dispose and clear both slots (a world whose sky fails
-     shows no sky, as a failed model shows a placeholder, never the previous
-     world's sky), log the reason, and report it through the returned
-     promise so the Sky picker can show it to the owner.
-- The SOM Inspector keeps calling `loadBackground`; it gets the same rules.
+  chunk. It does **not** use the world ledger or the transfer limiter (one
+  sky; L26). Returns bytes or a reason. **Its 30 s deadline covers the
+  request and reading the whole body** (review R7).
+
+- **One sky controller per scene** replaces the free function (R1, R4):
+  `createSkyLoader({ scene, fetchImage, decode })` in
+  `load-background.js`, exported from renderer-three. `loadBackground` stays
+  as a thin wrapper for one release (the Inspector moves to the controller in
+  the same round). **It alone writes `scene.background` and
+  `scene.environment`;** `app.js` L639–641 and the Inspector's L217–218 are
+  removed.
+
+  **State:** `generation` (a counter), `loaded = { url, texture } | null`,
+  `pending = { generation, url, abort } | null`, `failedUrl` (or null).
+
+  **The rule (R4):** only the current generation may change the scene's
+  slots, `loaded`, `failedUrl`, or report a result. Every superseded or
+  cancelled generation, whenever it settles, disposes any texture it made,
+  revokes its blob URL, and changes nothing else.
+
+  - **`update(bg, worldBaseUrl)`** (from `world:loaded`, `som:set` of
+    `__document__`, and the picker):
+    1. no sky (`''`, missing, `type` not `equirectangular`) → cancel
+       `pending`; dispose `loaded.texture`; null both slots; `loaded = null`,
+       `failedUrl = null`;
+    2. resolve with `resolveSkyUrl`; a refusal → as (1), then report the
+       reason;
+    3. `url === loaded?.url` → **re-assert** both slots to
+       `loaded.texture` (they may have been cleared or replaced), no fetch.
+       This is what makes a repeated `world:loaded` on the same SOM keep its
+       sky (R1);
+    4. `url === pending?.url` → nothing (already on its way);
+    5. `url === failedUrl` → nothing: a failed sky is not refetched on every
+       World Info change (P1's rename problem), only by `retry()` or a new
+       world;
+    6. otherwise start a new generation: cancel `pending`, `generation++`,
+       `pending = { generation, url, abort }`, then:
+       - `fetchImage` (30 s for the transfer);
+       - `imageHeader`: PNG/JPEG/WebP only, sides 1–4096, area ≤ 4096 × 2048;
+       - `decode`: a `blob:` URL through `TextureLoader` (the same decode and
+         orientation as today), **bounded at 10 s**; the blob URL is revoked
+         when it settles, on every outcome; a decode that settles after the
+         bound or after its generation was superseded is disposed then;
+       - if still current: set mapping and colour space, dispose
+         `loaded.texture` (if any), set both slots, `loaded = { url,
+         texture }`, `failedUrl = null`, `pending = null`, report success;
+       - on any failure while current: dispose `loaded.texture`, null both
+         slots, `loaded = null`, `failedUrl = url`, `pending = null`, report
+         the reason. (A world whose sky fails shows no sky, never the previous
+         one.) A superseded generation's failure does nothing (R4).
+  - **`retry()`:** `failedUrl = null`, then `update` with the last values. The
+    picker calls it when the owner picks the sky that failed.
+  - **`resetWorld()`** (from `connecting` and `disconnected`, next to
+    `modelBridge.resetWorld()`): cancel `pending` (`generation++`), dispose
+    `loaded.texture`, null both slots, clear `loaded` and `failedUrl`. A world
+    change therefore never reuses a pending request from the previous world,
+    even for the same URL (R1).
+  - **`dispose()`:** as `resetWorld()`, and later calls do nothing.
+  - **Reporting:** `update` returns a promise for its own generation:
+    `{ ok: true }`, `{ ok: false, reason }`, or `{ ok: false, reason:
+    'superseded' }`. The picker shows only its own non-superseded failure.
+- The SOM Inspector uses the same controller: `onBackgroundChange` calls
+  `update`; its world-change path calls `resetWorld`.
 
 #### Z4. The Sky picker (`apps/client/src/sky-picker.js`; `index.html`; `app.js` wiring)
 - A "World" label and row under the Add row with `<select id="ep-sky">`:
   None, then each catalog sky by name, then a disabled "Custom" option shown
   only while the world's texture isn't a catalog sky (L29a). Synced on
   `world:loaded` and on `som:set` of `__document__`.
-- **Change:** build the new extras from a deep copy of the current
-  `som.extras`, changing **only** `atrium.background.type`
+- **One write at a time** (R2): while a sky write waits for its answer the
+  select is disabled. The next change can't start until it's answered.
+- **Change:** build the new extras from a deep copy of the **current**
+  `som.extras` at that moment, changing only `atrium.background.type`
   (`'equirectangular'`) and `.texture` (`storedUrl(…)`, or `''` for None);
-  assign `som.extras`; remember `client.lastSendSeq`; call `loadBackground`
-  locally (*probe*: the server's echo of the owner's own send resolves the
-  pending edit but emits no `som:set`, `AtriumClient.js` L982–985).
-- **On `edit:rejected` for that seq** (*probe*): the client does **not** roll
-  the SOM back (`_resolveRejected` only emits). The picker restores the
-  previous extras itself by assigning them again (a send with no changed
-  leaf, which the server allows), restores the select, reloads the previous
-  sky, and shows the server's message. `edit:unknown` (connection lost)
-  needs nothing: the reconnect's `som-dump` brings the server's value.
+  assign `som.extras`; remember `client.lastSendSeq` and the two leaves'
+  previous values; call `sky.update(…)` locally (*probe*: the server's echo
+  of the owner's own send resolves the pending edit but emits no `som:set`,
+  `AtriumClient.js` L982–985).
+- **On `edit:accepted` for that seq:** re-enable the select.
+- **On `edit:rejected` for that seq** (R2): the client doesn't roll the SOM
+  back (*probe*: `_resolveRejected` only emits), so the picker does, **for the
+  two leaves only and without sending**:
+  - if the SOM's current `type` and `texture` still equal what this write
+    sent, put back their previous values with `client.applyLocally(() => …)`
+    on a copy of the **current** extras (every other field as it now is),
+    then `sky.update(…)`;
+  - otherwise another session's background change has already arrived and
+    is the newer value: leave it;
+  - re-sync the select from the SOM, show the server's message, re-enable.
+  Nothing is sent, so a rollback can't revert anyone's description or name.
+- **On `edit:unknown`** (connection lost): re-enable; the reconnect's
+  `som-dump` brings the server's value.
 - Enabled only in Edit mode, as the Add row.
 
 #### Z5. Server (`packages/server/src/send-policy.js`)
@@ -426,12 +583,13 @@ leaves; the undo engine (a sky isn't undoable); the SOM Inspector's UI.
 ## 5. Tests
 | Area | Tests (each in its package's suite) |
 |---|---|
-| Catalog | `loadCatalog`: size cap, wrong version, each invalid-entry rule drops only that entry, broken JSON → empty; `storedUrl` same-origin and cross-origin; **the committed catalog passes** |
-| Grid | tile click builds the exact descriptor (pinned `sha256`, catalog `bounds`, free name); tiles disabled while waiting; refusal message; form gate (opening closes the Model form and back); Escape, Edit off, reconnect close it |
+| Catalog | `loadCatalog`: size cap enforced mid-stream (a body that never ends is aborted), wrong version, path patterns (`/assets/library/models/../x.glb`, `/assets/library/%2e%2e/x.glb`, a query, a fragment, a sky url in `models`, a name whose 12 hex don't match `sha256`), each invalid-entry rule drops only that entry, broken JSON → empty; `storedUrl` same-origin and cross-origin; **the committed catalog passes** |
+| Grid | tile click builds the exact descriptor (pinned `sha256`, catalog `bounds`, free name); tiles disabled while waiting **and** while structurally blocked; refusal message; form gate (opening closes the Model form and back); Escape, Edit off, reconnect close it; **closed while an add waits: the answer still registers undo, the grid shows and selects nothing** |
 | Sky URL | shared vectors through client `skyUrlProblem` and server leaf: A1 cases, `''`, `http:`, `data:`, `javascript:`, `//host`, backslash, credentials, over-length; `resolveSkyUrl` refuses a document-relative value (`skyboxtest1.png`, `../x.png`) |
-| `fetchImage` | request options, redirect to `http:` refused, 16 MiB cap mid-stream, deadline, abort |
-| `loadBackground` | header checks (each format, oversize side, oversize area, zero size, truncated header); unchanged URL → no fetch; a new value disposes the old texture; a late response loses to a newer request; clear disposes; refusal clears and reports |
-| Picker | change writes only the two leaves (a test diffs the sent extras); rejection restores the SOM's extras, the select and the previous sky; Custom shown for a non-catalog texture |
+| `fetchImage` | request options, redirect to `http:` refused, 16 MiB cap mid-stream, the deadline covering a body that drips past 30 s, abort |
+| Sky controller | header checks (each format, oversize side, oversize area, zero size, truncated header); **repeated `world:loaded` on the same SOM with the slots cleared in between keeps the sky, no fetch** (R1); **`resetWorld` while a sky loads, then the same URL in the next world: a new request, and the old one's late texture is disposed** (R1, R4); a new value disposes the old texture; **a stale decode that succeeds is disposed and changes no slot; a stale failure doesn't clear a newer sky** (R4); blob URL revoked on success, failure, abort and supersession; decode past 10 s is disposed when it settles; **a failed URL isn't refetched on a rename, and `retry()` of the same URL succeeds** (R7); clear disposes; `dispose()` |
+| Picker | change writes only the two leaves (a test diffs the sent extras); select disabled until answered; **rejection restores only the two leaves, without a send, keeping a description another session changed meanwhile** (R2); **rejection after another session's background change keeps that change** (R2); Custom shown for a non-catalog texture |
+| Build tool (Claude, local; not in the pipeline) | H1's test list; `install-library.sh`: a destination present with the wrong hash stops with an error (R6), a symlink in staging refused, a file not in the catalog refused, a second run installs nothing and passes |
 | Server | `world-crud`/send-policy: owner sets a library sky (allowed), `http:` refused, `''` allowed, other leaves still refused |
 
 **Proofs** (each break must fail named tests; "not reproducible" is not an
@@ -440,7 +598,13 @@ acceptable result, models-hardening §4.3): (p1) the server leaf back to
 entry validation removed; (p4) `storedUrl` always returning the path;
 (p5) the old texture's disposal removed; (p6) the unchanged-URL short-circuit
 removed (a fetch count rises); (p7) the picker sending the whole extras
-object with an extra changed leaf.
+object with an extra changed leaf; (p8) step 3's re-assert removed (the
+repeated `world:loaded` test loses its sky); (p9) the generation check
+removed from the failure path (a stale failure clears a newer sky); (p10) the
+stale-success disposal removed (a texture count rises); (p11) the picker's
+rollback sending instead of `applyLocally` (the concurrent-description test
+fails); (p12) `loadCatalog`'s path patterns replaced by a `startsWith`
+check (the encoded-traversal entries load).
 
 ### 5.1 Claude's browser checks (after publish, before DEV acceptance)
 With the harness of the 10-21 passdown §5.1, plus a copy of the real library
@@ -451,7 +615,15 @@ files and catalog served under `/assets/library/`:
   placeholder with the budget reason, and the count reached is recorded;
 - every sky loads; switching skies 10 times leaves
   `renderer.info.memory.textures` flat;
-- renaming the world causes no sky request;
+- renaming the world causes no sky request; a world with an external
+  reference keeps its sky when the reference loads (R1);
+- **placement** (review note): the largest, smallest and three other items
+  are placed side by side and screenshotted from the avatar's view; each
+  rests on the floor at the placement point (H1's re-pivot) and its
+  placeholder box matches the model;
+- **two owners** in two browsers: one changes the description while the
+  other's sky write is forced to fail (a stubbed server refusal); both end
+  with the new description (R2);
 - the regenerated `atrium.gltf` sky (root path) loads, and the old
   document-relative value is refused with a reason; an `http:` sky (set by a raw
   `send`) is refused by the server; an oversize PNG served from a stubbed
@@ -472,11 +644,11 @@ files and catalog served under `/assets/library/`:
 
 ## 7. Worker rules and release path
 As models-hardening §7, with:
-- **Spec by git reference** (models-hardening §4.1) if this pre-brief's final
-  revision is over about 40 KB; it is about 33 KB now, but the kickoff should
-  reference it anyway, pinned by sha256.
+- **Spec by git reference** (models-hardening §4.1): this pre-brief is about
+  49 KB, over the 40 KB limit, so every card that needs it gets a `git show`
+  reference pinned by sha256, never a copy.
 - **Steps, one commit each:** (1) Z5 + shared sky vectors (server, client
-  spec); (2) Z3 `fetchImage` + `resolveSkyUrl`, and the regenerated fixture; (3) Z3 `loadBackground`;
+  spec); (2) Z3 `fetchImage` + `resolveSkyUrl`, and the regenerated fixture; (3) Z3's sky controller, with `app.js` and the SOM Inspector moved to it;
   (4) Z1 catalog module and the committed-catalog test; (5) Z2 grid;
   (6) Z4 picker; (7) full suites, proofs, handoff.
 - **`--max-runtime 3h`**, `max_turns` 300; review card requires every proof
@@ -496,7 +668,7 @@ As models-hardening §7, with:
   `resolveSkyUrl` live there; decoding stays in renderer-three.
 - Import maps: any new module path imported by the browser needs an
   import-map entry in `apps/client/index.html` (and the SOM Inspector's, for
-  `loadBackground`'s new imports) — round 1 of 3a failed on exactly this
+  the sky controller's new imports) — round 1 of 3a failed on exactly this
   (10-20 passdown §4.1).
 - The smoke check requires `#ep-model`; adding `--require-id ep-library` is a
   host follow-up, not part of this round.
@@ -510,6 +682,12 @@ As models-hardening §7, with:
    append-only rule); pruning unreferenced files is a later host task.
 3. Lighting for worlds with no sky: see L31.
 4. `'cubemap'` remains a server-accepted type the client ignores.
+5. **Whole-extras World Info writes can revert another owner's concurrent
+   change** (P3). The Sky picker narrows this (it builds from the current SOM
+   and never sends a rollback), but its forward write still carries every
+   leaf, as the SOM Inspector's does. The fix is a leaf-level document `send`
+   (a protocol change with its schema, AGENTS.md rule 1), for its own small
+   round.
 
 ## 10. References
 Design §4.4, §9 row 3; models-by-url pre-brief §3 (L13–L15, L20), §9,
@@ -535,6 +713,32 @@ L568–583.
 - **Rev 0.2 (2026-10-22, ~08:55 PT):** a Misc category of ten models
   (operator request), 34 models in all; §5.1's budget check reworded, since
   34 distinct items no longer fit one world.
+- **Rev 0.3 (2026-10-22, ~09:40 PT):** an outside review of Rev 0.2 (NOT YET
+  GO; R1–R7 and three notes). Claude checked each claim against `9e7478f`
+  and took all of them (§13). Decisions unchanged.
+
+## 13. Outside review of Rev 0.2 (2026-10-22) and what Rev 0.3 did
+
+Verdict: **NOT YET GO** for implementation or host installation; architecture
+and L21–L31 agreed; a targeted Rev 0.3 asked for. The reviewer read the code
+at `9e7478f` through GitHub and ran URL-normalization and `cp -n` checks.
+Claude re-checked each concrete claim before amending.
+
+| # | Finding | Checked | Rev 0.3 |
+|---|---|---|---|
+| R1 (must) | Skipping an unchanged URL loses the sky, because `world:loaded` clears both slots first and repeats on the same SOM | Confirmed: `app.js` L639–641, L645, L655 | P1; Z3's controller owns the slots, re-asserts on an unchanged URL, and resets on `connecting`/`disconnected`; app's clearing removed; tests, (p8) |
+| R2 (must) | Restoring the whole saved extras after a rejection can overwrite a concurrent change | Confirmed (`_resolveRejected` only emits; another session's set is applied; a whole-extras send can revert a description). Claude adds that the **forward** write has the same exposure, pre-existing | P3; Z4: one write at a time, rollback of the two leaves only, via `applyLocally`, never sent, and skipped if a newer background arrived; §9.5 records the forward race; tests, (p11), §5.1 |
+| R3 (must) | Build tool: include keys as paths, download limits, redirects, and checking the GLB against the browser's rules | Agreed (no code yet). Claude adds that the `.gltf`'s own `uri`s must be checked too, or `NodeIO` reads them from anywhere | H1 rewritten: host allowlist, manual redirects, streaming caps, one path function, `wx` creates, `uri` = include key, 3a's `preflightProblem` run on each GLB |
+| R4 (must) | Every async outcome needs cleanup and generation ownership | Confirmed: today's late texture is dropped by the token but not disposed | Z3's rule: only the current generation touches slots or reports; every other disposes and revokes; tests, (p9), (p10) |
+| R5 (should) | Prefix + A1 isn't containment (`/assets/library/%2e%2e/x`) | Confirmed with Node's URL parser: `../` and `%2e%2e` both normalize to `/assets/x` | Z1: exact per-kind patterns, name hash tied to `sha256`; tests, (p12) |
+| R6 (should) | `cp -n` can skip silently | Agreed | H2: `install-library.sh` (private root copy, hash-or-stop, re-hash after install, root-owned 0755 tree) |
+| R7 (should) | The sky deadline and retry are unclear | Agreed | `fetchImage` 30 s covers the body; decode bounded at 10 s; a failed URL is remembered but `retry()` and a new world refetch it |
+| Note | Enforce the catalog cap while reading | Agreed | Z1 |
+| Note | Tiles must respect the structural blocker; closing with an add pending | Agreed | Z2, tests |
+| Note | Check placement, not only loading | Agreed | H1 re-pivots every model to its base centre and flags odd sizes; §5.1 screenshots |
+
+Not taken: nothing. The reviewer's note that tonemapped JPEGs lose the
+HDRI's range is agreed and left as L24 says (no HDR this round).
 
 ## Appendix A. Proposed items (L28; ids verified on api.polyhaven.com, 10-21)
 
