@@ -1,0 +1,19 @@
+{
+  "name": "atrium-library-build",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Builds Atrium's starter library from Poly Haven (step 3b, H1). Run on the host by the operator; never part of a deploy.",
+  "license": "MIT",
+  "author": "Tony Parisi / Metatron Studio",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "4.3.0",
+    "@gltf-transform/extensions": "4.3.0",
+    "@gltf-transform/functions": "4.3.0",
+    "sharp": "0.35.4"
+  }
+}
