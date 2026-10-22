@@ -1,7 +1,8 @@
 # Pre-brief: Phase 3 step 3b — the starter library, the sky, and library hosting
 
-Status: **DRAFT, Revision 0 (2026-10-21, ~23:59 PT). Decisions L21–L30 (§3)
-await the operator.** L13–L15 were decided on 2026-10-19 (models-by-url
+Status: **DRAFT, Revision 0.1 (2026-10-22, ~01:55 PT). Decisions L21–L31 (§3)
+await the operator.** Rev 0.1 takes the operator's answer to Q1 (no live world
+has a sky) into P2, L25, L26, Z3, §5 and §9, and adds L31. L13–L15 were decided on 2026-10-19 (models-by-url
 pre-brief §3) and carry into this round; §3 refines L13's catalog path (L21).
 - **Drafted by Claude from a clone of `main` at `9e7478f`.** Its runtime code
   is identical to the released `82c1d40e` (DEV, MAIN record and PROD): the
@@ -23,7 +24,7 @@ pre-brief §3) and carry into this round; §3 refines L13's catalog path (L21).
   values; the library build tool and the Caddy route (host steps).
 - **Out of scope:** model animations (step 4); the richer `add` and the copy
   step; uploads and live API browsing (design §4.4 "later"); `.hdr` skies;
-  a default environment light for worlds with no sky (§9.3); the Hubs/Spoke
+  a default environment light for worlds with no sky (L31); the Hubs/Spoke
   kit (licence unverified, design §4.4).
 
 ## 1. What this round is
@@ -71,10 +72,11 @@ and hands it to `THREE.TextureLoader`. Then:
 - **Client:** `TextureLoader` fetches it with the page's defaults (image
   element, `crossOrigin: 'anonymous'`, the page's referrer), no size,
   dimension or time limit. Every visitor does this automatically on entry.
-- **Legacy form in use:** `tests/fixtures/atrium.gltf` names
-  `skyboxtest1.png` (document-relative; 7.6 MB PNG, 3072 × 1536). The PROD
-  commons may use the same form (unverified, §11 Q1). So the client must keep
-  loading a document-relative sky that resolves to the world's own origin.
+- **No live world has a sky** (operator, 2026-10-22: the commons and every
+  world so far are black). The only sky anywhere is the test fixture
+  `tests/fixtures/atrium.gltf`, which names `skyboxtest1.png`
+  (document-relative; 7.6 MB PNG, 3072 × 1536). So tightening the rule
+  breaks nothing in use.
 - `'cubemap'` is accepted by the server but the client only warns.
 
 ### P3. World Info writes already work, from the owner only
@@ -177,17 +179,20 @@ the workspace. (b) Download the 4k `.hdr` and tonemap it in pure JS
 **L25. The sky URL rule.** (a) **New values follow A1** (`https://` or a
 single-slash root path, no control characters, backslashes or credentials),
 or `''` to clear, **checked by the server** on the `background.texture` leaf
-and by the client before loading; the client also still loads a **legacy**
-document-relative value (P2) but only when it resolves to the world's own
-origin. `background.type` stays as is. (b) Client-side only (the server keeps
-accepting any string; every client refuses it).
+and by the client before loading. **No legacy forms:** no live world has a
+sky (P2), so a document-relative value is refused like any other non-A1 value.
+The fixture generator writes `/tests/fixtures/skyboxtest1.png` instead.
+`background.type` stays as is. (b) As (a), but the client still loads a
+document-relative value that resolves to the world's own origin (only the
+fixture would use it). (c) Client-side only (the server keeps accepting any
+string; every client refuses it).
 
 **L26. Sky limits.** (a) **16 MiB download, the 30 s deadline, A2's request
 policy (credentials omitted, no referrer, redirects followed then checked),
 PNG/JPEG/WebP only by header (3a's `imageHeader`), each side ≤ 4096 and
 width × height ≤ 4096 × 2048; outside the 512 MiB model budget (one sky at a
 time); the previous texture disposed on change; reloaded only when the
-resolved URL changes.** The legacy 3072 × 1536 fixture passes. (b) As (a)
+resolved URL changes.** The 3072 × 1536 fixture passes. (b) As (a)
 but charged to the model texture budget (a sky then evicts about two library
 items' worth).
 
@@ -217,6 +222,20 @@ non-`devtasks/` upload mid-round is refused by the release merge,
 models-hardening §2.1). Then the pipeline: client, renderer and server, with
 a DEV restart (the server's sky check). (b) Pipeline first with a fixture
 catalog, library later (DEV acceptance couldn't place real items).
+
+**L31. Lighting when a world has no sky.** Every world today has none (P2),
+so every library item will first be seen under `Stage`'s lights only: an
+ambient light at 0.6 and one directional sun (`Stage.js` L39–80), with no
+environment map. Rough wood and fabric look acceptable that way; metal and
+glossy parts look flat or black. (a) **No change this round.** Claude's
+browser checks (§5.1) screenshot four items (wood, fabric, metal, plant)
+with no sky and with a library sky, and the passdown records whether a
+default is needed. (b) When the sky is None, set `scene.environment` to a
+neutral `RoomEnvironment` (PMREM). Library models look right at once, but
+**every existing world's primitives change appearance** too (they gain
+reflections and get brighter). (c) Give only model instances an `envMap`
+when the scene has no environment: primitives unchanged, but a second
+lighting path to keep in step with the sky.
 
 ## 4. Contract (per the recommended decisions)
 
@@ -345,9 +364,10 @@ listing; `/assets/library/../` can't escape.
 #### Z3. The sky loader (`packages/client/src/model-fetch.js`, `packages/renderer-three/src/load-background.js`)
 - **`skyUrlProblem(texture)`** in `model-spec.js` (and its server mirror,
   Z5): A1, or `''`. **`resolveSkyUrl(texture, worldBaseUrl)`**: an A1 value
-  resolves as models do; a legacy value (no scheme, not starting with `/`)
-  resolves against `worldBaseUrl` and is accepted only if the result's origin
-  is the world's origin; anything else is refused.
+  resolves as models do (`resolveModelUrl`); anything else is refused with a
+  reason (L25a: no document-relative form).
+- **Fixture:** `tests/fixtures/generate-atrium.js` writes
+  `/tests/fixtures/skyboxtest1.png`; regenerate `atrium.gltf` and commit both.
 - **`fetchImage({ url, worldBaseUrl, signal, fetchFn, limits })`** exported
   from `model-fetch.js`, built on the existing internal `fetchOne`/`readBody`:
   `FETCH_OPTIONS`, redirect check (`redirectProblem`), 16 MiB cap counted per
@@ -406,7 +426,7 @@ leaves; the undo engine (a sky isn't undoable); the SOM Inspector's UI.
 |---|---|
 | Catalog | `loadCatalog`: size cap, wrong version, each invalid-entry rule drops only that entry, broken JSON → empty; `storedUrl` same-origin and cross-origin; **the committed catalog passes** |
 | Grid | tile click builds the exact descriptor (pinned `sha256`, catalog `bounds`, free name); tiles disabled while waiting; refusal message; form gate (opening closes the Model form and back); Escape, Edit off, reconnect close it |
-| Sky URL | shared vectors through client `skyUrlProblem` and server leaf: A1 cases, `''`, `http:`, `data:`, `javascript:`, `//host`, backslash, credentials, over-length; `resolveSkyUrl` legacy same-origin accepted, legacy escaping to another origin refused |
+| Sky URL | shared vectors through client `skyUrlProblem` and server leaf: A1 cases, `''`, `http:`, `data:`, `javascript:`, `//host`, backslash, credentials, over-length; `resolveSkyUrl` refuses a document-relative value (`skyboxtest1.png`, `../x.png`) |
 | `fetchImage` | request options, redirect to `http:` refused, 16 MiB cap mid-stream, deadline, abort |
 | `loadBackground` | header checks (each format, oversize side, oversize area, zero size, truncated header); unchanged URL → no fetch; a new value disposes the old texture; a late response loses to a newer request; clear disposes; refusal clears and reports |
 | Picker | change writes only the two leaves (a test diffs the sent extras); rejection restores the SOM's extras, the select and the previous sky; Custom shown for a non-catalog texture |
@@ -428,7 +448,8 @@ files and catalog served under `/assets/library/`:
 - every sky loads; switching skies 10 times leaves
   `renderer.info.memory.textures` flat;
 - renaming the world causes no sky request;
-- the legacy `atrium.gltf` sky still loads; an `http:` sky (set by a raw
+- the regenerated `atrium.gltf` sky (root path) loads, and the old
+  document-relative value is refused with a reason; an `http:` sky (set by a raw
   `send`) is refused by the server; an oversize PNG served from a stubbed
   World Info is refused by the client with a reason;
 - a page on origin A in a world on origin B: the stored URL is absolute on A,
@@ -448,10 +469,10 @@ files and catalog served under `/assets/library/`:
 ## 7. Worker rules and release path
 As models-hardening §7, with:
 - **Spec by git reference** (models-hardening §4.1) if this pre-brief's final
-  revision is over about 40 KB; it is about 31 KB now, but the kickoff should
+  revision is over about 40 KB; it is about 33 KB now, but the kickoff should
   reference it anyway, pinned by sha256.
 - **Steps, one commit each:** (1) Z5 + shared sky vectors (server, client
-  spec); (2) Z3 `fetchImage` + `resolveSkyUrl`; (3) Z3 `loadBackground`;
+  spec); (2) Z3 `fetchImage` + `resolveSkyUrl`, and the regenerated fixture; (3) Z3 `loadBackground`;
   (4) Z1 catalog module and the committed-catalog test; (5) Z2 grid;
   (6) Z4 picker; (7) full suites, proofs, handoff.
 - **`--max-runtime 3h`**, `max_turns` 300; review card requires every proof
@@ -483,9 +504,7 @@ As models-hardening §7, with:
    recognise `/assets/library/` URLs.
 2. A rebuilt library with changed hashes leaves old files in place (L23's
    append-only rule); pruning unreferenced files is a later host task.
-3. **Worlds with no sky have no environment light,** so PBR library models
-   look dark next to primitives. A default `RoomEnvironment` when the sky is
-   None is a small follow-up worth considering.
+3. Lighting for worlds with no sky: see L31.
 4. `'cubemap'` remains a server-accepted type the client ignores.
 
 ## 10. References
@@ -498,14 +517,17 @@ L804–806; `send-policy.js` L350–351, `authorizeDocumentSend`;
 L568–583.
 
 ## 11. Open for the operator
-- **Q1.** What does the PROD commons' `atrium.background.texture` say today?
-  If it's document-relative, L25a keeps it loading; if it's `http:`, it will
-  stop loading after this round (re-set it from the Sky picker).
+- **Q1. Answered** (operator, 2026-10-22): the commons and all worlds so far
+  have no sky. Taken into P2, L25 and L31.
 - **Q2.** Strike or swap any of Appendix A before the build.
 
 ## 12. Revision log
 - **Rev 0 (2026-10-21, ~23:59 PT):** drafted from probes at `9e7478f` and
   the live Poly Haven API.
+- **Rev 0.1 (2026-10-22, ~01:55 PT):** Q1 answered (no live world has a sky).
+  L25a drops the legacy document-relative form (old behaviour kept as
+  option (b)); the fixture moves to a root path; P2, L26, Z3, §5, §5.1 and §9
+  follow. New L31 (lighting without a sky), from §9.3.
 
 ## Appendix A. Proposed items (L28; ids verified on api.polyhaven.com, 10-21)
 
