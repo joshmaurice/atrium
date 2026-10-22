@@ -7,8 +7,9 @@ import { TreeView }              from './TreeView.js'
 import { PropertySheet }         from './PropertySheet.js'
 import { WorldInfoPanel }        from './WorldInfoPanel.js'
 import { AnimationsPanel }       from './AnimationsPanel.js'
-import { Stage, PointerInputBridge, projectRayToPlane, computeParentInverse, initDocumentView, loadBackground } from '@atrium/renderer-three'
+import { Stage, PointerInputBridge, projectRayToPlane, computeParentInverse, initDocumentView, createSkyLoader } from '@atrium/renderer-three'
 import { resolveSelectionRoot } from '@atrium/interaction'
+import { fetchImage } from '@atrium/client/model-fetch'
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -47,6 +48,12 @@ const { scene: threeScene } = stage
 const avatar = stage.avatar
 const canvas  = renderer.domElement
 
+// Z3 (library-sky) — the same sky controller the client uses. It ALONE writes
+// threeScene.background/environment: this file's clearing before a load is gone.
+// resetWorld() runs at every world boundary — connecting, disconnected, and
+// immediately before each of the five loadWorld/loadWorldFromData calls below.
+const sky = createSkyLoader({ scene: threeScene, fetchImage })
+
 // ---------------------------------------------------------------------------
 // DocumentView / animation state
 // ---------------------------------------------------------------------------
@@ -78,7 +85,7 @@ const propSheet = new PropertySheet(propsPanelEl, propsHeaderEl, {
   onSetActiveCamera: (cam) => applyActiveCamera(cam),
 })
 const worldInfo = new WorldInfoPanel(worldInfoEl, {
-  onBackgroundChange: (bg) => loadBackground(threeScene, bg, client.worldBaseUrl),
+  onBackgroundChange: (bg) => sky.update(bg, client.worldBaseUrl),
 })
 const animationsPanel = new AnimationsPanel(animationsPanelEl)
 
@@ -214,9 +221,8 @@ function updateStatusBar(text) {
 client.on('world:loaded', ({ name }) => {
   if (!client.som) return
 
-  // Clear previous background/environment before loading new world
-  threeScene.background  = null
-  threeScene.environment = null
+  // Z3 — the slots are the sky controller's; it re-asserts an unchanged URL
+  // rather than clearing and refetching it.
 
   // Reset selection and drag state for fresh world
   selected  = null
@@ -242,7 +248,7 @@ client.on('world:loaded', ({ name }) => {
   animationsPanel.show(client.som, animCtrl)
   updateStatusBar(name ? `World: ${name}` : '')
 
-  loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
+  sky.update(client.som.extras?.atrium?.background, client.worldBaseUrl)
 
   // Attach selection and drag listeners to all non-ephemeral SOM nodes
   for (const node of client.som.nodes) {
@@ -273,15 +279,17 @@ function resetPanels() {
 client.on('connecting', () => {
   resetPanels()
   setConnectionState('connecting')
+  sky.resetWorld()
 })
 
 client.on('disconnected', () => {
   resetPanels()
   setConnectionState('disconnected')
+  sky.resetWorld()
 
   // Reload world in static mode — restores nav node and clears avatar geometry
   const url = worldUrlInput.value.trim()
-  if (url) client.loadWorld(new URL(url, window.location.href).href)
+  if (url) { sky.resetWorld(); client.loadWorld(new URL(url, window.location.href).href) }
 })
 
 client.on('error', (err) => {
@@ -326,7 +334,7 @@ client.on('som:set', ({ nodeName }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
     worldInfo.refresh()
-    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
+    sky.update(client.som.extras?.atrium?.background, client.worldBaseUrl)
     return
   }
   const selected = treeView.selectedNode
@@ -353,6 +361,7 @@ async function loadAtriumConfig(config, baseUrl) {
   let userMessage = null
 
   if (gltfUrl) {
+    sky.resetWorld()
     await client.loadWorld(gltfUrl)
     worldUrlInput.value = gltfUrl
   } else if (config.world.gltf) {
@@ -386,12 +395,14 @@ async function loadDroppedFile(file) {
 
   if (name.endsWith('.glb')) {
     const buffer = await file.arrayBuffer()
+    sky.resetWorld()
     await client.loadWorldFromData(buffer, file.name)
     return
   }
 
   if (name.endsWith('.gltf')) {
     const text = await file.text()
+    sky.resetWorld()
     await client.loadWorldFromData(text, file.name)
     return
   }
@@ -452,6 +463,7 @@ loadBtn.addEventListener('click', async () => {
       if (msg) updateStatusBar(msg)
     } else {
       const absoluteUrl = new URL(url, window.location.href).href
+      sky.resetWorld()
       await client.loadWorld(absoluteUrl)
     }
   } catch (err) {

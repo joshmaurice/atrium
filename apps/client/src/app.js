@@ -4,7 +4,7 @@
 import * as THREE from 'three'
 import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
-import { Stage, PointerInputBridge, initDocumentView, loadBackground, buildAvatarDescriptor, buildTeleporterDescriptor, buildPrimitiveDescriptor } from '@atrium/renderer-three'
+import { Stage, PointerInputBridge, initDocumentView, createSkyLoader, buildAvatarDescriptor, buildTeleporterDescriptor, buildPrimitiveDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
 import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
@@ -26,7 +26,7 @@ import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 import { palettePlacement, paletteName, teleporterName, copyName, modelName, firstFreeName } from './edit-palette.js'
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
 import { createDiagnosticListeners } from './model-listeners.js'
-import { fetchModel } from '@atrium/client/model-fetch'
+import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
@@ -384,6 +384,12 @@ const stage = new Stage(viewportEl, {
 const { renderer, nav, animCtrl, scene: threeScene } = stage
 const avatar = stage.avatar
 const canvas  = renderer.domElement
+
+// Z3 (library-sky) — the sky controller. It ALONE writes scene.background and
+// scene.environment: the clearing this file used to do before a load, and the
+// free `loadBackground` it used to call, are gone. Every world boundary calls
+// `sky.resetWorld()`, beside `modelBridge.resetWorld()`.
+const sky = createSkyLoader({ scene: threeScene, fetchImage })
 // Firefox can start a native drag of a <canvas> as an image (seen once Edit
 // mode's TransformControls had pointer capture): the viewport's drop outline
 // appears and look-drags stop. The canvas is never something to drag.
@@ -636,10 +642,8 @@ client.on('world:loaded', ({ name, description, author }) => {
   // (pre-brief #7) — always use the client's base, not the module-level worldUrlInput.
   const bgBaseUrl = client.worldBaseUrl || ''
 
-  // Clear previous background/environment before loading new world
-  threeScene.background = null
-  threeScene.environment = null
-
+  // Z3 — the slots are NOT cleared here any more: the sky controller owns them,
+  // and it re-asserts an unchanged URL instead of refetching it (R1).
   // B1 — the old sceneGroup (and anything attached to it) is about to go.
   endEditSession()
 
@@ -652,7 +656,7 @@ client.on('world:loaded', ({ name, description, author }) => {
   stage.setSceneGroup(sceneGroup)
   modelBridge.attachView(docView, sceneGroup)
 
-  loadBackground(threeScene, client.som.extras?.atrium?.background, bgBaseUrl)
+  sky.update(client.som.extras?.atrium?.background, bgBaseUrl)
 
   // HUD world line
   hudWorldEl.textContent = name ? `World: ${name}` : ''
@@ -736,6 +740,9 @@ client.on('connecting', () => {
   // ledger and dispose every template and instance. It does NOT wait for a new
   // client.som (the client emits `connecting` long before the next som-dump).
   modelBridge.resetWorld()
+  // Z3 — the sky's world boundary, beside the bridge's. A world change never
+  // reuses a pending sky request from the previous world, even for one URL.
+  sky.resetWorld()
   // Z7 — the Model form goes with the panel.
   modelForm.reset()
   refreshModelRow()
@@ -751,6 +758,7 @@ client.on('disconnected', () => {
   setConnectionState('disconnected')
   // A9 — the same world reset the connecting path takes.
   modelBridge.resetWorld()
+  sky.resetWorld()
   modelForm.reset()
   refreshModelRow()
   // Close the destination form (the panel is going with the session)
@@ -802,7 +810,7 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 client.on('som:set', ({ nodeName, path }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
-    loadBackground(threeScene, client.som.extras?.atrium?.background, client.worldBaseUrl)
+    sky.update(client.som.extras?.atrium?.background, client.worldBaseUrl)
     return
   }
   // Rebuild pads if a teleporter node was modified (T4), or a transform of a
@@ -2835,6 +2843,7 @@ epModel.addEventListener('click', () => {
 function beginNewWorld() {
   endCheck()
   modelBridge.resetWorld()
+  sky.resetWorld()
   modelForm.reset()
   refreshModelRow()
 }
