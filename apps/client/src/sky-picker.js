@@ -42,15 +42,42 @@ function deepCopy(value) {
 /**
  * The select's value for a stored texture: None, a catalog sky's id, or Custom.
  *
- * The SOM stores the URL the write STORED (L22a), so each sky's stored URL is
- * computed the same way before the comparison.
+ * Z5 (edit-polish-3, L4a) — a catalog sky is recognised BY PATH. The stored
+ * texture is resolved against the world's base (or, with no base, the page's
+ * origin) and matched against an entry's own `url`: no query, no fragment, and
+ * the pathnames equal. Round 1 compared the stored texture as a STRING with the
+ * URL `storedUrl()` computes for THIS viewer, so a world on origin A whose owner
+ * stored the root path showed "Custom" on a page served from origin B, and an
+ * owner on B's absolute URL showed "Custom" on A — the sky itself was right, only
+ * the label was wrong.
+ *
+ * The match is a PATH HEURISTIC, not a content check (review 7, nit): catalog
+ * file names carry the first 12 hex digits of the file's sha256
+ * (`<id>-<sha12>.<ext>`), which makes it strong, but a host that is not the
+ * library's can serve other bytes at that same path and be labelled wrongly. The
+ * sky that is shown is unaffected.
  */
-export function skyValueFor(texture, skies, { worldBaseUrl = null, pageOrigin = '', storedUrl = (path) => path } = {}) {
+export function skyValueFor(texture, skies, { worldBaseUrl = null, pageOrigin = '' } = {}) {
   if (typeof texture !== 'string' || texture === '') return SKY_NONE
+  const stored = storedPath(texture, worldBaseUrl ?? pageOrigin)
+  if (stored === null) return SKY_CUSTOM
   for (const entry of skies ?? []) {
-    if (storedUrl(entry.url, worldBaseUrl, pageOrigin) === texture) return entry.id
+    if (stored === entry.url) return entry.id
   }
   return SKY_CUSTOM
+}
+
+/**
+ * Z5 — the path a stored texture names, or null when it cannot name one: it must
+ * resolve against `base`, and carry no query and no fragment. `entry.url` is a
+ * root path, so a stored URL that rounds to that path matches it whatever host
+ * is serving the bytes.
+ */
+function storedPath(texture, base) {
+  let url
+  try { url = new URL(texture, base || undefined) } catch { return null }
+  if (url.search || url.hash) return null
+  return url.pathname
 }
 
 /**
@@ -134,7 +161,6 @@ export function createSkyPicker({ deps = {} } = {}) {
     return skyValueFor(currentTexture(), skies(), {
       worldBaseUrl: deps.worldBaseUrl?.() ?? null,
       pageOrigin: deps.pageOrigin?.() ?? '',
-      storedUrl: (path, base, origin) => deps.storedUrl?.(path, base, origin) ?? path,
     })
   }
 
@@ -197,6 +223,13 @@ export function createSkyPicker({ deps = {} } = {}) {
 
   /** Z4 — the select's change: one write, from a copy of the CURRENT extras. */
   function change(value) {
+    // Z5 — an UNCHANGED pick sends nothing, and does so BEFORE any URL is
+    // computed. One id can now stand for several stored URLs (a catalog sky
+    // stored as a root path in one world and as an absolute URL in another), so
+    // re-choosing the option the select already shows would rewrite the world's
+    // sky from another origin. Browsers fire no `change` for the shown option,
+    // which is what hid this; the picker itself refuses it.
+    if (value === valueForSom()) return null
     if (state.waiting !== null) return null
     if (!deps.canEdit?.()) return null
     const som = deps.som?.()

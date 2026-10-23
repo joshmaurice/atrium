@@ -40,7 +40,7 @@ function extras(texture, extra = {}) {
   }
 }
 
-function harness({ texture = '', canEdit = true, skies = SKIES, skyUpdate, skyRetry } = {}) {
+function harness({ texture = '', canEdit = true, skies = SKIES, skyUpdate, skyRetry, pageOrigin = PAGE_ORIGIN, worldBaseUrl = 'https://atrium.example' } = {}) {
   const som = { extras: extras(texture) }
   const calls = {
     applyExtras: [], applyLocally: 0, update: [], retry: 0,
@@ -62,8 +62,8 @@ function harness({ texture = '', canEdit = true, skies = SKIES, skyUpdate, skyRe
       som: () => som,
       catalog: () => ({ ...CATALOG, skies }),
       canEdit: () => canEdit,
-      worldBaseUrl: () => 'https://atrium.example',
-      pageOrigin: () => PAGE_ORIGIN,
+      worldBaseUrl: () => worldBaseUrl,
+      pageOrigin: () => pageOrigin,
       storedUrl: (path) => storedUrl(path),
       applyExtras: (next) => { calls.applyExtras.push(next); som.extras = next; const seq = 100 + seqs.length; seqs.push(seq); return seq },
       applyLocally: (fn) => { calls.applyLocally += 1; fn() },
@@ -84,31 +84,43 @@ const settle = () => new Promise((resolve) => setImmediate(resolve))
 // The select's value
 // ===========================================================================
 
-describe('skyValueFor', () => {
+describe('skyValueFor (Z5 — by path)', () => {
   test('None for an empty texture', () => {
     assert.equal(skyValueFor('', SKIES), SKY_NONE)
     assert.equal(skyValueFor(undefined, SKIES), SKY_NONE)
     assert.equal(skyValueFor(null, SKIES), SKY_NONE)
   })
 
-  test('the sky id for a catalog sky\'s stored URL', () => {
-    const withOrigin = (path) => `${PAGE_ORIGIN}${path}`
-    assert.equal(skyValueFor(storedUrl(SKIES[1].url), SKIES, { pageOrigin: PAGE_ORIGIN, storedUrl: withOrigin }), 'Sky_02')
+  test('the root path names the entry from either page origin', () => {
+    for (const origin of ['https://atrium.example', 'https://other.example']) {
+      assert.equal(skyValueFor(SKIES[0].url, SKIES, { pageOrigin: origin }), 'Sky_01')
+      assert.equal(skyValueFor(SKIES[1].url, SKIES, { worldBaseUrl: 'https://atrium.example/', pageOrigin: origin }), 'Sky_02')
+    }
   })
 
-  test('Custom for a texture that is not a catalog sky', () => {
+  test('the same path on another host names the entry too', () => {
+    // The owner stored an absolute URL on origin A; the viewer's page is on B.
+    assert.equal(skyValueFor('https://a.example/assets/library/skies/Sky_01-aaaaaaaaaaaa.jpg', SKIES,
+      { worldBaseUrl: 'https://atrium.example', pageOrigin: 'https://b.example' }), 'Sky_01')
+    // And the other way round.
+    assert.equal(skyValueFor('https://b.example/assets/library/skies/Sky_02-bbbbbbbbbbbb.jpg', SKIES,
+      { worldBaseUrl: 'https://atrium.example', pageOrigin: 'https://a.example' }), 'Sky_02')
+  })
+
+  test('a query, a fragment, another path or a near-miss name is Custom', () => {
+    assert.equal(skyValueFor(`${SKIES[0].url}?v=2`, SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
+    assert.equal(skyValueFor(`${SKIES[0].url}#top`, SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
     assert.equal(skyValueFor('https://elsewhere.example/x.jpg', SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
-    assert.equal(skyValueFor('/assets/library/skies/Unknown_01-cccccccccccc.jpg', SKIES), SKY_CUSTOM)
+    assert.equal(skyValueFor('/assets/library/skies/Unknown_01-cccccccccccc.jpg', SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
+    // A near miss: the id is right, the hash in the name is not.
+    assert.equal(skyValueFor('/assets/library/skies/Sky_01-ffffffffffff.jpg', SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
+    // ...and neither is the extension.
+    assert.equal(skyValueFor('/assets/library/skies/Sky_01-aaaaaaaaaaaa.png', SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
   })
 
-  test('the stored URL is computed with the world base URL and page origin', () => {
-    const base = 'https://world.example/'
-    const skyStored = (path, worldBaseUrl, pageOrigin) =>
-      (worldBaseUrl && new URL(worldBaseUrl).origin === pageOrigin ? path : `${pageOrigin}${path}`)
-    // Same origin: the path is stored as is.
-    assert.equal(skyValueFor('/assets/library/skies/Sky_01-aaaaaaaaaaaa.jpg', SKIES, { worldBaseUrl: 'https://atrium.example/', pageOrigin: PAGE_ORIGIN, storedUrl: skyStored }), 'Sky_01')
-    // Another origin: the absolute URL is stored.
-    assert.equal(skyValueFor(`${PAGE_ORIGIN}/assets/library/skies/Sky_02-bbbbbbbbbbbb.jpg`, SKIES, { worldBaseUrl: base, pageOrigin: PAGE_ORIGIN, storedUrl: skyStored }), 'Sky_02')
+  test('a texture that names no path at all is Custom, never a crash', () => {
+    assert.equal(skyValueFor('skyboxtest1.png', SKIES), SKY_CUSTOM)
+    assert.equal(skyValueFor('skyboxtest1.png', SKIES, { pageOrigin: '' }), SKY_CUSTOM)
   })
 })
 
@@ -236,6 +248,28 @@ describe('change', () => {
     const h = harness({ canEdit: false })
     assert.equal(h.picker.change('Sky_01'), null)
     assert.equal(h.calls.applyExtras.length, 0)
+  })
+
+  test('Z5 — an unchanged pick sends NOTHING, from another origin too', () => {
+    // The world's SOM holds the catalog PATH (origin A stored it); this viewer's
+    // page is on origin B. The picker names it (by path), and re-choosing what the
+    // select already shows must not rewrite the world's sky from B.
+    const h = harness({ texture: SKIES[0].url, pageOrigin: 'https://b.example', worldBaseUrl: 'https://atrium.example' })
+    assert.equal(h.picker.value, 'Sky_01', 'the picker names the catalog sky from origin B')
+    assert.equal(h.picker.change('Sky_01'), null, 'an unchanged pick is refused by the picker itself')
+    assert.equal(h.calls.applyExtras.length, 0, 'zero applyExtras calls: nothing is sent')
+    assert.equal(h.calls.update.length, 0, 'and the controller is not asked to load anything')
+    assert.equal(h.picker.waiting, null)
+    // ...and a real change still sends.
+    assert.ok(h.picker.change(SKY_NONE), 'None is not the current value, so this one sends')
+    assert.equal(h.calls.applyExtras.length, 1)
+  })
+
+  test('Z5 — an unchanged pick while a write waits changes nothing', () => {
+    const h = harness({ texture: storedUrl(SKIES[0].url) })
+    assert.ok(h.picker.change(SKY_NONE), 'a real change sends')
+    assert.equal(h.picker.change(SKY_NONE), null, 'the same value is refused the second time')
+    assert.equal(h.calls.applyExtras.length, 1)
   })
 
   test('an unknown sky id changes nothing', () => {
