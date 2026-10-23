@@ -14,6 +14,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   fetchImage, IMAGE_LIMITS, IMAGE_REASONS, FETCH_OPTIONS,
+  SKY_RETRYABLE_REASONS, isSkyRetryable,
 } from '../src/model-fetch.js'
 
 const UTF8 = new TextEncoder()
@@ -402,4 +403,24 @@ test('L26: the abort listener is removed on success — the signal leaks nothing
   // Aborting after the transfer must not touch the finished transfer.
   external.abort()
   assert.equal(result.ok, true)
+})
+
+// ===========================================================================
+// V3.4 (round 2) — which failures a Retry can fix
+// ===========================================================================
+
+test('V3.4: a transfer, deadline, cap, decode or image-header failure is retryable', () => {
+  for (const reason of ['network', 'http', 'timeout', 'too-large', 'decode',
+    'unsupported-image', 'bad-size', 'too-large-dimensions']) {
+    assert.equal(isSkyRetryable(reason), true, reason)
+  }
+})
+
+test('V3.4: a refusal by rule is NOT retryable — it lives in the same module', () => {
+  for (const reason of ['url-type', 'url-length', 'url-chars', 'url-scheme', 'url-parse',
+    'url-host', 'url-credentials', 'url-relative', 'no-base', 'empty',
+    'bad-spec', 'redirect', 'aborted', 'superseded', 'disposed']) {
+    assert.equal(isSkyRetryable(reason), false, reason)
+  }
+  assert.deepEqual(SKY_RETRYABLE_REASONS.length, 8)
 })

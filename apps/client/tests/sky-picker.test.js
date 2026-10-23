@@ -40,7 +40,7 @@ function extras(texture, extra = {}) {
   }
 }
 
-function harness({ texture = '', canEdit = true, skies = SKIES } = {}) {
+function harness({ texture = '', canEdit = true, skies = SKIES, skyUpdate, skyRetry } = {}) {
   const som = { extras: extras(texture) }
   const calls = {
     applyExtras: [], applyLocally: 0, update: [], retry: 0,
@@ -48,8 +48,14 @@ function harness({ texture = '', canEdit = true, skies = SKIES } = {}) {
   }
   const seqs = []
   const sky = {
-    update: (background, baseUrl) => { calls.update.push({ background, baseUrl }); return Promise.resolve({ ok: true }) },
-    retry: () => { calls.retry += 1; return Promise.resolve({ ok: true }) },
+    update: (background, baseUrl) => {
+      calls.update.push({ background, baseUrl })
+      return skyUpdate ? skyUpdate(background, baseUrl) : Promise.resolve({ ok: true })
+    },
+    retry: () => {
+      calls.retry += 1
+      return skyRetry ? skyRetry() : Promise.resolve({ ok: true })
+    },
   }
   const picker = createSkyPicker({
     deps: {
@@ -70,6 +76,9 @@ function harness({ texture = '', canEdit = true, skies = SKIES } = {}) {
   const last = () => calls.renderSelect.at(-1)
   return { picker, som, calls, last }
 }
+
+/** Let the picker's routed promises settle. */
+const settle = () => new Promise((resolve) => setImmediate(resolve))
 
 // ===========================================================================
 // The select's value
@@ -185,7 +194,8 @@ describe('change', () => {
   test('it sends a copy of the current extras differing only in the two leaves', () => {
     const h = harness({ texture: '' })
     const before = JSON.parse(JSON.stringify(h.som.extras))
-    const seq = h.picker.change('Sky_01')
+    h.picker.change('Sky_01')
+    const seq = h.picker.waiting
     assert.equal(seq, 100)
     assert.equal(h.calls.applyExtras.length, 1)
     const sent = h.calls.applyExtras[0]
@@ -242,7 +252,8 @@ describe('change', () => {
 describe('the answers', () => {
   test('accepted re-enables the select and clears the status', () => {
     const h = harness()
-    const seq = h.picker.change('Sky_01')
+    h.picker.change('Sky_01')
+    const seq = h.picker.waiting
     assert.equal(h.picker.onAccepted(seq), true)
     assert.equal(h.picker.waiting, null)
     assert.equal(h.picker.status, null)
@@ -251,7 +262,8 @@ describe('the answers', () => {
 
   test('rejected restores only the two leaves, WITHOUT sending (R2)', () => {
     const h = harness({ texture: storedUrl(SKIES[0].url) })
-    const seq = h.picker.change('Sky_02')
+    h.picker.change('Sky_02')
+    const seq = h.picker.waiting
     assert.equal(h.calls.applyExtras.length, 1, 'the forward write sent once')
 
     assert.equal(h.picker.onRejected(seq, 'the sky was refused'), true)
@@ -264,7 +276,8 @@ describe('the answers', () => {
 
   test('rejected keeps a description another session changed meanwhile (R2)', () => {
     const h = harness({ texture: storedUrl(SKIES[0].url) })
-    const seq = h.picker.change('Sky_02')
+    h.picker.change('Sky_02')
+    const seq = h.picker.waiting
     // Another session changed the description while our write was in flight.
     h.som.extras.atrium.description = 'Changed elsewhere'
     h.picker.onRejected(seq, 'refused')
@@ -274,7 +287,8 @@ describe('the answers', () => {
 
   test('rejected after another session\'s background change keeps that change (R2)', () => {
     const h = harness({ texture: storedUrl(SKIES[0].url) })
-    const seq = h.picker.change('Sky_02')
+    h.picker.change('Sky_02')
+    const seq = h.picker.waiting
     // Another session set a third sky before our rejection arrived.
     const third = storedUrl('/assets/library/skies/Sky_03-cccccccccccc.jpg')
     h.som.extras.atrium.background.texture = third
@@ -284,7 +298,8 @@ describe('the answers', () => {
 
   test('unknown just ends the wait: the reconnect\'s som-dump is the truth', () => {
     const h = harness()
-    const seq = h.picker.change('Sky_01')
+    h.picker.change('Sky_01')
+    const seq = h.picker.waiting
     assert.equal(h.picker.onUnknown(seq), true)
     assert.equal(h.picker.waiting, null)
     assert.equal(h.calls.applyLocally, 0)
@@ -292,7 +307,8 @@ describe('the answers', () => {
 
   test('an answer for another seq is ignored', () => {
     const h = harness()
-    const seq = h.picker.change('Sky_01')
+    h.picker.change('Sky_01')
+    const seq = h.picker.waiting
     assert.equal(h.picker.onAccepted(seq + 1), false)
     assert.equal(h.picker.waiting, seq)
   })
@@ -336,13 +352,15 @@ describe('the failure and Retry (Z4)', () => {
     assert.equal(h.calls.setStatus.at(-1), null)
   })
 
-  test('Retry calls the controller once and clears the failure first', () => {
+  test('Retry does NOT clear the failure itself (V3.2): the result decides', () => {
     const h = harness()
     h.picker.onSkyResult({ ok: false, reason: 'network', message: 'x' })
-    h.picker.retry()
+    const promise = h.picker.retry()
     assert.equal(h.calls.retry, 1)
-    assert.equal(h.picker.failure, null)
-    assert.equal(h.calls.setRetryVisible.at(-1), false)
+    assert.equal(typeof promise.then, 'function', 'V3.1 — retry() returns the promise')
+    assert.deepEqual(h.picker.failure, { reason: 'network', message: 'x' },
+      'the failure stays until the retry answers')
+    assert.equal(h.calls.setRetryVisible.at(-1), true, 'and Retry stays visible')
   })
 
   test('a world change clears the failure and the wait', () => {
@@ -360,6 +378,124 @@ describe('the failure and Retry (Z4)', () => {
     h.picker.onSkyResult({ ok: false, reason: 'network', message: 'x' })
     assert.equal(h.calls.setRetryVisible.at(-1), false, 'the Retry button stays hidden')
     assert.equal(h.last().enabled, false, 'and the select is disabled')
+  })
+})
+
+// ===========================================================================
+// V3 (round 2) — every current failure is shown, and Retry only when it can help
+// ===========================================================================
+
+describe('the result is routed, and Retry only when it can help (V3)', () => {
+  test('change() to a failing sky shows the reason and Retry, FROM THE PROMISE', async () => {
+    const h = harness({
+      skyUpdate: () => Promise.resolve({ ok: false, reason: 'network', message: 'the network went away' }),
+    })
+    const result = await h.picker.change('Sky_01')
+    assert.deepEqual(result, { ok: false, reason: 'network', message: 'the network went away' })
+    assert.deepEqual(h.picker.failure, { reason: 'network', message: 'the network went away' })
+    assert.equal(h.calls.setStatus.at(-1), 'the network went away')
+    assert.equal(h.calls.setRetryVisible.at(-1), true)
+  })
+
+  test('a change that succeeds clears any earlier failure', async () => {
+    const h = harness({ skyUpdate: () => Promise.resolve({ ok: true }) })
+    h.picker.onSkyResult({ ok: false, reason: 'network', message: 'x' })
+    await h.picker.change('Sky_01')
+    assert.equal(h.picker.failure, null)
+    assert.equal(h.calls.setRetryVisible.at(-1), false)
+  })
+
+  test('a controller that throws is a failure like any other', async () => {
+    const h = harness({ skyUpdate: () => Promise.reject(new Error('boom')) })
+    await h.picker.change('Sky_01')
+    assert.equal(h.picker.failure.reason, 'network')
+    assert.match(h.picker.failure.message, /boom/)
+  })
+
+  test('a Retry that fails again keeps the reason and Retry, with the NEW reason', async () => {
+    const h = harness({
+      skyUpdate: () => Promise.resolve({ ok: false, reason: 'network', message: 'the first try' }),
+      skyRetry: () => Promise.resolve({ ok: false, reason: 'timeout', message: 'the sky took too long to download' }),
+    })
+    await h.picker.change('Sky_01')
+    assert.deepEqual(h.picker.failure, { reason: 'network', message: 'the first try' })
+
+    const again = await h.picker.retry()
+    assert.equal(h.calls.retry, 1, 'the controller is retried once')
+    assert.deepEqual(again, { ok: false, reason: 'timeout', message: 'the sky took too long to download' })
+    assert.deepEqual(h.picker.failure, { reason: 'timeout', message: 'the sky took too long to download' })
+    assert.equal(h.calls.setStatus.at(-1), 'the sky took too long to download')
+    assert.equal(h.calls.setRetryVisible.at(-1), true, 'and Retry stays')
+  })
+
+  test('a Retry that succeeds clears both the reason and the button', async () => {
+    const h = harness({
+      skyUpdate: () => Promise.resolve({ ok: false, reason: 'network', message: 'x' }),
+      skyRetry: () => Promise.resolve({ ok: true }),
+    })
+    await h.picker.change('Sky_01')
+    assert.equal(h.calls.setRetryVisible.at(-1), true)
+
+    await h.picker.retry()
+    assert.equal(h.picker.failure, null)
+    assert.equal(h.calls.setRetryVisible.at(-1), false)
+    assert.equal(h.calls.setStatus.at(-1), null)
+  })
+
+  test('a rule refusal shows its reason with NO Retry (V3.4)', async () => {
+    const message = 'url must start with https:// or with a single /'
+    const h = harness({ skyUpdate: () => Promise.resolve({ ok: false, reason: 'url-scheme', message }) })
+    await h.picker.change('Sky_01')
+    assert.deepEqual(h.picker.failure, { reason: 'url-scheme', message })
+    assert.equal(h.calls.setStatus.at(-1), message, 'the reason is shown')
+    assert.equal(h.calls.setRetryVisible.at(-1), false, 'but there is no button to press')
+  })
+
+  test('Retry is never offered for ANY refusal by rule', async () => {
+    for (const reason of ['url-type', 'url-length', 'url-chars', 'url-scheme', 'url-parse',
+      'url-host', 'url-credentials', 'url-relative', 'no-base', 'empty']) {
+      const h = harness({ skyUpdate: () => Promise.resolve({ ok: false, reason, message: reason }) })
+      await h.picker.change('Sky_01')
+      assert.equal(h.calls.setRetryVisible.at(-1), false, `${reason} must show no Retry`)
+    }
+  })
+
+  test('Retry IS offered for every retryable failure', async () => {
+    for (const reason of ['network', 'http', 'timeout', 'too-large', 'decode',
+      'unsupported-image', 'bad-size', 'too-large-dimensions']) {
+      const h = harness({ skyUpdate: () => Promise.resolve({ ok: false, reason, message: reason }) })
+      await h.picker.change('Sky_01')
+      assert.equal(h.calls.setRetryVisible.at(-1), true, `${reason} must offer Retry`)
+    }
+  })
+
+  test('onRejected\'s own controller call is routed too (V3.1)', async () => {
+    let call = 0
+    const h = harness({
+      texture: storedUrl(SKIES[0].url),
+      skyUpdate: () => {
+        call += 1
+        return Promise.resolve(call === 1
+          ? { ok: true }
+          : { ok: false, reason: 'http', message: 'the server refused the request (500)' })
+      },
+    })
+    h.picker.change('Sky_02')
+    const seq = h.picker.waiting
+    h.picker.onRejected(seq, 'the sky was refused')
+    await settle()
+    assert.deepEqual(h.picker.failure, { reason: 'http', message: 'the server refused the request (500)' },
+      'the rollback update\'s result reaches the report')
+    assert.equal(h.calls.setRetryVisible.at(-1), true)
+  })
+
+  test('a superseded failure is still ignored, and Retry stays hidden for it', async () => {
+    const h = harness()
+    for (const reason of ['superseded', 'disposed']) {
+      h.picker.onSkyResult({ ok: false, reason })
+      assert.equal(h.picker.failure, null, reason)
+    }
+    assert.equal(h.calls.setRetryVisible.length, 0)
   })
 })
 
@@ -414,6 +550,21 @@ describe('app.js wiring (read as a file)', () => {
   test('the picker is created and its results are routed', () => {
     assert.match(source, /skyPicker = createSkyPicker\(/)
     assert.match(source, /\.then\(\(result\) => skyPicker\?\.onSkyResult\(result\)\)/)
+  })
+
+  test('V3.1: app.js\'s Retry handler routes the promise — it cannot be dropped', () => {
+    // app.js must call retry() (round 1 called `sky.update` from change() and
+    // threw the answer away, so a failed sky left no reason and no Retry).
+    assert.match(source, /epSkyRetry\?\.addEventListener\('click',\s*\(\)\s*=>[^\n]*skyPicker\.retry\(\)\)/)
+    // And what it returns is routed, in the picker's one place: `retry()` and
+    // `change()` both hand the controller's promise to `route()`.
+    const picker = readFileSync(resolve(__dirname, '../src/sky-picker.js'), 'utf-8')
+    assert.match(picker, /return route\(deps\.sky\.retry\(\)\)/,
+      'retry() routes the controller promise to onSkyResult')
+    assert.match(picker, /return route\(deps\.sky\?\.update\?\.\(/,
+      'change() routes the controller promise to onSkyResult')
+    assert.match(picker, /function route\(result\) \{/, 'and there is exactly one router')
+    assert.equal((picker.match(/function route\(/g) ?? []).length, 1)
   })
 
   test('world:loaded and som:set __document__ sync the picker', () => {

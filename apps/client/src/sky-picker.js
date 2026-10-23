@@ -16,7 +16,15 @@
  * a DEEP COPY of the current `som.extras`, so nothing else is changed — and a
  * rejected write is rolled back for the two background leaves only, through
  * `applyLocally`, and is NEVER sent.
+ *
+ * Round 2 (V3): EVERY controller call this picker makes has its result routed to
+ * `onSkyResult` — one place, inside the picker — so no call site (here or in
+ * app.js) can drop it. `retry()` never clears the failure itself; the result
+ * decides. And Retry is offered only for a failure a retry can fix (V3.4):
+ * a rule refusal shows its reason with no button.
  */
+
+import { isSkyRetryable } from '@atrium/client/model-fetch'
 
 /** The select's value for "no sky". */
 export const SKY_NONE = ''
@@ -140,7 +148,35 @@ export function createSkyPicker({ deps = {} } = {}) {
       enabled: edit && state.waiting === null,
     })
     deps.setStatus?.(state.status ?? state.failure?.message ?? state.failure?.reason ?? null)
-    deps.setRetryVisible?.(Boolean(state.failure) && edit)
+    // V3.4 — Retry is offered only for a failure a retry can fix. A refusal by
+    // rule (any resolveSkyUrl code, a type this client does not render) shows its
+    // reason with NO button: retrying it can never help.
+    deps.setRetryVisible?.(Boolean(state.failure) && edit && isSkyRetryable(state.failure.reason))
+  }
+
+  /**
+   * V3.1 — THE one place a controller result reaches the report. Every call this
+   * picker makes to the controller (`change`, `onRejected`'s local update,
+   * `retry`) goes through here, so no call site can drop a result. The promise is
+   * returned too, so a caller (app.js, a test) can await the same answer.
+   *
+   * @param {Promise<object>|object|undefined} result
+   * @returns {Promise<object>}
+   */
+  function route(result) {
+    if (!result || typeof result.then !== 'function') {
+      onSkyResult(result)
+      return Promise.resolve(result)
+    }
+    return Promise.resolve(result).then(
+      (value) => { onSkyResult(value); return value },
+      (error) => {
+        // A controller that throws is a failure like any other.
+        const failure = { ok: false, reason: 'network', message: String(error?.message ?? error) }
+        onSkyResult(failure)
+        return failure
+      },
+    )
   }
 
   /** world:loaded, som:set of __document__, and after every answer. */
@@ -191,10 +227,11 @@ export function createSkyPicker({ deps = {} } = {}) {
     state.status = null
     state.failure = null
     render()
-    // The server's echo of the owner's own send resolves the pending edit but
-    // emits no som:set, so the sky is updated locally too.
-    deps.sky?.update?.(next.atrium.background, deps.worldBaseUrl?.() ?? null)
-    return seq
+    // V3.1 — the result is routed here (one place) and the promise is returned,
+    // so no call site can drop it. The server's echo of the owner's own send
+    // resolves the pending edit but emits no som:set, so the sky is updated
+    // locally too.
+    return route(deps.sky?.update?.(next.atrium.background, deps.worldBaseUrl?.() ?? null))
   }
 
   /** edit:accepted for this write: the select comes back. */
@@ -228,7 +265,8 @@ export function createSkyPicker({ deps = {} } = {}) {
       const restored = restoreSkyExtras(som?.extras ?? {}, state.previous)
       if (restored) {
         deps.applyLocally?.(() => { som.extras = restored })
-        deps.sky?.update?.(backgroundOf(restored), deps.worldBaseUrl?.() ?? null)
+        // V3.1 — the rollback's own controller call is routed like every other.
+        route(deps.sky?.update?.(backgroundOf(restored), deps.worldBaseUrl?.() ?? null))
       }
     }
 
@@ -266,11 +304,16 @@ export function createSkyPicker({ deps = {} } = {}) {
     render()
   }
 
-  /** Z4 — the Retry button: the controller tries the world's current sky again. */
+  /**
+   * Z4 — the Retry button: the controller tries the world's current sky again.
+   *
+   * V3.2 — it does NOT clear the failure itself. The result decides: a success
+   * clears it (`onSkyResult`), a failure shows the new reason and keeps Retry.
+   * V3.1 — its promise is routed (and returned) like `change()`'s.
+   */
   function retry() {
-    state.failure = null
-    render()
-    return deps.sky?.retry?.()
+    if (!deps.sky?.retry) return null
+    return route(deps.sky.retry())
   }
 
   return {

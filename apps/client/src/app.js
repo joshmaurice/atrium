@@ -3107,6 +3107,11 @@ skyPicker = createSkyPicker({
   },
 })
 
+// V3.1 (round 2) — the select and the Retry button. The picker routes its own
+// controller calls to `onSkyResult` (one place, inside sky-picker.js) and returns
+// the promise, so neither handler here can drop a result: round 1 called
+// `sky.update(...)` and threw its answer away, which is why a failed sky left the
+// owner with no reason and no Retry.
 epSky?.addEventListener('change', () => skyPicker.change(epSky.value))
 epSkyRetry?.addEventListener('click', () => skyPicker.retry())
 
