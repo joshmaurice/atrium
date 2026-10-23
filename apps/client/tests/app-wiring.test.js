@@ -148,7 +148,7 @@ describe('Z2 — Edit off closes whichever form holds the gate, and discards the
   })
 
   test('the teleporter and model branches return without selectAdded for a not-owned answer', () => {
-    const answer = functionBody('onStructureAnswer')
+    const answer = stripComments(functionBody('onStructureAnswer'))
     const tele = answer.indexOf('if (request.teleporter)')
     const model = answer.indexOf('if (request.model)')
     const generic = answer.indexOf("if (removedMessage === 'show')", model)
@@ -172,7 +172,7 @@ describe('Z2 — Edit off closes whichever form holds the gate, and discards the
   })
 
   test('both branches use the one not-owned error rule, which reports nothing for an acceptance', () => {
-    const answer = functionBody('onStructureAnswer')
+    const answer = stripComments(functionBody('onStructureAnswer'))
     assert.match(answer, /orphanAddError\(status, message\)/)
     assert.match(flatten(functionBody('orphanAddError')), /if \(status === 'accepted'\) return null/)
   })
@@ -184,7 +184,7 @@ describe('Z2 — Edit off closes whichever form holds the gate, and discards the
 
 describe('Z3 — app.js is wiring only for the destination form', () => {
   test('the branch hands the answer to the form and returns', () => {
-    const answer = functionBody('onStructureAnswer')
+    const answer = stripComments(functionBody('onStructureAnswer'))
     const tele = answer.indexOf('if (request.teleporter)')
     const branch = answer.slice(tele, answer.indexOf('if (request.model)', tele))
     assert.match(branch, /teleporterForm\?\.onAnswer\(seq, status, message\)/)
