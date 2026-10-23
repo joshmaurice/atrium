@@ -1,0 +1,35 @@
+import sys, time, json
+import os; sys.path.insert(0, os.environ.get('HARNESS_ROOT', '/tmp/atrium-harness') + '/harness')
+from h import *
+NOTE = "() => getComputedStyle(document.getElementById('ep-spawn-note')).display"
+with sync_playwright() as pw:
+    br = pw.chromium.launch(args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'])
+    W = lambda pg, ms: pg.page.wait_for_timeout(ms)
+    a = Page(br); a.connect('wss://127.0.0.1:8443/w/grp7'); a.edit_on(); W(a, 800)
+    print('nodes', a.ev("atriumClient.som.nodes.map(n => n.name)"))
+    a.ev("__ep().selectForEdit(atriumClient.som.getNodeByName('Group'))"); W(a, 300)
+    print('C7g Group selected (origin 3,0,0; its pad lands on spawn)', a.ev("__ep().selected?.name"), 'note', a.ev(NOTE))
+    a.ev("__ep().selectForEdit(atriumClient.som.getNodeByName('Floor'))"); W(a, 300)
+    print('C7g Floor selected', a.ev(NOTE))
+    a.ev("__ep().selectForEdit(atriumClient.som.getNodeByName('Group'))"); W(a, 300)
+    DRAG = "(x) => { const e = __ep(); e.gizmo.dispatchEvent({ type: 'dragging-changed', value: true }); e.selectedObj.position.x = x; e.gizmo.dispatchEvent({ type: 'objectChange' }) }"
+    a.ev(DRAG, 8); W(a, 100)
+    print('C7g dragging the group to x=8 (pad now 5 m off)', a.ev(NOTE))
+    a.ev("(x) => { const e = __ep(); e.selectedObj.position.x = x; e.gizmo.dispatchEvent({ type: 'objectChange' }) }", 3); W(a, 100)
+    print('C7g dragging back to x=3', a.ev(NOTE))
+    a.ev("() => __ep().gizmo.dispatchEvent({ type: 'dragging-changed', value: false })"); W(a, 600)
+    b = Page(br); b.connect('wss://127.0.0.1:8443/w/grp7'); W(b, 500)
+    b.ev("() => { atriumClient.som.getNodeByName('Child Pad').translation = [0, 0, 4] }"); W(a, 1200)
+    print('C7g another session moves the CHILD pad away (group still selected on A)', a.ev(NOTE), 'A child z', a.ev("atriumClient.som.getNodeByName('Child Pad').translation"))
+    b.ev("() => { atriumClient.som.getNodeByName('Child Pad').translation = [0, 0, -3] }"); W(a, 1200)
+    print('C7g and back', a.ev(NOTE))
+    # numeric field commit
+    a.ev("__ep().selectForEdit(atriumClient.som.getNodeByName('Child Pad'))"); W(a, 300)
+    print('C7n child pad selected', a.ev(NOTE))
+    inp = a.page.locator('#ep-fields input[data-field="translation"][data-i="2"]') if a.ev("!!document.querySelector('#ep-fields')") else a.page.locator('input[data-field="translation"][data-i="2"]')
+    inp.fill('6'); inp.press('Enter'); W(a, 600)
+    print('C7n typed local z=6', a.ev(NOTE))
+    a.page.click('#ep-undo'); W(a, 1000)
+    print('C7n after Undo of the transform', a.ev(NOTE))
+    print('errors', a.errors, b.errors)
+    a.close(); b.close(); br.close()

@@ -1,0 +1,53 @@
+import sys, time, json
+import os; sys.path.insert(0, os.environ.get('HARNESS_ROOT', '/tmp/atrium-harness') + '/harness')
+from h import *
+RENAME = "(n) => { const e = JSON.parse(JSON.stringify(atriumClient.som.extras)); if (n === null) delete e.atrium.name; else e.atrium.name = n; atriumClient.som.extras = e; return atriumClient.lastSendSeq }"
+HUD = "document.getElementById('hud-world').textContent"
+FORMS = "() => ({ model: [__ep().modelForm.isOpen(), getComputedStyle(document.getElementById('model-form')).display, document.getElementById('model-url-input').value, __ep().modelForm.state.url], grid: [__lib().libraryGrid.isOpen(), getComputedStyle(document.getElementById('library-grid')).display], tp: [__ep().teleporterForm.isOpen(), getComputedStyle(document.getElementById('tp-form')).display, document.getElementById('tp-dest-input').value], gate: __ep().modelGate.current })"
+with sync_playwright() as pw:
+    br = pw.chromium.launch(args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'])
+    ctl(catalog='small', worldsDelay=0)
+    # ---- check 1: HUD follows a rename from another session
+    a = Page(br); a.connect('wss://127.0.0.1:8443/w/ep1')
+    b = Page(br); b.connect('wss://127.0.0.1:8443/w/ep1')
+    print('C1 start', repr(a.ev(HUD)))
+    b.ev(RENAME, 'Renamed World'); time.sleep(1.5)
+    print('C1 after rename (A, B)', repr(a.ev(HUD)), repr(b.ev(HUD)), 'A connected', a.ev('atriumClient.connected'))
+    b.ev(RENAME, ''); time.sleep(1.5)
+    print('C1 after empty name', repr(a.ev(HUD)))
+    b.ev(RENAME, 'Again'); time.sleep(1); b.ev(RENAME, None); time.sleep(1.5)
+    print('C1 after name removed', repr(a.ev(HUD)))
+    print('C1 errors', a.errors, b.errors)
+    a.close(); b.close()
+    # ---- check 2 and 9: Edit off closes forms and discards the Model draft
+    p = Page(br); p.connect('wss://127.0.0.1:8443/w/ep2'); p.edit_on()
+    url = '/assets/library/models/Tiny_Cube-a29f050367f9.glb'
+    p.page.click('#ep-model'); p.page.fill('#model-url-input', url); p.page.click('#model-check-btn')
+    p.wait("() => __ep().modelForm.state.result || __ep().modelForm.state.problem", timeout=30000)
+    print('C2 model open+checked', p.ev(FORMS), 'status', p.ev("document.getElementById('model-form').innerText.slice(0,200)"))
+    p.page.click('#edit-toggle-btn'); time.sleep(0.4)
+    print('C2 after Edit off', p.ev(FORMS))
+    p.edit_on(); time.sleep(0.3)
+    print('C2 Edit back on', p.ev(FORMS))
+    p.page.click('#ep-model'); time.sleep(0.3)
+    print('C9 reopen Model', p.ev(FORMS))
+    p.page.click('#ep-library'); time.sleep(0.5)
+    print('C2 library open', p.ev(FORMS))
+    p.page.click('#edit-toggle-btn'); time.sleep(0.3); p.edit_on(); time.sleep(0.3)
+    print('C2 library after Edit off/on', p.ev(FORMS))
+    p.page.click('#ep-teleporter'); time.sleep(0.5); p.page.fill('#tp-dest-input', '/worlds/x/y')
+    print('C2 tp open', p.ev(FORMS))
+    p.page.click('#edit-toggle-btn'); time.sleep(0.3); p.edit_on(); time.sleep(0.3)
+    print('C2 tp after Edit off/on', p.ev(FORMS))
+    p.page.click('#ep-teleporter'); time.sleep(0.5)
+    print('C2 tp reopened', p.ev(FORMS))
+    p.page.click('#tp-form-cancel'); time.sleep(0.2)
+    # C9b: reconnect with a URL typed (not checked)
+    p.page.click('#ep-model'); p.page.fill('#model-url-input', 'https://example.com/typed.glb'); time.sleep(0.2)
+    p.page.click('#connectBtn'); p.wait('!atriumClient.connected'); time.sleep(0.5)
+    print('C9 after disconnect', p.ev(FORMS))
+    p.page.click('#connectBtn'); p.wait('atriumClient.connected && atriumClient.som'); time.sleep(0.8)
+    p.edit_on(); p.page.click('#ep-model'); time.sleep(0.3)
+    print('C9 after reconnect, reopen', p.ev(FORMS))
+    print('errors', p.errors)
+    p.close(); br.close()
