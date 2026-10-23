@@ -8,7 +8,8 @@ const ROOT = process.env.HARNESS_ROOT ?? '/tmp/atrium-harness'
 const WT = ROOT + '/wt'
 const { WebSocketServer } = await import(WT + '/packages/server/node_modules/ws/wrapper.mjs')
 const { attachSessionHandlers } = await import(WT + '/packages/server/src/session.js')
-const { createWorld } = await import(WT + '/packages/server/src/world.js')
+const { createWorld, createWorldFromDocument } = await import(WT + '/packages/server/src/world.js')
+const KHRONOS = process.env.KHRONOS_DIR ?? ROOT + '/khronos'
 const REPO = process.env.ATRIUM_REPO ?? '/home/claude/atrium'
 const sharp = (await import(REPO + '/scripts/library-build/node_modules/sharp/dist/index.cjs')).default
 
@@ -63,6 +64,28 @@ function handler(req, res) {
     }
     return send(res, 200, JSON.stringify(state), 'application/json')
   }
+  // scripting-4a §5.1 check 6 — save a world the way autosave does (avatars
+  // excluded by identity), then restart it from that document: every socket is
+  // closed and the next connect gets a fresh world built from the saved file.
+  if (p === '/__save' || p === '/__restart') {
+    const key = u.searchParams.get('key') ?? 'default'
+    return void (async () => {
+      const entry = await worldFor(key)
+      const excludeNodes = [...entry.sessions.values()].map((s) => s.avatarNode).filter(Boolean)
+      const doc = JSON.stringify(await entry.world.serialize({ excludeNodes }))
+      saved.set(key, doc)
+      if (p === '/__restart') {
+        for (const ws of entry.wss.clients) ws.terminate()
+        worlds.delete(key)
+      }
+      send(res, 200, doc, 'application/json')
+    })().catch((err) => send(res, 500, String(err?.stack ?? err)))
+  }
+  if (p.startsWith('/khronos/')) {
+    const rel = normalize(p.slice('/khronos/'.length))
+    if (rel.startsWith('..')) return send(res, 403, 'no')
+    return serveFile(res, join(KHRONOS, rel))
+  }
   if (state.missing && p === state.missing) return send(res, 404, 'not found (harness)')
   if (p === '/api/worlds') {
     const body = JSON.stringify([{ slug: 'one', name: 'World One', visibility: 'public' }, { slug: 'two', name: 'World Two', visibility: 'private' }])
@@ -79,6 +102,7 @@ function handler(req, res) {
     s = s.replace('const modelBridge = createModelBridge(', 'const modelBridge = window.__mb = createModelBridge(')
     s = s.replace('const sky = createSkyLoader({ scene: threeScene, fetchImage })', 'const sky = window.__sky = createSkyLoader({ scene: threeScene, fetchImage })')
     s += '\nwindow.__lib = () => ({ libraryGrid, skyPicker, libraryCatalog, undo })\n'
+    s += '\nwindow.__anim = () => ({ modelAnimations, animationControls, get selected() { return selected } })\n'
     s += '\nwindow.__ep = () => ({ modelForm, teleporterForm, modelGate, get selected() { return selected }, get selectedObj() { return selectedObj }, get gizmo() { return gizmo }, selectForEdit, modes })\n'
     return send(res, 200, s, 'text/javascript')
   }
@@ -113,17 +137,25 @@ function handler(req, res) {
 
 // Worlds: wss://host/w/<key>; key prefix picks the source document.
 const worlds = new Map()
+const saved = new Map()   // key -> the last /__save or /__restart document
 async function worldFor(key) {
   if (worlds.has(key)) return worlds.get(key)
   const promise = (async () => {
+    if (saved.has(key)) {
+      const world = await createWorldFromDocument(saved.get(key))
+      const wss = new WebSocketServer({ noServer: true }); const sessions = new Map()
+      attachSessionHandlers({ wss, world, sessions, worldOwnerUserId: 'owner' })
+      return { wss, world, sessions }
+    }
     let src = 'tests/fixtures/space.gltf'
     if (key.startsWith('ext')) src = 'tests/fixtures/space-ext.gltf'
     if (key.startsWith('atr')) src = 'tests/fixtures/atrium.gltf'
-    if (key.startsWith('grp')) { const world = await createWorld(ROOT + '/harness/group.gltf', { baseUrl: `https://127.0.0.1:${PORT_A}/` }); const wss = new WebSocketServer({ noServer: true }); attachSessionHandlers({ wss, world, worldOwnerUserId: 'owner' }); return { wss, world } }
+    if (key.startsWith('grp')) { const world = await createWorld(ROOT + '/harness/group.gltf', { baseUrl: `https://127.0.0.1:${PORT_A}/` }); const wss = new WebSocketServer({ noServer: true }); const sessions = new Map(); attachSessionHandlers({ wss, world, sessions, worldOwnerUserId: 'owner' }); return { wss, world, sessions } }
     const world = await createWorld(key.startsWith('rel') ? ROOT + '/harness/atrium-rel.gltf' : join(WT, src), { baseUrl: `https://127.0.0.1:${PORT_A}/${src.replace(/[^/]*$/, '')}` })
     const wss = new WebSocketServer({ noServer: true })
-    attachSessionHandlers({ wss, world, worldOwnerUserId: 'owner' })
-    return { wss, world }
+    const sessions = new Map()
+    attachSessionHandlers({ wss, world, sessions, worldOwnerUserId: 'owner' })
+    return { wss, world, sessions }
   })()
   worlds.set(key, promise)
   return promise

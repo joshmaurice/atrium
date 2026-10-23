@@ -32,11 +32,17 @@ DEV acceptance.
   - `checks/library-sky/c*.py`: the 14 library-sky checks, plus a few
     variants;
   - `checks/edit-polish-3/{a..f}.py`: edit-polish-3's checks 1–10 and its
-    round-2 V1/V2.
+    round-2 V1/V2;
+  - `checks/scripting-4a/`: step 4a's §5.1 checks, with shared helpers in
+    `anim.py`. `c1.py` is checks 1, 2, 2b and 3; `c4.py` is 4 and 5;
+    `c6.py` is 6; `c7.py` is 7 and 8; `c8b.py` is the row right after
+    placing a model; `c9.py` is 9; `clockprobe.py` prints each session's
+    clock window and frame time.
 
 ## Setup (about 2 minutes)
 ```bash
 cd /home/claude/atrium            # the clone; the commit must be fetched into it
+# (a clone elsewhere: set ATRIUM_REPO=<its path> for setup.sh and server.mjs)
 git fetch origin refs/heads/workflow/<slug>:refs/remotes/origin/workflow/<slug>
 devtasks/harness/setup.sh <published SHA>   # HARNESS_ROOT defaults to /tmp/atrium-harness
 ```
@@ -67,6 +73,13 @@ gives fresh worlds.
   - `flaky=0|1` (`/skies/flaky.png` is 404 until set);
   - `missing=<path>` (that path returns 404);
   - `worldsDelay=<ms>` (`/api/worlds` answers after a delay).
+- **`/__save?key=<world key>`** serializes that world as autosave does
+  (avatars excluded) and keeps the document. **`/__restart?key=…`** does the
+  same, then closes every socket of that world. The next connect builds the
+  world from the saved document, as a server restart does (scripting-4a
+  check 6).
+- **`/khronos/<file>`** serves `$HARNESS_ROOT/khronos/` (`Fox.glb`,
+  `CesiumMan.glb`; `setup.sh` fetches them).
 - **Counters:** `/__counts` gives request counts per path, and `/__reset`
   clears them.
 - **The `app.js` it serves is patched** to expose:
@@ -74,7 +87,9 @@ gives fresh worlds.
   - `window.__sky` (the sky loader);
   - `__lib()` (grid, picker, catalog, undo);
   - `__ep()` (forms, gate, `selected`, `selectedObj`, `gizmo`,
-    `selectForEdit`, `modes`).
+    `selectForEdit`, `modes`);
+  - `__anim()` (`modelAnimations`, `animationControls`, `selected`), from
+    scripting-4a on.
 
   **If a later `app.js` renames those lines, the patch silently misses** and
   `Page()` times out waiting for `window.__lib`. Update the `replace`
@@ -82,7 +97,17 @@ gives fresh worlds.
 - **Images:** `/skies/ok.png` is 2048 × 1024, and `/skies/big.png` is
   8192 × 4096, which is too large.
 
-## Lessons (edit-polish-3 passdown §4.5)
+## Lessons (edit-polish-3 passdown §4.5, and scripting-4a)
+- **Keep the viewport small for timing checks** (`anim.py`'s `SPage` uses
+  480 × 360). SwiftShader takes about 150 ms a frame for two skinned models
+  at 1280 × 800. A pong waits behind the frame, so the clock estimate is
+  off by half that wait. That's a harness artifact; real hardware is
+  around 60 fps.
+- **Ground truth for clip time** is `performance.timeOrigin +
+  performance.now()` in the page. A page's `Date.now` override doesn't
+  touch it, and the harness server runs on the same machine.
+- **Use a fresh world key per run** (`anim.fresh()`): worlds live as long as
+  the server process, so a reused key keeps the last run's models.
 - **Any check that stubs or holds WebSocket messages
   (`page.route_web_socket`) must wait with `page.wait_for_timeout(ms)`, not
   `time.sleep`.** The sync API forwards routed messages only during its own
