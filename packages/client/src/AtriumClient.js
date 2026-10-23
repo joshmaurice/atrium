@@ -100,6 +100,10 @@ function createClock() {
     samples: [],         // { rtt, offset, at } — the rolling window
     offset: null,        // serverNow() = monoNow() + offset
     ready: false,        // true after the first valid pong
+    // V3 — a discontinuity invalidates the estimate but never DROPS it: the
+    // window is rebuilt from a fresh burst, and until the first answer of that
+    // burst lands `offset` keeps serving `serverNow()` while `ready` is false.
+    recovering: false,
     timers: new Set(),   // every timer this connection owns
   }
 }
@@ -358,6 +362,12 @@ export class AtriumClient extends EventEmitter {
    * value is at least the local monotonic clock; after `hello` it starts from
    * `hello.serverTime` and is refined by every accepted `pong`.
    *
+   * V3 — once `hello` has given one, the estimate is NEVER missing: a
+   * discontinuity reports `ready` false and keeps the last estimate serving
+   * this function, so a playing clip cannot drop to frame 0 while the clock
+   * recovers. The `?? 0` is only for a connection with no `hello` yet — there
+   * is no world then, and nothing plays.
+   *
    * @returns {number}  milliseconds on the server's clock
    */
   serverNow() {
@@ -401,6 +411,9 @@ export class AtriumClient extends EventEmitter {
     clock.sent.clear()
     clock.samples = []
     clock.ready = false
+    // V3 — `hello` (re)states the estimate itself, so nothing is recovering on
+    // a connection whose offset just came from the server.
+    clock.recovering = false
     clock.offset = typeof serverTime === 'number' ? serverTime - this._monoNow() : null
     this._burstPings(record, { steady: true })
   }
@@ -455,8 +468,12 @@ export class AtriumClient extends EventEmitter {
    * Z3 — a `pong`. A pong this connection never asked for (another connection's,
    * or a superseded one's) and one whose ping is more than 60 s old by
    * `monoNow()` are IGNORED. A new sample whose offset differs from the current
-   * estimate by more than `max(250 ms, its RTT)` is a discontinuity: the window
-   * is cleared WITHOUT keeping that sample, and a fresh burst follows.
+   * estimate by more than `max(250 ms, its RTT)` is a discontinuity: V4 clears
+   * `sent` first, so the answers to the pings sent before it cannot be taken for
+   * the new burst's; the window goes WITHOUT that sample (it may itself be the
+   * wrong one), the burst follows, and V3 keeps the last estimate serving
+   * `serverNow()` — with `ready` false — until the burst's first answer lands,
+   * which is the new estimate.
    */
   _onPong(msg, record) {
     const clock = record?.clock
@@ -468,20 +485,28 @@ export class AtriumClient extends EventEmitter {
     const now = this._monoNow()
     if (now - sentMono > CLOCK_PING_MAX_AGE_MS) return
 
-    clock.ready = true
     const rtt = Math.max(0, now - sentMono)
     const offset = msg.serverTime - (sentMono + rtt / 2)
 
-    if (clock.offset !== null && Math.abs(offset - clock.offset) > Math.max(CLOCK_JUMP_MIN_MS, rtt)) {
-      // The window goes, and this sample with it: it may itself be the wrong one
-      // (a pre-sleep ping answered after a wake). The estimate is rebuilt from
-      // the burst's answers.
+    if (!clock.recovering &&
+        clock.offset !== null &&
+        Math.abs(offset - clock.offset) > Math.max(CLOCK_JUMP_MIN_MS, rtt)) {
+      // V3/V4 — the window goes, and this sample with it: it may itself be the
+      // wrong one (a pre-sleep ping answered after a wake). V4: the outstanding
+      // keys go too, BEFORE the new burst is sent, so only that burst can
+      // rebuild the estimate. V3: `offset` is left alone and `ready` goes false.
       clock.samples = []
-      clock.offset = null
+      clock.recovering = true
+      clock.ready = false
+      clock.sent.clear()
       this._burstPings(record)
       return
     }
 
+    // The first answer of a recovery burst skips the comparison above — it is
+    // the estimate the old one has just been declared wrong against.
+    clock.recovering = false
+    clock.ready = true
     clock.samples.push({ rtt, offset, at: now })
     this._pruneClockSamples(clock, now)
     let best = clock.samples[0]

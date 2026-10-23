@@ -273,10 +273,12 @@ test('Z3: a discontinuity (a server-time jump) clears the window, keeps no sampl
   assert.equal(h.sentAt(ping.clientTime), h.mono(), 'answered at once: a small RTT')
 
   const before = h.pingCount()
+  const estimate = h.offset()
   h.answer(ping.clientTime, { skew: 60_000 })   // the server restarted
 
   assert.equal(h.samples().length, 0, 'the window was cleared')
-  assert.equal(h.offset(), null, 'and the stale estimate with it')
+  assert.equal(h.offset(), estimate, 'V3: the estimate is kept until the new burst answers')
+  assert.equal(h.client.serverClockReady, false, 'and the clock is not ready while it recovers')
   assert.equal(h.timeoutCount(), PING_BURST_COUNT, 'a burst of five pings is armed')
 
   h.advanceTo(h.mono() + PING_BURST_INTERVAL_MS * (PING_BURST_COUNT - 1))
@@ -292,11 +294,13 @@ test('Z3: a discontinuity (a slept device whose monotonic clock paused) is detec
 
   h.advance(300)                                // the device is awake for 300 ms
   const ping = h.pings().at(-1)
+  const estimate = h.offset()
   h.advanceTo(h.sentAt(ping.clientTime) + 300)  // a 300 ms RTT …
   h.answer(ping.clientTime, { skew: 60_000 })   // … while the server’s clock moved 60 s on
 
   assert.equal(h.samples().length, 0, 'detected: the window is cleared')
-  assert.equal(h.offset(), null)
+  assert.equal(h.offset(), estimate, 'V3: and the last estimate is kept')
+  assert.equal(h.client.serverClockReady, false, 'the clock recovers before it is ready again')
   assert.equal(h.timeoutCount(), PING_BURST_COUNT, 'and a fresh burst of five is armed')
 })
 
@@ -386,6 +390,82 @@ test('Z3: a jump threshold of 250 ms holds a small disagreement', () => {
   h.answer(ping.clientTime, { skew: CLOCK_JUMP_MIN_MS - 50 })
   assert.equal(h.samples().length, 2, 'a disagreement below the threshold is just a sample')
   assert.equal(h.offset(), BASE_OFFSET + CLOCK_JUMP_MIN_MS - 50, 'and the fresher, faster sample wins')
+})
+
+// ===========================================================================
+// Recovery: the estimate is kept, and only the new burst answers (V3, V4)
+// ===========================================================================
+
+test('V3: a discontinuity keeps the last estimate until the new burst answers', () => {
+  const h = makeHarness()
+  h.handshake()
+  h.advanceTo(T0 + PING_BURST_INTERVAL_MS * (PING_BURST_COUNT - 1))
+  h.answer(1)                                   // rtt 800, offset BASE
+  assert.equal(h.offset(), BASE_OFFSET)
+
+  h.advanceTo(T0 + PING_STEADY_INTERVAL_MS)
+  const ping = h.pings().at(-1)
+  h.advanceTo(h.sentAt(ping.clientTime))        // rtt 0: a clean sample
+  const estimate = h.offset()
+  h.answer(ping.clientTime, { skew: 60_000 })   // the server restarted
+
+  assert.equal(h.offset(), estimate, 'the estimate is still the last good one')
+  assert.equal(h.client.serverNow() - h.serverAt(h.mono()), 0,
+    'so serverNow() is still the server’s clock — never frame 0 on a missing offset')
+  assert.equal(h.client.serverClockReady, false, 'and the clock is not ready while it recovers')
+
+  // The new burst answers: its FIRST answer is the new estimate, with no
+  // comparison against the estimate the discontinuity just invalidated.
+  h.advanceTo(h.mono())
+  const recovery = h.pings().at(-1)
+  assert.ok(recovery.clientTime > ping.clientTime, 'a fresh key, never an old one')
+  assert.equal(h.sentAt(recovery.clientTime), h.mono(), 'answered at once: a small rtt')
+  h.answer(recovery.clientTime, { skew: 60_000 })   // a +60 s jump, the same one
+
+  assert.equal(h.samples().length, 1, 'the new window holds the new sample')
+  assert.equal(h.offset(), BASE_OFFSET + 60_000, 'and the estimate moved to the new clock')
+  assert.equal(h.client.serverNow(), h.serverAt(h.mono()) + 60_000, 'serverNow() follows it')
+  assert.equal(h.client.serverClockReady, true, 'readiness returns with the first answer')
+})
+
+test('V4: recovery uses only the new burst’s answers', () => {
+  const h = makeHarness()
+  h.handshake()
+  h.advanceTo(T0 + PING_BURST_INTERVAL_MS * (PING_BURST_COUNT - 1))
+  h.answer(5)                                   // rtt 0: the first estimate
+  assert.equal(h.offset(), BASE_OFFSET, 'ping 5 decided it')
+  assert.equal(h.samples().length, 1)
+
+  h.advanceTo(T0 + PING_STEADY_INTERVAL_MS)
+  const ping = h.pings().at(-1)
+  h.advanceTo(h.sentAt(ping.clientTime))        // rtt 0
+  assert.deepEqual([1, 2, 3, 4].map((k) => h.sentAt(k) !== undefined), [true, true, true, true],
+    'four pings of the first burst are still unanswered')
+
+  const estimate = h.offset()
+  h.answer(ping.clientTime, { skew: 60_000 })   // the discontinuity
+
+  assert.deepEqual([1, 2, 3, 4].map((k) => h.sentAt(k) !== undefined), [false, false, false, false],
+    'V4: the outstanding keys were cleared with the window, before the new burst')
+
+  // The old pings’ answers arrive now, and are not this burst’s answers: the
+  // keys are no longer in the map, so Z3’s own rule ignores them.
+  for (const clientTime of [1, 2, 3, 4]) {
+    h.mock.simulateMessage({ type: 'pong', clientTime, serverTime: h.serverAt(h.mono()) + 60_000 })
+  }
+  assert.equal(h.samples().length, 0, 'no old answer became the window’s first sample')
+  assert.equal(h.offset(), estimate, 'nor moved the estimate')
+  assert.equal(h.client.serverClockReady, false, 'and the clock is still recovering')
+
+  // The new burst’s first answer is the window’s first sample.
+  h.advanceTo(h.mono())
+  const recovery = h.pings().at(-1)
+  assert.ok(recovery.clientTime > ping.clientTime, 'a key of the new burst')
+  h.advanceTo(h.sentAt(recovery.clientTime))
+  h.answer(recovery.clientTime, { skew: 60_000 })
+  assert.equal(h.samples().length, 1, 'the new burst’s first answer is the window’s first sample')
+  assert.equal(h.offset(), BASE_OFFSET + 60_000, 'and the estimate is the server’s new clock')
+  assert.equal(h.client.serverClockReady, true)
 })
 
 // ===========================================================================
