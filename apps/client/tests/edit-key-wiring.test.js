@@ -58,17 +58,78 @@ function broken(rule, why = PASSOWN) {
 
 /**
  * Copy `source` through the literal that starts at `at` (a quote or a backtick),
- * honouring backslash escapes, and return the index just after it. A template
- * literal's `${ … }` is copied as text: app.js never puts a comment or an
- * unbalanced quote inside one.
+ * honouring backslash escapes, and return the index just after it.
+ *
+ * V3 (round 2) — a template literal's `${ … }` is CODE: its braces are matched
+ * (and its own strings, templates, regexes and comments skipped) to find the
+ * closing `}`, so a backtick inside an interpolation does not end the template.
+ * The plain quotes have no interpolation and are copied as before.
  */
 function skipLiteral(source, at) {
+  if (source[at] === '`') return scanTemplate(source, at).end
   const quote = source[at]
   let i = at + 1
   while (i < source.length) {
     const ch = source[i]
     if (ch === '\\') { i += 2; continue }
     if (ch === quote) return i + 1
+    i += 1
+  }
+  return i
+}
+
+/**
+ * V3 — a template literal, copied with its `${ … }` interpolations scanned as
+ * CODE: their comments are stripped (recursively), while the literal text around
+ * them is kept exactly. Returns the text to emit and the index after the closing
+ * backtick.
+ *
+ * @returns {{ text: string, end: number }}
+ */
+function scanTemplate(source, at) {
+  let out = '`'
+  let i = at + 1
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '\\') { out += source.slice(i, i + 2); i += 2; continue }
+    if (ch === '`') return { text: `${out}\``, end: i + 1 }
+    if (ch === '$' && source[i + 1] === '{') {
+      const close = matchingBrace(source, i + 1)
+      out += `\${${stripComments(source.slice(i + 2, close))}}`
+      i = close + 1
+      continue
+    }
+    out += ch
+    i += 1
+  }
+  return { text: `${out}\``, end: i }
+}
+
+/**
+ * V3 — the index of the `}` that closes the `{` at `at`, skipping literals,
+ * templates, regexes and comments inside. Returns `source.length` when the brace
+ * never closes (app.js never has such a case).
+ */
+function matchingBrace(source, at) {
+  let depth = 0
+  let i = at
+  while (i < source.length) {
+    const ch = source[i]
+    const next = source[i + 1]
+    if (ch === "'" || ch === '"' || ch === '`') { i = skipLiteral(source, i); continue }
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i)
+      i = end === -1 ? source.length : end
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2)
+      i = end === -1 ? source.length : end + 2
+      continue
+    }
+    if (ch === '/' && startsRegex(source.slice(0, i))) { i = skipRegex(source, i); continue }
+    if (ch === '{') { depth += 1; i += 1; continue }
+    if (ch === '}') { depth -= 1; i += 1; if (depth === 0) return i - 1; continue }
     i += 1
   }
   return i
@@ -90,9 +151,17 @@ function stripComments(source) {
   while (i < source.length) {
     const ch = source[i]
     const next = source[i + 1]
-    if (ch === "'" || ch === '"' || ch === '`') {
+    if (ch === "'" || ch === '"') {
       const end = skipLiteral(source, i)
       out += source.slice(i, end)
+      i = end
+      continue
+    }
+    if (ch === '`') {
+      // V3 (round 2) — a template is kept, but its `${ … }` interpolations are
+      // scanned as code, so a comment inside one IS stripped.
+      const { text, end } = scanTemplate(source, i)
+      out += text
       i = end
       continue
     }
@@ -239,23 +308,106 @@ function keydownListeners(source) {
   return listeners
 }
 
+/** A value this guard cannot read from a literal. */
+const UNREADABLE = Symbol('unreadable')
+
+/** V3 — the literal a value may be: `true`, `false`, a number, a string, `null`, `undefined`. */
+function literalValue(text) {
+  const t = text.trim()
+  if (t === 'true') return true
+  if (t === 'false') return false
+  if (t === 'null') return null
+  if (t === 'undefined') return undefined
+  if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t)) return Number(t)
+  if (/^'(?:[^'\\]|\\.)*'$/.test(t) || /^"(?:[^"\\]|\\.)*"$/.test(t)) return t.slice(1, -1)
+  return UNREADABLE
+}
+
+/** V3 — a property key: an identifier, or a single- or double-quoted string. */
+function readKey(text) {
+  const t = text.trim()
+  if (/^[A-Za-z_$][\w$]*$/.test(t)) return t
+  if (/^'(?:[^'\\]|\\.)*'$/.test(t) || /^"(?:[^"\\]|\\.)*"$/.test(t)) return t.slice(1, -1)
+  return UNREADABLE
+}
+
+/** The text between the `{` at `text[0]` and its match, or null. */
+function braceBody(text) {
+  let depth = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === "'" || ch === '"' || ch === '`') { i = skipLiteral(text, i) - 1; continue }
+    if (ch === '{') depth += 1
+    else if (ch === '}') { depth -= 1; if (depth === 0) return text.slice(1, i) }
+  }
+  return null
+}
+
+/** The index of the first `:` at nesting depth 0, or -1. */
+function topLevelColon(text) {
+  let depth = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === "'" || ch === '"' || ch === '`') { i = skipLiteral(text, i) - 1; continue }
+    if (ch === '(' || ch === '[' || ch === '{') { depth += 1; continue }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue }
+    if (ch === ':' && depth === 0) return i
+  }
+  return -1
+}
+
+/** V3 — `text` split at its top-level commas, each part untrimmed. */
+function splitTopLevel(text) {
+  const parts = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === "'" || ch === '"' || ch === '`') { i = skipLiteral(text, i) - 1; continue }
+    if (ch === '(' || ch === '[' || ch === '{') { depth += 1; continue }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue }
+    if (ch === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1 }
+  }
+  parts.push(text.slice(start))
+  return parts
+}
+
 /**
  * Z6 — what the listener's THIRD argument says about capture: `true`, `false`, or
- * `'unknown'` for anything this guard cannot read (a variable, a call). The
- * handler's body is never searched for `true` or `capture`: only the argument
- * decides.
+ * `'unknown'` for anything this guard cannot read (a variable, a call, a spread,
+ * a computed key, a shorthand, a method). The handler's body is never searched
+ * for `true` or `capture`: only the argument decides.
+ *
+ * V3 (round 2) — the options object is read EXACTLY. `true`/`false` are the
+ * plain flags. An object literal is readable only when every entry is
+ * `key: value` with a key that is an identifier or a quoted string and a value
+ * that is a literal; anything else — a spread, a computed key, a shorthand, a
+ * method, another value — is "unknown options". Capture is the value of the LAST
+ * `capture` entry, quoted or not, as in JavaScript: on unless it is `false`, `0`,
+ * `''`, `null` or `undefined`.
  */
 function captureFlag(options) {
   if (options === null || options === undefined || options === '') return false
   const text = options.trim()
   if (text === 'true') return true
   if (text === 'false') return false
-  if (text.startsWith('{') || text.startsWith('[')) {
-    const match = text.match(/(?:^|[,{\s])capture\s*:\s*([^,}\]]*)/)
-    if (!match) return false                       // no capture property: not capturing
-    return match[1].trim() !== 'false'
+  if (!text.startsWith('{')) return 'unknown'      // a variable, a call, an array
+  const body = braceBody(text)
+  if (body === null) return 'unknown'
+  let capture
+  let sawCapture = false
+  for (const entry of splitTopLevel(body)) {
+    if (entry.trim() === '') continue
+    const colon = topLevelColon(entry)
+    if (colon < 0) return 'unknown'                // a spread, a shorthand, a method
+    const key = readKey(entry.slice(0, colon))
+    if (key === UNREADABLE) return 'unknown'       // a computed key, or no key at all
+    const value = literalValue(entry.slice(colon + 1))
+    if (value === UNREADABLE) return 'unknown'
+    if (key === 'capture') { capture = value; sawCapture = true }
   }
-  return 'unknown'
+  if (!sawCapture) return false                    // no capture property: not capturing
+  return !(capture === false || capture === 0 || capture === '' || capture === null || capture === undefined)
 }
 
 /** The rule-2 failure for a listener, or null (Z6 — the exact third argument). */
@@ -443,6 +595,75 @@ describe('Z6 — a capture flag is read from the exact third argument', () => {
     assert.equal(captureFlag(listener.options), false)
     assert.equal(captureProblem(listener), null)
     assert.equal(bodyProblems(listener), null, 'and the body rules still pass')
+  })
+})
+
+// V3 (round 2) — the options object and a template's interpolations, read exactly.
+describe('Z6 — V3: the options object is read exactly', () => {
+  test('a quoted capture key counts as capturing', () => {
+    for (const options of ["{ 'capture': true }", '{ "capture": true }']) {
+      assert.equal(captureFlag(options), true, `${options} is capturing`)
+    }
+  })
+
+  test('the LAST capture entry wins, as in JavaScript', () => {
+    assert.equal(captureFlag('{ capture: false, capture: true }'), true)
+    assert.equal(captureFlag('{ capture: true, capture: false }'), false)
+    assert.equal(captureFlag("{ 'capture': true, capture: false }"), false)
+  })
+
+  test('a spread in the options object is "unknown options"', () => {
+    for (const options of ['{ capture: false, ...{ capture: true } }', '{ ...base, capture: true }']) {
+      assert.equal(captureFlag(options), 'unknown', `${options} cannot be read`)
+    }
+  })
+
+  test('a computed key, a shorthand, a method and a variable value are "unknown options"', () => {
+    for (const options of ['{ [key]: true }', '{ capture }', '{ capture() { return true } }', '{ capture: value }']) {
+      assert.equal(captureFlag(options), 'unknown', `${options} cannot be read`)
+    }
+  })
+
+  test('the flag values are read by their JavaScript meaning', () => {
+    assert.equal(captureFlag('{ capture: 1 }'), true)
+    assert.equal(captureFlag('{ capture: "false" }'), true)
+    assert.equal(captureFlag("{ capture: '' }"), false)
+    assert.equal(captureFlag('{ capture: 0 }'), false)
+    assert.equal(captureFlag('{ capture: null }'), false)
+    assert.equal(captureFlag('{ capture: undefined }'), false)
+    assert.equal(captureFlag('{ passive: true }'), false, 'no capture property at all')
+  })
+
+  test('the crafted passing listener still passes the capture rule', () => {
+    assert.equal(captureProblem(editOf(crafted())), null)
+  })
+})
+
+describe('Z6 — V3: a template’s ${ … } is scanned as code', () => {
+  test('a // inside an interpolation is stripped, and the rest of the template kept', () => {
+    assert.equal(stripComments('const a = `x ${y // gone\n} z`'), 'const a = `x ${y \n} z`')
+  })
+
+  test('a // inside a string inside an interpolation is KEPT', () => {
+    assert.equal(stripComments("const a = `x ${'a // b'} z`"), "const a = `x ${'a // b'} z`")
+  })
+
+  test('a backtick inside an interpolation does not end the template', () => {
+    assert.equal(stripComments('const a = `x ${`y`} // gone`'), 'const a = `x ${`y`} // gone`')
+  })
+
+  test('an interpolation’s braces are matched, so a comment after it is stripped', () => {
+    assert.equal(stripComments('const a = `x ${ {k: 1} } y` // gone'), 'const a = `x ${ {k: 1} } y` ')
+  })
+
+  test('the order rule fails when the only consume call sits in a comment inside ${ … }', () => {
+    // Before V3 this copied `${ … }` as text, so the commented call survived
+    // stripping and satisfied the order rule. Now it is a comment and must fail.
+    const source = crafted({
+      edit: EDIT_LISTENER.replace('e.stopImmediatePropagation()',
+        'const note = `key ${e.code /* e.stopImmediatePropagation() */}`'),
+    })
+    assert.match(bodyProblems(editOf(source)) ?? '', /stopImmediatePropagation/)
   })
 })
 
