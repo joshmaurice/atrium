@@ -3020,6 +3020,12 @@ libraryGrid = createLibraryGrid({
     refreshActions: () => refreshEditActions(),
     renderTiles: renderLibraryTiles,
     setStatus: renderLibraryStatus,
+    // V1 (round 2) — the ONLY writer of this element's visibility. The grid calls
+    // it from open()/close()/reset(), so its state and its `display` can never
+    // disagree again (round 1's bug: the grid was logically open and invisible).
+    setVisible: (visible) => {
+      if (libraryGridEl) libraryGridEl.style.display = visible ? '' : 'none'
+    },
   },
 })
 // Z2 — the other direction: opening another form closes the grid.

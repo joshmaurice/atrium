@@ -85,6 +85,7 @@ export function groupByCategory(models = []) {
  * @param {(name: string) => void} [args.deps.selectNode]
  * @param {() => void} [args.deps.refreshActions]
  * @param {(groups: Array<object>, opts: object) => void} [args.deps.renderTiles]
+ * @param {(visible: boolean) => void} [args.deps.setVisible]  V1 — the panel's own visibility
  */
 export function createLibraryGrid({ gate = null, name = 'library', deps = {} } = {}) {
   const state = {
@@ -193,6 +194,10 @@ export function createLibraryGrid({ gate = null, name = 'library', deps = {} } =
     state.waiting = null
     state.pendingName = null
     setStatus(null)
+    // V1 (round 2) — the panel's visibility follows its state, EVERY time, so the
+    // grid can never be logically open and still `display:none` (the round-1
+    // bug: `open()` changed state and re-rendered but never showed the element).
+    deps.setVisible?.(true)
     gate?.claim(name)
     render()
     deps.refreshActions?.()
@@ -209,6 +214,8 @@ export function createLibraryGrid({ gate = null, name = 'library', deps = {} } =
     state.waiting = null
     state.pendingName = null
     setStatus(null)
+    // V1 — and hidden with it, every time.
+    deps.setVisible?.(false)
     gate?.release(name)
     render()
     deps.refreshActions?.()
@@ -216,6 +223,7 @@ export function createLibraryGrid({ gate = null, name = 'library', deps = {} } =
 
   function isOpen() { return state.open }
 
+  /** A world boundary. It closes the panel (and so hides it) exactly once. */
   function reset() { close() }
 
   /** The palette re-reads its enable rule here; the grid does the same. */

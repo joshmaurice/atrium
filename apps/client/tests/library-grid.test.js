@@ -32,7 +32,7 @@ const CATALOG = {
 }
 
 function harness(over = {}) {
-  const calls = { renderTiles: [], addNode: [], begin: [], register: [], select: [], refresh: 0, status: [] }
+  const calls = { renderTiles: [], addNode: [], begin: [], register: [], select: [], refresh: 0, status: [], setVisible: [] }
   const gate = createFormGate()
   const grid = createLibraryGrid({
     gate,
@@ -51,6 +51,8 @@ function harness(over = {}) {
       refreshActions: () => { calls.refresh += 1 },
       renderTiles: (groups, opts) => calls.renderTiles.push({ groups, opts }),
       setStatus: (text, kind) => calls.status.push({ text, kind }),
+      // V1 — the panel's visibility port, as app.js passes it.
+      setVisible: (visible) => calls.setVisible.push(visible),
       ...over.deps,
     },
   })
@@ -336,11 +338,87 @@ describe('the form gate', () => {
 })
 
 // ===========================================================================
+// V1 (round 2) — the panel is shown and hidden WITH its state
+// ===========================================================================
+
+describe('the visibility port (V1)', () => {
+  test('open() calls setVisible(true)', () => {
+    const h = harness()
+    h.grid.open()
+    assert.deepEqual(h.calls.setVisible, [true])
+    assert.equal(h.grid.isOpen(), true)
+  })
+
+  test('close() calls setVisible(false)', () => {
+    const h = harness()
+    h.grid.open()
+    h.grid.close()
+    assert.deepEqual(h.calls.setVisible, [true, false])
+    assert.equal(h.grid.isOpen(), false)
+  })
+
+  test('reset() (the reconnect and world-boundary path) calls setVisible(false)', () => {
+    const h = harness()
+    h.grid.open()
+    h.grid.reset()
+    assert.deepEqual(h.calls.setVisible, [true, false])
+    assert.equal(h.grid.isOpen(), false)
+  })
+
+  test('a reset on an already-closed panel still hides it, every time', () => {
+    const h = harness()
+    h.grid.reset()
+    h.grid.open()
+    h.grid.reset()
+    assert.deepEqual(h.calls.setVisible, [false, true, false])
+  })
+
+  test('the state and the visibility can never disagree', () => {
+    const h = harness()
+    for (const step of ['open', 'reset', 'open', 'close', 'reset']) {
+      h.grid[step]()
+      assert.equal(h.calls.setVisible.at(-1), h.grid.isOpen(),
+        `${step}: setVisible(${h.calls.setVisible.at(-1)}) vs isOpen() ${h.grid.isOpen()}`)
+    }
+  })
+
+  test('a grid built without the port still works (the port is optional)', () => {
+    const grid = createLibraryGrid({ name: 'library', deps: { renderTiles: () => {} } })
+    grid.open()
+    grid.close()
+    assert.equal(grid.isOpen(), false)
+  })
+})
+
+// ===========================================================================
 // The app.js wiring that only exists in the page
 // ===========================================================================
 
 describe('app.js wiring (read as a file)', () => {
   const source = readFileSync(resolve(__dirname, '../src/app.js'), 'utf-8')
+
+  test('V1: app.js passes setVisible into the grid', () => {
+    const at = source.indexOf('libraryGrid = createLibraryGrid(')
+    assert.ok(at > 0, 'the grid is created')
+    const block = source.slice(at, source.indexOf('\n})', at))
+    assert.match(block, /\bsetVisible\s*:/, 'the deps carry a setVisible port')
+  })
+
+  test('V1: the port writes libraryGridEl.style.display, and NOTHING else does', () => {
+    const writers = source.match(/libraryGridEl\.style\.display\s*=/g) ?? []
+    assert.equal(writers.length, 1, `expected exactly one writer of libraryGridEl.style.display, found ${writers.length}`)
+    // ...and that one writer is inside the setVisible port.
+    const at = source.indexOf('libraryGridEl.style.display =')
+    const port = source.lastIndexOf('setVisible', at)
+    assert.ok(port > 0 && at - port < 200, 'the writer is the setVisible port')
+    assert.match(source.slice(port, at + 60), /visible \? '' : 'none'/)
+  })
+
+  test('V1: Escape, Edit off, connecting, disconnected and beginNewWorld all hide it', () => {
+    // Each path closes the grid, and close() is what calls setVisible(false).
+    const closes = source.match(/libraryGrid[^\n]*close\(\)/g) ?? []
+    assert.ok(closes.length >= 4, `expected the four world-boundary closes, found ${closes.length}`)
+  })
 
   test('the request.library branch runs BEFORE the generic branches', () => {
     const library = source.indexOf('if (request.library)')
