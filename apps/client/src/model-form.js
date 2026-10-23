@@ -79,6 +79,13 @@ export function buildModelDescriptor({ name, position, rotation, url, bounds, sh
 /**
  * The gate that keeps one form open at a time (Z7). Both forms register a
  * closer; claiming closes whichever form held the gate.
+ *
+ * Z2 (edit-polish-3, S1) — `closeCurrent()` closes whatever holds the gate, for
+ * turning Edit mode off: the panel's forms (the destination form, the Model form
+ * and the Library grid) all live in it, and whichever one is open is the one
+ * that has to close. The holder is emptied BEFORE its closer runs, so a closer
+ * that releases the gate itself (every `close()` does) cannot leave a stale
+ * entry behind, and the gate ends up empty either way.
  */
 export function createFormGate() {
   const closers = new Map()
@@ -90,6 +97,14 @@ export function createFormGate() {
       current = name
     },
     release(name) { if (current === name) current = null },
+    /** Z2 — close the form holding the gate, if any; the gate ends empty. */
+    closeCurrent() {
+      if (current === null) return null
+      const name = current
+      current = null
+      closers.get(name)?.()
+      return name
+    },
     get current() { return current },
     isOpen: (name) => current === name,
   }
@@ -135,6 +150,19 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
   const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
   const text = (element, value) => { if (element) element.textContent = value ?? '' }
 
+  /**
+   * Z2 — is the URL box the focused element? The box mirrors `state.url` on every
+   * render EXCEPT while the owner is typing in it (a render that overwrote a
+   * half-typed URL would move the caret). Read through the element's own
+   * `ownerDocument`, so the page's element and a test's fake one both work.
+   */
+  function urlHasFocus() {
+    const element = elements.url
+    if (!element) return false
+    const doc = element.ownerDocument ?? (typeof document === 'undefined' ? null : document)
+    return doc?.activeElement === element
+  }
+
   function problemText(problem) {
     if (!problem) return ''
     return problem.message || problem.reason || 'the model could not be loaded'
@@ -146,6 +174,10 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     if (elements.privacy) text(elements.privacy, PRIVACY_NOTE)
     show(elements.error, Boolean(state.error))
     text(elements.error, state.error ?? '')
+    // Z2 — the box always shows the form's URL. Nothing wrote it before, so a
+    // reset (Edit off, a reconnect, a world load) left the old URL on screen
+    // while the form's state was empty.
+    if (elements.url && !urlHasFocus()) elements.url.value = state.url
 
     const status = state.checking ? 'Checking…'
       : state.error ? state.error

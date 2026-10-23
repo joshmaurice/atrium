@@ -486,3 +486,110 @@ test('S3: a Check that is still current is not ignored', async () => {
   assert.equal(h.form.canSave(), true)
   assert.equal(h.form.specForSave().url, 'https://host/old.glb')
 })
+
+// ---------------------------------------------------------------------------
+// Z2 (edit-polish-3, S1) — turning Edit mode off closes the panel's forms and
+// discards the Model form's draft. The gate's `closeCurrent()` is what app.js
+// calls first, then `reset()`.
+// ---------------------------------------------------------------------------
+
+test('Z2: closeCurrent() calls the holder’s closer, once, and empties the gate', () => {
+  const gate = createFormGate()
+  const calls = []
+  gate.register('model', () => calls.push('model'))
+  gate.register('library', () => calls.push('library'))
+
+  assert.equal(gate.closeCurrent(), null, 'no holder: nothing to close')
+  assert.deepEqual(calls, [], 'and no closer runs')
+
+  gate.claim('model')
+  assert.equal(gate.closeCurrent(), 'model')
+  assert.deepEqual(calls, ['model'], 'only the holder’s closer ran, once')
+  assert.equal(gate.current, null, 'and the gate ends up EMPTY')
+  assert.equal(gate.isOpen('model'), false)
+
+  assert.equal(gate.closeCurrent(), null, 'a second call is a no-op')
+  assert.deepEqual(calls, ['model'])
+
+  // The freed gate is claimable by the next form, which closes nothing.
+  gate.claim('library')
+  assert.deepEqual(calls, ['model'], 'claiming an empty gate closes no one')
+  assert.equal(gate.current, 'library')
+})
+
+test('Z2: a holder with no closer still leaves the gate empty', () => {
+  const gate = createFormGate()
+  gate.claim('library')
+  assert.equal(gate.closeCurrent(), 'library')
+  assert.equal(gate.current, null)
+})
+
+test('Z2: a closer that releases the gate itself leaves it empty (the real forms)', () => {
+  const h = harness()
+  // Exactly app.js's registration.
+  h.gate.register('model', () => h.form.close())
+  h.form.open()
+  assert.equal(h.gate.current, 'model')
+  h.gate.closeCurrent()
+  assert.equal(h.form.isOpen(), false, 'the Model form closed')
+  assert.equal(h.gate.current, null, 'and the gate is empty, never left on the released holder')
+})
+
+test('Z2: type and Check a URL, close, reset(), reopen — the state and the box are both empty', async () => {
+  const h = harness()
+  h.form.open()
+  h.elements.url.value = 'https://host/chair.glb'
+  h.elements.url.fire('input')
+  h.elements.check.fire('click')
+  await tick()
+  assert.equal(h.form.canSave(), true, 'the Check held a result')
+
+  // A close keeps the draft (only Edit off discards it — that is `reset()`).
+  h.form.close()
+  assert.equal(h.form.state.url, 'https://host/chair.glb', 'a close keeps the draft')
+  assert.equal(h.elements.url.value, 'https://host/chair.glb')
+
+  h.form.reset()
+  assert.equal(h.form.state.url, '', 'reset() clears the URL')
+  assert.equal(h.elements.url.value, '', 'and the box with it — nothing wrote it before this round')
+  assert.equal(h.form.specForSave(), null)
+  assert.equal(h.form.isOpen(), false)
+
+  h.form.open()
+  assert.equal(h.elements.url.value, '')
+  assert.equal(h.form.canSave(), false, 'no stale result comes back with it')
+})
+
+test('Z2: a reset while saving forgets only the wait', async () => {
+  const h = harness()
+  h.form.open()
+  h.form.onUrlInput('https://host/chair.glb')
+  await h.form.check()
+  const sent = h.form.save()
+  assert.equal(h.form.state.saving, true)
+  assert.equal(h.form.seq, sent.seq)
+
+  h.form.reset()
+  assert.equal(h.form.state.saving, false, 'reset forgets the wait')
+  assert.equal(h.form.seq, null)
+  assert.equal(h.form.state.url, '', 'and the draft')
+  assert.equal(h.form.onAnswer(sent.seq, 'accepted'), false, 'the answer is no longer the form’s')
+  assert.deepEqual(h.calls.selected, [], 'so nothing is selected by it')
+})
+
+test('Z2: render leaves a focused URL box alone', () => {
+  const h = harness()
+  h.form.open()
+  h.form.onUrlInput('https://host/chair.glb')
+  assert.equal(h.elements.url.value, 'https://host/chair.glb', 'an unfocused box mirrors the state')
+
+  // The owner is typing in the box: a render must not overwrite it.
+  h.elements.url.ownerDocument = { activeElement: h.elements.url }
+  h.elements.url.value = 'https://host/ben'
+  h.form.render()
+  assert.equal(h.elements.url.value, 'https://host/ben', 'the half-typed value is left alone')
+
+  h.elements.url.ownerDocument = null
+  h.form.render()
+  assert.equal(h.elements.url.value, 'https://host/chair.glb', 'and it mirrors again once blurred')
+})
