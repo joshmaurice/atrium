@@ -271,25 +271,28 @@ test('Z5: an event for a replaced instance under the same name is ignored', () =
   assert.equal(animations.size, 1, 'and only one entry is live')
 })
 
-test('Z5: a dropped earlier animation is clip-missing, and a later one still plays', () => {
+test('Z5/V6: a dropped animation is not offered, and a saved value naming it is clip-missing', () => {
   const clips = [
     // No track can be bound to a part called `Ghost`, so this animation is dropped.
     makeClip('Broken', 2, 0, 10, 'Ghost'),
     makeClip('Good', 2, 0, 10, 'Part'),
   ]
   const instance = makeInstance(clips)
-  assert.deepEqual(instance.animationNames, ['Broken', 'Good'])
+  assert.deepEqual(instance.animationNames, ['Broken', 'Good'],
+    'the dropped animation keeps its L8 id and file index')
   assert.deepEqual(instance.clipIndices, [1], 'only the second animation kept a clip')
 
   const part = partOf(instance)
   const animations = createModelAnimations({ now: () => 1_001_000 })
   animations.onInstanceCreated({ name: 'Fox', node: { name: 'Fox' }, instance })
 
-  assert.deepEqual(animations.status('Fox').clips, ['Broken', 'Good'], 'both ids are offered')
+  assert.deepEqual(animations.status('Fox').clips, ['Good'],
+    'V6: only the retained animation is offered — the dropped one is not')
 
   animations.set('Fox', PLAYING('Broken', { startedAt: 1_000_000 }))
   animations.update()
-  assert.equal(animations.status('Fox').state, ANIMATION_STATE.clipMissing)
+  assert.equal(animations.status('Fox').state, ANIMATION_STATE.clipMissing,
+    'and a saved value naming the dropped id is still clip-missing')
   assert.equal(part.position.x, 0, 'nothing plays for a dropped animation')
   assert.equal(animations.actionFor('Fox'), null, 'and no action was made')
 
@@ -297,6 +300,96 @@ test('Z5: a dropped earlier animation is clip-missing, and a later one still pla
   animations.update()
   assert.equal(part.position.x, 5, 'a second into a two-second 0 → 10 clip')
   assert.equal(animations.status('Fox').state, ANIMATION_STATE.playing)
+})
+
+// ===========================================================================
+// V5 — a stopped action is played again
+// ===========================================================================
+
+test('V5: re-applying the same clip and startedAt after Stop plays it again', () => {
+  const h = makeLayer([makeClip('Leap', 10, 0, 10)], { loaded: 0 })
+  const VALUE = PLAYING('Leap', { startedAt: 1_000_000 })
+
+  h.setClock(1_000_000); h.frame()
+  h.animations.set('Fox', VALUE)
+  h.frame()
+  assert.equal(h.part.position.x, 0, 'the clip starts')
+
+  h.setClock(1_003_000); h.frame()
+  assert.equal(h.part.position.x, 3, 'it is playing')
+
+  h.animations.set('Fox', null)                 // Stop
+  h.frame()
+  assert.equal(h.part.position.x, 0, 'the loaded rest pose')
+  assert.equal(h.animations.actionFor('Fox').isRunning(), false, 'and nothing is running')
+
+  // The SAME clip and the SAME `startedAt`: the fast path must not skip a
+  // stopped action, or the value is re-applied and nothing moves.
+  h.animations.set('Fox', VALUE)
+  h.frame()
+  assert.equal(h.animations.actionFor('Fox').isRunning(), true,
+    'V5: the stopped action is running again')
+  assert.equal(h.part.position.x, 3, 'and the object shows the frame the clock asks for')
+  assert.equal(h.animations.status('Fox').state, ANIMATION_STATE.playing)
+})
+
+// ===========================================================================
+// V1 — onChange
+// ===========================================================================
+
+test('V1: onChange reports each change once, and a frame with no change not at all', () => {
+  const calls = []
+  const instance = makeInstance([makeClip('Survey', 2, 0, 10)])
+  let clock = 1_000_000
+  const animations = createModelAnimations({ now: () => clock, onChange: (name) => calls.push(name) })
+
+  assert.deepEqual(calls, [], 'nothing to report before there is an instance')
+
+  animations.onInstanceCreated({ name: 'Fox', node: { name: 'Fox' }, instance })
+  assert.deepEqual(calls, ['Fox'], 'once after onInstanceCreated — the row leaves “loading”')
+
+  animations.update()
+  assert.deepEqual(calls, ['Fox'], 'and a frame with nothing playing changes nothing')
+
+  animations.set('Fox', PLAYING('Survey', { startedAt: 1_000_000 }))
+  assert.deepEqual(calls, ['Fox', 'Fox'], 'once on a set that changes the state')
+
+  animations.update()
+  assert.equal(calls.length, 2, 'not on the frame before the clip’s end')
+
+  clock = 1_002_000                                   // the 2 s clip crosses its duration
+  animations.update()
+  assert.equal(calls.length, 3, 'once from update(), on the frame the clip ends')
+  assert.equal(calls.at(-1), 'Fox')
+
+  animations.update()
+  assert.equal(calls.length, 3, 'and not on the frames after it')
+
+  animations.set('Fox', PLAYING('Survey', { startedAt: 1_000_000 }))   // a fresh, equal object
+  assert.equal(calls.length, 3, 'no call for a deep-equal set')
+  animations.update()
+  assert.equal(calls.length, 3, 'nor for the frame that follows one')
+
+  animations.onInstanceDisposing({ name: 'Fox', node: { name: 'Fox' }, instance })
+  assert.equal(calls.length, 4, 'once after onInstanceDisposing')
+  assert.equal(calls.at(-1), 'Fox')
+})
+
+test('V1: a rename reports both names, and clear reports what it drops', () => {
+  const calls = []
+  const instance = makeInstance([makeClip('Walk', 10, 0, 10)])
+  const animations = createModelAnimations({ now: () => 0, onChange: (name) => calls.push(name) })
+
+  animations.onInstanceCreated({ name: 'Fox', node: { name: 'Fox' }, instance })
+  assert.deepEqual(calls, ['Fox'])
+
+  animations.rename('Fox', 'Vixen')
+  assert.deepEqual(calls, ['Fox', 'Fox', 'Vixen'],
+    'the old name reads nothing now, the new one carries the value')
+
+  animations.clear()
+  assert.equal(calls.length, 4, 'clear reports the one name that was still carrying a state')
+  assert.equal(calls.at(-1), 'Vixen')
 })
 
 // ===========================================================================

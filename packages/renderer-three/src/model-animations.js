@@ -26,6 +26,20 @@
  * `AnimationMixer` is used directly, NOT the world's `AnimationBridge`: that
  * bridge belongs to the world file's own animations and stops a finished clip in
  * every client, which is exactly the flaw 4a avoids (L6, §9.5).
+ *
+ * Round 2 adds three things:
+ *
+ *   - **V1: `onChange(name)`.** The Edit panel's row is written only when the
+ *     layer says something changed, so the row follows the layer's own state —
+ *     a clip that ends, a load that finishes, a Stop — with no per-frame DOM
+ *     work. It reports after the instance callbacks, after a `set`, `rename` or
+ *     `clear` that changed anything, and once from `update()` on a transition.
+ *   - **V5: a stopped action is played again.** A deep-equal `set` still does
+ *     nothing, and Stop is still `action.stop()` alone, but a stopped action
+ *     asked for the same clip and `startedAt` is played rather than skipped.
+ *   - **V6: `status().clips` lists only PLAYABLE ids.** A dropped animation
+ *     keeps its L8 id, is not offered, and a saved value naming it stays
+ *     `clip-missing`.
  */
 
 import { AnimationMixer, LoopOnce } from 'three'
@@ -58,18 +72,28 @@ function sameValue(a, b) {
  * @param {object} [args.bridge]  the model bridge; its three lifecycle callbacks are
  *                                wired to this layer's `onInstance*` methods
  * @param {() => number} [args.now]  the SERVER's clock (`() => client.serverNow()`)
+ * @param {(name: string) => void} [args.onChange]  V1: told when what
+ *                                `status(name)` returns may have changed
  * @returns {object}  `set`, `rename`, `clear`, `update`, `status`, the three
  *                    `onInstance*` callbacks, and the `mixerFor`/`actionFor` seams
  */
-export function createModelAnimations({ bridge = null, now = () => Date.now() } = {}) {
+export function createModelAnimations({ bridge = null, now = () => Date.now(), onChange = null } = {}) {
   /** The wanted value per model node name. `null` = stopped. */
   const wanted = new Map()
   /** One entry per live INSTANCE object (never per name). */
   const entries = new Map()
   /** The current instance per node name, so a late event for an old one is ignored. */
   const current = new Map()
+  /** V1 — the last snapshot `onChange` was told, per node name. */
+  const reported = new Map()
 
   const serverNow = () => (typeof now === 'function' ? now() : now)
+
+  /** V1 — the change callback: a no-op when the caller gave none. */
+  const notify = typeof onChange === 'function' ? onChange : () => {}
+
+  /** V1 — what everything starts from: no instance, so `status` is `loading`. */
+  const LOADING_SNAPSHOT = Object.freeze({ clips: [], state: ANIMATION_STATE.loading })
 
   // ── entries ──────────────────────────────────────────────────────────────
 
@@ -111,6 +135,58 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
     return entry && entry.name === name ? entry : null
   }
 
+  /** V6 — the PLAYABLE ids: the L8 ids whose animation was retained, in file order. */
+  function playableIds(entry) {
+    return entry.ids
+      .filter((candidate) => entry.clipIndices.includes(candidate.index))
+      .map((candidate) => candidate.id)
+  }
+
+  /**
+   * Z5/V6 — the state for a live entry. `no-clips` is decided by the FILE having
+   * no animations at all: a file whose every animation was dropped, with a saved
+   * value naming one of them, is `clip-missing` — the state the owner clears with
+   * Stop — never `no-clips`.
+   */
+  function stateFor(entry) {
+    if (entry.ids.length === 0) return ANIMATION_STATE.noClips
+    const value = wanted.get(entry.name) ?? null
+    if (!isPlaying(value)) return ANIMATION_STATE.stopped
+    const resolved = resolveClip(entry, value.clip)
+    if (!resolved) return ANIMATION_STATE.clipMissing
+    const { ended } = clipTime({
+      value,
+      duration: resolved.clip.duration,
+      nowServer: serverNow(),
+    })
+    return ended ? ANIMATION_STATE.ended : ANIMATION_STATE.playing
+  }
+
+  /** V1 — a comparable snapshot of what `status(name)` returns. */
+  function snapshotOf(entry) {
+    return entry
+      ? { clips: playableIds(entry), state: stateFor(entry) }
+      : LOADING_SNAPSHOT
+  }
+
+  function sameSnapshot(a, b) {
+    return a.state === b.state &&
+      a.clips.length === b.clips.length &&
+      a.clips.every((id, at) => id === b.clips[at])
+  }
+
+  /**
+   * V1 — tell the caller that what `status(name)` returns may have changed. The
+   * last snapshot is kept per name, so a repeat (an ignored late event, a frame
+   * with no transition, a `set` that changed nothing) calls nothing.
+   */
+  function reportChange(name) {
+    const next = snapshotOf(entryForName(name))
+    if (sameSnapshot(reported.get(name) ?? LOADING_SNAPSHOT, next)) return
+    reported.set(name, next)
+    notify(name)
+  }
+
   /**
    * Z5 — Stop: `action.stop()` ALONE. The mixer restores each binding's saved
    * original value (the loaded rest pose) as the action deactivates. Nothing is
@@ -124,13 +200,17 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
   }
 
   /**
-   * Z5 — put the instance's action on `resolved`. The action is kept when it
-   * already targets the same clip at the same `startedAt` (a value that changed
-   * only its `loop`/`speed` re-reads them, which `update` does anyway); anything
-   * else re-targets, and so restarts.
+   * Z5/V5 — put the instance's action on `resolved`. The action is kept when it
+   * already targets the same clip at the same `startedAt` AND is still running
+   * (a value that changed only its `loop`/`speed` re-reads them, which `update`
+   * does anyway); anything else re-targets, and so restarts. V5: an entry that
+   * was STOPPED is re-targeted even for the same clip and `startedAt`, so
+   * re-applying a value — 4b's writes, a re-applied value, a stopped model's
+   * restored state — plays it again instead of leaving the rest pose.
    */
   function targetAction(entry, value, resolved) {
     if (entry.action &&
+        !entry.stopped &&
         entry.actionClipId === resolved.id &&
         entry.actionStartedAt === value.startedAt) return
     if (entry.action) {
@@ -191,6 +271,9 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
     // A value that arrives before the instance exists is applied the moment
     // `onInstanceCreated` makes one; a value for a live instance is applied now.
     if (entry) stepEntry(entry)
+    // V1 — a value with no instance yet changes nothing `status` reports (it is
+    // `loading` either way), and `reportChange` knows it.
+    reportChange(name)
   }
 
   /** Z6 — a rename moves the node's wanted value and re-points its entry. */
@@ -209,6 +292,10 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
       const live = entryForName(to)
       if (live) stepEntry(live)
     }
+    // V1 — both names changed what `status` reports: the old one is nothing now,
+    // the new one carries the value the old one had.
+    reportChange(from)
+    reportChange(to)
   }
 
   /** Z6 — forget everything (a world change, a disconnect, a reset). */
@@ -217,37 +304,35 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
     entries.clear()
     current.clear()
     wanted.clear()
+    // V1 — every name that was reported reads nothing now: tell the caller once,
+    // then forget the reports (a fresh world starts from `loading`).
+    for (const name of [...reported.keys()]) reportChange(name)
+    reported.clear()
   }
 
   /**
    * Z5 — one frame, called by the app's frame loop before `stage.tick(dt)`.
    * Only an entry that is playing and has a live instance costs anything.
+   *
+   * V1 — each entry's state is reported once when it changes (`playing` →
+   * `ended`, for example); a frame where nothing changes calls nothing.
    */
   function update() {
-    for (const entry of entries.values()) stepEntry(entry)
+    for (const entry of entries.values()) {
+      stepEntry(entry)
+      reportChange(entry.name)
+    }
   }
 
   /**
-   * Z5 — what the Edit panel shows for a model node: its L8 clip ids and one of
-   * `loading` | `stopped` | `playing` | `ended` | `clip-missing` | `no-clips`.
+   * Z5/V6 — what the Edit panel shows for a model node: its PLAYABLE L8 clip ids
+   * and one of `loading` | `stopped` | `playing` | `ended` | `clip-missing` |
+   * `no-clips`.
    */
   function status(name) {
     const entry = entryForName(name)
     if (!entry) return { clips: [], state: ANIMATION_STATE.loading }
-    const clips = entry.ids.map((candidate) => candidate.id)
-    if (clips.length === 0) return { clips, state: ANIMATION_STATE.noClips }
-
-    const value = wanted.get(entry.name) ?? null
-    if (!isPlaying(value)) return { clips, state: ANIMATION_STATE.stopped }
-    const resolved = resolveClip(entry, value.clip)
-    if (!resolved) return { clips, state: ANIMATION_STATE.clipMissing }
-
-    const { ended } = clipTime({
-      value,
-      duration: resolved.clip.duration,
-      nowServer: serverNow(),
-    })
-    return { clips, state: ended ? ANIMATION_STATE.ended : ANIMATION_STATE.playing }
+    return { clips: playableIds(entry), state: stateFor(entry) }
   }
 
   // ── the bridge's three lifecycle events (Z5) ─────────────────────────────
@@ -264,6 +349,10 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
     const entry = makeEntry(name, node ?? null, instance)
     entries.set(instance, entry)
     stepEntry(entry)
+    // V1 — the instance is what `status` was waiting for; the row is told here,
+    // which is what closes the "selected while loading" gap (the bridge's
+    // `setStatus(loaded)` runs BEFORE this event).
+    reportChange(name)
   }
 
   /**
@@ -285,14 +374,19 @@ export function createModelAnimations({ bridge = null, now = () => Date.now() } 
    */
   function onInstanceDisposing({ name, instance } = {}) {
     if (!instance) return
+    let changed = false
     const entry = entries.get(instance)
     if (entry) {
       stopEntry(entry)
       entry.mixer.uncacheRoot(entry.root ?? instance.scene)
       entry.action = null
       entries.delete(instance)
+      changed = true
     }
-    if (current.get(name) === instance) current.delete(name)
+    if (current.get(name) === instance) { current.delete(name); changed = true }
+    // V1 — the node goes back to `loading`; a late event for an instance that
+    // was already replaced changes nothing, and says nothing.
+    if (changed) reportChange(name)
   }
 
   /** Z5 — a diagnostic seam: the live mixer for a model node, if it has one. */
