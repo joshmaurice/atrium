@@ -1,6 +1,7 @@
 # Pre-brief: Edit mode polish 3 (small fixes after library-sky)
 
-Status: **DRAFT, Revision 1 (2026-10-22). Decisions L1–L6 open (§3).**
+Status: **FINAL, Revision 1.1 (2026-10-22). Decisions L1–L6 approved by the
+operator (2026-10-22 21:28 PT), all as recommended: (a) each (§3).**
 - **Rev 1 applies an outside review of Rev 0** (verdict "revise before
   implementation, no major redesign"). There were three must-fix and three
   should-fix findings and one nit, all taken; §11 lists them. The reviewer
@@ -223,7 +224,7 @@ v22.22.0. Commands: `node --test tests/*.test.js` in each package.
 - **S2 — The HUD shows the document's current name** (item 1), with the
   same text rule as on load.
 
-### Open (recommendations first)
+### Approved (operator, 2026-10-22 21:28 PT, all (a) as recommended)
 - **L1 — Lane.**
   - **(a) Recommended: the full pipeline,** as polish-2: kickoff, GLM
     brief, brief gate, DeepSeek, GLM review, the release chain, Claude's
@@ -614,3 +615,5 @@ specifics:
 | 7 | A hash in a path isn't a content guarantee | Nit | P5, Z5 wording |
 
 The reviewer recommends (a) for all of L1–L6, the same as this document.
+- **Rev 1.1** (2026-10-22 21:28 PT): the operator approved L1–L6, all (a).
+  Only the status line and §3's heading changed.
