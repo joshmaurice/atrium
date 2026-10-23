@@ -22,6 +22,7 @@ export {
 export {
   createModelBridge, MODEL_STATUS, MODEL_INSTANCE_LIMIT, HOST_FRAME_LIMIT, specKey, specTemplateKey,
 } from './model-bridge.js'
+export { createModelAnimations, ANIMATION_STATE } from './model-animations.js'
 export { AnimationBridge } from './AnimationBridge.js'
 export { Stage } from './Stage.js'
 export {

@@ -100,8 +100,8 @@ function clearNames(root) {
  * @param {object} template   `{ scene, animations }`, as GLTFLoader gives it
  * @param {object} [opts]
  * @param {(scene: object) => object} [opts.cloneFn]  the clone (SkeletonUtils by default)
- * @returns {{wrapper: Object3D, scene: object, clips: object[], droppedTracks: number,
- *            removedAttachments: number}}
+ * @returns {{wrapper: Object3D, scene: object, clips: object[], clipIndices: number[],
+ *            animationNames: string[], droppedTracks: number, removedAttachments: number}}
  */
 export function buildInstance(template, { cloneFn = skeletonClone } = {}) {
   const instanceScene = cloneFn(template.scene)
@@ -110,14 +110,24 @@ export function buildInstance(template, { cloneFn = skeletonClone } = {}) {
   const map = new Map()
   mapTrees(template.scene, instanceScene, map)
 
-  // Step 2: the clips, retargeted by identity.
+  // Step 2: the clips, retargeted by identity. scripting-4a Z5 — a retained clip
+  // keeps its FILE index (`clipIndices`), because `buildInstance` drops a clip
+  // with no bound track (P13), so `clips[i]` need not be animation `i`.
+  const animations = template.animations ?? []
   const clips = []
+  const clipIndices = []
   let droppedTracks = 0
-  for (const clip of template.animations ?? []) {
-    const { clip: retargeted, dropped } = retargetClip(clip, template.scene, map)
+  for (let index = 0; index < animations.length; index++) {
+    const { clip: retargeted, dropped } = retargetClip(animations[index], template.scene, map)
     droppedTracks += dropped
-    if (retargeted) clips.push(retargeted)
+    if (retargeted) { clips.push(retargeted); clipIndices.push(index) }
   }
+
+  // scripting-4a Z5/Z4 — the template's animation names in FILE order, including
+  // the ones no clip was built for: `clipIds` needs every name to keep its ids
+  // unique, and the drop is reported as `clip-missing` rather than as a shifted
+  // index.
+  const animationNames = animations.map((clip) => (typeof clip?.name === 'string' ? clip.name : ''))
 
   // Step 3: lights and cameras out, then step 4: the names.
   const removedAttachments = stripLightsAndCameras(instanceScene)
@@ -127,7 +137,7 @@ export function buildInstance(template, { cloneFn = skeletonClone } = {}) {
   const wrapper = new Object3D()
   wrapper.userData[MODEL_WRAPPER_FLAG] = true
   wrapper.add(instanceScene)
-  return { wrapper, scene: instanceScene, clips, droppedTracks, removedAttachments }
+  return { wrapper, scene: instanceScene, clips, clipIndices, animationNames, droppedTracks, removedAttachments }
 }
 
 /** Z6 — the placeholder: an unnamed wireframe box whose base sits on origin. */

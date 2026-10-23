@@ -62,6 +62,12 @@ const noop = () => {}
  * @param {object} deps.hooks                           the tested seams
  * @param {(args: object) => Promise<object>} deps.hooks.fetchModel  the limited fetcher (required)
  * @param {(node: object, status: object) => void} [deps.onStatus]  one event per change
+ * @param {(e: {name: string, node: object, instance: object}) => void} [deps.onInstanceCreated]
+ *   scripting-4a Z5 — a new instance, after a successful load
+ * @param {(e: {name: string, node: object, instance: object}) => void} [deps.onInstanceRehosted]
+ *   scripting-4a Z5 — a view's detach/attach: the same instance, re-hosted
+ * @param {(e: {name: string, node: object, instance: object}) => void} [deps.onInstanceDisposing]
+ *   scripting-4a Z5 — BEFORE the instance is disposed
  */
 export function createModelBridge(deps = {}) {
   const {
@@ -69,6 +75,9 @@ export function createModelBridge(deps = {}) {
     som = () => null,
     nextFrame = (fn) => fn(),
     onStatus = noop,
+    onInstanceCreated = noop,
+    onInstanceRehosted = noop,
+    onInstanceDisposing = noop,
     hooks = {},
   } = deps
 
@@ -286,13 +295,26 @@ export function createModelBridge(deps = {}) {
     currentView = { docView, sceneGroup, generation: ++viewGeneration }
     for (const record of instances.values()) attach(record)
     reconcile()
+    // scripting-4a Z5 — a view change KEEPS every instance (A9), so this is a
+    // RE-HOST: nothing is disposed, nothing restarts, and the mixer with its
+    // action stays with the instance object it belongs to.
+    for (const record of instances.values()) notifyRehosted(record)
   }
 
   /** Detach every wrapper from its host before the view is rebuilt (A9). */
   function detachView() {
     viewGeneration += 1
-    for (const record of instances.values()) detachWrapper(record)
+    for (const record of instances.values()) {
+      detachWrapper(record)
+      notifyRehosted(record)
+    }
     currentView = null
+  }
+
+  /** Z5 — a re-host event for a record that has an instance. */
+  function notifyRehosted(record) {
+    if (!record?.instance) return
+    onInstanceRehosted({ name: record.node.name, node: record.node, instance: record.instance })
   }
 
   /** Take the wrapper out of the scene but keep it: a view change re-attaches it. */
@@ -326,6 +348,9 @@ export function createModelBridge(deps = {}) {
       record.placeholder = null
     }
     if (record.instance) {
+      // scripting-4a Z5 — the animation layer hears about this BEFORE the clips
+      // and skeletons go: it stops the action and uncaches the mixer's bindings.
+      onInstanceDisposing({ name: record.node.name, node: record.node, instance: record.instance })
       disposeInstance(record.instance, { removeFromHost: true })
       record.instance = null
       record.clips = []
@@ -611,10 +636,16 @@ export function createModelBridge(deps = {}) {
     record.instance = built
     record.wrapper = built.wrapper
     record.clips = built.clips
+    record.clipIndices = built.clipIndices ?? []
+    record.animationNames = built.animationNames ?? []
     record.droppedTracks = built.droppedTracks
     setStatus(record, MODEL_STATUS.loaded, null, built.droppedTracks
       ? `${built.droppedTracks} animation tracks couldn't be bound` : null)
     settle(record)
+    // scripting-4a Z5 — a NEW instance: the animation layer makes a mixer for it
+    // and applies the node's wanted value at once, so a late joiner shows the
+    // right frame on its first rendered frame.
+    onInstanceCreated({ name: record.node.name, node: record.node, instance: built })
     attachOrWait(record)
   }
 
