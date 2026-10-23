@@ -1,6 +1,6 @@
 # Revision — edit-polish-3 round 2 (after the outside code review of `a3ec6537`)
 
-**Status:** DRAFT, Rev 0 (2026-10-23), for the operator's approval.
+**Status:** approved by the operator (2026-10-23 00:10 PT), Rev 0 as drafted.
 - **Base:** the reviewed round-1 tip `a3ec65371e3b4bcaac6a4e2b7b96722e20341a1d`
   on `workflow/edit-polish-3`. Round 2 commits on top of it, on the same
   branch, in the existing worktree `/workspace/wt/edit-polish-3`.
