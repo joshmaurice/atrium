@@ -1,7 +1,9 @@
 # Pre-brief: Phase 3 step 4 — scripting: the plan (4a–4d), and 4a (model animations) in detail
 
-Status: **DRAFT, Revision 1 (2026-10-23). Decisions D1–D6 (the whole step)
+Status: **DRAFT, Revision 1.1 (2026-10-23). Decisions D1–D6 (the whole step)
 and L1–L9 (4a) open (§3).**
+- **Rev 1.1 applies a second outside review** (of Rev 1, "sound; seven
+  fixes, no conceptual change"). The changes are listed in §10.
 - **Rev 1 applies an outside review of Rev 0** ("changes recommended, no
   conceptual redesign"): five must-fix, two should-fix and two conditions on
   4b, all taken. §10 lists them.
@@ -9,7 +11,11 @@ and L1–L9 (4a) open (§3).**
     `startedAt`. L8 is now a unique clip id with an index map.
   - **Narrowed:** D2 is provisional, and D5 sets a direction only.
 - **Drafted by Claude from `main` at `1206a52`.** Its code is identical to
-  the released `a31c5a62` (DEV, MAIN and PROD). Claims marked *probe* were
+  the released `a31c5a62` (DEV, MAIN and PROD).
+  - **The kickoff's base will be whatever edit-polish-3 releases as.** That
+    round changes the Edit panel. The brief author re-checks P7
+    (`refreshModelRow`) and Z6's `app.js` call sites against that base
+    before writing the brief. Claims marked *probe* were
   run against the real modules with throwaway scripts (not committed). The
   rest are read from the code, with line numbers at `1206a52`.
 - **Sources:**
@@ -118,6 +124,9 @@ This is the pattern design §4.3 points to ("synced the way
   Only the protocol inspector sends pings today; `AtriumClient` ignores
   `pong` (L465).
 - **`tick`** carries `serverTime` too, and the client ignores it (L464).
+- **All of these are the server's `Date.now()`:** `hello.serverTime`,
+  `pong.serverTime`, `tick.serverTime` and, under L5 (b), Z2's stamp. So
+  the stamp and every client's estimate use one clock.
 - So a client can estimate the server's clock with no protocol change: the
   usual round-trip method, offset = `serverTime` − (`clientTime` + RTT/2),
   keeping the sample with the lowest RTT.
@@ -172,28 +181,6 @@ This is the pattern design §4.3 points to ("synced the way
   status changes.
 - The row is where the clip controls go (L7).
 
-### P12. How three.js holds a clip's end (*probe*; review 1)
-- **The setup:** a 2 s clip moving `box.x` from 0 to 10, driven by setting
-  `action.time` and calling `mixer.update(0)` each time.
-- **The result:** times past the end gave `x = 10` with the action still
-  enabled, under the default `LoopRepeat` and also under `LoopOnce` with or
-  without `clampWhenFinished`. Setting the time back to 1 gave `x = 5`.
-- **But** this relies on `update(0)` skipping the loop and finish logic.
-  The defaults are `LoopRepeat` and `clampWhenFinished = false`, so any real
-  delta (or a later three.js) can wrap a clip or disable it at its end.
-  - Z5 therefore configures every action as `LoopOnce` with
-    `clampWhenFinished = true`, and computes looping itself (Z4).
-  - The tests check the **animated object's own values**, not only the
-    computed time.
-
-### P13. The clip list isn't the file's animation list (review 3)
-- **`buildInstance` keeps only clips with at least one bound track**
-  (`model-instances.js` L80–81: a clip with no resolvable track returns
-  `null` and is skipped). So `record.clips[i]` need not be the file's
-  animation *i*.
-- **Names aren't unique.** A file can hold `Walk`, `Walk` and `Walk (2)`. A
-  naive " (2)" suffix gives two `Walk (2)`.
-
 ### P8. The Khronos interactivity engine (for D2)
 A separate evaluation read the code of the tool, its npm package, the Khronos
 Sample Renderer and the test-asset repo (shallow clones, 2026-10-22). Claude
@@ -244,6 +231,12 @@ then checked the package's metadata and loaded it in Node (*probe*).
   was estimated at 1,200–2,000 lines plus tests. It would fail most of the
   Khronos assets and need rework for every new operation.
 
+### P9. Test baseline at `1206a52`
+- **Suites:** server 530 (34 files), `packages/client` 391, renderer-three
+  265, `apps/client` 766, som 234, protocol 71 and interaction 9. All pass.
+  Node v22.22.0.
+- **Ports:** new server tests use port 0 (AGENTS.md).
+
 ### P10. A new extras leaf can't be set today (*probe*)
 - **`SOMDocument.setPath`** (`packages/som/src/SOMDocument.js` L949)
   refuses a final key that doesn't exist yet. It throws `Unknown property
@@ -270,11 +263,35 @@ then checked the package's metadata and loaded it in Node (*probe*).
 
   Accept-then-apply needs no rollback on rejection.
 
-### P9. Test baseline at `1206a52`
-- **Suites:** server 530 (34 files), `packages/client` 391, renderer-three
-  265, `apps/client` 766, som 234, protocol 71 and interaction 9. All pass.
-  Node v22.22.0.
-- **Ports:** new server tests use port 0 (AGENTS.md).
+### P12. How three.js holds a clip's end (*probe*; review 1)
+- **The setup:** a 2 s clip moving `box.x` from 0 to 10, driven by setting
+  `action.time` and calling `mixer.update(0)` each time.
+- **The result:** times past the end gave `x = 10` with the action still
+  enabled, under the default `LoopRepeat` and also under `LoopOnce` with or
+  without `clampWhenFinished`. Setting the time back to 1 gave `x = 5`.
+- **But** this relies on `update(0)` skipping the loop and finish logic.
+  The defaults are `LoopRepeat` and `clampWhenFinished = false`, so any real
+  delta (or a later three.js) can wrap a clip or disable it at its end.
+  - Z5 therefore configures every action as `LoopOnce` with
+    `clampWhenFinished = true`, and computes looping itself (Z4).
+  - The tests check the **animated object's own values**, not only the
+    computed time.
+- **Stop restores the loaded pose only through `action.stop()`** (*probe*,
+  second review 2). The test object starts at `x = 0`, with a clip running
+  from 5 to 10:
+  - `reset()` then `update(0)` gives `x = 5`: the clip's first frame, not
+    the rest pose;
+  - `action.stop()` alone gives `x = 0`. The mixer saved each binding's
+    original value when the action was first activated, and restores it
+    when the action stops.
+
+### P13. The clip list isn't the file's animation list (review 3)
+- **`buildInstance` keeps only clips with at least one bound track**
+  (`model-instances.js` L80–81: a clip with no resolvable track returns
+  `null` and is skipped). So `record.clips[i]` need not be the file's
+  animation *i*.
+- **Names aren't unique.** A file can hold `Walk`, `Walk` and `Walk (2)`. A
+  naive " (2)" suffix gives two `Walk (2)`.
 
 ## 3. Decisions
 
@@ -437,7 +454,8 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
   - **(a) Recommended:** after `duration / speed`, every client holds the
     last frame. Nobody writes a stop; `playing` stays true and means "has
     been played".
-    - The panel shows "Played" and offers Play again.
+    - The panel shows "Played", with Play (again) and Stop (back to rest)
+      both enabled.
     - A visitor who arrives later sees the last frame too.
   - (b) The owner's client writes `playing: false` when the clip ends.
 
@@ -448,11 +466,15 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
     clips:**
     - a **clip select**: the clips by their L8 ids;
     - a **Loop** checkbox;
-    - one **Play / Stop** button.
+    - **two buttons, Play and Stop** (second review 6):
+      - **Play** is enabled when stopped or ended, and restarts the clip;
+      - **Stop** is enabled when playing or ended, and returns the model to
+        its rest pose.
   - A model with no clips shows "No animations"; one that's loading shows
     "Animations: loading".
   - **A saved clip the model doesn't have** shows "Clip ‘X’ not found in
-    this model", and nothing plays.
+    this model" (written with `textContent`, never as markup), and nothing
+    plays.
   - **Play, Stop, a clip change while playing, and a Loop change while
     playing** each write the whole value once and wait for the answer: the
     controls are disabled until it comes.
@@ -470,12 +492,17 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 - **L8 — Clips are identified by a unique id built from their names.**
   - **(a) Recommended (Rev 1; review 3):**
     - **The id comes from the file's own animation list,** in file order,
-      before any clip is dropped (P13).
-    - **The id is the name,** or `animation_<index>` when the name is empty.
-    - **When that id is already taken by an earlier animation, or is any
-      other animation's own name,** it gets ` (n)`, with the smallest n ≥ 2
-      that leaves it unique against **every** name and id in the file. So
-      `Walk`, `Walk` and `Walk (2)` become `Walk`, `Walk (3)` and `Walk (2)`.
+      before any clip is dropped (P13). **The names are GLTFLoader's**
+      (`gltf.animations[i].name`), the names the clip objects carry. GLTFLoader
+      already names an unnamed animation `animation_<i>` (P1), so `clipIds`
+      treats an empty name the same way only as a defensive fallback.
+    - **Candidate:** the name, with its stem cut to 250 characters.
+    - **First occurrence wins.** The candidate is kept unless it's already an
+      assigned id. Otherwise it gets ` (n)`: the smallest n ≥ 2 such that
+      `candidate (n)` is neither an assigned id nor any animation's name in
+      the file. So `Walk`, `Walk` and `Walk (2)` become `Walk`, `Walk (3)`
+      and `Walk (2)`.
+    - **An id is at most 256 + ` (n)` characters,** within Z1's 300.
     - **Each id keeps its file index,** so 4b can map a graph's animation
       index to it.
     - **A dropped animation keeps its id** but isn't offered or playable
@@ -503,7 +530,7 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 - **`animationValueProblem(value)`** returns a reason code or null:
   - `animation-type`: not a plain object;
   - `keys`: not exactly `clip`, `playing`, `loop`, `speed` and `startedAt`;
-  - `clip`: not a string of 1–256 characters;
+  - `clip`: not a string of 1–300 characters;
   - `playing` or `loop`: not a boolean;
   - `speed`: not a finite number from 0.1 to 10;
   - `startedAt`: not an integer from 0 to 2^53 − 1.
@@ -544,6 +571,7 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
   - A missing intermediate object is still refused.
   - The same SOM code runs on the server and in every client, so a broadcast
     `set` of the new leaf applies everywhere.
+  - **It's a list on purpose:** 4b's set-once `objectId` leaf (D6) joins it.
 - **`add`:** `checkAtriumExtras` also checks `atrium.animation` when it's
   present. It must pass Z1, and the node must carry `atrium.model`.
 - **No schema change.** `send`'s `field` and `value` are already generic.
@@ -555,6 +583,10 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
   node: name, field: 'extras.atrium.animation', value }`. It tracks the
   edit as `renameNode` does (`type: 'send'`, `field`, `value`) and returns
   the seq. It throws "World not loaded" as the others do.
+- **The own echo is matched by `requestSeq`, never by value** (second review
+  1). Today's `_resolveOwnSetEcho` (`AtriumClient` L1027) already looks the
+  pending edit up by `msg.requestSeq`. Keep it that way: a stamped
+  `startedAt` changes the value, so a value comparison would never match.
 - **Nothing changes locally until the answer** (the rename pattern). On the
   own echo, `_resolveOwnSetEcho` applies **the broadcast's `value`** (the
   server-stamped one, L5 (b)), never the value it sent. It does so with
@@ -569,9 +601,11 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
   `Date.now()`. The offset maps that clock to the server's:
   `serverNow() = monoNow() + offset`. A wall-clock change on the device then
   can't move `serverNow()`.
-- **Pings carry `clientTime`** as the schema requires (integer ms). The
-  client keeps its own map from each ping's `clientTime` to the `monoNow()`
-  at send, and measures RTT from that.
+- **Pings carry `clientTime`** as the schema requires (an integer). Its
+  value is **a per-connection ping counter** (1, 2, 3 …), not a time, so the
+  five pings of a burst never share a key (second review 4). The client
+  keeps a map from that counter to the `monoNow()` at send, and measures RTT
+  from that.
 - **Samples:** after `hello` the estimate starts from `hello.serverTime`.
   Then five `ping`s go at 200 ms intervals, then one every 30 s while
   connected.
@@ -582,10 +616,12 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 - **A discontinuity** is a new sample whose offset differs from the current
   estimate by more than `max(250 ms, its RTT)`. It could be a sleeping
   device whose monotonic clock paused, or a server restart. On one:
-  - the window is cleared and holds only that sample;
-  - a burst of five pings follows at once.
-- **Ignored:** a `pong` not in the map (another connection's, or older than
-  60 s).
+  - the window is cleared, **without keeping that sample**: it may itself be
+    wrong, for example a pre-sleep ping answered after a wake;
+  - a burst of five pings follows at once, and the estimate rebuilds from
+    their answers.
+- **Ignored:** a `pong` not in the map (another connection's), or one whose
+  ping was sent more than 60 s ago by `monoNow()`.
 - **Timers:** every ping timer belongs to its connection record. All are
   cancelled on `disconnected`, on a superseded connection, on a connect
   timeout and on a new `hello`.
@@ -624,14 +660,19 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
   - then `mixer.update(0)`;
   - **the mixer's own looping and its `finished` event are never relied
     on;**
-  - **Stop:** the action is stopped and the rest pose restored: the action
-    reset, `mixer.update(0)`, then the action stopped.
+  - **Stop:** `action.stop()`. The mixer restores each binding's saved
+    original value, which is the loaded rest pose (P12). The first activation
+    happens on a fresh instance (`onInstanceCreated`), so what's saved is the
+    loaded pose. Don't reset and update first: that shows the clip's frame 0.
+  - **A clip that's never activated** (`clip-missing`, `no-clips`) has
+    nothing to restore.
   - **An already-ended clip** (a late joiner) is set straight to its
     duration, which holds the last pose.
 - **`set` is idempotent (review 7).** Setting a value deep-equal to the
   current one changes nothing: no new action, no mixer change, no restart.
-  A changed value with the same clip and `startedAt` (a Loop change) only
-  re-reads the loop flag; anything else re-targets the action.
+  A changed value with the same clip and `startedAt` only re-reads `loop`
+  and `speed` (kept for 4b; in 4a a Loop change is re-stamped, so it
+  restarts). Anything else re-targets the action.
 - **`update()` runs once per frame.** Only entries that are playing and have
   a live instance cost work. With nothing playing it returns at once.
 - **Driving every frame from the clock** means a tab that was in the
@@ -660,7 +701,7 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 
 ### Z6. Wiring in `app.js`
 - **`world:loaded`, `som:add`, and `som:set` with path
-  `extras.atrium.animation` (or `extras`) on a model node** call `modelAnimations.set(name, node.extras?.atrium?.animation ?? null)`.
+  `extras.atrium.animation` on a model node** call `modelAnimations.set(name, node.extras?.atrium?.animation ?? null)`.
   A rename moves the entry (as the bridge's records move); `som:remove`
   drops it.
 - **The frame loop** calls `modelAnimations.update()` before `stage.tick`.
@@ -703,10 +744,10 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 | Z2 | Server (port 0): an owner `send` of a valid value on a model node is accepted and broadcast; on a non-model node it's refused `INVALID_FIELD`; a bad value is refused `INVALID_VALUE`; `null` is accepted; a visitor is refused; `add` with a valid and an invalid leaf; it survives a save and reload. **Stamping:** a playing send with `startedAt: 0` is stored and broadcast with the server's time (within the test's window); a `playing: false` send and `null` are not stamped; an `add` keeps its `startedAt` | (b) allow the leaf on any node; (b4) store the client's `startedAt` |
 | Z2 (SOM) | som: `setPath` creates `extras.atrium.animation` when missing; still refuses any other missing final key under `extras.` (for example `extras.atrium.other`), a missing intermediate, a malformed spelling (`extras..atrium.animation`, `extras.atrium.animation.`), and an inherited name (`extras.atrium.toString` is never created and never treated as present); an existing key behaves as before | (b2) create missing keys on any `extras.` path |
 | Z2a | Client (fake socket): `setModelAnimation` sends the exact message and tracks it; nothing changes before the echo; **the echo applies the broadcast's value, not the sent one** (a stamped `startedAt` arrives); then `som:set` and `edit:accepted`; a rejection changes nothing; another session's `set` of the field applies | (b3) apply the sent value |
-| Z3 | Client, fake clocks and socket: the offset from `hello`, then from the lowest-RTT `pong` in the window; **a stale best sample older than 5 minutes is replaced**; a window of 10; **a discontinuity** (a fake monotonic jump, and a server-time jump) clears the window and bursts five pings; **a wall-clock (`Date.now`) change moves nothing**; an unknown or 60 s-old `pong` is ignored; **no ping timer survives** a disconnect, a superseded connection, a connect timeout or a new `hello` | (c) keep the lowest-RTT sample forever; (c2) leave a timer running after disconnect |
-| Z4 | `clipTime`: stopped, loop wrap, once clamp and `ended`, `speed`, a future `startedAt`, a zero duration. `clipIds`: `['Walk', 'Walk', 'Walk (2)']` gives `Walk`, `Walk (3)`, `Walk (2)`; several unnamed clips; an unnamed clip whose `animation_<i>` is another clip's name; indices kept | (d) loop without the modulo; (d2) a naive suffix that repeats an id |
-| Z5 | renderer-three with real `AnimationClip`s on a real `Object3D` and a fake bridge: **the animated object's own values** past the duration for a once clip (the last pose), for a late-created instance of an ended clip, and after Stop (the rest pose); a looping clip at a time past its duration shows the wrapped pose; set before load, then `onInstanceCreated` applies it; `onInstanceRehosted` keeps the same mixer and action; `onInstanceDisposing` uncaches before disposal; **an event for a replaced instance under the same name is ignored**; a dropped earlier animation gives `clip-missing` for its id while later ids still play; **`set` with a deep-equal value creates no action and restarts nothing**; with nothing playing, `update` touches no mixer | (e) accumulate `dt` instead of setting the time from the clock; (e2) the default loop mode without clamping; (e3) key the mixer by name |
-| Z6–Z7 | A source-level wiring guard for `app.js` (the frame-loop call and the three `set` call sites); a pure panel-state helper tested for each status text and for the values Play (`startedAt: 0`) and Stop produce; **a late answer for a model that is no longer selected** re-enables nothing and shows no error on the new selection | (f) a late answer applied to the current selection |
+| Z3 | Client, fake clocks and socket: the offset from `hello`, then from the lowest-RTT `pong` in the window; **a stale best sample older than 5 minutes is replaced**; a window of 10; **a discontinuity** (a fake monotonic jump, and a server-time jump) clears the window and bursts five pings; **a wall-clock (`Date.now`) change moves nothing**; an unknown or 60 s-old `pong` is ignored; **all five pongs of one burst land, each with its own send time**; a discontinuity's own sample is not kept; **no ping timer survives** a disconnect, a superseded connection, a connect timeout or a new `hello` | (c) keep the lowest-RTT sample forever; (c2) leave a timer running after disconnect |
+| Z4 | `clipTime`: stopped, loop wrap, once clamp and `ended`, `speed`, a future `startedAt`, a zero duration. `clipIds`: `['Walk', 'Walk', 'Walk (2)']` gives `Walk`, `Walk (3)`, `Walk (2)`; GLTFLoader's names for an unnamed index 0 and an index 1 named `animation_0` give `animation_0` and `animation_0 (2)`; the `''` fallback; a 300-character name repeated gives ids of at most 300 characters; indices kept | (d) loop without the modulo; (d2) a naive suffix that repeats an id |
+| Z5 | renderer-three with real `AnimationClip`s on a real `Object3D` and a fake bridge: **the animated object's own values** past the duration for a once clip (the last pose), for a late-created instance of an ended clip, and after Stop (the rest pose); a looping clip at a time past its duration shows the wrapped pose; **Stop with a clip whose first frame differs from the loaded value (the object at `x = 0`, the clip running 5 → 10) returns `x = 0`**; set before load, then `onInstanceCreated` applies it; `onInstanceRehosted` keeps the same mixer and action; `onInstanceDisposing` uncaches before disposal; **an event for a replaced instance under the same name is ignored**; a dropped earlier animation gives `clip-missing` for its id while later ids still play; **`set` with a deep-equal value creates no action and restarts nothing**; with nothing playing, `update` touches no mixer | (e) accumulate `dt` instead of setting the time from the clock; (e2) the default loop mode without clamping; (e4) Stop by reset and `update(0)`; (e3) key the mixer by name |
+| Z6–Z7 | A source-level wiring guard for `app.js` (the frame-loop call and the three `set` call sites); a pure panel-state helper tested for each status text, for which of Play and Stop are enabled in each state (stopped, playing, ended, `clip-missing`, loading), and for the values Play (`startedAt: 0`) and Stop produce; **a late answer for a model that is no longer selected** re-enables nothing and shows no error on the new selection | (f) a late answer applied to the current selection |
 
 **Proofs:** commit first; break the file, run, record the failing test
 names, restore the file **from a saved copy, never with `git checkout`**,
@@ -728,7 +769,7 @@ In the local harness (library-sky passdown §5.3), with `Fox.glb` and
    frame at once.
 4. **Once:** Play without Loop: every session ends on the last frame, and no
    session sends anything when it ends.
-5. **Stop:** all sessions return to the rest pose.
+5. **Stop:** all sessions return to the rest pose, from playing and from ended.
 6. **Saved:** reload the server from its saved file; the loop is still
    running, at the right phase.
 7. **Refused:** a stubbed rejection: the reason shows, and nothing played.
@@ -756,6 +797,8 @@ In the local harness (library-sky passdown §5.3), with `Fox.glb` and
 5. **Stop:** both return to rest. **"Survey" without Loop:** both end on the
    last frame.
 6. **Delete it and Undo:** it comes back with its animation.
+7. **Play and Stop:** Play is offered when stopped or ended, and Stop when
+   playing or ended.
 
 ## 7. Worker rules and release path
 As library-sky (`devtasks/KICKOFF-library-sky.md`), with this round's
@@ -804,9 +847,10 @@ specifics:
 - **D5's drag rule.**
 - **What a graph's animation index means.** In a standard graph,
   `animation/start` names an animation by its index in the glTF file. In
-  Atrium a behaviour's animations are a placed model's clips, so the adapter
-  maps the index to the object's clip list (4a's display-name order) and
-  writes 4a's leaf. The world file's own animations (§9.5) are a separate
+  Atrium a behaviour's animations are a placed model's clips. Every L8 id
+  keeps its file index, so the adapter maps the graph's index to the file
+  index, then to the id, and writes 4a's leaf. A dropped animation is
+  `clip-missing`. The world file's own animations (§9.5) are a separate
   question.
 
 ### 9.2 4c — visitors' `activate`
@@ -857,3 +901,19 @@ or part of 4b if templates are to drive world-file animations too.
 The reviewer recommends (a) for D1–D6 (D2 provisional, D5 as direction) and
 for L1–L4, L6, L7 and L9, (b) for L5, and the revised L8, the same as this
 revision.
+- **Rev 1.1** (2026-10-23): a second outside review, of Rev 1 (`f997eba`),
+  read the document only. Its verdict was "sound, ready for FINAL after one
+  more pass". Claude checked the code claims: own-echo matching (by
+  `requestSeq`) and Stop (*probe*: `stop()` restores the loaded pose, and
+  reset with `update(0)` shows frame 0).
+
+| # | Finding | Severity | Where it went |
+|---|---|---|---|
+| 1 | Matching the own echo by value would fail once the server stamps | Must-fix | Z2a states the rule; the code already matches by `requestSeq` |
+| 2 | Stop as reset with `update(0)` shows frame 0, not the rest pose | Must-fix | P12 (*probe*), Z5's Stop rule, a distinguishing test and (e4) |
+| 3 | L8's text contradicted its example; repeated long names overflow Z1 | Must-fix | L8 restated (first occurrence wins; the stem cut to 250), Z1's `clip` up to 300 |
+| 4 | A burst's pings share one `clientTime` key | Should-fix | Z3: a per-connection counter; the 60 s rule on `monoNow` |
+| 5 | Which names feed `clipIds` changes the ids | Should-fix | L8: GLTFLoader's names; `''` is a defensive fallback; the test's expected output stated |
+| 6 | One Play/Stop button can't serve the ended state | Should-fix | L6, L7: two buttons; panel-state tests per state |
+| 7 | §9.1 still mapped by display order | Should-fix | §9.1: file index to id |
+| Nits | The Loop parenthetical; the base after edit-polish-3; the same server clock; P-section order; Z6's `extras`; `CREATABLE_PATHS` as a list; `textContent`; a discontinuity's own sample | — | All taken |
