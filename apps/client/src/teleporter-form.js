@@ -107,10 +107,22 @@ export function createTeleporterForm({ elements = {}, deps = {}, gate = null, na
   /**
    * Z3 — the world list's answer, for the opening that asked for it. An answer
    * that arrives after a close, or after a newer fresh opening, is dropped.
+   *
+   * V1 (round 2) — a list that arrives while the owner has already chosen a
+   * destination must not erase that choice. The value on screen now is read
+   * BEFORE the fill and handed to the adapter, which re-selects it when the
+   * list it just wrote still offers it ("The commons", `/`, included); the
+   * select is left on the placeholder otherwise. Save is then re-derived from
+   * what is ACTUALLY chosen — a world in the select or a non-blank destination
+   * box — so a list that dropped the choice leaves Save off unless the input
+   * has text.
    */
   function fillIfCurrent(opening, options) {
     if (!state.open || opening !== state.opening) return false
-    deps.fillWorlds?.(options ?? [], {})
+    const previous = selectText()
+    deps.fillWorlds?.(options ?? [], { selected: previous })
+    state.saveEnabled = Boolean(selectText()) || Boolean(destText().trim())
+    render()
     return true
   }
 

@@ -31,7 +31,17 @@ const html = readFileSync(resolve(__dirname, '../index.html'), 'utf-8')
 function functionBody(name) {
   const at = source.search(new RegExp(`function ${name}\\s*\\(`))
   assert.ok(at >= 0, `app.js has a function ${name}() — the guard cannot check what is not there`)
-  const open = source.indexOf('{', at)
+  // Skip the parameter list first: a destructured parameter is a `{ … }` of its
+  // own (V1's `fillTeleporterWorlds(options, { loading, … })`), so the body's `{`
+  // is the first one AFTER the parameters close, not the first one after the name.
+  const paren = source.indexOf('(', at)
+  let pdepth = 0
+  let close = paren
+  for (; close < source.length; close++) {
+    if (source[close] === '(') pdepth += 1
+    else if (source[close] === ')') { pdepth -= 1; if (pdepth === 0) break }
+  }
+  const open = source.indexOf('{', close)
   let depth = 0
   for (let i = open; i < source.length; i++) {
     if (source[i] === '{') depth++
@@ -209,6 +219,16 @@ describe('Z3 — app.js is wiring only for the destination form', () => {
     const click = source.slice(source.indexOf("epTeleporter.addEventListener('click'"))
     assert.match(click, /palettePlacement\(origin, forward\.toArray\(\)\)/, 'the palette placement is still read here')
     assert.match(click, /teleporterForm\?\.open\(\[position\[0\], 0, position\[2\]\]\)/, 'and handed to the form')
+  })
+
+  test('V1: the select adapter re-selects the value the form passes it', () => {
+    const body = stripComments(functionBody('fillTeleporterWorlds'))
+    assert.match(body, /selected/, 'the adapter reads a `selected` value')
+    assert.match(body, /tpWorldSelect\.value\s*=\s*selected/, 'and assigns it back after the fill')
+    // The form is the one that reads the value on screen and passes it on.
+    const formSource = readFileSync(resolve(__dirname, '../src/teleporter-form.js'), 'utf-8')
+    assert.match(formSource, /fillWorlds\?\.\([^)]*selected/,
+      'the form hands the adapter the value the select showed (V1)')
   })
 
   test('Escape and the world boundaries close it through the module', () => {

@@ -1272,8 +1272,13 @@ function listTeleporterWorlds() {
  * ("The commons" is always offered), the worlds, or the manual-only state for a
  * world on another server. The form calls it empty in its loading state as it
  * opens, and again with the worlds its own opening asked for.
+ *
+ * V1 (round 2) — the form hands the value the select showed before the fill as
+ * `selected`. When the list just written still offers that value it is re-selected,
+ * so a list that lands late does not throw away a destination the owner chose
+ * while it loaded; otherwise the select stays on the placeholder.
  */
-function fillTeleporterWorlds(options, { loading = false, manualOnly = false } = {}) {
+function fillTeleporterWorlds(options, { loading = false, manualOnly = false, selected = '' } = {}) {
   tpWorldSelect.textContent = ''
   if (manualOnly) {
     tpWorldSelect.disabled = true
@@ -1297,6 +1302,12 @@ function fillTeleporterWorlds(options, { loading = false, manualOnly = false } =
     opt.value = world.value
     opt.textContent = world.label
     tpWorldSelect.appendChild(opt)
+  }
+  // V1 (round 2) — put back the choice the form passed in, when this list still
+  // offers it. A value the list no longer carries leaves the select on the
+  // placeholder; the form re-derives Save either way.
+  if (selected && [...tpWorldSelect.options].some((opt) => opt.value === selected)) {
+    tpWorldSelect.value = selected
   }
 }
 

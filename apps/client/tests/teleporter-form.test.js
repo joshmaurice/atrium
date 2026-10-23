@@ -44,8 +44,24 @@ const tick = () => new Promise((r) => setTimeout(r, 0))
 const WORLD = { value: '/worlds/me/room', label: 'Room' }
 const OTHER_WORLD = { value: '/worlds/me/garden', label: 'Garden' }
 
+/**
+ * V1 (round 2) — the page's DOM adapter in miniature: it writes the select from
+ * the list it is given (the placeholder, "The commons" `/`, then the options),
+ * and re-selects `selected` only when the list it just wrote offers it. Unlike
+ * the recording default below, it changes `elements.worldSelect.value`, which is
+ * what makes the late-list behaviour observable.
+ */
+function writingAdapter(elements, calls) {
+  return (options, { loading = false, manualOnly = false, selected = '' } = {}) => {
+    calls.fills.push({ options, loading, manualOnly, selected })
+    const offered = manualOnly ? [''] : ['', '/', ...(options ?? []).map((o) => o.value)]
+    elements.worldSelect.value = offered.includes(selected) ? selected : ''
+  }
+}
+
 function harness({
   listWorlds,
+  adapter,
   gate = createFormGate(),
   dispatchAllowed = () => true,
   nearSpawn = () => false,
@@ -67,7 +83,9 @@ function harness({
     gate,
     deps: {
       listWorlds: listWorlds ?? (() => { calls.lists += 1; return Promise.resolve([WORLD]) }),
-      fillWorlds: (options, opts = {}) => calls.fills.push({ options, ...opts }),
+      fillWorlds: adapter
+        ? adapter(elements, calls)
+        : (options, opts = {}) => calls.fills.push({ options, ...opts }),
       isValidDestination,
       resolveDestination,
       teleporterName,
@@ -289,6 +307,68 @@ test('Z3: a rejected world list changes nothing', async () => {
   pending.reject(new Error('offline'))
   await tick()
   assert.equal(h.calls.fills.length, 1, 'no second fill, and no throw')
+})
+
+// ===========================================================================
+// V1 (round 2) — a late world list keeps the destination the owner chose
+// ===========================================================================
+
+test('V1: a destination chosen while the list loads survives the late list', async () => {
+  const pending = deferred()
+  const h = harness({ listWorlds: () => pending.promise, adapter: writingAdapter })
+
+  h.form.open([1, 0, 2])
+  // The owner picks "The commons" (`/`), which the loading list does not carry.
+  h.elements.worldSelect.value = '/'
+  h.elements.worldSelect.fire('change')
+  assert.equal(h.elements.save.disabled, false, 'a chosen world enables Save')
+
+  pending.resolve([WORLD, OTHER_WORLD])
+  await tick()
+  assert.equal(h.elements.worldSelect.value, '/', 'the late list kept "The commons"')
+  assert.equal(h.elements.save.disabled, false, 'and Save is still enabled')
+})
+
+test('V1: a chosen world the late list no longer offers returns to the placeholder', async () => {
+  const pending = deferred()
+  const h = harness({ listWorlds: () => pending.promise, adapter: writingAdapter })
+
+  h.form.open([1, 0, 2])
+  h.elements.worldSelect.value = WORLD.value
+  h.elements.worldSelect.fire('change')
+  assert.equal(h.elements.save.disabled, false)
+
+  pending.resolve([OTHER_WORLD])               // WORLD is not in the late list
+  await tick()
+  assert.equal(h.elements.worldSelect.value, '', 'the select is back on the placeholder')
+  assert.equal(h.elements.save.disabled, true, 'and Save is off with nothing chosen')
+})
+
+test('V1: a typed destination keeps Save on through a late list', async () => {
+  const pending = deferred()
+  const h = harness({ listWorlds: () => pending.promise, adapter: writingAdapter })
+
+  h.form.open([1, 0, 2])
+  h.elements.destInput.value = '/worlds/me/garden'
+  h.elements.destInput.fire('input')
+  assert.equal(h.elements.save.disabled, false)
+
+  pending.resolve([WORLD])
+  await tick()
+  assert.equal(h.elements.worldSelect.value, '', 'no world was chosen')
+  assert.equal(h.elements.save.disabled, false, 'the typed destination still enables Save')
+})
+
+test('V1: the late fill hands the adapter the value on screen, and only then', async () => {
+  const pending = deferred()
+  const h = harness({ listWorlds: () => pending.promise })   // the recording adapter
+
+  h.form.open([1, 0, 2])
+  h.elements.worldSelect.value = WORLD.value
+  pending.resolve([WORLD])
+  await tick()
+  assert.equal(h.calls.fills.at(-1).selected, WORLD.value, 'the current choice is passed on')
+  assert.equal(h.calls.fills[0].selected, undefined, 'the loading fill passes no `selected`')
 })
 
 // ===========================================================================
