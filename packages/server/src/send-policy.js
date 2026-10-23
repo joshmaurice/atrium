@@ -171,7 +171,20 @@ export function checkAtriumExtras(extras) {
     const teleporterCheck = checkTeleporterDestination(teleporter.destination)
     if (!teleporterCheck.ok) return teleporterCheck
   }
-  return checkModelValue(atrium.model)
+  const modelCheck = checkModelValue(atrium.model)
+  if (!modelCheck.ok) return modelCheck
+  // Z2 — `atrium.animation` is checked when the key is PRESENT (null included):
+  // absent or null is accepted on a model node, any other value must pass Z1,
+  // and a node that carries the key must carry `atrium.model`.
+  if (Object.hasOwn(atrium, 'animation')) {
+    const animation = atrium.animation
+    if (animation !== null) {
+      const problem = animationValueProblem(animation)
+      if (problem) return animationDeny(problem)
+    }
+    if (!carriesModel({ extras })) return animationDeny('model-node')
+  }
+  return allow()
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +314,85 @@ export function modelExtrasProblem(extras) {
 
 function modelDeny(reason) {
   return deny(SEND_INVALID, MODEL_MESSAGES[reason] ?? 'the model value is invalid')
+}
+
+// ---------------------------------------------------------------------------
+// scripting-4a (Z1, Z2) — `extras.atrium.animation`, the second writable node
+// extras leaf
+//
+// One rule set, two implementations: this and the client's
+// `packages/client/src/animation-spec.js`, pinned to each other by
+// `tests/fixtures/animation-spec-vectors.json`, which both read.
+// ---------------------------------------------------------------------------
+
+/** The one node extras leaf 4a adds (L1/Z2). */
+export const ANIMATION_LEAF = 'extras.atrium.animation'
+
+/** The exact key set of the animation value (Z1). */
+const ANIMATION_KEYS = ['clip', 'playing', 'loop', 'speed', 'startedAt']
+
+/** Z1's bounds. `clip` goes to 300 for a cut-to-250 stem plus a ` (n)` suffix. */
+export const ANIMATION_CLIP_MAX      = 300
+export const ANIMATION_SPEED_MIN     = 0.1
+export const ANIMATION_SPEED_MAX     = 10
+export const ANIMATION_STARTED_MAX   = Number.MAX_SAFE_INTEGER
+
+/** The reason codes and their plain text (Z1). */
+export const ANIMATION_MESSAGES = {
+  'animation-type': 'extras.atrium.animation must be an object',
+  'keys':           'extras.atrium.animation must have exactly the keys clip, playing, loop, speed and startedAt',
+  'clip':           `clip must be a string of 1 to ${ANIMATION_CLIP_MAX} characters`,
+  'playing':        'playing must be a boolean',
+  'loop':           'loop must be a boolean',
+  'speed':          `speed must be a number from ${ANIMATION_SPEED_MIN} to ${ANIMATION_SPEED_MAX}`,
+  'startedAt':      `startedAt must be an integer from 0 to ${ANIMATION_STARTED_MAX}`,
+  'model-node':     'extras.atrium.animation is only allowed on a model node',
+}
+
+/** The plain text for an animation reason code. */
+export function animationReasonText(reason) {
+  return ANIMATION_MESSAGES[reason] ?? 'the animation value is invalid'
+}
+
+/**
+ * Z1 — the value rule for `extras.atrium.animation`. Returns a reason code or
+ * null. `null` is NOT a case here: it is the separate "stopped" value the server
+ * accepts on a model node (Z2).
+ *
+ * @param {*} value
+ * @returns {string|null}
+ */
+export function animationValueProblem(value) {
+  if (!isPlainObject(value)) return 'animation-type'
+  const keys = Object.keys(value)
+  if (keys.length !== ANIMATION_KEYS.length) return 'keys'
+  for (const key of keys) if (!ANIMATION_KEYS.includes(key)) return 'keys'
+  if (typeof value.clip !== 'string' || value.clip.length < 1 || value.clip.length > ANIMATION_CLIP_MAX) return 'clip'
+  if (!isBool(value.playing)) return 'playing'
+  if (!isBool(value.loop)) return 'loop'
+  if (!isFiniteNumber(value.speed) || value.speed < ANIMATION_SPEED_MIN || value.speed > ANIMATION_SPEED_MAX) return 'speed'
+  const startedAt = value.startedAt
+  if (typeof startedAt !== 'number' || !Number.isInteger(startedAt) ||
+      startedAt < 0 || startedAt > ANIMATION_STARTED_MAX) return 'startedAt'
+  return null
+}
+
+/** Z2 — a node carries a model (the leaf is only allowed there). */
+function carriesModel(node) {
+  const model = node?.extras?.atrium?.model
+  return model !== undefined && model !== null
+}
+
+function animationDeny(reason) {
+  return deny(SEND_INVALID, animationReasonText(reason))
+}
+
+/** Z2 — the `send` half: the node rule, then the value rule, then null. */
+export function checkAnimationValue(node, value) {
+  if (!carriesModel(node)) return deny(SEND_INVALID_FIELD, ANIMATION_MESSAGES['model-node'])
+  if (value === null) return allow()
+  const problem = animationValueProblem(value)
+  return problem ? animationDeny(problem) : allow()
 }
 
 /** The value half of Z1 (called from `checkAtriumExtras`). */
@@ -628,6 +720,14 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar }) {
   // same exported checker the `add` path uses.
   if (field === TELEPORTER_LEAF) {
     return checkTeleporterDestination(value)
+  }
+
+  // scripting-4a Z2 — the second node extras leaf: the model's animation state,
+  // allowed only on a node that carries its model. The node read is the RESOLVED
+  // node passed in here, never `authorizeSend`'s `currentExtras` (the document's),
+  // so a node that has lost its model cannot keep receiving the leaf.
+  if (field === ANIMATION_LEAF) {
+    return checkAnimationValue(node, value)
   }
 
   const materialMatch = MATERIAL_PATH_RE.exec(field)

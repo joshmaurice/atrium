@@ -11,6 +11,7 @@ import { parsePath } from '@atrium/som'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost,
+  ANIMATION_LEAF,
 } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
@@ -718,7 +719,18 @@ export function attachSessionHandlers({
             break
           }
 
-          const result = world.setField(msg.node, msg.field, msg.value)
+          // scripting-4a Z2 / L5(b) — the server stamps a Play. The stamp runs
+          // AFTER `authorizeSend` accepted (so a refused value is never stamped)
+          // and before the apply and the broadcast, and the SAME stamped object is
+          // both stored and broadcast. `add` is never stamped: a Duplicate or an
+          // Undo-restored node keeps its value and stays in step (P6).
+          let appliedValue = msg.value
+          if (msg.field === ANIMATION_LEAF && msg.value !== null &&
+              typeof msg.value === 'object' && msg.value.playing === true) {
+            appliedValue = { ...msg.value, startedAt: Date.now() }
+          }
+
+          const result = world.setField(msg.node, msg.field, appliedValue)
           if (!result.ok) {
             sendError(ws, msg.seq, result.code, result.message ?? `${result.code}: ${msg.node}`)
             break
@@ -728,7 +740,7 @@ export function attachSessionHandlers({
             seq: nextSeq(),
             node: msg.node,
             field: msg.field,
-            value: msg.value,
+            value: appliedValue,
             serverTime: Date.now(),
             session: session.id,
             requestSeq: msg.seq,

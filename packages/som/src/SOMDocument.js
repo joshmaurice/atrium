@@ -20,6 +20,15 @@ export function parsePath(path) {
   return segments
 }
 
+/**
+ * Z2 (scripting-4a) — the paths `setPath` may CREATE when their final key is
+ * missing. A LIST on purpose: 4b's set-once `objectId` leaf joins it.
+ *
+ * The match is on the path STRING, exactly: a non-canonical spelling such as
+ * `extras..atrium.animation` is not the listed path and stays refused.
+ */
+export const CREATABLE_PATHS = Object.freeze(['extras.atrium.animation'])
+
 function resolvePath(somNode, segments) {
   let current = somNode
   for (let i = 0; i < segments.length - 1; i++) {
@@ -30,6 +39,38 @@ function resolvePath(somNode, segments) {
   }
   const key = segments[segments.length - 1]
   return { target: current, key }
+}
+
+/** A plain data object — `{}`-shaped, never a wrapper or an array. */
+function isPlainData(v) {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const proto = Object.getPrototypeOf(v)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * Z2 — does `key` count as PRESENT on `target`?
+ *
+ * A SOM wrapper (SOMNode, SOMObject, …) keeps its accessors on the prototype, so
+ * `in` is right for it. A plain data object has no inherited field of the
+ * document: an inherited name such as `toString` is never present there and is
+ * never created.
+ */
+function keyIsPresent(target, key) {
+  if (!(key in target)) return false
+  if (Object.hasOwn(target, key)) return true
+  return !isPlainData(target)
+}
+
+/** Z2 — every segment before the final key resolves to a plain object. */
+function resolvesThroughPlainObjects(somNode, segments) {
+  let current = somNode
+  for (let i = 0; i < segments.length - 1; i++) {
+    const next = current[segments[i]]
+    if (!isPlainData(next)) return false
+    current = next
+  }
+  return true
 }
 
 import { SOMObject }    from './SOMObject.js'
@@ -949,8 +990,14 @@ export class SOMDocument extends SOMObject {
   setPath(somNode, path, value) {
     const segments = parsePath(path)
     const { target, key } = resolvePath(somNode, segments)
-    if (typeof key === 'string' && !(key in target)) {
-      throw new Error(`Unknown property "${key}" on ${target?.constructor?.name ?? 'object'}`)
+    if (typeof key === 'string' && !keyIsPresent(target, key)) {
+      // Z2 — a listed path may create its missing final key, and only when every
+      // earlier segment is a plain object. Every other missing final key, and a
+      // non-canonical spelling of a listed one, keeps today's refusal.
+      const creatable = CREATABLE_PATHS.includes(path) && resolvesThroughPlainObjects(somNode, segments)
+      if (!creatable) {
+        throw new Error(`Unknown property "${key}" on ${target?.constructor?.name ?? 'object'}`)
+      }
     }
     target[key] = value
   }

@@ -15,6 +15,7 @@ export { SOMLight }     from './SOMLight.js'
 export { SOMTexture }   from './SOMTexture.js'
 export { SOMSkin }      from './SOMSkin.js'
 export { parsePath }    from './SOMDocument.js'
+export { CREATABLE_PATHS } from './SOMDocument.js'
 export {
   pruneCandidateProperties,
   pruneDocumentInPlace,

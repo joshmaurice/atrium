@@ -1,0 +1,243 @@
+{
+  "note": "Shared by the server's and the client's Z1 tests (scripting-4a Z1): 'values' are extras.atrium.animation values. 'reason' is the shared reason code for a refused value. Read by packages/server/test/*.test.js and packages/client/tests/*.test.js, so the two implementations of animationValueProblem cannot drift. `null` is NOT here: it is not a Z1 case (Z1 says 'not a plain object'), it is the server's separate 'stopped' value accepted on a model node.",
+  "values": [
+    {
+      "label": "the recommended value, looping",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": 1700000000000 },
+      "ok": true
+    },
+    {
+      "label": "the recommended value, once",
+      "value": { "clip": "Walk", "playing": true, "loop": false, "speed": 1, "startedAt": 0 },
+      "ok": true
+    },
+    {
+      "label": "playing false is a legal value (not stamped)",
+      "value": { "clip": "Walk", "playing": false, "loop": false, "speed": 1, "startedAt": 7 },
+      "ok": true
+    },
+    {
+      "label": "speed at the low end",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 0.1, "startedAt": 0 },
+      "ok": true
+    },
+    {
+      "label": "speed at the high end",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 10, "startedAt": 0 },
+      "ok": true
+    },
+    {
+      "label": "startedAt at the high end (2^53 - 1)",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": 9007199254740991 },
+      "ok": true
+    },
+    {
+      "label": "clip of 300 characters",
+      "value": { "clip": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": true
+    },
+    {
+      "label": "a clip name with spaces and punctuation",
+      "value": { "clip": "Walk (3) / id", "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": true
+    },
+    {
+      "label": "null is not a plain object",
+      "value": null,
+      "ok": false,
+      "reason": "animation-type"
+    },
+    {
+      "label": "an array",
+      "value": [],
+      "ok": false,
+      "reason": "animation-type"
+    },
+    {
+      "label": "a string",
+      "value": "playing",
+      "ok": false,
+      "reason": "animation-type"
+    },
+    {
+      "label": "a number",
+      "value": 1,
+      "ok": false,
+      "reason": "animation-type"
+    },
+    {
+      "label": "a boolean",
+      "value": true,
+      "ok": false,
+      "reason": "animation-type"
+    },
+    {
+      "label": "an empty object",
+      "value": {},
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "an extra key",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": 0, "paused": false },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "the model's playback key",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": 0, "autoStart": true },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "clip missing",
+      "value": { "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "playing missing",
+      "value": { "clip": "Walk", "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "loop missing",
+      "value": { "clip": "Walk", "playing": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "speed missing",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "startedAt": 0 },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "startedAt missing",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1 },
+      "ok": false,
+      "reason": "keys"
+    },
+    {
+      "label": "clip is empty",
+      "value": { "clip": "", "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "clip"
+    },
+    {
+      "label": "clip is 301 characters",
+      "value": { "clip": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "clip"
+    },
+    {
+      "label": "clip is not a string",
+      "value": { "clip": 3, "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "clip"
+    },
+    {
+      "label": "clip is null",
+      "value": { "clip": null, "playing": true, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "clip"
+    },
+    {
+      "label": "playing is a string",
+      "value": { "clip": "Walk", "playing": "true", "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "playing"
+    },
+    {
+      "label": "playing is 1",
+      "value": { "clip": "Walk", "playing": 1, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "playing"
+    },
+    {
+      "label": "playing is null",
+      "value": { "clip": "Walk", "playing": null, "loop": true, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "playing"
+    },
+    {
+      "label": "loop is a string",
+      "value": { "clip": "Walk", "playing": true, "loop": "yes", "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "loop"
+    },
+    {
+      "label": "loop is 0",
+      "value": { "clip": "Walk", "playing": true, "loop": 0, "speed": 1, "startedAt": 0 },
+      "ok": false,
+      "reason": "loop"
+    },
+    {
+      "label": "speed is 0",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 0, "startedAt": 0 },
+      "ok": false,
+      "reason": "speed"
+    },
+    {
+      "label": "speed is just below the low end",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 0.09, "startedAt": 0 },
+      "ok": false,
+      "reason": "speed"
+    },
+    {
+      "label": "speed is just above the high end",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 10.01, "startedAt": 0 },
+      "ok": false,
+      "reason": "speed"
+    },
+    {
+      "label": "speed is negative",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": -1, "startedAt": 0 },
+      "ok": false,
+      "reason": "speed"
+    },
+    {
+      "label": "speed is a string",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": "1", "startedAt": 0 },
+      "ok": false,
+      "reason": "speed"
+    },
+    {
+      "label": "speed is null",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": null, "startedAt": 0 },
+      "ok": false,
+      "reason": "speed"
+    },
+    {
+      "label": "startedAt is negative",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": -1 },
+      "ok": false,
+      "reason": "startedAt"
+    },
+    {
+      "label": "startedAt is above 2^53 - 1",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": 9007199254740992 },
+      "ok": false,
+      "reason": "startedAt"
+    },
+    {
+      "label": "startedAt is fractional",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": 1.5 },
+      "ok": false,
+      "reason": "startedAt"
+    },
+    {
+      "label": "startedAt is a string",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": "0" },
+      "ok": false,
+      "reason": "startedAt"
+    },
+    {
+      "label": "startedAt is null",
+      "value": { "clip": "Walk", "playing": true, "loop": true, "speed": 1, "startedAt": null },
+      "ok": false,
+      "reason": "startedAt"
+    }
+  ]
+}
