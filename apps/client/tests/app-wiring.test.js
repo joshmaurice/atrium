@@ -160,6 +160,12 @@ describe('Z2 — Edit off closes whichever form holds the gate, and discards the
       assert.match(branch, /return/, `the ${name} branch returns`)
       assert.ok(!/selectAdded\(/.test(branch),
         `the ${name} branch never selects through selectAdded — an accepted add the form no longer owns selects NOTHING (Z2)`)
+      // The not-owned rule itself must RETURN: without it, an unmatched answer
+      // falls through to the generic branches below (proof (b4)).
+      const orphan = branch.lastIndexOf('orphanAddError(')
+      assert.ok(orphan >= 0, `the ${name} branch routes a not-owned answer through orphanAddError()`)
+      assert.match(branch.slice(orphan), /\breturn\b/,
+        `the ${name} branch RETURNS after the not-owned rule, so a not-owned accepted add cannot fall through to selectAdded`)
     }
     // The generic branch keeps the palette's and Duplicate's selection (J6).
     assert.match(flatten(answer.slice(generic)), /selectAdded\(request\.name\)/)
