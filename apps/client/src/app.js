@@ -31,7 +31,8 @@ import { loadCatalog, storedUrl, EMPTY_CATALOG } from './library-catalog.js'
 import { createSkyPicker, SKY_NONE, SKY_CUSTOM } from './sky-picker.js'
 import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
-import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS } from '@atrium/renderer-three'
+import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
+import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animation-panel.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
@@ -695,6 +696,13 @@ client.on('world:loaded', ({ name, description, author }) => {
   // holds, so an external ref's repeat costs no download.
   modelBridge.reconcile()
 
+  // ── The models' animations (Z6, scripting-4a) ───────────────────────────
+  // Every model node hands the layer its saved state. For a node whose instance
+  // is already there (an external ref's repeat) this drives it at once; for one
+  // still loading, `onInstanceCreated` applies it the moment the instance is
+  // built, so a late joiner's first rendered frame is the world's frame.
+  syncModelAnimations()
+
   // R2.2: rebuild pads after world finishes loading so pads saved in a world
   // trigger and show labels for joiners and after reload (session:ready fires
   // before som-dump, so the rebuild there sees no SOM).
@@ -759,6 +767,9 @@ client.on('connecting', () => {
   // ledger and dispose every template and instance. It does NOT wait for a new
   // client.som (the client emits `connecting` long before the next som-dump).
   modelBridge.resetWorld()
+  // Z6 — the animation layer goes with it: no action and no wanted value from
+  // the previous world survives (the instances it was driven by are gone).
+  modelAnimations?.clear()
   // Z3 — the sky's world boundary, beside the bridge's. A world change never
   // reuses a pending sky request from the previous world, even for one URL.
   sky.resetWorld()
@@ -768,6 +779,8 @@ client.on('connecting', () => {
   libraryGrid?.close()
   // Z4 — and the Sky picker's failure.
   skyPicker?.reset()
+  // Z7 — and the clip controls' wait and remembered choice.
+  animationControls?.reset()
   refreshModelRow()
   // Close the destination form (Z3 — its own module forgets the wait and closes)
   teleporterForm?.reset()
@@ -781,11 +794,13 @@ client.on('disconnected', () => {
   setConnectionState('disconnected')
   // A9 — the same world reset the connecting path takes.
   modelBridge.resetWorld()
+  modelAnimations?.clear()
   sky.resetWorld()
   modelForm.reset()
   libraryGrid?.close()
   // Z4 — the Sky picker's failure and any wait go with the world.
   skyPicker?.reset()
+  animationControls?.reset()
   refreshModelRow()
   // Close the destination form (Z3 — its own module forgets the wait and closes)
   teleporterForm?.reset()
@@ -861,6 +876,13 @@ client.on('som:set', ({ nodeName, path }) => {
     // below it (the panel above refreshes only when the changed node IS the
     // selection): a child pad moved inside the selected group.
     if (TRANSFORM_FIELDS.includes(path) && isUnder(node, selected)) refreshSpawnNote()
+    // Z6 (scripting-4a) — the animation leaf: the layer takes the value the SOM
+    // now holds. This is the path another session's Play reaches, and the path
+    // the server's own answer to ours reaches (the echo applies the broadcast
+    // value through setPath, then emits this).
+    if (path === MODEL_ANIMATION_FIELD) {
+      modelAnimations?.set(nodeName, node.extras?.atrium?.animation ?? null)
+    }
   }
   // Y2 — a delete's capture is redone on every remote change until its removal
   undo.reCapture()
@@ -1455,6 +1477,21 @@ const epSkyStatus  = document.getElementById('ep-sky-status')
 const epSkyRetry   = document.getElementById('ep-sky-retry')
 // Assigned below; declared here for the same reason as the grid.
 let skyPicker = null
+
+// ── The model row's clip controls (Z7, scripting-4a) ─────────────────────
+const epAnimRow    = document.getElementById('ep-anim-row')
+const epAnimClip   = document.getElementById('ep-anim-clip')
+const epAnimLoop   = document.getElementById('ep-anim-loop')
+const epAnimPlay   = document.getElementById('ep-anim-play')
+const epAnimStop   = document.getElementById('ep-anim-stop')
+const epAnimStatus = document.getElementById('ep-anim-status')
+// The options the select was last built from, so re-rendering does not rebuild
+// the list (and does not stomp the open dropdown) on every frame-loop refresh.
+let lastAnimationOptions = null
+// Assigned below, beside the bridge they read; declared here so the handlers
+// registered above them can reach them.
+let modelAnimations = null
+let animationControls = null
 const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
@@ -2038,7 +2075,7 @@ client.on('som:rename', () => {
 
 // A removed node (or one under a removed ancestor): cancel its gestures, never
 // write to it again, and drop it from the selection (B2, B4).
-client.on('som:remove', () => {
+client.on('som:remove', ({ nodeName: goneName } = {}) => {
   if (!client.som) return
   const alive = (n) => client.som.getNodeByName(n.name) === n
   editTracker.pruneRemoved(alive)
@@ -2061,14 +2098,22 @@ client.on('som:remove', () => {
   resetStaleWorldCamera()
   // Z5 — the scene follows the SOM: a removed model node loses its instance.
   modelBridge.reconcile()
+  // Z6 — and its wanted animation value goes with it.
+  if (goneName) modelAnimations?.set(goneName, null)
   refreshModelRow()
 })
 
-client.on('som:add', () => {
+client.on('som:add', ({ nodeName }) => {
   if (selected) refreshNameField()
   // Z7 — a pad may have arrived under the selection.
   if (selected) refreshSpawnNote()
   modelBridge.reconcile()
+  // Z6 — a model node that arrives carrying a saved state hands it over at once.
+  const added = nodeName ? client.som?.getNodeByName(nodeName) : null
+  if (added?.extras?.atrium?.model) {
+    modelAnimations?.set(nodeName, added.extras.atrium.animation ?? null)
+  }
+  refreshModelRow()
 })
 
 // ── Add palette, Duplicate, Delete (Phase 3 step 1b-2) ──────────────────
@@ -2454,24 +2499,30 @@ client.on('som:add', ({ nodeName }) => structure.addSeen(nodeName))
 // rejection's rollback; a seq the picker does not own is ignored here.
 client.on('edit:accepted', ({ seq }) => {
   skyPicker?.onAccepted(seq)
+  // Z7 — the clip controls own their own wait; a seq they do not own is ignored.
+  animationControls?.onAccepted(seq)
   onStructureAnswer(seq, 'accepted')
 })
 client.on('edit:rejected', ({ seq, code, message }) => {
   skyPicker?.onRejected(seq, message || code)
+  animationControls?.onRejected(seq, message || code)
   onStructureAnswer(seq, 'rejected', message || code)
 })
 client.on('edit:unknown',  ({ seq }) => {
   skyPicker?.onUnknown(seq)
+  animationControls?.onUnknown(seq)
   onStructureAnswer(seq, 'unknown')
 })
 
 // A remote change to the selection, or to a material it shares, can change
 // whether it may be duplicated.
 client.on('som:set', () => { if (modes.edit) refreshEditActions(); refreshModelRow() })
-client.on('som:rename', () => {
+client.on('som:rename', ({ from, to } = {}) => {
   if (modes.edit) refreshEditActions()
   // A rename changes the name an instance is keyed on, so the scene catches up.
   modelBridge.reconcile()
+  // Z6 — and the animation layer's entry moves with it.
+  if (from && to) modelAnimations?.rename(from, to)
   refreshModelRow()
 })
 
@@ -2662,6 +2713,10 @@ function tick(now) {
   const dt = (now - lastTick) / 1000
   lastTick = now
 
+  // Z6 (scripting-4a) — the model animations advance from the server's clock
+  // BEFORE the stage renders, so every viewer draws the frame the world's state
+  // asks for.
+  modelAnimations?.update()
   stage.tick(dt)
   labels.update()
   tickEditMode()
@@ -2749,9 +2804,40 @@ const modelBridge = createModelBridge({
   worldBaseUrl: () => client.worldBaseUrl ?? null,
   nextFrame: (fn) => requestAnimationFrame(fn),
   onStatus: (node, status) => { modelStatuses.set(node, status); if (node === selected) refreshModelRow() },
+  // scripting-4a Z5 — the animation layer's three lifecycle events. Each carries
+  // the INSTANCE object, never just its name, so a late event for a replaced
+  // instance under the same name cannot touch the replacement.
+  onInstanceCreated:   (event) => modelAnimations?.onInstanceCreated(event),
+  onInstanceRehosted:  (event) => modelAnimations?.onInstanceRehosted(event),
+  onInstanceDisposing: (event) => modelAnimations?.onInstanceDisposing(event),
   // V3 — the bridge has NO default fetcher (it throws without one): this is the
   // real loader, the same one Check runs, so a placed model renders.
   hooks: { fetchModel: (args) => fetchModel(args) },
+})
+
+/**
+ * Z5/Z6 (scripting-4a) — the model animations. `now` is the SERVER's clock
+ * (Z3), so every session computes the same frame from the same state; the bridge
+ * above drives it through the three lifecycle events.
+ */
+modelAnimations = createModelAnimations({
+  bridge: modelBridge,
+  now: () => client.serverNow(),
+})
+
+/**
+ * Z7 (scripting-4a) — the model row's clip controls. The logic is pure
+ * (`model-animation-panel.js`); this is the wiring: the selection, the layer's
+ * `status`, the client's `setModelAnimation`, and the row's DOM.
+ */
+animationControls = createAnimationControls({
+  deps: {
+    selected: () => selected,
+    status: (name) => modelAnimations.status(name),
+    write: (name, value) => client.setModelAnimation(name, value),
+    render: (panel) => renderAnimationRow(panel),
+    showError: (text) => showEditError(text),
+  },
 })
 
 /** The last status the bridge reported for a node (Z5/L11). */
@@ -2774,6 +2860,8 @@ function refreshModelRow() {
   if (!selected || !spec) {
     epModelRow.style.display = 'none'
     if (epModelStatus) epModelStatus.textContent = ''
+    // Z7 — no selection (or a node that is not a model): no clip controls either.
+    animationControls?.refresh()
     return
   }
   epModelRow.style.display = ''
@@ -2787,6 +2875,56 @@ function refreshModelRow() {
     epModelStatus.textContent = statusText(status)
     epModelStatus.style.color = status?.status === MODEL_STATUS.failed ? '#f87171' : ''
   }
+  // Z7 — the clip controls live in this row, so this one place re-renders them.
+  animationControls?.refresh()
+}
+
+/**
+ * Z6 (scripting-4a) — hand every model node's saved animation state to the
+ * animation layer. Called from `world:loaded`; a node whose instance exists is
+ * driven at once, and one still loading gets it the moment it arrives
+ * (`onInstanceCreated`).
+ */
+function syncModelAnimations() {
+  const som = client.som
+  if (!som?.allNodes || !modelAnimations) return
+  for (const node of som.allNodes) {
+    if (!node?.extras?.atrium?.model) continue
+    modelAnimations.set(node.name, node.extras?.atrium?.animation ?? null)
+  }
+}
+
+/**
+ * Z7 — the one writer of the clip controls' DOM: the select's options, the Loop
+ * box, the two buttons' enabled state and the status line, all from the pure
+ * panel state. A clip id is written with `textContent`, never as markup.
+ */
+function renderAnimationRow(panel) {
+  if (!epAnimRow) return
+  if (!panel) {
+    epAnimRow.style.display = 'none'
+    if (epAnimStatus) epAnimStatus.textContent = ''
+    return
+  }
+  epAnimRow.style.display = ''
+  const optionsKey = panel.clips.join('\u0000')
+  if (optionsKey !== lastAnimationOptions) {
+    lastAnimationOptions = optionsKey
+    epAnimClip.textContent = ''
+    for (const id of panel.clips) {
+      const option = document.createElement('option')
+      option.value = id
+      option.textContent = id
+      epAnimClip.appendChild(option)
+    }
+  }
+  if (panel.clip !== null) epAnimClip.value = panel.clip
+  epAnimClip.disabled = !panel.clipEnabled
+  epAnimLoop.checked = panel.loop
+  epAnimLoop.disabled = !panel.loopEnabled
+  epAnimPlay.disabled = !panel.playEnabled
+  epAnimStop.disabled = !panel.stopEnabled
+  epAnimStatus.textContent = panel.text ?? ''
 }
 
 // ── The checked template (Z7/A8) ─────────────────────────────────────────
@@ -2974,10 +3112,12 @@ epModel.addEventListener('click', () => {
 function beginNewWorld() {
   endCheck()
   modelBridge.resetWorld()
+  modelAnimations?.clear()
   sky.resetWorld()
   modelForm.reset()
   libraryGrid?.close()
   skyPicker?.reset()
+  animationControls?.reset()
   refreshModelRow()
 }
 
@@ -3168,6 +3308,14 @@ skyPicker = createSkyPicker({
 // owner with no reason and no Retry.
 epSky?.addEventListener('change', () => skyPicker.change(epSky.value))
 epSkyRetry?.addEventListener('click', () => skyPicker.retry())
+
+// ── The model row's clip controls (Z7, scripting-4a) ─────────────────────
+// Every handler is one call into the controls, which own the write, its wait and
+// its own answers (`onAccepted`/`onRejected`/`onUnknown` above).
+epAnimClip?.addEventListener('change', () => animationControls?.change(epAnimClip.value))
+epAnimLoop?.addEventListener('change', () => animationControls?.setLoop(epAnimLoop.checked))
+epAnimPlay?.addEventListener('click', () => animationControls?.play())
+epAnimStop?.addEventListener('click', () => animationControls?.stop())
 
 loadCatalog().then((loaded) => {
   if (!loaded.ok) {

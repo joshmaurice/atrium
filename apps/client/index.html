@@ -501,6 +501,7 @@
     "@atrium/client/AnimationController":   "../../packages/client/src/AnimationController.js",
     "@atrium/client/model-spec":            "../../packages/client/src/model-spec.js",
     "@atrium/client/model-fetch":           "../../packages/client/src/model-fetch.js",
+    "@atrium/client/animation-spec":        "../../packages/client/src/animation-spec.js",
     "@atrium/renderer-three":               "../../packages/renderer-three/src/index.js",
     "@atrium/interaction":                  "../../packages/interaction/src/index.js"
   }
@@ -688,6 +689,20 @@
         <span id="ep-model-pinned" style="color:#94a3b8;font-size:11px;margin-left:4px"></span>
       </div>
       <div class="ep-status" id="ep-model-status"></div>
+      <!-- scripting-4a (Z7, L7) — the clip controls for a selected model node:
+           the clip select (the L8 ids), a Loop box, and TWO buttons, Play and
+           Stop. app.js's model-animation-panel.js is the one writer of their
+           text, their options and their disabled state; visitors never see the
+           row, because the panel is the owner's. -->
+      <div class="ep-row" id="ep-anim-row" style="display:none"><span>Animation</span>
+        <select id="ep-anim-clip" aria-label="Clip"></select>
+        <label id="ep-anim-loop-label" style="display:flex;align-items:center;gap:3px;font-size:11px">
+          <input type="checkbox" id="ep-anim-loop" /> Loop
+        </label>
+        <button id="ep-anim-play" title="Play the chosen clip">Play</button>
+        <button id="ep-anim-stop" title="Stop and return to the rest pose">Stop</button>
+      </div>
+      <div class="ep-status" id="ep-anim-status"></div>
       <!-- edit-polish-3 (Z7, L5a) — the spawn note: app.js's refreshSpawnNote() is
            the one writer of its text and its visibility, and it is hidden until a
            selected pad (or a group holding one) sits near the spawn point. The

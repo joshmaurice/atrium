@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
+//
+// model-animation-panel.test.js — scripting-4a step 5 (Z7's pure half).
+//
+// No DOM and no three.js — `apps/client` tests cannot have them. The panel's
+// logic is pure, so every status text, every enabled/disabled control, the exact
+// value Play and Stop write, and the L7 rule (a late answer for a model that is
+// no longer selected touches nothing) are all tested with plain values.
+
+import { test, describe } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  panelState, animationStatusText, playValue, stopValue, createAnimationControls,
+  MODEL_ANIMATION_FIELD,
+} from '../src/model-animation-panel.js'
+
+const CLIPS = ['Survey', 'Walk', 'Run']
+const status = (state, clips = CLIPS) => ({ state, clips })
+const PLAYING = { clip: 'Walk', playing: true, loop: true, speed: 1, startedAt: 1_700_000_000_000 }
+
+// ===========================================================================
+// The texts
+// ===========================================================================
+
+describe('panelState — the status texts (Z7)', () => {
+  test('every state has its line', () => {
+    assert.equal(animationStatusText('stopped'), 'Stopped')
+    assert.equal(animationStatusText('playing'), 'Playing')
+    assert.equal(animationStatusText('ended'), 'Played')
+    assert.equal(animationStatusText('loading'), 'Animations: loading')
+    assert.equal(animationStatusText('no-clips'), 'No animations')
+    assert.equal(animationStatusText('clip-missing', 'Nope'), "Clip 'Nope' not found in this model")
+  })
+
+  test('a model with no clips says so, and offers nothing', () => {
+    const panel = panelState({ status: status('no-clips', []), value: null })
+    assert.equal(panel.text, 'No animations')
+    assert.equal(panel.playEnabled, false)
+    assert.equal(panel.stopEnabled, false)
+    assert.equal(panel.clipEnabled, false)
+  })
+
+  test('a loading model says so, and offers nothing', () => {
+    const panel = panelState({ status: status('loading', []), value: PLAYING })
+    assert.equal(panel.text, 'Animations: loading')
+    assert.equal(panel.playEnabled, false)
+    assert.equal(panel.stopEnabled, false)
+  })
+
+  test('a saved clip the model does not have names it, and plays nothing', () => {
+    const panel = panelState({
+      status: status('clip-missing'), value: { ...PLAYING, clip: 'Gallop' },
+    })
+    assert.equal(panel.text, "Clip 'Gallop' not found in this model")
+    assert.equal(panel.playEnabled, false, 'nothing plays')
+    assert.equal(panel.stopEnabled, false)
+    assert.equal(panel.clipEnabled, true, 'but the owner can pick another clip')
+  })
+
+  test('an ended clip says Played', () => {
+    const panel = panelState({ status: status('ended'), value: PLAYING })
+    assert.equal(panel.text, 'Played')
+  })
+})
+
+describe('panelState — which control is offered (L7)', () => {
+  const cases = [
+    ['stopped', { playEnabled: true,  stopEnabled: false }],
+    ['playing', { playEnabled: false, stopEnabled: true }],
+    ['ended',   { playEnabled: true,  stopEnabled: true }],
+    ['clip-missing', { playEnabled: false, stopEnabled: false }],
+    ['loading', { playEnabled: false, stopEnabled: false }],
+    ['no-clips', { playEnabled: false, stopEnabled: false }],
+  ]
+  for (const [state, expected] of cases) {
+    test(`${state}: play=${expected.playEnabled} stop=${expected.stopEnabled}`, () => {
+      const clips = state === 'loading' || state === 'no-clips' ? [] : CLIPS
+      const panel = panelState({ status: status(state, clips), value: PLAYING })
+      assert.equal(panel.playEnabled, expected.playEnabled, 'Play')
+      assert.equal(panel.stopEnabled, expected.stopEnabled, 'Stop')
+      assert.equal(panel.loopEnabled, clips.length > 0, 'Loop')
+    })
+  }
+
+  test('a write in flight disables every control for that node', () => {
+    const panel = panelState({ status: status('stopped'), value: null, waiting: true })
+    assert.equal(panel.playEnabled, false)
+    assert.equal(panel.stopEnabled, false)
+    assert.equal(panel.clipEnabled, false)
+    assert.equal(panel.loopEnabled, false)
+  })
+})
+
+describe('the values Play and Stop write (L7)', () => {
+  test('Play writes the whole value with startedAt 0 — the server stamps it', () => {
+    assert.deepEqual(playValue({ clip: 'Walk', loop: true }),
+      { clip: 'Walk', playing: true, loop: true, speed: 1, startedAt: 0 })
+    assert.deepEqual(playValue({ clip: 'Run' }),
+      { clip: 'Run', playing: true, loop: false, speed: 1, startedAt: 0 })
+    assert.equal(playValue({ clip: 'Run' }).startedAt, 0)
+  })
+
+  test('Stop writes null', () => {
+    assert.equal(stopValue(), null)
+  })
+
+  test('the leaf the controls write is extras.atrium.animation', () => {
+    assert.equal(MODEL_ANIMATION_FIELD, 'extras.atrium.animation')
+  })
+})
+
+// ===========================================================================
+// The controls: one write at a time, per node (L7)
+// ===========================================================================
+
+function makeControls({ statuses = new Map() } = {}) {
+  const writes = []
+  const errors = []
+  const panels = []
+  let seq = 100
+  const nodes = new Map()
+  const state = { selected: null }
+
+  const node = (name, animation = null) => {
+    const created = { name, extras: { atrium: { model: { url: `https://h/${name}.glb` }, ...(animation !== null ? { animation } : {}) } } }
+    nodes.set(name, created)
+    // The first node made is the selection, so a test can drive the controls
+    // without a separate select() call.
+    if (state.selected === null) state.selected = created
+    return created
+  }
+
+  const controls = createAnimationControls({
+    deps: {
+      selected: () => state.selected,
+      status: (name) => statuses.get(name) ?? status('loading', []),
+      write: (name, value) => { writes.push({ name, value }); return ++seq },
+      render: (panel) => panels.push(panel),
+      showError: (text) => errors.push(text),
+    },
+  })
+
+  return {
+    controls, writes, errors, panels, nodes, node,
+    select(name) { state.selected = nodes.get(name) ?? null; controls.refresh() },
+    set(name, value) { nodes.get(name).extras.atrium.animation = value },
+    get lastPanel() { return panels.at(-1) },
+  }
+}
+
+test('Z7: Play sends the value for the selected node and disables it until the answer', () => {
+  const h = makeControls()
+  h.node('Fox', null)
+  h.set('Fox', PLAYING)
+  h.controls.refresh()
+
+  const seq = h.controls.play()
+  assert.equal(typeof seq, 'number')
+  assert.deepEqual(h.writes.at(-1), { name: 'Fox', value: playValue({ clip: 'Walk', loop: true }) })
+  assert.equal(h.lastPanel.waiting, true, 'the row shows the wait')
+  assert.equal(h.lastPanel.playEnabled, false, 'and the controls are disabled')
+  assert.equal(h.lastPanel.stopEnabled, false)
+
+  h.controls.onAccepted(seq)
+  assert.equal(h.lastPanel.waiting, false, 'the answer re-enables them')
+})
+
+test('Z7: a second write for the same node is refused while one is in flight', () => {
+  const h = makeControls()
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+  assert.equal(typeof h.controls.play(), 'number')
+  const before = h.writes.length
+  assert.equal(h.controls.stop(), null, 'no second write while the first is unanswered')
+  assert.equal(h.writes.length, before)
+})
+
+test('Z7: a rejection shows the reason in the edit error line', () => {
+  const h = makeControls({ statuses: new Map([['Fox', status('stopped')]]) })
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+  const seq = h.controls.play()
+
+  h.controls.onRejected(seq, 'extras.atrium.animation is only allowed on a model node')
+  assert.deepEqual(h.errors, ['extras.atrium.animation is only allowed on a model node'])
+  assert.equal(h.controls.waiting, 0, 'and the wait is over')
+  assert.equal(h.lastPanel.playEnabled, true, 'the controls come back')
+})
+
+test('Z7: a late answer for a model that is no longer selected touches nothing on the new one', () => {
+  const statuses = new Map([['Fox', status('playing')], ['Chair', status('stopped')]])
+  const h = makeControls({ statuses })
+  h.node('Fox', PLAYING)
+  h.node('Chair', null)
+  h.select('Fox')
+  const seq = h.controls.play()
+  assert.equal(h.lastPanel.waiting, true, 'Fox waits')
+
+  // The owner selects another model while the answer is out.
+  h.select('Chair')
+  assert.equal(h.lastPanel.waiting, false, 'Chair was never waiting on Fox’s write')
+  assert.equal(h.lastPanel.playEnabled, true, 'and its controls are live')
+
+  const panels = h.panels.length
+  h.controls.onRejected(seq, 'refused')
+  assert.deepEqual(h.errors, [], 'no error is shown against the new selection')
+  assert.equal(h.lastPanel.playEnabled, true, 'and nothing was re-enabled or disabled on it')
+  assert.ok(h.panels.length > panels, 'it did re-render, for the new selection')
+  assert.equal(h.lastPanel.state, 'stopped', 'still Chair’s own state')
+
+  // The answer still applied to its OWN node, through the SOM.
+  h.select('Fox')
+  assert.equal(h.lastPanel.waiting, false, 'Fox’s wait is over')
+})
+
+test('Z7: an unknown answer ends the wait with nothing else changed', () => {
+  const h = makeControls()
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+  const seq = h.controls.stop()
+  assert.equal(h.controls.onUnknown(seq), true)
+  assert.equal(h.controls.waiting, 0)
+  assert.deepEqual(h.errors, [])
+})
+
+test('Z7: a seq the controls do not own is ignored', () => {
+  const h = makeControls()
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+  assert.equal(h.controls.onAccepted(4242), false)
+  assert.equal(h.controls.onRejected(4242, 'x'), false)
+  assert.equal(h.controls.onUnknown(4242), false)
+  assert.deepEqual(h.errors, [])
+})
+
+test('Z7: a clip change while playing writes a new playing value; while stopped it only remembers', () => {
+  const statuses = new Map([['Fox', status('playing')]])
+  const h = makeControls({ statuses })
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+
+  const seq = h.controls.change('Run')
+  assert.equal(typeof seq, 'number', 'playing: the change is a write')
+  assert.deepEqual(h.writes.at(-1).value, playValue({ clip: 'Run', loop: true }), 'and the server re-stamps it')
+
+  h.controls.onAccepted(seq)
+  statuses.set('Fox', status('stopped'))
+  h.set('Fox', { ...PLAYING, playing: false, clip: 'Run', loop: true })
+  h.controls.refresh()
+  const before = h.writes.length
+  assert.equal(h.controls.change('Survey'), null, 'stopped: nothing is sent')
+  assert.equal(h.writes.length, before)
+  assert.equal(h.lastPanel.clip, 'Survey', 'but the choice is remembered for Play')
+
+  const playSeq = h.controls.play()
+  assert.deepEqual(h.writes.at(-1).value, playValue({ clip: 'Survey', loop: true }))
+  h.controls.onAccepted(playSeq)
+})
+
+test('Z7: a Loop change while playing writes; while stopped it only remembers', () => {
+  const statuses = new Map([['Fox', status('playing')]])
+  const h = makeControls({ statuses })
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+
+  const seq = h.controls.setLoop(false)
+  assert.equal(typeof seq, 'number')
+  assert.deepEqual(h.writes.at(-1).value, playValue({ clip: 'Walk', loop: false }))
+  h.controls.onAccepted(seq)
+
+  statuses.set('Fox', status('stopped'))
+  h.set('Fox', { ...PLAYING, playing: false, loop: false })
+  h.controls.refresh()
+  const before = h.writes.length
+  assert.equal(h.controls.setLoop(true), null)
+  assert.equal(h.writes.length, before)
+  assert.equal(h.lastPanel.loop, true, 'remembered in the panel')
+})
+
+test('Z7: reset forgets every wait and the remembered choice', () => {
+  const h = makeControls()
+  h.node('Fox', PLAYING)
+  h.controls.refresh()
+  h.controls.play()
+  assert.equal(h.controls.waiting, 1)
+
+  h.controls.reset()
+  assert.equal(h.controls.waiting, 0, 'the wait goes with the world')
+  assert.equal(h.lastPanel.waiting, false, 'and the row re-renders with no wait on it')
+  assert.equal(h.lastPanel.playEnabled, false, 'while the value still says playing')
+})
+
+test('Z7: a node that is not a model node renders no row', () => {
+  const h = makeControls()
+  h.node('Fox', PLAYING)
+  h.nodes.set('Plain', { name: 'Plain', extras: {} })
+  h.select('Plain')
+  assert.equal(h.lastPanel, null)
+  h.select('Fox')
+  assert.ok(h.lastPanel, 'the selected model node renders')
+})
