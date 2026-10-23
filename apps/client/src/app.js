@@ -2823,6 +2823,11 @@ const modelBridge = createModelBridge({
 modelAnimations = createModelAnimations({
   bridge: modelBridge,
   now: () => client.serverNow(),
+  // V1 — the row follows the LAYER's state: this is called only when what
+  // `status(name)` reports could have changed (a load that finished, a clip that
+  // ended, a Stop), never per frame. The bridge's own `onStatus` above still
+  // carries its loading/ready/failed line.
+  onChange: (name) => { if (selected?.name === name) refreshModelRow() },
 })
 
 /**
@@ -2837,6 +2842,9 @@ animationControls = createAnimationControls({
     write: (name, value) => client.setModelAnimation(name, value),
     render: (panel) => renderAnimationRow(panel),
     showError: (text) => showEditError(text),
+    // V8 — a new write clears the old rejection's line first, exactly as the
+    // edit tracker clears it for its own accepted answer.
+    clearError: () => clearEditError(),
   },
 })
 
@@ -2907,7 +2915,9 @@ function renderAnimationRow(panel) {
     return
   }
   epAnimRow.style.display = ''
-  const optionsKey = panel.clips.join('\u0000')
+  // V7 — the cache key is JSON.stringify: a clip id may contain any character,
+  // `\u0000` included, so a joined key could collide two different lists.
+  const optionsKey = JSON.stringify(panel.clips)
   if (optionsKey !== lastAnimationOptions) {
     lastAnimationOptions = optionsKey
     epAnimClip.textContent = ''

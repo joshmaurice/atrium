@@ -216,6 +216,27 @@ describe('Z7 — the panel wiring', () => {
     assert.match(panel, /deps\.showError\?\.\(message/)
   })
 
+  test('V1: the controls are refreshed from the layer’s onChange, for the selected node', () => {
+    assert.match(source,
+      /onChange:\s*\(name\)\s*=>\s*\{\s*if\s*\(selected\?\.name\s*===\s*name\)\s*refreshModelRow\(\)\s*\}/,
+      'the row follows the LAYER, and only when the changed name is the selection')
+    assert.match(source, /createModelAnimations\(\{[\s\S]{0,600}?onChange:/,
+      'and the layer is the thing given it')
+  })
+
+  test('V8: the controls are given the edit error line’s own clearer', () => {
+    assert.match(source, /clearError:\s*\(\)\s*=>\s*clearEditError\(\)/,
+      'a new write clears the line as `editTracker` does')
+    assert.match(panel, /deps\.clearError\?\.\(\)/)
+  })
+
+  test('V7: the option cache key is JSON.stringify, never a joined string', () => {
+    const body = functionBody('renderAnimationRow')
+    assert.match(body, /JSON\.stringify\(panel\.clips\)/,
+      'a clip id may contain any character, U+0000 included')
+    assert.ok(!/\.join\(/.test(body), 'a joined key could collide two lists')
+  })
+
   test('the controls write through client.setModelAnimation', () => {
     assert.match(source, /write:\s*\(name, value\)\s*=>\s*client\.setModelAnimation\(name, value\)/)
   })

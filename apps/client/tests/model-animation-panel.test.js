@@ -48,14 +48,22 @@ describe('panelState — the status texts (Z7)', () => {
     assert.equal(panel.stopEnabled, false)
   })
 
-  test('a saved clip the model does not have names it, and plays nothing', () => {
+  test('a saved clip the model does not have names it, and offers a way out (V6)', () => {
     const panel = panelState({
       status: status('clip-missing'), value: { ...PLAYING, clip: 'Gallop' },
     })
     assert.equal(panel.text, "Clip 'Gallop' not found in this model")
-    assert.equal(panel.playEnabled, false, 'nothing plays')
-    assert.equal(panel.stopEnabled, false)
-    assert.equal(panel.clipEnabled, true, 'but the owner can pick another clip')
+    assert.equal(panel.playEnabled, true, 'V6: a playable clip is shown, so Play is offered')
+    assert.equal(panel.clip, 'Survey', 'and the select shows the first playable clip')
+    assert.equal(panel.stopEnabled, true, 'Stop is offered too — it writes null')
+    assert.equal(panel.clipEnabled, true, 'and the owner can pick another clip')
+  })
+
+  test('V6: clip-missing with NOTHING playable still offers Stop, and no Play', () => {
+    const panel = panelState({ status: status('clip-missing', []), value: PLAYING })
+    assert.equal(panel.clip, null, 'there is no clip to show')
+    assert.equal(panel.playEnabled, false, 'nothing can be played')
+    assert.equal(panel.stopEnabled, true, 'but the missing clip can still be cleared')
   })
 
   test('an ended clip says Played', () => {
@@ -69,7 +77,8 @@ describe('panelState — which control is offered (L7)', () => {
     ['stopped', { playEnabled: true,  stopEnabled: false }],
     ['playing', { playEnabled: false, stopEnabled: true }],
     ['ended',   { playEnabled: true,  stopEnabled: true }],
-    ['clip-missing', { playEnabled: false, stopEnabled: false }],
+    // V6/R2 (a) — the one state L7 is amended for.
+    ['clip-missing', { playEnabled: true, stopEnabled: true }],
     ['loading', { playEnabled: false, stopEnabled: false }],
     ['no-clips', { playEnabled: false, stopEnabled: false }],
   ]
@@ -118,6 +127,8 @@ function makeControls({ statuses = new Map() } = {}) {
   const writes = []
   const errors = []
   const panels = []
+  const clears = []
+  let line = ''
   let seq = 100
   const nodes = new Map()
   const state = { selected: null }
@@ -137,12 +148,15 @@ function makeControls({ statuses = new Map() } = {}) {
       status: (name) => statuses.get(name) ?? status('loading', []),
       write: (name, value) => { writes.push({ name, value }); return ++seq },
       render: (panel) => panels.push(panel),
-      showError: (text) => errors.push(text),
+      showError: (text) => { line = text || ''; errors.push(text) },
+      // V8 — the edit error line itself, so a test can see it cleared.
+      clearError: () => { line = ''; clears.push(true) },
     },
   })
 
   return {
-    controls, writes, errors, panels, nodes, node,
+    controls, writes, errors, panels, nodes, node, clears,
+    get errorLine() { return line },
     select(name) { state.selected = nodes.get(name) ?? null; controls.refresh() },
     set(name, value) { nodes.get(name).extras.atrium.animation = value },
     get lastPanel() { return panels.at(-1) },
@@ -150,7 +164,7 @@ function makeControls({ statuses = new Map() } = {}) {
 }
 
 test('Z7: Play sends the value for the selected node and disables it until the answer', () => {
-  const h = makeControls()
+  const h = makeControls({ statuses: new Map([['Fox', status('playing')]]) })
   h.node('Fox', null)
   h.set('Fox', PLAYING)
   h.controls.refresh()
@@ -167,7 +181,7 @@ test('Z7: Play sends the value for the selected node and disables it until the a
 })
 
 test('Z7: a second write for the same node is refused while one is in flight', () => {
-  const h = makeControls()
+  const h = makeControls({ statuses: new Map([['Fox', status('playing')]]) })
   h.node('Fox', PLAYING)
   h.controls.refresh()
   assert.equal(typeof h.controls.play(), 'number')
@@ -279,7 +293,7 @@ test('Z7: a Loop change while playing writes; while stopped it only remembers', 
 })
 
 test('Z7: reset forgets every wait and the remembered choice', () => {
-  const h = makeControls()
+  const h = makeControls({ statuses: new Map([['Fox', status('playing')]]) })
   h.node('Fox', PLAYING)
   h.controls.refresh()
   h.controls.play()
@@ -299,4 +313,140 @@ test('Z7: a node that is not a model node renders no row', () => {
   assert.equal(h.lastPanel, null)
   h.select('Fox')
   assert.ok(h.lastPanel, 'the selected model node renders')
+})
+
+// ===========================================================================
+// V2 — Play sends the clip the select shows
+// ===========================================================================
+
+test('V2: a model selected while loading plays the clip that arrives with the load', () => {
+  const statuses = new Map([['CesiumMan', status('loading', [])]])
+  const h = makeControls({ statuses })
+  h.node('CesiumMan', null)
+  h.controls.refresh()
+  assert.equal(h.lastPanel.text, 'Animations: loading')
+  assert.equal(h.lastPanel.clip, null, 'nothing to show yet')
+  assert.equal(h.lastPanel.playEnabled, false)
+
+  // The instance arrives: V1's onChange reaches the row as a refresh, and the
+  // clips are there now. The owner still has not picked anything.
+  statuses.set('CesiumMan', status('stopped', ['animation_0']))
+  h.controls.refresh()
+
+  assert.equal(h.lastPanel.clip, 'animation_0', 'the select shows the clip that arrived')
+  assert.equal(h.lastPanel.playEnabled, true)
+  assert.equal(typeof h.controls.play(), 'number', 'and Play is not a silent no-op')
+  assert.deepEqual(h.writes.at(-1),
+    { name: 'CesiumMan', value: playValue({ clip: 'animation_0' }) },
+    'it writes the clip the row shows')
+})
+
+test('V2: an explicit pick of the third clip survives a refresh', () => {
+  const statuses = new Map([['Fox', status('stopped')]])   // Survey, Walk, Run
+  const h = makeControls({ statuses })
+  h.node('Fox', null)
+  h.controls.refresh()
+  assert.equal(h.controls.change('Run'), null, 'stopped: the pick only remembers')
+  assert.equal(h.lastPanel.clip, 'Run')
+
+  h.controls.refresh()
+  assert.equal(h.lastPanel.clip, 'Run', 'the pick is kept while it is still offered')
+
+  const seq = h.controls.play()
+  assert.deepEqual(h.writes.at(-1).value, playValue({ clip: 'Run' }), 'and Play uses it')
+  h.controls.onAccepted(seq)
+  h.controls.refresh()
+  assert.equal(h.lastPanel.clip, 'Run', 'a refresh after the answer keeps it too')
+})
+
+test('V2: an explicit pick that disappears from the list is replaced by the shown clip', () => {
+  const statuses = new Map([['Fox', status('stopped')]])
+  const h = makeControls({ statuses })
+  h.node('Fox', null)
+  h.controls.refresh()
+  h.controls.change('Run')
+  assert.equal(h.lastPanel.clip, 'Run')
+
+  // A different file under the same node: `Run` is not in its list any more.
+  statuses.set('Fox', status('stopped', ['Survey', 'Walk']))
+  h.controls.refresh()
+  assert.equal(h.lastPanel.clip, 'Survey', 'the shown clip replaces the pick')
+
+  const seq = h.controls.play()
+  assert.deepEqual(h.writes.at(-1).value, playValue({ clip: 'Survey' }))
+  h.controls.onAccepted(seq)
+})
+
+test('V2: whenever the row offers Play, play() writes exactly the clip the row shows', () => {
+  const cases = [
+    ['stopped, no saved value', status('stopped'), null],
+    ['stopped, a saved value', status('stopped'), { ...PLAYING, playing: false, clip: 'Walk' }],
+    ['ended', status('ended'), PLAYING],
+    ['a one-clip model stopped', status('stopped', ['only']), null],
+    ['clip-missing, one playable clip', status('clip-missing', ['only']), { ...PLAYING, clip: 'gone' }],
+    ['clip-missing, three playable clips', status('clip-missing'), { ...PLAYING, clip: 'gone' }],
+  ]
+  for (const [label, theStatus, value] of cases) {
+    const h = makeControls({ statuses: new Map([['Fox', theStatus]]) })
+    h.node('Fox', value)
+    h.controls.refresh()
+    assert.equal(h.lastPanel.playEnabled, true, `${label}: Play is offered`)
+    const seq = h.controls.play()
+    assert.equal(typeof seq, 'number', `${label}: play() wrote a value`)
+    assert.deepEqual(h.writes.at(-1),
+      { name: 'Fox', value: playValue({ clip: h.lastPanel.clip, loop: h.lastPanel.loop }) },
+      `${label}: the clip the row shows, and its Loop`)
+  }
+})
+
+// ===========================================================================
+// V6 — clip-missing is not a dead end
+// ===========================================================================
+
+test('V6: in clip-missing, Stop clears the saved clip and Play replaces it', () => {
+  const statuses = new Map([['CesiumMan', status('clip-missing', ['animation_0'])]])
+  const h = makeControls({ statuses })
+  h.node('CesiumMan', { ...PLAYING, clip: 'gone' })
+  h.controls.refresh()
+
+  assert.equal(h.lastPanel.text, "Clip 'gone' not found in this model")
+  assert.equal(h.lastPanel.stopEnabled, true, 'Stop is offered')
+  assert.equal(h.lastPanel.clip, 'animation_0', 'and the select shows the playable clip')
+
+  const stopSeq = h.controls.stop()
+  assert.deepEqual(h.writes.at(-1), { name: 'CesiumMan', value: null }, 'Stop writes null')
+  h.controls.onAccepted(stopSeq)
+
+  const playSeq = h.controls.play()
+  assert.deepEqual(h.writes.at(-1),
+    { name: 'CesiumMan', value: playValue({ clip: 'animation_0', loop: true }) },
+    'and Play writes a new playing value for the shown clip')
+  h.controls.onAccepted(playSeq)
+})
+
+// ===========================================================================
+// V8 — a new write clears the old rejection
+// ===========================================================================
+
+test('V8: every write clears the previous rejection’s line as it starts', () => {
+  const cases = [
+    ['Play', (h) => h.controls.play(), 'stopped'],
+    ['Stop', (h) => h.controls.stop(), 'playing'],
+    ['a clip change', (h) => h.controls.change('Run'), 'playing'],
+    ['a Loop change', (h) => h.controls.setLoop(true), 'playing'],
+  ]
+  for (const [label, start, state] of cases) {
+    const h = makeControls({ statuses: new Map([['Fox', status(state)]]) })
+    h.node('Fox', { ...PLAYING, playing: state === 'playing' })
+    h.controls.refresh()
+
+    const first = start(h)
+    assert.equal(typeof first, 'number', `${label}: the first write goes out`)
+    h.controls.onRejected(first, 'stubbed: animation refused')
+    assert.equal(h.errorLine, 'stubbed: animation refused', `${label}: the reason is on the line`)
+
+    const second = start(h)
+    assert.equal(typeof second, 'number', `${label}: the next write goes out`)
+    assert.equal(h.errorLine, '', `${label}: and the line was cleared as it started`)
+  }
 })

@@ -14,6 +14,19 @@
  * the late answer re-enables nothing on the new selection and shows no error
  * against it — the new selection's controls were never disabled by the old
  * write, and the answer still lands on its own node through the SOM.
+ *
+ * Round 2 (V2, V6, V8):
+ *
+ *   - **V2: Play sends the clip the select SHOWS.** The panel remembers whether
+ *     the owner actually picked a clip (`choice.explicit`, set by a `change()`
+ *     or a Play). Without a pick the clip is re-derived on every render by
+ *     `panelState`'s own rule, so a clip list that arrives after a load gives
+ *     Play the shown clip — a model selected while it was still loading can
+ *     play without a reselect.
+ *   - **V6: `clip-missing` is not a dead end.** Stop is enabled (it writes
+ *     `null`), and Play is enabled when the select shows a playable clip.
+ *     R2 (a) amends L7 for that one state.
+ *   - **V8: a new write clears the previous rejection's line first.**
  */
 
 /** Z5/Z2a — the node extras leaf these controls write. */
@@ -46,7 +59,8 @@ export function panelState({ status = null, value = null, clip = null, loop = fa
   const state = status?.state ?? 'loading'
   const saved = value?.clip ?? null
   const chosen = clips.includes(clip) ? clip : (clips.includes(saved) ? saved : (clips[0] ?? null))
-  const enabled = !waiting && clips.length > 0
+  const hasClips = clips.length > 0
+  const enabled = !waiting && hasClips
 
   return {
     state,
@@ -57,9 +71,14 @@ export function panelState({ status = null, value = null, clip = null, loop = fa
     text: animationStatusText(state, saved),
     clipEnabled: enabled,
     loopEnabled: enabled,
-    // L7 — Play is offered when stopped or ended, and Stop when playing or ended.
-    playEnabled: enabled && (state === 'stopped' || state === 'ended'),
-    stopEnabled: enabled && (state === 'playing' || state === 'ended'),
+    // L7 — Play when stopped or ended, and Stop when playing or ended.
+    //
+    // V6/R2 (a) amends L7 for `clip-missing`: Play is offered for the clip the
+    // select SHOWS (a new playing value replaces the saved one), and Stop for
+    // the saved value. Stop needs no clip list — it writes `null`, and is the
+    // only way out when nothing is playable at all.
+    playEnabled: enabled && (state === 'stopped' || state === 'ended' || state === 'clip-missing'),
+    stopEnabled: !waiting && (state === 'playing' || state === 'ended' || state === 'clip-missing'),
   }
 }
 
@@ -87,12 +106,16 @@ export function animationStatusText(state, savedClip = null) {
  *                                    `client.setModelAnimation`, returning the seq
  * @param {(panel: object|null) => void} [args.deps.render]     app.js writes the row
  * @param {(text: string) => void} [args.deps.showError]        the edit error line
+ * @param {() => void} [args.deps.clearError]                   V8: clear that line
  */
 export function createAnimationControls({ deps = {} } = {}) {
   /** seq -> the SOM node the write was sent for (one write at a time, per node). */
   const inFlight = new Map()
-  /** The owner's choice for the selected node: the select and the Loop box. */
-  const choice = { node: null, clip: null, loop: false }
+  /**
+   * The owner's choice for the selected node: the select, the Loop box, and —
+   * V2 — whether the owner actually PICKED the clip (`change()` or a Play).
+   */
+  const choice = { node: null, clip: null, explicit: false, loop: false }
 
   const selected = () => deps.selected?.() ?? null
 
@@ -110,19 +133,30 @@ export function createAnimationControls({ deps = {} } = {}) {
     return false
   }
 
-  /** Re-read the choice when the selection changes, or when the SOM moves under it. */
+  /**
+   * V2 — keep the selected node's clip in step with what the select shows.
+   *
+   * A pick is kept while it is still offered. Without one — or once the picked
+   * clip is gone from the list — the clip is RE-DERIVED on every render by
+   * `panelState`'s own rule (the stored clip when it is offered, else the first
+   * offered one). That is what gives Play the clip the row shows when the clip
+   * list arrives after the instance does, and it is why a model selected while
+   * it was still loading can play without a reselect.
+   */
   function syncChoice(node, status, value) {
     if (choice.node !== node) {
       choice.node = node
-      choice.clip = value?.clip ?? status.clips[0] ?? null
+      choice.clip = null
+      choice.explicit = false
       choice.loop = value?.loop === true
     }
-    // While PLAYING, the stored value is the truth; while stopped, what the owner
-    // picked is (L7: the choice is only remembered until Play).
-    if (value && value.playing === true) {
-      choice.clip = status.clips.includes(value.clip) ? value.clip : choice.clip
-      choice.loop = value.loop === true
+    if (!choice.explicit || !status.clips.includes(choice.clip)) {
+      choice.explicit = false
+      choice.clip = panelState({ status, value, clip: null, loop: choice.loop }).clip
     }
+    // While PLAYING, the stored value is the truth for the Loop box (L7: the
+    // owner's choice is remembered only until the write answers).
+    if (value && value.playing === true) choice.loop = value.loop === true
   }
 
   function render() {
@@ -130,6 +164,8 @@ export function createAnimationControls({ deps = {} } = {}) {
     const spec = specOf(node)
     if (!node || !spec) {
       choice.node = null
+      choice.clip = null
+      choice.explicit = false
       deps.render?.(null)
       return
     }
@@ -148,6 +184,10 @@ export function createAnimationControls({ deps = {} } = {}) {
   /** Z7 — the one place a write starts. Returns the seq, or null. */
   function write(node, value) {
     if (!node || waitingFor(node)) return null
+    // V8 — a new write clears the previous rejection's line before it starts, so
+    // "stubbed: animation refused" cannot sit there while the next write waits.
+    // This is the same thing `editTracker` does when its own edit is accepted.
+    deps.clearError?.()
     let seq
     try {
       seq = deps.write?.(node.name, value)
@@ -167,6 +207,8 @@ export function createAnimationControls({ deps = {} } = {}) {
     if (!node) return null
     choice.node = node
     choice.clip = clip
+    // V2 — a pick, kept while the clip is still offered.
+    choice.explicit = true
     const value = node.extras?.atrium?.animation ?? null
     if (value && value.playing === true) return write(node, playValue({ clip, loop: choice.loop }))
     render()
@@ -185,11 +227,20 @@ export function createAnimationControls({ deps = {} } = {}) {
     return null
   }
 
-  /** Play restarts the chosen clip; the server stamps `startedAt`. */
+  /**
+   * Play restarts the chosen clip; the server stamps `startedAt`.
+   *
+   * V2 — the choice is re-derived first, so this writes exactly what
+   * `panelState` shows: whenever the row offers Play, `play()` writes a value,
+   * and it never returns null without writing.
+   */
   function play() {
     const node = selected()
     if (!node) return null
+    syncChoice(node, statusOf(node), node.extras?.atrium?.animation ?? null)
     if (!choice.clip) return null
+    // V2 — a Play is a pick too.
+    choice.explicit = true
     return write(node, playValue({ clip: choice.clip, loop: choice.loop }))
   }
 
@@ -205,6 +256,7 @@ export function createAnimationControls({ deps = {} } = {}) {
     inFlight.clear()
     choice.node = null
     choice.clip = null
+    choice.explicit = false
     choice.loop = false
     render()
   }
