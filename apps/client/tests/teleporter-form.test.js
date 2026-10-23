@@ -151,6 +151,24 @@ test('Z3: both fields hide the last error, and Save is refused while one is up',
   assert.equal(g.elements.error.style.display, 'none', 'typing hides it too')
 })
 
+test('Z3: changing the inputs after a REJECTION hides its error too', () => {
+  const h = harness()
+  const sent = openAndSave(h)
+  h.form.onAnswer(sent.seq, 'rejected', 'that destination is taken')
+  assert.equal(h.elements.error.style.display, '', 'the rejection shows')
+
+  h.elements.destInput.value = '/worlds/me/garden'
+  h.elements.destInput.fire('input')
+  assert.equal(h.elements.error.style.display, 'none', 'editing the destination hides it')
+
+  // ...and the same through the world select.
+  h.form.onAnswer(h.form.save().seq, 'rejected', 'still taken')
+  assert.equal(h.elements.error.style.display, '', 'the second rejection shows')
+  h.elements.worldSelect.value = WORLD.value
+  h.elements.worldSelect.fire('change')
+  assert.equal(h.elements.error.style.display, 'none', 'choosing a world hides it')
+})
+
 test('Z3: the module reads its own elements — app.js adds no listeners', () => {
   // Every rule above ran through `wire()`; a second wire() would double them.
   const h = harness()
