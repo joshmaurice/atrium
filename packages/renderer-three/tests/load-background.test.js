@@ -13,7 +13,9 @@ import * as THREE from 'three'
 import {
   createSkyLoader, skyHeaderProblem, skyReasonText,
   SKY_MAX_SIDE, SKY_MAX_AREA, SKY_DECODE_TIMEOUT_MS,
+  SKY_RETRYABLE_REASONS, isSkyRetryable,
 } from '../src/load-background.js'
+import { SKY_RETRYABLE_REASONS as SOURCE_RETRYABLE } from '@atrium/client/model-fetch'
 import { imageHeader } from '../src/model-parse.js'
 
 const A = 'https://cdn.example.com/a.jpg'
@@ -91,10 +93,13 @@ function harness({ decodeTimeoutMs = SKY_DECODE_TIMEOUT_MS } = {}) {
   const decodes = []
   const created = []
   const revoked = []
+  const logs = []
   const sky = createSkyLoader({
     scene,
     fetchImage,
     decodeTimeoutMs,
+    // V2 — the injected log, so every reported failure is observable.
+    log: (line) => logs.push(line),
     createObjectURL: (blob) => { const url = `blob:mock-${created.length}`; created.push({ url, blob }); return url },
     revokeObjectURL: (url) => { revoked.push(url) },
     decode: (blobUrl) => {
@@ -103,7 +108,7 @@ function harness({ decodeTimeoutMs = SKY_DECODE_TIMEOUT_MS } = {}) {
       return d.promise
     },
   })
-  return { scene, sky, fetchImage, decodes, created, revoked }
+  return { scene, sky, fetchImage, decodes, created, revoked, logs }
 }
 
 /** Resolve the nth fetch with a good image, then let the controller reach decode. */
@@ -644,5 +649,155 @@ describe('resetWorld and dispose', () => {
     assert.equal(late.disposed, 1, 'and the texture it made is disposed')
     assert.equal(h.scene.background, null, 'no slot is touched')
     assert.deepEqual(await p, { ok: false, reason: 'superseded' })
+  })
+})
+
+// ===========================================================================
+// The failure log (V2, round 2)
+// ===========================================================================
+
+describe('the failure log (V2)', () => {
+  test('a current failure is logged once, with its reason code and its URL', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'http', message: 'the server refused the request (404)' })
+    assert.deepEqual(await p, { ok: false, reason: 'http', message: 'the server refused the request (404)' })
+    assert.deepEqual(h.logs, [`[sky] the server refused the request (404) (http) — ${A}`])
+  })
+
+  test('a failure with no message of its own logs the reason text', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'timeout' })
+    await p
+    assert.deepEqual(h.logs, [`[sky] ${skyReasonText('timeout')} (timeout) — ${A}`])
+  })
+
+  test('a refusal by rule is logged too, with the refused VALUE', async () => {
+    const h = harness()
+    const value = 'skyboxtest1.png'
+    const result = await h.sky.update({ type: 'equirectangular', texture: value }, null)
+    assert.equal(result.ok, false)
+    assert.equal(h.fetchImage.calls.length, 0, 'nothing is fetched for a refused value')
+    assert.deepEqual(h.logs, [`[sky] ${skyReasonText(result.reason)} (${result.reason}) — ${value}`])
+  })
+
+  test('a superseded result is not logged', async () => {
+    const h = harness()
+    const pA = h.sky.update(sky(A), null)
+    await tick()
+    const pB = h.sky.update(sky(B), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'network', message: 'late' })
+    assert.deepEqual(await pA, { ok: false, reason: 'superseded' })
+    assert.deepEqual(h.logs, [], 'a stale failure writes nothing')
+    h.fetchImage.calls[1].resolve({ ok: true, bytes: GOOD_WEBP, url: B })
+    await tick()
+    h.decodes[0].resolve(texture('B'))
+    assert.deepEqual(await pB, { ok: true })
+  })
+
+  test('a success is not logged', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    await arrive(h, 0)
+    h.decodes[0].resolve(texture('A'))
+    assert.deepEqual(await p, { ok: true })
+    assert.deepEqual(h.logs, [])
+  })
+
+  test('the failedUrl shortcut re-reports the failure once, and never again', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'http', message: 'gone (500)' })
+    await p
+    assert.equal(h.logs.length, 1, 'the failure itself is logged')
+
+    // A rename: the shortcut answers, and reports the failure one more time.
+    await h.sky.update(sky(A), null)
+    assert.equal(h.fetchImage.calls.length, 1, 'and it is not refetched')
+    assert.equal(h.logs.length, 2, 'the first shortcut hit re-reports it')
+
+    // Every later rename is silent.
+    await h.sky.update(sky(A), null)
+    await h.sky.update(sky(A), null)
+    assert.equal(h.logs.length, 2, 'the second and later hits are silent')
+  })
+
+  test('a viewer who is not the owner logs the same line (no owner branch)', async () => {
+    // The loader has no notion of ownership or Edit mode: the line is written
+    // for every caller. Its only switch is the injected `log` itself.
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'network' })
+    await p
+    assert.equal(h.logs.length, 1)
+  })
+})
+
+// ===========================================================================
+// The original reason survives a repeat (V3.3, round 2)
+// ===========================================================================
+
+describe('the original failure is remembered (V3.3)', () => {
+  test('a repeated update with the same value returns the ORIGINAL reason and message', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'http', message: 'the server refused the request (404)' })
+    await p
+
+    const again = await h.sky.update(sky(A), null)
+    assert.deepEqual(again, { ok: false, reason: 'http', message: 'the server refused the request (404)' },
+      'a rename keeps the specific reason, never a generic one')
+    assert.deepEqual(h.sky.failed, { url: A, reason: 'http', message: 'the server refused the request (404)' })
+  })
+
+  test('after a retry that fails again, the NEW reason is the one remembered', async () => {
+    const h = harness()
+    const p = h.sky.update(sky(A), null)
+    await tick()
+    h.fetchImage.calls[0].resolve({ ok: false, reason: 'timeout' })
+    await p
+
+    const retried = h.sky.retry()
+    await tick()
+    assert.equal(h.fetchImage.calls.length, 2, 'retry() refetches the same value')
+    h.fetchImage.calls[1].resolve({ ok: false, reason: 'http', message: 'the server refused the request (503)' })
+    assert.deepEqual(await retried, { ok: false, reason: 'http', message: 'the server refused the request (503)' })
+    assert.deepEqual(await h.sky.update(sky(A), null),
+      { ok: false, reason: 'http', message: 'the server refused the request (503)' })
+  })
+})
+
+// ===========================================================================
+// The retryable set (V3.4, round 2) — exported here for the picker to read
+// ===========================================================================
+
+describe('SKY_RETRYABLE_REASONS (V3.4)', () => {
+  test('a transfer, deadline, decode or image-header failure is retryable', () => {
+    for (const reason of ['network', 'http', 'timeout', 'too-large', 'decode',
+      'unsupported-image', 'bad-size', 'too-large-dimensions']) {
+      assert.equal(isSkyRetryable(reason), true, reason)
+    }
+  })
+
+  test('a refusal by rule is NOT retryable', () => {
+    for (const reason of ['url-type', 'url-length', 'url-chars', 'url-scheme', 'url-parse',
+      'url-host', 'url-credentials', 'url-relative', 'no-base', 'empty', 'bad-spec',
+      'redirect', 'superseded', 'disposed']) {
+      assert.equal(isSkyRetryable(reason), false, reason)
+    }
+  })
+
+  test('the controller and the picker read the SAME list', () => {
+    // Re-exported from load-background.js (and from the package index), so the
+    // picker never keeps a second copy of it.
+    assert.equal(SKY_RETRYABLE_REASONS, SOURCE_RETRYABLE)
   })
 })

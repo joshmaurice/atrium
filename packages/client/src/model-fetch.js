@@ -911,6 +911,41 @@ function imageFailure(reason, detail) {
 }
 
 /**
+ * V3.4 (library-sky round 2) — the sky failure reasons a Retry button can
+ * actually fix: a transfer that failed (`network`, an `http` status, the 30 s
+ * `timeout`, the 16 MiB `too-large` cap), a `decode` that failed, or an image
+ * header that is unreadable or too large (`unsupported-image`, `bad-size`,
+ * `too-large-dimensions`).
+ *
+ * Everything else is a REFUSAL BY RULE, which a Retry can never fix and for
+ * which the picker shows the reason with NO button: any `resolveSkyUrl` code
+ * (`url-type`, `url-length`, `url-chars`, `url-scheme`, `url-parse`,
+ * `url-host`, `url-credentials`, `url-relative`, `no-base`, `empty`),
+ * `fetchImage`'s own `bad-spec` and `redirect`, and a background `type` this
+ * client does not render.
+ *
+ * It lives beside `IMAGE_REASONS` because `load-background.js` — which does the
+ * classifying — imports `three`, and `apps/client/src/sky-picker.js` (with its
+ * tests) must not. `load-background.js` re-exports it, so the picker and the
+ * controller's own tests read ONE list.
+ */
+export const SKY_RETRYABLE_REASONS = Object.freeze([
+  'network',              // the transfer failed
+  'http',                 // the server refused the request
+  'timeout',              // the transfer outlived its deadline
+  'too-large',            // the transfer outgrew its byte cap
+  'decode',               // three could not decode the bytes
+  'unsupported-image',    // the image header is not PNG, JPEG or WebP
+  'bad-size',             // the image header carries no usable size
+  'too-large-dimensions', // the image is bigger than 4096 × 2048
+])
+
+/** True when a sky's failure is one a Retry can help with (V3.4). */
+export function isSkyRetryable(reason) {
+  return SKY_RETRYABLE_REASONS.includes(reason)
+}
+
+/**
  * L26 — name a sky abort: a caller's cancellation is quiet (`aborted`), our own
  * 30 s timer is `timeout`. A sky transfer has no world ledger, so there is no
  * `world-download-budget` case to name.

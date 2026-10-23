@@ -3,7 +3,7 @@
 
 import * as THREE from 'three'
 import { resolveSkyUrl, modelReasonText } from '@atrium/client/model-spec'
-import { fetchImage as defaultFetchImage } from '@atrium/client/model-fetch'
+import { fetchImage as defaultFetchImage, SKY_RETRYABLE_REASONS, isSkyRetryable } from '@atrium/client/model-fetch'
 import { imageHeader } from './model-parse.js'
 
 /**
@@ -16,7 +16,7 @@ import { imageHeader } from './model-parse.js'
  * re-assert them and cannot be raced by a caller.
  *
  * The rule (R4): only the CURRENT generation may touch the scene's slots,
- * `loaded`, `failedUrl`, or report a result. Every superseded or cancelled
+ * `loaded`, the failure, or report a result. Every superseded or cancelled
  * generation, whenever it settles, disposes any texture it made, revokes its
  * blob URL, and changes nothing else.
  *
@@ -24,10 +24,14 @@ import { imageHeader } from './model-parse.js'
  *   generation  a counter; every new request and every cancellation bumps it
  *   loaded      `{ url, texture }` currently in the scene, or null
  *   pending     `{ generation, url, controller }` in flight, or null
- *   failedUrl   the URL whose load failed most recently, or null
+ *   failed      `{ url, reason, message }` of the last failure, or null
+ *   logged      has the current `failed` been re-reported by the shortcut?
  *
- * `loaded` and `failedUrl` are never both set: a failure clears `loaded`.
+ * `loaded` and `failed` are never both set: a failure clears `loaded`.
  */
+
+/** V2 (round 2) — the retryable set, re-exported so picker and tests share it. */
+export { SKY_RETRYABLE_REASONS, isSkyRetryable }
 
 /** L26 — a decode that has not settled in this long is abandoned. */
 export const SKY_DECODE_TIMEOUT_MS = 10_000
@@ -49,6 +53,14 @@ export const SKY_REASONS = Object.freeze({
 /** The plain text for a sky reason code. */
 export function skyReasonText(reason) {
   return SKY_REASONS[reason] ?? modelReasonText(reason)
+}
+
+/**
+ * V2 — where a sky failure is reported when the caller injects no `log`. Every
+ * viewer's console gets the reason, owner or not, Edit mode or not.
+ */
+export function defaultLog(line) {
+  console.warn(line)
 }
 
 /** The default decode: a `blob:` URL through the same TextureLoader as before. */
@@ -106,6 +118,7 @@ function settleWithBound(promise, ms) {
  * @param {(blob: Blob) => string} [args.createObjectURL]
  * @param {(url: string) => void} [args.revokeObjectURL]
  * @param {number} [args.decodeTimeoutMs]
+ * @param {(line: string) => void} [args.log]  where every reported failure goes
  */
 export function createSkyLoader({
   scene,
@@ -114,15 +127,27 @@ export function createSkyLoader({
   createObjectURL = (blob) => URL.createObjectURL(blob),
   revokeObjectURL = (url) => URL.revokeObjectURL(url),
   decodeTimeoutMs = SKY_DECODE_TIMEOUT_MS,
+  log = defaultLog,
 } = {}) {
   let generation = 0
   let loaded = null
   let pending = null
-  let failedUrl = null
+  let failed = null          // { url, reason, message } — the last failure
+  let shortcutLogged = false // has the shortcut re-reported this `failed`?
   let last = null            // { bg, worldBaseUrl } — what retry() re-runs
   let disposed = false
 
   const isCurrent = (gen) => gen === generation
+
+  /**
+   * V2 — ONE line per reported failure, for every viewer, owner or not, Edit
+   * mode or not: `[sky] <message> (<reason>) — <url or the refused value>`.
+   * Superseded results and successes are never logged.
+   */
+  function logFailure(value, reason, message) {
+    if (typeof log !== 'function') return
+    log(`[sky] ${message ?? skyReasonText(reason)} (${reason}) — ${value}`)
+  }
 
   /** The ONE place the scene's two slots are written. */
   function setSlots(texture) {
@@ -148,16 +173,29 @@ export function createSkyLoader({
     cancelPending()
     if (loaded) { disposeTexture(loaded.texture); loaded = null }
     setSlots(null)
-    failedUrl = null
+    forgetFailure()
   }
 
-  /** A failure of the CURRENT generation: no sky is shown, never the old one. */
+  /** Forget the last failure (and the shortcut's one re-report of it). */
+  function forgetFailure() {
+    failed = null
+    shortcutLogged = false
+  }
+
+  /**
+   * A failure of the CURRENT generation: no sky is shown, never the old one.
+   * The failure keeps its reason and message — V3.3 — so a later `update` with
+   * the same value answers with the ORIGINAL reason, not a generic one.
+   */
   function failCurrent(gen, url, reason, message) {
     if (pending && pending.generation === gen) pending = null
     if (loaded) { disposeTexture(loaded.texture); loaded = null }
     setSlots(null)
-    failedUrl = url
-    return { ok: false, reason, message: message ?? skyReasonText(reason) }
+    const text = message ?? skyReasonText(reason)
+    failed = { url, reason, message: text }
+    shortcutLogged = false
+    logFailure(url, reason, text)
+    return { ok: false, reason, message: text }
   }
 
   /**
@@ -188,7 +226,11 @@ export function createSkyLoader({
     const resolved = resolveSkyUrl(texture, worldBaseUrl)
     if (!resolved.ok) {
       clearAll()
-      return { ok: false, reason: resolved.reason, message: skyReasonText(resolved.reason) }
+      const message = skyReasonText(resolved.reason)
+      // V2 — a refusal by rule is logged too, with the refused VALUE (there is
+      // no resolved URL to name).
+      logFailure(texture, resolved.reason, message)
+      return { ok: false, reason: resolved.reason, message }
     }
     const url = resolved.url
 
@@ -209,8 +251,17 @@ export function createSkyLoader({
     }
 
     // 6. a failed URL is not refetched on every World Info change (P1's rename
-    //    problem): only retry() or a new world tries it again.
-    if (failedUrl === url) return { ok: false, reason: 'failed', message: skyReasonText('failed') }
+    //    problem): only retry() or a new world tries it again. V3.3 — the answer
+    //    carries the ORIGINAL reason and message, so a rename cannot replace a
+    //    specific reason with a generic one. V2 — the shortcut re-reports that
+    //    failure to the log once, and not again on every later change.
+    if (failed && failed.url === url) {
+      if (!shortcutLogged) {
+        shortcutLogged = true
+        logFailure(failed.url, failed.reason, failed.message)
+      }
+      return { ok: false, reason: failed.reason, message: failed.message }
+    }
 
     // 7. a new generation.
     cancelPending()
@@ -246,7 +297,7 @@ export function createSkyLoader({
       if (loaded) disposeTexture(loaded.texture)
       setSlots(texture)
       loaded = { url, texture }
-      failedUrl = null
+      forgetFailure()
       pending = null
       return { ok: true }
     } catch (error) {
@@ -257,7 +308,7 @@ export function createSkyLoader({
 
   /** Z4's Retry: forget the failure and try the same values once more. */
   function retry() {
-    failedUrl = null
+    forgetFailure()
     if (!last) return Promise.resolve({ ok: false, reason: 'empty', message: skyReasonText('empty') })
     return update(last.bg, last.worldBaseUrl)
   }
@@ -273,7 +324,7 @@ export function createSkyLoader({
     cancelPending()
     if (loaded) { disposeTexture(loaded.texture); loaded = null }
     setSlots(null)
-    failedUrl = null
+    forgetFailure()
     last = null
   }
 
@@ -293,7 +344,8 @@ export function createSkyLoader({
     get disposed() { return disposed },
     get loaded() { return loaded },
     get pending() { return pending },
-    get failedUrl() { return failedUrl },
+    get failed() { return failed },
+    get failedUrl() { return failed?.url ?? null },
     get last() { return last },
   }
 }

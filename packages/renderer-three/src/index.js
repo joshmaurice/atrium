@@ -8,6 +8,7 @@ export { initDocumentView } from './document-view.js'
 export {
   loadBackground, createSkyLoader, skyReasonText, skyHeaderProblem,
   decodeWithTextureLoader, SKY_REASONS, SKY_MAX_SIDE, SKY_MAX_AREA, SKY_DECODE_TIMEOUT_MS,
+  SKY_RETRYABLE_REASONS, isSkyRetryable, defaultLog,
 } from './load-background.js'
 export {
   MODEL_PARSE_LIMITS, PARSE_REASONS, parseReasonText, preflightProblem, imageHeader, estimateTextureBytes,
