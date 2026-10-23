@@ -14,6 +14,8 @@
 // Returns { setPads, update, reset, setActive, setReady }
 // ---------------------------------------------------------------------------
 
+import { isTeleporter } from './teleporter-marker.js'
+
 export const TELEPORT_TRIGGER_RADIUS = 0.75
 export const TELEPORT_TRIGGER_HEIGHT = 2.0
 
@@ -168,4 +170,33 @@ export function createTeleportTrigger({ onTrigger, resolveDestination }) {
 export function nearSpawn(position, radius = TELEPORT_TRIGGER_RADIUS + 0.5) {
   if (!position || position.length < 2) return false
   return Math.hypot(position[0], position[2]) <= radius
+}
+
+/**
+ * Z7 (edit-polish-3, L5a) — is a pad at or under `node` near the spawn point?
+ *
+ * The node and EVERY descendant are walked, and each node that is a teleporter is
+ * judged by its OWN world position through `worldPositionOf` (world-position.js
+ * composes the parents' translation, rotation and scale): a selected GROUP whose
+ * child pad sits away from the group's origin is judged by the pad, not by the
+ * group — "is the group near spawn" is not "is its pad near spawn".
+ *
+ * `worldPositionOf` is called exactly ONCE per pad (the walk does not stop at the
+ * first near pad), so a caller and its tests can count the calls. Pure: no DOM, no
+ * three.js — the tests pass a fake that reads plain values.
+ *
+ * @param {{children?: object[]}} node
+ * @param {(node: object) => number[]} worldPositionOf
+ * @returns {boolean}
+ */
+export function padNearSpawn(node, worldPositionOf) {
+  if (!node || typeof worldPositionOf !== 'function') return false
+  let near = false
+  const walk = (current) => {
+    if (!current) return
+    if (isTeleporter(current) && nearSpawn(worldPositionOf(current))) near = true
+    for (const child of current.children ?? []) walk(child)
+  }
+  walk(node)
+  return near
 }

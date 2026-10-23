@@ -6,7 +6,8 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, TELEPORT_TRIGGER_HEIGHT } from '../src/teleport-trigger.js'
+import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, TELEPORT_TRIGGER_HEIGHT, nearSpawn, padNearSpawn } from '../src/teleport-trigger.js'
+import { worldPosition } from '../src/world-position.js'
 
 describe('createTeleportTrigger', () => {
 
@@ -408,5 +409,78 @@ describe('createTeleportTrigger', () => {
     trigger.reset()
     trigger.update([0, 0, 0]) // stale pad position — must not fire
     assert.equal(triggered.length, 0, 'no pads after reset')
+  })
+})
+
+// ===========================================================================
+// Z7 (edit-polish-3, L5a) — padNearSpawn: each pad judged by its own world
+// position, over the whole subtree
+// ===========================================================================
+
+/** A SOM-shaped node: a pad when it carries a destination. */
+function node(name, translation, { destination = null, rotation = [0, 0, 0, 1], scale = [1, 1, 1], children = [] } = {}) {
+  const parent = { name, translation, rotation, scale, children, parent: null }
+  if (destination) parent.extras = { atrium: { teleporter: { destination } } }
+  for (const child of children) child.parent = parent
+  return parent
+}
+
+const PAD = (translation, children = []) => node('pad', translation, { destination: '/worlds/me/room', children })
+const CUBE = (translation, children = []) => node('cube', translation, { children })
+
+describe('padNearSpawn (Z7)', () => {
+  test('a pad on the spawn point is near, and one just outside it is not', () => {
+    assert.equal(nearSpawn([0, 0, 0]), true)
+    assert.equal(padNearSpawn(PAD([0, 0, 0]), worldPosition), true)
+    assert.equal(padNearSpawn(PAD([20, 0, 20]), worldPosition), false)
+    // TELEPORT_TRIGGER_RADIUS + 0.5 = 1.25 is the boundary.
+    assert.equal(padNearSpawn(PAD([1.2, 0, 0]), worldPosition), true)
+    assert.equal(padNearSpawn(PAD([1.3, 0, 0]), worldPosition), false)
+  })
+
+  test('a node with no pad anywhere under it is not near', () => {
+    let called = 0
+    const count = (n) => { called += 1; return worldPosition(n) }
+    assert.equal(padNearSpawn(CUBE([0, 0, 0], [CUBE([0, 0, 0])]), count), false)
+    assert.equal(called, 0, 'worldPositionOf is never asked about a node that is not a pad')
+    assert.equal(padNearSpawn(null, worldPosition), false)
+    assert.equal(padNearSpawn(PAD([0, 0, 0])), false, 'no function: false, never a throw')
+  })
+
+  test('a pad under a group is judged by the PAD, not by the group', () => {
+    // The group's origin is 10 m out; the child pad sits back on the origin.
+    const offset = node('group', [10, 0, 0], { children: [PAD([-10, 0, 0])] })
+    assert.equal(nearSpawn(offset.translation), false, 'the group itself is NOT near spawn')
+    assert.equal(padNearSpawn(offset, worldPosition), true, 'but its pad is')
+
+    // ...and the other way round: the group is near, its pad is not.
+    const away = node('group', [0, 0, 0], { children: [PAD([10, 0, 0])] })
+    assert.equal(nearSpawn(away.translation), true, 'the group IS near spawn')
+    assert.equal(padNearSpawn(away, worldPosition), false, 'but its pad is not')
+  })
+
+  test('a rotation up the chain is composed too', () => {
+    // Half a turn about y, 5 m out, with the pad 5 m further along its own z:
+    // the pad lands back on the origin while the group's origin is well away.
+    const half = [0, 1, 0, 0]
+    const group = node('group', [0, 0, 5], { rotation: half, children: [PAD([0, 0, 5])] })
+    assert.equal(nearSpawn(group.translation), false, 'the group is 5 m out')
+    assert.equal(padNearSpawn(group, worldPosition), true, 'the rotated pad is on the origin')
+  })
+
+  test('worldPositionOf is called exactly once per pad', () => {
+    const first = PAD([20, 0, 20])
+    const second = PAD([0, 0, 0])                   // near: the walk still visits the third
+    const third = PAD([20, 0, 20])
+    const group = node('group', [0, 0, 0], { children: [first, second, third], extras: undefined })
+    const seen = []
+    const result = padNearSpawn(group, (n) => { seen.push(n.name); return worldPosition(n) })
+    assert.equal(result, true)
+    assert.equal(seen.length, 3, `expected one call per pad, got ${seen.length}`)
+  })
+
+  test('the search goes right down the tree', () => {
+    const deep = node('group', [20, 0, 20], { children: [CUBE([0, 0, 0], [node('nested', [0, 0, 0], { children: [PAD([-20, 0, -20])] })])] })
+    assert.equal(padNearSpawn(deep, worldPosition), true, 'a pad three levels down still counts')
   })
 })

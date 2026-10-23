@@ -688,6 +688,11 @@
         <span id="ep-model-pinned" style="color:#94a3b8;font-size:11px;margin-left:4px"></span>
       </div>
       <div class="ep-status" id="ep-model-status"></div>
+      <!-- edit-polish-3 (Z7, L5a) — the spawn note: app.js's refreshSpawnNote() is
+           the one writer of its text and its visibility, and it is hidden until a
+           selected pad (or a group holding one) sits near the spawn point. The
+           marker for DEV acceptance is this element's presence. -->
+      <div class="ep-status" id="ep-spawn-note" style="display:none;color:#f0ad4e"></div>
       <div class="ep-row"><span>Position</span>
         <input type="text" data-field="translation" data-i="0" aria-label="Position x" />
         <input type="text" data-field="translation" data-i="1" aria-label="Position y" />

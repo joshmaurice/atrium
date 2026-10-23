@@ -7,7 +7,7 @@ import { LabelOverlay }          from './LabelOverlay.js'
 import { Stage, PointerInputBridge, initDocumentView, createSkyLoader, buildAvatarDescriptor, buildTeleporterDescriptor, buildPrimitiveDescriptor } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
 import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
-import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn } from './teleport-trigger.js'
+import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn, padNearSpawn } from './teleport-trigger.js'
 import { isTeleporter, teleporterDestination } from './teleporter-marker.js'
 import { teleporterLabel } from './teleporter-label.js'
 import { syncPadLabels } from './pad-labels.js'
@@ -25,6 +25,7 @@ import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 // module's exports that appears in app.js to be in its import list (V2).
 import { palettePlacement, paletteName, teleporterName, copyName, modelName, firstFreeName } from './edit-palette.js'
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
+import { createTeleporterForm } from './teleporter-form.js'
 import { createLibraryGrid, libraryAnswerError } from './library-grid.js'
 import { loadCatalog, storedUrl, EMPTY_CATALOG } from './library-catalog.js'
 import { createSkyPicker, SKY_NONE, SKY_CUSTOM } from './sky-picker.js'
@@ -638,6 +639,18 @@ const pointerBridge = new PointerInputBridge({
 // Client event listeners
 // ---------------------------------------------------------------------------
 
+/**
+ * Z1 (edit-polish-3, S2) — THE one writer of the HUD's world line, with today's
+ * text rule. Called from `world:loaded` with the event's name, and from the
+ * `som:set` `__document__` branch with the document's current
+ * `extras.atrium.name`: a rename through World Info reaches the HUD at once,
+ * where it used to wait for the next connection (the operator saw that at
+ * library-sky acceptance). A rename is not logged; only a load is.
+ */
+function showWorldName(name) {
+  hudWorldEl.textContent = name ? `World: ${name}` : ''
+}
+
 client.on('world:loaded', ({ name, description, author }) => {
   if (!client.som) return
 
@@ -664,8 +677,8 @@ client.on('world:loaded', ({ name, description, author }) => {
   sky.update(client.som.extras?.atrium?.background, bgBaseUrl)
     .then((result) => skyPicker?.onSkyResult(result))
 
-  // HUD world line
-  hudWorldEl.textContent = name ? `World: ${name}` : ''
+  // HUD world line — Z1: through the one writer.
+  showWorldName(name)
 
   // Console metadata
   console.log(`[app] World: ${name ?? '(unnamed)'}${author ? ` by ${author}` : ''}`)
@@ -756,8 +769,8 @@ client.on('connecting', () => {
   // Z4 — and the Sky picker's failure.
   skyPicker?.reset()
   refreshModelRow()
-  // Close the destination form (the panel is going with the session)
-  closeTeleporterForm()
+  // Close the destination form (Z3 — its own module forgets the wait and closes)
+  teleporterForm?.reset()
   // Hide failure panel (connecting covers teleport/Go back retry)
   hideTeleportFailurePanel()
 })
@@ -774,8 +787,8 @@ client.on('disconnected', () => {
   // Z4 — the Sky picker's failure and any wait go with the world.
   skyPicker?.reset()
   refreshModelRow()
-  // Close the destination form (the panel is going with the session)
-  closeTeleporterForm()
+  // Close the destination form (Z3 — its own module forgets the wait and closes)
+  teleporterForm?.reset()
 
   // Reload the world in static mode — clears avatar/peer nodes from the scene
   // and restores NavigationController's localNode for input to work again.
@@ -823,6 +836,9 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 client.on('som:set', ({ nodeName, path }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
+    // Z1 — the document's name reaches the HUD at once, BEFORE the sky work and
+    // before this branch's return (a rename used to need a reconnect).
+    showWorldName(client.som.extras?.atrium?.name)
     // Z4 — a document change from another session, or the server's own update:
     // the select follows the SOM, and a sky failure is reported under it.
     skyPicker?.sync()
@@ -841,6 +857,10 @@ client.on('som:set', ({ nodeName, path }) => {
       rebuildPads()
     }
     if (node === selected) refreshEditPanel()
+    // Z7 — the spawn note follows a transform of the selection OR of ANY node
+    // below it (the panel above refreshes only when the changed node IS the
+    // selection): a child pad moved inside the selected group.
+    if (TRANSFORM_FIELDS.includes(path) && isUnder(node, selected)) refreshSpawnNote()
   }
   // Y2 — a delete's capture is redone on every remote change until its removal
   undo.reCapture()
@@ -1183,31 +1203,26 @@ connectBtn.addEventListener('click', handleConnect)
 
 // ---------------------------------------------------------------------------
 // The destination form — opened by the panel's Teleporter button (edit-polish-2
-// Z3). Its Cancel, Escape, turning Edit mode off and a new connection all close
-// it through closeTeleporterForm(). There is no toolbar placement mode any more
-// (Z4): a pad goes through the palette's path, so Undo removes it and Redo
-// brings it back.
+// Z3; its own module since edit-polish-3 Z3, L2a).
+//
+// The form's LOGIC lives in teleporter-form.js, tested with fake elements. What
+// stays here is the wiring: the palette placement the button reads, the two DOM
+// adapters (the world list and the select), the gate registration — made here,
+// because all three panel forms share that gate — and the answer branch in
+// onStructureAnswer. Cancel, Escape, turning Edit mode off and a new connection
+// all close it. There is no toolbar placement mode any more (Z4): a pad goes
+// through the palette's path, so Undo removes it and Redo brings it back.
 // ---------------------------------------------------------------------------
 
-// The form's own wait: the seq of the add it sent, while the form shows
-// "Saving…". This is only what the form is showing — the structure tracker
-// holds the pending add and undo registers it, as for any palette add.
-let formWaitSeq = null
+// Z7 — the gate that keeps ONE panel form open at a time: the destination form,
+// the Model form and the Library grid. It is declared here because the
+// destination form is the first of the three; Z2's `closeCurrent()` closes
+// whichever form holds it.
+const modelGate = createFormGate()
 
-function closeTeleporterForm() {
-  // Closing while saving forgets the form's wait only: the request's answer is
-  // still recorded by undo (Y7), exactly as a palette add whose answer lands
-  // after Edit mode is off.
-  formWaitSeq = null
-  modelGate.release('teleporter')
-  pendingPosition = null
-  tpForm.style.display = 'none'
-  tpFormError.style.display = 'none'
-  tpSaveBtn.textContent = 'Save'
-  tpSaveBtn.disabled = true
-  tpFormCancel.disabled = false
-  refreshEditActions()
-}
+// Z3 — the form itself, created below beside the Model form and the grid (all
+// three need the same gate). Declared here so the handlers above it can reach it.
+let teleporterForm = null
 
 // ---------------------------------------------------------------------------
 // The destination form's DOM (T5; edit-polish-2 L2/Z3)
@@ -1227,9 +1242,63 @@ const tpFormError = document.getElementById('tp-form-error')
 const tpSaveBtn = document.getElementById('tp-save-btn')
 const tpFormCancel = document.getElementById('tp-form-cancel')
 
-// The position the next Save uses: the palette's ground point, taken by the
-// Teleporter button's click (only x and z matter; the descriptor forces y = 0).
-let pendingPosition = null
+// The position the next Save uses is the palette's ground point, taken by the
+// Teleporter button's click and handed to the form's `open()` (only x and z
+// matter; the descriptor forces y = 0). It lives in the form now (Z3).
+
+/**
+ * Z3 — the first DOM adapter: the worlds the form offers. It answers `null`
+ * SYNCHRONOUSLY for a world on another server, which is the form's manual-entry-
+ * only signal; otherwise it is a promise of `{ value, label }`.
+ */
+function listTeleporterWorlds() {
+  const accountHttp = AtriumClient.wsOriginToHttpOrigin(accountWsBase)
+  const worldHttp = currentWorldUrl ? AtriumClient.wsOriginToHttpOrigin(currentWorldUrl) : null
+  const sameOrigin = worldHttp && accountHttp && (() => {
+    try { return new URL(worldHttp).origin === new URL(accountHttp).origin } catch { return false }
+  })()
+  if (!sameOrigin) return null
+  return fetch('/api/worlds').then((res) => (res.ok ? res.json() : [])).then((worlds) => {
+    const username = currentUser?.username || ''
+    return (worlds ?? []).map((w) => ({
+      value: `/worlds/${encodeURIComponent(username)}/${encodeURIComponent(w.slug)}`,
+      label: `${w.name || w.slug}${w.visibility === 'private' ? ' (private)' : ''}`,
+    }))
+  }).catch(() => [])
+}
+
+/**
+ * Z3 — the second DOM adapter, and the ONE writer of the select: the placeholder
+ * ("The commons" is always offered), the worlds, or the manual-only state for a
+ * world on another server. The form calls it empty in its loading state as it
+ * opens, and again with the worlds its own opening asked for.
+ */
+function fillTeleporterWorlds(options, { loading = false, manualOnly = false } = {}) {
+  tpWorldSelect.textContent = ''
+  if (manualOnly) {
+    tpWorldSelect.disabled = true
+    const only = document.createElement('option')
+    only.value = ''
+    only.textContent = '-- Manual entry only (different server) --'
+    tpWorldSelect.appendChild(only)
+    return
+  }
+  tpWorldSelect.disabled = false
+  const head = document.createElement('option')
+  head.value = ''
+  head.textContent = loading ? '-- Loading your worlds… --' : '-- Select your world --'
+  tpWorldSelect.appendChild(head)
+  const commons = document.createElement('option')
+  commons.value = '/'
+  commons.textContent = 'The commons'
+  tpWorldSelect.appendChild(commons)
+  for (const world of options ?? []) {
+    const opt = document.createElement('option')
+    opt.value = world.value
+    opt.textContent = world.label
+    tpWorldSelect.appendChild(opt)
+  }
+}
 
 // Teleporter failure panel — stub for U1, fleshed out in U2.
 // Called from connecting, session:ready, Escape handler before the panel DOM exists.
@@ -1277,8 +1346,8 @@ document.addEventListener('keydown', (e) => {
       hideTeleportFailurePanel()
       return
     }
-    // Ignore Escape while a save is pending
-    if (formWaitSeq != null) return
+    // Ignore Escape while a save is pending (Z3 — the form's own wait).
+    if (teleporterForm?.waitSeq != null) return
     // Z2 — the Library grid, before the forms: it is the panel's last-opened
     // section and the only one with no text field to swallow the key.
     if (libraryGrid?.isOpen()) {
@@ -1290,8 +1359,8 @@ document.addEventListener('keydown', (e) => {
       modelForm.close()
       return
     }
-    if (tpForm.style.display !== 'none') {
-      closeTeleporterForm()
+    if (teleporterForm?.isOpen()) {
+      teleporterForm.close()
       return
     }
     // Edit mode (B2): first Escape deselects, a second leaves Edit mode.
@@ -1304,7 +1373,7 @@ document.addEventListener('keydown', (e) => {
   }
 })
 
-// ── The Teleporter button and its form (edit-polish-2 Z3, L2, L4) ────────
+// ── The Teleporter button (edit-polish-2 Z3, L2, L4; its own form since Z3) ──
 //
 // A pad goes through the palette's path: the same placement (the palette's
 // fixed distance ahead of you, on the ground), the structure tracker's one-at-a-time rule and
@@ -1314,156 +1383,22 @@ document.addEventListener('keydown', (e) => {
 // The button is NOT a palette button (no `data-kind`, P2): the palette handler
 // would throw on an unknown kind. It has this handler and joins the palette's
 // enable rule (`!blocked && modes.edit`) in refreshEditActions.
+//
+// Z3 — the click only takes the placement and hands it to the form: the form
+// owns the fields, the four listeners, the world list and the wait, and it
+// refuses a fresh opening while it waits on its own Save.
 
 const epTeleporter = document.getElementById('ep-teleporter')
 
 epTeleporter.addEventListener('click', () => {
   if (!modes.edit || editDispatchBlocked()) return
-  // While the form waits on its own save, the click does nothing.
-  if (formWaitSeq != null) return
-
   const origin = avatar.localNode?.translation ?? [0, 0, 0]
   const forward = new THREE.Vector3()
   stage.camera.getWorldDirection(forward)
   // Exactly as a palette add; only x and z matter (the descriptor forces y = 0).
   const { position } = palettePlacement(origin, forward.toArray())
-  pendingPosition = [position[0], 0, position[2]]
-  openTeleporterForm()
+  teleporterForm?.open([position[0], 0, position[2]])
 })
-
-/**
- * Open the destination form for `pendingPosition`. A click while it is already
- * open (and not saving) takes a fresh position and spawn warning and keeps what
- * was typed: the world list and the fields are left where they are.
- */
-function openTeleporterForm() {
-  const alreadyOpen = tpForm.style.display !== 'none'
-  // Z7 — only one form at a time: opening this one closes the Model form.
-  modelGate.claim('teleporter')
-
-  if (!alreadyOpen) {
-    // Populate world list — only when same origin as account server
-    const accountHttp = AtriumClient.wsOriginToHttpOrigin(accountWsBase)
-    const worldHttp = currentWorldUrl ? AtriumClient.wsOriginToHttpOrigin(currentWorldUrl) : null
-    const sameOrigin = worldHttp && accountHttp && (() => {
-      try { return new URL(worldHttp).origin === new URL(accountHttp).origin } catch { return false }
-    })()
-
-    if (sameOrigin) {
-      tpWorldSelect.disabled = false
-      tpWorldSelect.innerHTML = '<option value="">-- Select your world --</option>'
-      // Add "The commons" option
-      const opt = document.createElement('option')
-      opt.value = '/'
-      opt.textContent = 'The commons'
-      tpWorldSelect.appendChild(opt)
-
-      fetch('/api/worlds').then(res => {
-        if (!res.ok) return null
-        return res.json()
-      }).then(worlds => {
-        if (!worlds) return
-        for (const w of worlds) {
-          const opt = document.createElement('option')
-          const username = currentUser?.username || ''
-          opt.value = `/worlds/${encodeURIComponent(username)}/${encodeURIComponent(w.slug)}`
-          opt.textContent = `${w.name || w.slug}${w.visibility === 'private' ? ' (private)' : ''}`
-          tpWorldSelect.appendChild(opt)
-        }
-      }).catch(() => {})
-    } else {
-      tpWorldSelect.disabled = true
-      tpWorldSelect.innerHTML = '<option value="">-- Manual entry only (different server) --</option>'
-    }
-
-    tpFormError.style.display = 'none'
-    tpDestInput.value = ''
-    tpSaveBtn.textContent = 'Save'
-    tpSaveBtn.disabled = true
-  }
-
-  tpFormCancel.disabled = false
-  formWaitSeq = null
-
-  // Spawn warning for the position this click took
-  tpSpawnWarn.style.display = (pendingPosition && nearSpawn(pendingPosition)) ? '' : 'none'
-  tpForm.style.display = ''
-}
-
-tpWorldSelect.addEventListener('change', () => {
-  if (tpWorldSelect.value) {
-    tpSaveBtn.disabled = false
-    tpFormError.style.display = 'none'
-  }
-})
-
-tpDestInput.addEventListener('input', () => {
-  tpSaveBtn.disabled = !tpDestInput.value.trim()
-  tpFormError.style.display = 'none'
-})
-
-tpSaveBtn.addEventListener('click', () => {
-  // Z3 — refused unless Edit mode is on and nothing blocks, as a palette add
-  if (!modes.edit || editDispatchBlocked()) return
-  if (formWaitSeq != null) return
-
-  const dest = tpWorldSelect.value || tpDestInput.value.trim()
-  if (!dest) {
-    tpFormError.textContent = 'Select a world or enter a destination'
-    tpFormError.style.display = ''
-    return
-  }
-
-  // R4: validate destination format before resolving
-  if (!isValidDestination(dest)) {
-    tpFormError.textContent = 'Invalid destination — enter a path (e.g. /worlds/user/slug) or ws(s) URL'
-    tpFormError.style.display = ''
-    return
-  }
-
-  const resolved = resolveWorldAddress(dest, currentWorldUrl)
-  if (!resolved) {
-    tpFormError.textContent = 'Invalid destination — enter a path (e.g. /worlds/user/slug) or ws(s) URL'
-    tpFormError.style.display = ''
-    return
-  }
-
-  // L4 — the pad's name, `Teleporter`, `Teleporter 2`… like the palette's Cube
-  const name = teleporterName(isNameFree)
-  if (!name) {
-    tpFormError.textContent = 'No free name for a new teleporter'
-    tpFormError.style.display = ''
-    return
-  }
-
-  tpSaveBtn.disabled = true
-  tpFormCancel.disabled = true
-
-  try {
-    const descriptor = buildTeleporterDescriptor({
-      name,
-      position: pendingPosition,
-      destination: dest.trim(),
-    })
-    const seq = client.addNode(descriptor)
-    // The answer can't be handled before this handler returns (one thread).
-    structure.begin('add', seq, { name, descriptor, teleporter: true })
-    // Y7 — recorded from its answer, whatever the Edit mode then
-    undo.registerAdd(seq, { name, duplicate: false })
-    formWaitSeq = seq
-    tpSaveBtn.textContent = 'Saving...'
-    clearEditError()
-    refreshEditActions()
-  } catch (err) {
-    tpFormError.textContent = 'Failed to place teleporter: ' + err.message
-    tpFormError.style.display = ''
-    tpSaveBtn.disabled = false
-    tpSaveBtn.textContent = 'Save'
-    tpFormCancel.disabled = false
-  }
-})
-
-tpFormCancel.addEventListener('click', closeTeleporterForm)
 
 // ---------------------------------------------------------------------------
 // Edit mode (Phase 3 step 1b-1) — devtasks/PREBRIEF-edit-mode-ui-1.md
@@ -1485,6 +1420,7 @@ const epEmpty        = document.getElementById('ep-empty')
 const epFields       = document.getElementById('ep-fields')
 const epName         = document.getElementById('ep-name')
 const epNameStatus   = document.getElementById('ep-name-status')
+const epSpawnNote    = document.getElementById('ep-spawn-note')     // Z7, edit-polish-3
 const epError        = document.getElementById('ep-error')
 const epVectorInputs = [...epFields.querySelectorAll('input[data-field]')]
 const epPalette      = document.getElementById('ep-palette')        // 1b-2 N1
@@ -1648,10 +1584,17 @@ function setEditMode(on) {
     editToggleBtn.classList.add('active')
   } else {
     if (!modes.edit) return
-    // Z3 — leaving Edit mode closes the destination form. Closing while a save
-    // is unanswered forgets the form's wait only: the answer is still recorded
-    // by undo (Y7).
-    closeTeleporterForm()
+    // Z2 (S1) — leaving Edit mode closes whichever panel form is open: the gate
+    // knows which one (the destination form, the Model form or the Library grid).
+    // The direct closeTeleporterForm() call that used to be here is REPLACED, not
+    // supplemented: separate modelForm.close()/libraryGrid.close() calls would
+    // duplicate what the gate already does. Closing while a Save is unanswered
+    // forgets the form's wait only: the answer is still recorded by undo (Y7).
+    modelGate.closeCurrent()
+    // Z2 — and Edit off discards the Model form's draft (`reset()` clears the
+    // URL, the Check result and the pin, and forgets any wait). The destination
+    // form starts empty on its next fresh opening, and the grid has no draft.
+    modelForm?.reset()
     selectForEdit(null)          // ends a drag with its final send
     // Y7 (Rev 2) — the structure tracker is NOT reset here: it holds 1b-2's
     // one-at-a-time rule and the S1 evidence, and a request answered while
@@ -1725,6 +1668,9 @@ function onHandleChange() {
     scale:       selectedObj.scale.toArray(),
   })
   refreshEditVectors()
+  // Z7 — LIVE during the drag: the pad's own world position is read again, so the
+  // note appears as it is dragged onto the spawn point and hides as it leaves.
+  refreshSpawnNote()
 }
 
 function applySnaps() {
@@ -1766,6 +1712,8 @@ function selectForEdit(node) {
   attachSelected()
   clearEditError()
   refreshEditPanel()
+  // Z7 — the spawn note follows the selection.
+  refreshSpawnNote()
 }
 
 // Look the selected node's three.js object up by name (G4), and put the
@@ -1845,6 +1793,33 @@ viewportEl.addEventListener('click', (e) => {
   selectForEdit(node)
   if (refused) showEditError(refused)
 })
+
+// ── The spawn note (Z7, edit-polish-3 L5a) ──────────────────────────────
+//
+// A selected pad — or a selected group holding one — within `nearSpawn` of the
+// origin may catch an arriving visitor. The PAD's own world position decides
+// (world-position.js composes the parents' translation, rotation and scale), and
+// the note is only SHOWN: the trigger rules and the form's own spawn warning are
+// untouched.
+
+const SPAWN_NOTE = 'Near the spawn point: arriving visitors may land on this pad (it won\'t fire until they step off)'
+
+/** Z7 — the ONE function that reads the current selection and sets the note. */
+function refreshSpawnNote() {
+  if (!epSpawnNote) return
+  const near = Boolean(selected) && padNearSpawn(selected, worldPosition)
+  epSpawnNote.textContent = near ? SPAWN_NOTE : ''
+  epSpawnNote.style.display = near ? '' : 'none'
+}
+
+/** An ancestor walk: is `node` at or below `root`? (Z7, the som:set rule) */
+function isUnder(node, root) {
+  if (!node || !root) return false
+  for (let current = node; current; current = current.parent) {
+    if (current === root) return true
+  }
+  return false
+}
 
 // ── Property panel (B5) ─────────────────────────────────────────────────
 
@@ -1952,6 +1927,8 @@ function commitVectorField(field) {
   const value = field === 'rotation' ? eulerDegToQuat(current) : current
   editTracker.commit(selected, field, value)
   refreshEditVectors()
+  // Z7 — a numeric commit moves the pad too.
+  refreshSpawnNote()
 }
 
 for (const input of epVectorInputs) {
@@ -2012,6 +1989,8 @@ client.on('edit:accepted', ({ seq }) => {
   if (undo.onAccepted(seq)) {
     refreshEditVectors()          // the node holds the undone value now
     refreshEditActions()
+    // Z7 — an undo or a redo of a transform moves its pads too.
+    refreshSpawnNote()
   }
   if (pendingRename && seq === pendingRename.seq) {
     pendingRename = null
@@ -2065,6 +2044,8 @@ client.on('som:remove', () => {
     if (structure.removalSeen(gone) === 'show') showEditError(REMOVED_MESSAGE)
   } else if (selected) {
     refreshNameField()             // a duplicate name may have gone
+    // Z7 — a pad (or a group holding one) may have gone from under the selection.
+    refreshSpawnNote()
   }
   resetStaleWorldCamera()
   // Z5 — the scene follows the SOM: a removed model node loses its instance.
@@ -2074,6 +2055,8 @@ client.on('som:remove', () => {
 
 client.on('som:add', () => {
   if (selected) refreshNameField()
+  // Z7 — a pad may have arrived under the selection.
+  if (selected) refreshSpawnNote()
   modelBridge.reconcile()
 })
 
@@ -2317,6 +2300,17 @@ epDelete.addEventListener('click', async () => {
 
 const STRUCTURE_VERB = { add: 'add', duplicate: 'duplicate', delete: 'delete' }
 
+/**
+ * Z2 (edit-polish-3) — the generic error for an add whose form no longer owns the
+ * answer, or null. An accepted answer reports nothing (and selects nothing); a
+ * rejection or an unknown answer is this line. `libraryAnswerError` is the same
+ * rule for the Library grid's own branch.
+ */
+function orphanAddError(status, message) {
+  if (status === 'accepted') return null
+  return `Couldn’t add: ${message ?? 'the world did not answer'}`
+}
+
 function onStructureAnswer(seq, status, message) {
   const result = structure.settle(seq, status)
   if (!result) return
@@ -2349,37 +2343,43 @@ function onStructureAnswer(seq, status, message) {
     return
   }
   if (request.teleporter) {
-    // Z3 — the destination form's own add. A rejection it is still waiting on
-    // belongs in the form; otherwise close the form (accepted and unknown both
-    // end its wait) and let the usual branches below decide the message and the
-    // selection. There is no `retryAdd` for a pad: it has no `primitive`, so a
-    // name taken meanwhile shows in the form and the next Save picks a fresh one.
-    if (status === 'rejected' && formWaitSeq === seq) {
-      formWaitSeq = null
-      tpFormError.textContent = message || 'Failed to place teleporter'
-      tpFormError.style.display = ''
-      tpSaveBtn.textContent = 'Save'
-      tpSaveBtn.disabled = false
-      tpFormCancel.disabled = false
-      refreshEditActions()
-      return
-    }
-    if (formWaitSeq === seq) closeTeleporterForm()
+    // Z3 (edit-polish-3) — the destination form's own add. Its `onAnswer` owns
+    // every answer it was waiting on and handles it completely: accepted closes
+    // the form and selects the new pad, rejected shows in the form, unknown shows
+    // "The world did not answer; try again". There is no `retryAdd` for a pad: it
+    // has no `primitive`, so a name taken meanwhile shows in the form and the next
+    // Save picks a fresh one.
+    const owned = teleporterForm?.onAnswer(seq, status, message) ?? false
+    // Z2 — an answer for a pad the form NO LONGER owns (Edit off closed it, or a
+    // newer opening): an accepted one selects NOTHING, and a rejected or unknown
+    // one is the generic edit error. Either way this branch returns, so the
+    // generic `selectAdded` below is reached by palette and Duplicate adds only.
+    const error = owned ? null : orphanAddError(status, message)
+    if (error) showEditError(error)
+    refreshEditActions()
+    return
   }
   if (request.model) {
-    // Z7 — the Model form's own add, exactly as the destination form's is:
-    // a rejection it is still waiting on shows in it; otherwise the form's
-    // wait ends (accepted and unknown both end it) and the usual branches
-    // below decide the message and the selection. There is no `retryAdd` for a
-    // model either: a name taken meanwhile shows in the form and the next Save
-    // picks a fresh one.
-    if (modelForm.onAnswer(seq, status, message)) {
+    // Z7 (models-by-url) — the Model form's own add. A rejection it is still
+    // waiting on shows in it; an acceptance selects through it. There is no
+    // `retryAdd` for a model either: a name taken meanwhile shows in the form and
+    // the next Save picks a fresh one.
+    if (modelForm?.onAnswer(seq, status, message)) {
       if (status !== 'accepted' && status !== 'rejected') {
         showEditError(`Couldn’t add: ${message ?? 'the world did not answer'}`)
       }
       refreshEditActions()
       return
     }
+    // Z2 (edit-polish-3) — an answer the Model form no longer owns: an accepted
+    // one selects NOTHING (it used to fall through to `selectAdded` and steal the
+    // selection), a rejected or unknown one is the generic edit error. This branch
+    // returns either way, so the generic `selectAdded` below belongs to palette and
+    // Duplicate adds only.
+    const error = orphanAddError(status, message)
+    if (error) showEditError(error)
+    refreshEditActions()
+    return
   }
   if (removedMessage === 'show') {
     showEditError(REMOVED_MESSAGE)             // another tab's delete won
@@ -2717,9 +2717,10 @@ const epModelUrl = document.getElementById('ep-model-url')
 const epModelPinned = document.getElementById('ep-model-pinned')
 const epModelStatus = document.getElementById('ep-model-status')
 
-// Z7 — only one of the destination and Model forms is open at a time.
-const modelGate = createFormGate()
-modelGate.register('teleporter', () => closeTeleporterForm())
+// Z7 — only one of the panel's forms is open at a time. The gate itself and the
+// destination form's closer are made in that form's own section above
+// (edit-polish-3 Z3); the Model form's and the grid's closers are registered
+// where each of them is created, below.
 
 // A11 — the diagnostic pointer listeners, once per SOM node.
 const diagnosticListeners = createDiagnosticListeners()
@@ -2904,11 +2905,51 @@ modelForm.wire()
 // Z7 — the other direction: the destination form's own open closes this one.
 modelGate.register('model', () => modelForm.close())
 
+// ── The destination form (Z3, edit-polish-3) ─────────────────────────────
+//
+// The logic lives in teleporter-form.js; this is its wiring, beside the Model
+// form's and the grid's. `buildDescriptor` stays a dependency because it comes
+// from renderer-three, which this package's tests cannot import; `dispatchAllowed`
+// is Edit mode on and nothing blocking, as the palette's own rule.
+
+teleporterForm = createTeleporterForm({
+  elements: {
+    form: tpForm,
+    worldSelect: tpWorldSelect,
+    destInput: tpDestInput,
+    spawnWarn: tpSpawnWarn,
+    error: tpFormError,
+    save: tpSaveBtn,
+    cancel: tpFormCancel,
+  },
+  gate: modelGate,
+  name: 'teleporter',
+  deps: {
+    // Z3 — the two DOM adapters: the list answers `null` synchronously for a
+    // world on another server, and `fillWorlds` is the select's one writer.
+    listWorlds: listTeleporterWorlds,
+    fillWorlds: fillTeleporterWorlds,
+    isValidDestination,
+    resolveDestination: (dest) => resolveWorldAddress(dest, currentWorldUrl),
+    teleporterName: () => teleporterName(isNameFree),
+    buildDescriptor: buildTeleporterDescriptor,
+    addNode: (descriptor) => client.addNode(descriptor),
+    structureBegin: (seq, pending) => structure.begin('add', seq, pending),
+    undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
+    refreshActions: () => refreshEditActions(),
+    dispatchAllowed: () => modes.edit && !editDispatchBlocked(),
+    nearSpawn,
+    clearEditError: () => clearEditError(),
+    selectNode: (name) => selectAdded(name),
+  },
+})
+teleporterForm.wire()
+modelGate.register('teleporter', () => teleporterForm.close())
+
 // Z7 — the Model button: the palette's placement, no data-kind, its own form.
+// Opening it closes whichever form holds the gate (the destination form included).
 epModel.addEventListener('click', () => {
   if (!modes.edit || editDispatchBlocked()) return
-  // Closing the destination form is the gate's job (only one form at a time).
-  closeTeleporterForm()
   modelForm.open()
 })
 
