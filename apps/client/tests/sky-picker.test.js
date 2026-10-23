@@ -118,6 +118,14 @@ describe('skyValueFor (Z5 — by path)', () => {
     assert.equal(skyValueFor('/assets/library/skies/Sky_01-aaaaaaaaaaaa.png', SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
   })
 
+  test('V4: an empty ? or # is not a catalog path either', () => {
+    // `new URL` gives an EMPTY search and hash for a lone `?`/`#`, so these used
+    // to name the entry; the stored string is what decides now.
+    assert.equal(skyValueFor(`${SKIES[0].url}?`, SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
+    assert.equal(skyValueFor(`${SKIES[0].url}#`, SKIES, { pageOrigin: PAGE_ORIGIN }), SKY_CUSTOM)
+    assert.equal(skyValueFor(`${SKIES[1].url}?#`, SKIES, { worldBaseUrl: 'https://atrium.example' }), SKY_CUSTOM)
+  })
+
   test('a texture that names no path at all is Custom, never a crash', () => {
     assert.equal(skyValueFor('skyboxtest1.png', SKIES), SKY_CUSTOM)
     assert.equal(skyValueFor('skyboxtest1.png', SKIES, { pageOrigin: '' }), SKY_CUSTOM)

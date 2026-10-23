@@ -72,8 +72,13 @@ export function skyValueFor(texture, skies, { worldBaseUrl = null, pageOrigin = 
  * resolve against `base`, and carry no query and no fragment. `entry.url` is a
  * root path, so a stored URL that rounds to that path matches it whatever host
  * is serving the bytes.
+ *
+ * V4 (round 2) — an EMPTY `?` or `#` (`…jpg?`) leaves `new URL`'s `search` and
+ * `hash` empty, so the stored STRING is checked as well: a `?` or a `#` anywhere
+ * in it means it names no path.
  */
 function storedPath(texture, base) {
+  if (typeof texture !== 'string' || texture.includes('?') || texture.includes('#')) return null
   let url
   try { url = new URL(texture, base || undefined) } catch { return null }
   if (url.search || url.hash) return null

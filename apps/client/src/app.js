@@ -2375,10 +2375,12 @@ function onStructureAnswer(seq, status, message) {
     // waiting on shows in it; an acceptance selects through it. There is no
     // `retryAdd` for a model either: a name taken meanwhile shows in the form and
     // the next Save picks a fresh one.
+    //
+    // V5 (round 2) — an answer this form OWNS adds no generic edit error, whatever
+    // its status. The form's own message (its "The world did not answer; try
+    // again" for an unknown answer) is the only one, so an owned answer is
+    // handled completely by its form, as Z2 asks.
     if (modelForm?.onAnswer(seq, status, message)) {
-      if (status !== 'accepted' && status !== 'rejected') {
-        showEditError(`Couldn’t add: ${message ?? 'the world did not answer'}`)
-      }
       refreshEditActions()
       return
     }

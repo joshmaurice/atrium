@@ -181,6 +181,22 @@ describe('Z2 — Edit off closes whichever form holds the gate, and discards the
     assert.match(flatten(answer.slice(generic)), /selectAdded\(request\.name\)/)
   })
 
+  test('V5: the owned Model answer shows no generic edit error', () => {
+    const answer = stripComments(functionBody('onStructureAnswer'))
+    const model = answer.indexOf('if (request.model)')
+    const generic = answer.indexOf("if (removedMessage === 'show')", model)
+    const branch = answer.slice(model, generic)
+    const owned = branch.indexOf('if (modelForm?.onAnswer(')
+    assert.ok(owned >= 0, 'the Model branch has its owned path')
+    const refresh = branch.indexOf('refreshEditActions()', owned)
+    assert.ok(refresh > owned, 'the owned path refreshes the panel')
+    assert.ok(!/showEditError\(/.test(branch.slice(owned, refresh)),
+      'an owned answer shows no generic edit error: its form handles it completely (V5/Z2)')
+    // ...and an answer the form does NOT own keeps the generic error (Z2).
+    assert.match(branch.slice(refresh), /orphanAddError\(/,
+      'the not-owned path still reports the generic error')
+  })
+
   test('both branches use the one not-owned error rule, which reports nothing for an acceptance', () => {
     const answer = stripComments(functionBody('onStructureAnswer'))
     assert.match(answer, /orphanAddError\(status, message\)/)
