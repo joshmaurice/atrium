@@ -5,6 +5,9 @@ import { WebIO } from '@gltf-transform/core'
 import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions'
 import { SOMDocument, SOMEvent } from '@atrium/som'
 
+/** Z2a (scripting-4a) — the node extras leaf the model-animation controls write. */
+export const MODEL_ANIMATION_FIELD = 'extras.atrium.animation'
+
 // ---------------------------------------------------------------------------
 // Minimal EventEmitter — works in Node.js and browsers without a build step
 // ---------------------------------------------------------------------------
@@ -57,6 +60,51 @@ function makeWebIO() {
 }
 
 // ---------------------------------------------------------------------------
+// scripting-4a Z3 — the server's clock, measured on a monotonic local clock
+// ---------------------------------------------------------------------------
+
+/**
+ * Z3 — the local clock every measurement comes from. `performance.now()` is
+ * monotonic: a wall-clock change on the device (a user fix, a DST step, a
+ * laptop waking with a wrong RTC) cannot move `serverNow()`. `Date.now()` is
+ * never used for a measurement.
+ */
+const defaultMonoNow = () => globalThis.performance.now()
+
+/** Z3 — the timers, injectable so a test can drive them. */
+const defaultTimers = {
+  setTimeout:    (fn, ms) => globalThis.setTimeout(fn, ms),
+  clearTimeout:  (t) => globalThis.clearTimeout(t),
+  setInterval:   (fn, ms) => globalThis.setInterval(fn, ms),
+  clearInterval: (t) => globalThis.clearInterval(t),
+}
+
+/** Z3 — five pings at 200 ms intervals after `hello` and after a discontinuity. */
+export const PING_BURST_COUNT        = 5
+export const PING_BURST_INTERVAL_MS  = 200
+/** Z3 — then one ping every 30 s while connected. */
+export const PING_STEADY_INTERVAL_MS = 30_000
+/** Z3 — the rolling window: the last 10 samples, none older than 5 minutes. */
+export const CLOCK_WINDOW_SIZE       = 10
+export const CLOCK_SAMPLE_MAX_AGE_MS = 5 * 60_000
+/** Z3 — a ping answered more than 60 s (by `monoNow()`) after it was sent is ignored. */
+export const CLOCK_PING_MAX_AGE_MS   = 60_000
+/** Z3 — below this the difference is a normal measurement, not a jump. */
+export const CLOCK_JUMP_MIN_MS       = 250
+
+/** One connection's clock state. Every timer in `timers` belongs to its record. */
+function createClock() {
+  return {
+    pingCounter: 0,      // Z3 — the per-connection `clientTime` counter
+    sent: new Map(),     // clientTime -> the monoNow() at send
+    samples: [],         // { rtt, offset, at } — the rolling window
+    offset: null,        // serverNow() = monoNow() + offset
+    ready: false,        // true after the first valid pong
+    timers: new Set(),   // every timer this connection owns
+  }
+}
+
+// ---------------------------------------------------------------------------
 // AtriumClient
 // ---------------------------------------------------------------------------
 
@@ -65,13 +113,22 @@ export class AtriumClient extends EventEmitter {
    * @param {object} opts
    * @param {boolean}  [opts.debug=false]  - Gate verbose console logging
    * @param {Function} [opts.WebSocket]    - WebSocket constructor (injectable for testing)
+   * @param {Function} [opts.monoNow]      - Z3: the monotonic local clock (injectable)
+   * @param {object}   [opts.timers]       - Z3: setTimeout/clearTimeout/setInterval/clearInterval
    */
-  constructor({ debug = false, WebSocket: WSImpl = globalThis.WebSocket, fetch: fetchImpl = globalThis.fetch, connectTimeout = 15000 } = {}) {
+  constructor({
+    debug = false, WebSocket: WSImpl = globalThis.WebSocket, fetch: fetchImpl = globalThis.fetch,
+    connectTimeout = 15000, monoNow = defaultMonoNow, timers = null,
+  } = {}) {
     super()
     this._debug   = debug
     this._WSImpl  = WSImpl
     this._fetch   = fetchImpl
     this._connectTimeout = connectTimeout
+    // Z3 — the measured clock and the timers are injectable, so a test drives
+    // both with fakes and no real 30 s interval ever runs.
+    this._monoNow = typeof monoNow === 'function' ? monoNow : defaultMonoNow
+    this._timers  = { ...defaultTimers, ...(timers ?? {}) }
 
     // Connection state — null when disconnected
     /** @type {{ sessionId, url, worldBaseUrl, ws, closing, stale, peerSessions, gen, connectTimeout } | null} */
@@ -292,6 +349,155 @@ export class AtriumClient extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
+  // Z3 — the server's clock
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Z3 — the server's clock as this client estimates it:
+   * `monoNow() + offset`. Before any estimate exists the offset is 0, so the
+   * value is at least the local monotonic clock; after `hello` it starts from
+   * `hello.serverTime` and is refined by every accepted `pong`.
+   *
+   * @returns {number}  milliseconds on the server's clock
+   */
+  serverNow() {
+    const clock = this._connectionRecord?.clock
+    return this._monoNow() + (clock?.offset ?? 0)
+  }
+
+  /** Z3 — true once this connection has answered a ping. */
+  get serverClockReady() {
+    return this._connectionRecord?.clock?.ready === true
+  }
+
+  /**
+   * Z3 — a connection's clock is cancelled in one place. NO TIMER OUTLIVES ITS
+   * CONNECTION: `disconnect`, a socket close, a connect timeout, a superseded
+   * connection and a new `hello` all come through here.
+   */
+  _cancelClock(record) {
+    const clock = record?.clock
+    if (!clock) return
+    // A timer's KIND is kept with its id: `clearTimeout` does not stop an
+    // interval, so the steady ping's own kind decides which canceller runs.
+    for (const timer of clock.timers) {
+      const cancel = timer.kind === 'interval' ? this._timers.clearInterval : this._timers.clearTimeout
+      cancel(timer.id)
+    }
+    clock.timers.clear()
+    clock.sent.clear()
+  }
+
+  /**
+   * Z3 — `hello` (re)starts the estimate: the offset comes from
+   * `hello.serverTime`, and five pings go at 200 ms intervals, then one every
+   * 30 s while connected.
+   */
+  _startClock(record, serverTime) {
+    if (!record) return
+    this._cancelClock(record)
+    const clock = record.clock ?? (record.clock = createClock())
+    clock.pingCounter = 0
+    clock.sent.clear()
+    clock.samples = []
+    clock.ready = false
+    clock.offset = typeof serverTime === 'number' ? serverTime - this._monoNow() : null
+    this._burstPings(record, { steady: true })
+  }
+
+  /**
+   * Z3 — a burst of `PING_BURST_COUNT` pings at 200 ms intervals. Every timer
+   * goes into the record's own set, so `_cancelClock` can reach it.
+   *
+   * @param {object} record
+   * @param {{steady?: boolean}} [opts]  also (re)start the 30 s interval
+   */
+  _burstPings(record, { steady = false } = {}) {
+    const clock = record?.clock
+    if (!clock) return
+    for (let i = 0; i < PING_BURST_COUNT; i++) {
+      const entry = { id: 0, kind: 'timeout' }
+      entry.id = this._timers.setTimeout(() => {
+        clock.timers.delete(entry)
+        if (record !== this._connectionRecord) return
+        this._sendPing(record)
+      }, i * PING_BURST_INTERVAL_MS)
+      // Node: a clock timer must never be the reason a process stays alive.
+      entry.id?.unref?.()
+      clock.timers.add(entry)
+    }
+    if (!steady) return
+    const interval = this._timers.setInterval(() => {
+      if (record !== this._connectionRecord) return
+      this._sendPing(record)
+    }, PING_STEADY_INTERVAL_MS)
+    interval?.unref?.()
+    clock.timers.add({ id: interval, kind: 'interval' })
+  }
+
+  /**
+   * Z3 — one ping. `clientTime` is a per-connection COUNTER (1, 2, 3 …), not a
+   * time, so the five pings of a burst never share a key; the send's `monoNow()`
+   * is kept under that counter so the RTT can be measured from it.
+   */
+  _sendPing(record) {
+    const clock = record?.clock
+    if (!clock || !record.ws) return
+    clock.pingCounter += 1
+    const clientTime = clock.pingCounter
+    clock.sent.set(clientTime, this._monoNow())
+    try {
+      record.ws.send(JSON.stringify({ type: 'ping', clientTime }))
+    } catch { /* the socket is closing; its close handler cancels the clock */ }
+  }
+
+  /**
+   * Z3 — a `pong`. A pong this connection never asked for (another connection's,
+   * or a superseded one's) and one whose ping is more than 60 s old by
+   * `monoNow()` are IGNORED. A new sample whose offset differs from the current
+   * estimate by more than `max(250 ms, its RTT)` is a discontinuity: the window
+   * is cleared WITHOUT keeping that sample, and a fresh burst follows.
+   */
+  _onPong(msg, record) {
+    const clock = record?.clock
+    if (!clock) return
+    const clientTime = msg?.clientTime
+    const sentMono = clock.sent.get(clientTime)
+    if (sentMono === undefined) return
+    clock.sent.delete(clientTime)
+    const now = this._monoNow()
+    if (now - sentMono > CLOCK_PING_MAX_AGE_MS) return
+
+    clock.ready = true
+    const rtt = Math.max(0, now - sentMono)
+    const offset = msg.serverTime - (sentMono + rtt / 2)
+
+    if (clock.offset !== null && Math.abs(offset - clock.offset) > Math.max(CLOCK_JUMP_MIN_MS, rtt)) {
+      // The window goes, and this sample with it: it may itself be the wrong one
+      // (a pre-sleep ping answered after a wake). The estimate is rebuilt from
+      // the burst's answers.
+      clock.samples = []
+      clock.offset = null
+      this._burstPings(record)
+      return
+    }
+
+    clock.samples.push({ rtt, offset, at: now })
+    this._pruneClockSamples(clock, now)
+    let best = clock.samples[0]
+    for (const sample of clock.samples) if (sample.rtt < best.rtt) best = sample
+    clock.offset = best.offset
+  }
+
+  /** Z3 — the rolling window: the last 10 samples, none older than 5 minutes. */
+  _pruneClockSamples(clock, now) {
+    clock.samples = clock.samples.filter((sample) => now - sample.at <= CLOCK_SAMPLE_MAX_AGE_MS)
+    if (clock.samples.length > CLOCK_WINDOW_SIZE) {
+      clock.samples = clock.samples.slice(clock.samples.length - CLOCK_WINDOW_SIZE)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Connect / disconnect
   // ---------------------------------------------------------------------------
 
@@ -324,6 +530,8 @@ export class AtriumClient extends EventEmitter {
       // socket without emitting 'disconnected', so this cannot hang off that
       // event; it happens here, before the new socket opens.
       this._resolveAllPendingAsUnknown(prevRecord)
+      // Z3 — the outgoing connection's clock stops with it.
+      this._cancelClock(prevRecord)
       // Mark previous record stale
       prevRecord.stale = true
       // Close the old socket so avatar leaves old world
@@ -462,7 +670,7 @@ export class AtriumClient extends EventEmitter {
         case 'join':       this._onJoin(msg, record);              break
         case 'leave':      this._onLeave(msg, record);             break
         case 'tick':       /* ignored */                            break
-        case 'pong':       /* ignored */                            break
+        case 'pong':       this._onPong(msg, record);               break
         case 'error': {
           const err = new Error(`${msg.code}: ${msg.message ?? ''}`)
           err.sessionId = sessionId
@@ -480,6 +688,8 @@ export class AtriumClient extends EventEmitter {
     const onClose = (codeOrEvent, reason) => {
       if (record !== this._connectionRecord) return
       this._clearConnectTimeout(record)
+      // Z3 — the clock stops with the socket, before anything else.
+      this._cancelClock(record)
       record.closing = true
       if (record.stale) return
       this._log('Connection closed')
@@ -543,6 +753,8 @@ export class AtriumClient extends EventEmitter {
         // 1) Clear the timer
         clearTimeout(record.connectTimeout)
         record.connectTimeout = undefined
+        // Z3 — a connection that never opened keeps no clock.
+        this._cancelClock(record)
         // 2) Mark stale + closing so no late events from this record
         record.stale = true
         record.closing = true
@@ -582,6 +794,8 @@ export class AtriumClient extends EventEmitter {
 
     // Clear connect timeout if still pending (pre-brief #4)
     this._clearConnectTimeout(record)
+    // Z3 — the connection's clock stops here: no timer outlives its connection.
+    this._cancelClock(record)
 
     // Mark record as stale so late close can't clobber a new connection
     record.stale = true
@@ -716,6 +930,10 @@ export class AtriumClient extends EventEmitter {
         this._avatarDescriptor.extras.displayName = msg.displayName
       }
     }
+    // Z3 (scripting-4a) — the clock starts here: the offset comes from
+    // `hello.serverTime` and the first burst of pings goes at once. A new
+    // `hello` cancels every timer the connection had.
+    this._startClock(record, msg.serverTime)
     // Set canPlaceTeleporters from server hello (T2). A1: `canEdit` carries the
     // same value; the old name stays as an alias for one release.
     this.canPlaceTeleporters = msg.canPlaceTeleporters === true
@@ -835,6 +1053,36 @@ export class AtriumClient extends EventEmitter {
       node: oldName,
       field: 'name',
       value: newName,
+    })
+    return seq
+  }
+
+  /**
+   * Z2a (scripting-4a) — set a model node's animation state. Sends
+   * `{type:'send', node: name, field: 'extras.atrium.animation', value}` and
+   * returns the request seq, exactly as `renameNode` does.
+   *
+   * Nothing changes locally until the answer. On the own echo the client applies
+   * THE BROADCAST'S VALUE — the server stamps a Play's `startedAt` (L5 (b)), so
+   * the sent value is not the stored one. The echo is matched by `requestSeq`,
+   * never by value.
+   *
+   * @param {string} name
+   * @param {object|null} value   the whole value, or null for Stop
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  setModelAnimation(name, value) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._sendSeq
+    this.lastSendSeq = seq
+    this._trackEdit(seq, { type: 'send', node: name, field: MODEL_ANIMATION_FIELD, value })
+    this._wsSend({
+      type: 'send',
+      seq,
+      node: name,
+      field: MODEL_ANIMATION_FIELD,
+      value,
     })
     return seq
   }
@@ -1024,6 +1272,12 @@ export class AtriumClient extends EventEmitter {
    * An echo of our own `set`. The value is already in the local SOM, but the
    * echo resolves the pending edit (A3) and, for a rename, applies it locally
    * and emits `som:rename` (A8).
+   *
+   * Z2a (scripting-4a): the animation leaf is the ONE other field that IS
+   * re-applied on its own echo — with THE BROADCAST'S value, never the value
+   * that was sent, because the server stamps a Play's `startedAt` (L5 (b)). It
+   * is matched by `requestSeq` like every other pending edit. Every other
+   * field's own echo stays a no-op, exactly as before.
    */
   _resolveOwnSetEcho(msg, record) {
     const pending = record?.pendingEdits
@@ -1046,6 +1300,14 @@ export class AtriumClient extends EventEmitter {
       // A8 — som:set is still emitted for the `name` field, with nodeName set
       // to the old name, for compatibility.
       this.emit('som:set', { nodeName: edit.node, path: 'name', value: edit.value })
+    }
+
+    if (edit.type === 'send' && edit.field === MODEL_ANIMATION_FIELD) {
+      this.applyLocally(() => {
+        const target = this._som?.getObjectByName?.(edit.node) ?? null
+        if (target) this._som.setPath(target, MODEL_ANIMATION_FIELD, msg.value)
+      })
+      this.emit('som:set', { nodeName: edit.node, path: MODEL_ANIMATION_FIELD, value: msg.value })
     }
 
     this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit })
