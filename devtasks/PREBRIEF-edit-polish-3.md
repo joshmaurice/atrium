@@ -1,6 +1,10 @@
 # Pre-brief: Edit mode polish 3 (small fixes after library-sky)
 
-Status: **DRAFT, Revision 0 (2026-10-22). Decisions L1–L6 open (§3).**
+Status: **DRAFT, Revision 1 (2026-10-22). Decisions L1–L6 open (§3).**
+- **Rev 1 applies an outside review of Rev 0** (verdict "revise before
+  implementation, no major redesign"). There were three must-fix and three
+  should-fix findings and one nit, all taken; §11 lists them. The reviewer
+  agrees with every recommended decision.
 - **Drafted by Claude from `main` at `1206a52`.** Its code is identical to
   the released `a31c5a62` (DEV, MAIN and PROD): `git diff --stat a31c5a62
   1206a52` shows only the library-sky passdown. Claims marked *probe* were
@@ -26,8 +30,10 @@ Status: **DRAFT, Revision 0 (2026-10-22). Decisions L1–L6 open (§3).**
 1. **The HUD's world name follows a rename.** Today it changes only on a
    reconnect.
 2. **Turning Edit off closes the Model form and the Library grid,** as
-   their specs said. Today they're only hidden with the panel, and they
-   reappear when Edit is turned back on.
+   their specs said, and discards the Model form's typed URL. Today they're
+   only hidden with the panel, and they reappear when Edit is turned back
+   on. **Also:** an add whose form has closed no longer grabs the selection
+   when its answer arrives late (Rev 1).
 3. **The destination (teleporter) form becomes its own module, with
    committed tests.** It is the last Edit-panel form whose logic still lives
    inside `app.js`. The move also fixes two of its bugs:
@@ -72,6 +78,28 @@ Status: **DRAFT, Revision 0 (2026-10-22). Decisions L1–L6 open (§3).**
     on Edit off.
   - A Save already sent keeps its undo entry either way: both `close()`s
     "forget the form's wait only" (`model-form.js` L342).
+- **The Model form's typed URL survives a close, and its input box survives
+  even a reset** (review 1, confirmed).
+  - `close()` (`model-form.js` L343) clears the Check result, the error and
+    the wait, but not `state.url`.
+  - `reset()` (L366) clears `state.url`, but **nothing in the module ever
+    writes `elements.url.value`**: the only use of the input is its `input`
+    listener (L377).
+  - So after a reconnect the box still shows the old URL while the form's
+    state is empty. A merely closed form keeps both.
+- **An add whose form has closed is still selected when it's accepted**
+  (review 2, confirmed, and wider than the review says).
+  - The Model form's `onAnswer` (L309) returns `false` for an answer it no
+    longer owns.
+  - The destination form's branch (`app.js` L2351) only closes the form when
+    it's still waiting.
+  - In both cases `onStructureAnswer` falls through to the generic `else if
+    (status === 'accepted' && request.kind !== 'delete' && modes.edit)
+    selectAdded(request.name)` (L2398).
+  - **Sequence:** Save; Edit off, which closes the form; Edit on; select
+    something else; then the acceptance arrives and replaces the selection.
+  - The Library grid alone returns before the generic branch (L2345), so it
+    already behaves as intended.
 - **The three forms already share one gate,** `createFormGate()`
   (`model-form.js` L83). At most one is open, and each registered a closer:
   - `teleporter` at L2722;
@@ -143,8 +171,14 @@ Status: **DRAFT, Revision 0 (2026-10-22). Decisions L1–L6 open (§3).**
   The sky itself shows correctly in both cases. Only the picker's label is
   wrong.
 - **Catalog file names carry the first 12 hex digits of the file's sha256**
-  (`<id>-<sha12>.<ext>`, checked by `loadCatalog`). The same path means the
-  same image wherever it's served.
+  (`<id>-<sha12>.<ext>`, checked by `loadCatalog`). Matching on that path is
+  a strong **identification heuristic**, not a content guarantee: any host
+  can serve other bytes at the same path (review 7).
+- **`createSkyPicker.change(value)` doesn't compare `value` with the
+  current one** (`sky-picker.js` L199; review 5). Today, re-choosing the
+  shown option rarely sends, only because browsers fire no `change` for it.
+  Once one id can stand for several stored URLs, the picker itself must
+  refuse an unchanged pick.
 
 ### P6. The key-wiring guard's blind spots (item 6)
 `tests/edit-key-wiring.test.js`:
@@ -165,8 +199,17 @@ Status: **DRAFT, Revision 0 (2026-10-22). Decisions L1–L6 open (§3).**
 - A pad later dragged onto spawn gets no note. That was accepted at
   polish-2 acceptance (§4.6 there): pads arm only after you step off them,
   so landing on one is harmless.
-- The panel already re-renders the selection on every `som:set` of the
-  selected node (L843) and on drag (`refreshEditPanel`, L1855).
+- **`refreshEditPanel` (L1855) doesn't run on a drag** (review 3,
+  confirmed).
+  - `onHandleChange` (L1720) and the numeric fields' commit (`commitVectorField`, L1930) refresh only
+    the vectors.
+  - The `som:set` handler refreshes the panel only when the changed node
+    **is** the selection (L843), not one of its descendants.
+  - So a note placed in `refreshEditPanel` would go stale during a drag, or
+    when a child pad moves.
+- **A selected group can hold a pad away from the group's origin.** "Is the
+  group near spawn" isn't "is its pad near spawn". `world-position.js`
+  already composes the parents' translation, rotation and scale.
 
 ### P8. Test baseline at `1206a52`
 `apps/client` 766 and `packages/renderer-three` 265, all passing, on Node
@@ -257,13 +300,34 @@ v22.22.0. Commands: `node --test tests/*.test.js` in each package.
   the panel. That covers the destination form, the Model form and the
   Library grid, whichever is open; the direct `closeTeleporterForm()` call
   there goes.
+- **Edit off also discards the Model form's draft** (review 1).
+  - `setEditMode(false)` calls `modelForm.reset()` after the gate. `reset()`
+    clears `state.url`, the Check result and the pin, and forgets any wait.
+  - The undo entry of a Save already sent is still recorded (Y7).
+  - The destination form already starts empty on its next fresh opening,
+    and the grid has no draft.
+- **The Model form's input box always shows `state.url`:** `render()`
+  writes `elements.url.value = state.url` unless the box has focus. Then
+  every `reset()`, including the connection and world-reset paths (L753,
+  L772, L2924), clears what's on screen too. That fixes P2's reconnect case.
 - **`endEditSession()` doesn't change.** It calls `setEditMode(false)`
-  first, so the gate now covers it, and its own two `close()` calls become
-  harmless no-ops. The connection and world-reset paths keep
-  `modelForm.reset()` (L753, L772, L2924), which also clears the typed URL.
-- An answer that arrives after a form was closed is handled as today:
-  - an accepted add is selected only if its form is still waiting;
-  - the undo entry is always recorded (Y7).
+  first, so the gate and the reset now cover it, and its own two `close()`
+  calls become harmless no-ops.
+- **An add whose form no longer waits for it selects nothing** (review 2;
+  P2):
+  - **An answer a form owns:** the form handles it completely. An accepted
+    one closes the form and selects the new node (`deps.selectNode`). The
+    Model form already does this; the destination form does it now (Z3).
+    `onStructureAnswer` returns.
+  - **An answer for a `request.model` or `request.teleporter` add that the
+    form no longer owns:**
+    - an accepted one returns without selecting anything;
+    - a rejected or unknown one shows the generic edit error ("Couldn't
+      add: …"), with Edit on, and returns.
+
+    The generic `selectAdded` branch is then reached only by palette and
+    Duplicate adds, as J6 intended.
+  - The undo entry is always recorded (Y7), owned or not.
 
 ### Z3. `teleporter-form.js` (L2)
 - **The API:** `createTeleporterForm({ elements, deps, gate, name =
@@ -284,11 +348,24 @@ v22.22.0. Commands: `node --test tests/*.test.js` in each package.
 
   The module imports nothing from three.js or the DOM.
 - **What it does,** with today's behaviour kept except the two fixes:
+  - **`wire()`** (review 4) attaches the module's own handlers, as
+    `createModelForm.wire()` does:
+    - the select's `change`: a chosen world enables Save and hides the
+      error;
+    - the input's `input`: Save enabled exactly when the text is non-blank,
+      and the error hidden;
+    - Save's `click`, which calls `save()`;
+    - Cancel's `click`, which calls `close()`.
+
+    `app.js` adds no listeners to these elements.
   - **`open(position)`:**
     - refused while waiting on its own Save;
     - claims the gate;
-    - a fresh opening resets the fields and asks `listWorlds()`; an opening
-      while already open keeps what was typed;
+    - **a fresh opening** first, synchronously, empties the fields, calls
+      `fillWorlds([], { loading: true })` (or `{ manualOnly: true }` when
+      `listWorlds` is null for this world), hides the error and disables
+      Save; then it asks `listWorlds()`;
+    - an opening while already open keeps what was typed and the list;
     - recomputes the spawn warning every time.
   - **The world list belongs to the opening that asked for it:** an answer
     that arrives after `close()`, or after a newer fresh opening, is
@@ -302,21 +379,26 @@ v22.22.0. Commands: `node --test tests/*.test.js` in each package.
       first bug.)*
     - A throw from `addNode` shows "Failed to place teleporter: …" and
       re-enables Save.
-  - **`onAnswer(seq, status, message)`** returns `true` only when it
-    consumes a rejection it was waiting on: the error shows and Save is
-    enabled again.
-    - An accepted or unknown answer it was waiting on closes the form and
-      returns `false`, so `onStructureAnswer` goes on to its usual message
-      and selection, as today.
-    - Any other seq returns `false` and changes nothing.
+  - **`onAnswer(seq, status, message)`** works as `createModelForm`'s does
+    (review 2). It returns `true` for every answer it was waiting on, and
+    handles it completely:
+    - **accepted:** closes the form and calls `deps.selectNode(name)`;
+    - **rejected:** shows the error and enables Save again, keeping what was
+      typed;
+    - **unknown:** shows "The world did not answer; try again" and enables
+      Save.
+
+    Any other seq returns `false` and changes nothing. Z2 says what
+    `app.js` does then.
   - **`close()` and `reset()`** forget the wait only. `isOpen()` and
     `waitSeq` are read-only views.
 - **What stays in `app.js`:**
   - the Teleporter button's position (`palettePlacement`);
   - the two DOM adapters;
   - the gate registration;
-  - `onStructureAnswer` calling `teleporterForm.onAnswer` in the
-    `request.teleporter` branch;
+  - `onStructureAnswer`'s `request.teleporter` branch: it calls
+    `teleporterForm.onAnswer` and then follows Z2's owned and not-owned
+    rules;
   - Escape's "ignored while saving", which now reads `teleporterForm.waitSeq`.
 
   `formWaitSeq`, `pendingPosition` and `closeTeleporterForm` go.
@@ -340,27 +422,48 @@ In `createSkyLoader`:
   has no search or hash, and its `pathname` equals the entry's `url`.
   Otherwise it returns `SKY_CUSTOM`, and `''` or missing stays None.
 - **What a pick stores doesn't change** (`storedUrl`).
-- **Choosing the sky the select already shows sends nothing,** as today's
-  "unchanged" rule. The check compares the select's values, so a catalog
-  sky stored under another origin isn't rewritten just by being shown.
+- **`change(value)` returns `null` and sends nothing when `value` equals
+  the picker's current value for the SOM** (`valueForSom()`; review 5). It
+  does so before computing any URL, so a catalog sky stored under another
+  origin is never rewritten just by being chosen again.
+- **The match is a path heuristic, not a content check** (review 7). A
+  wrong label is possible for a non-library host that serves that exact
+  path; the sky itself is unaffected.
 
 ### Z6. The key guard (L6)
 `tests/edit-key-wiring.test.js`:
 - **A small scanner** in the test strips comments outside string, template
   and regex literals before any match. Regexes are only those that follow
   `(`, `,`, `=` or `return`. The scanner has its own tests.
-- **The listener's full argument list is read** up to the matching `)` of
-  `addEventListener(`, and checked for a capture flag (`true`, `capture`)
-  before and after the body.
+- **The third argument is found exactly** (review 6). The scanner splits
+  `addEventListener(`'s arguments at **top-level** commas, matching
+  `()`, `[]` and `{}` and skipping strings, templates and comments.
+  - There is a capture flag if a third argument exists and is `true`, or is
+    an object literal with a `capture` property that isn't `false`.
+  - Any other third argument (a variable, a call) fails the rule as
+    "unknown options".
+  - The handler's body is never searched for these words.
 - The existing seven rules stay as they are and run on the stripped text.
 
 ### Z7. The spawn note (L5 (a))
-- **A pure `padNearSpawn(node, worldPosition)`** in `teleport-trigger.js`:
-  true when the node, or any node under it, `isTeleporter` and its world
-  position is `nearSpawn`. `worldPosition` is passed in, so the tests use
-  plain values.
+- **A pure `padNearSpawn(node, worldPositionOf)`** in `teleport-trigger.js`
+  (review 3).
+  - It walks the node and its descendants. For **each** node that
+    `isTeleporter`, it calls `worldPositionOf(thatNode)` and tests
+    `nearSpawn` on the result. It's true if any pad is near.
+  - `app.js` passes the existing `world-position.js` function, which
+    composes the parents' translation, rotation and scale.
+  - The tests pass a fake that reads plain values.
 - **`#ep-spawn-note`** sits in the selection fields, hidden by default.
-  `refreshEditPanel` shows it when `padNearSpawn(selected, …)`.
+- **One function, `refreshSpawnNote()`,** reads the current selection and
+  sets the note. It's called on:
+  - every selection change;
+  - every handle change (`onHandleChange`), live during a drag;
+  - every numeric transform commit (`commitVectorField`);
+  - undo and redo of a transform;
+  - `som:set` of a transform on the selection **or any of its
+    descendants**;
+  - `som:add` and `som:remove` under the selection.
 - The note is only shown. The trigger and the form's own warning don't
   change.
 
@@ -369,20 +472,23 @@ In `createSkyLoader`:
 - `teleport-trigger.js`'s trigger rules.
 - The sky controller's generation rules (R1–R7).
 - What the picker stores.
-- The Model form's and the grid's logic, except the gate's new call.
+- The grid's logic.
+- The Model form's logic, except two things: its input mirrors `state.url`
+  (Z2), and an add it no longer owns is no longer selected.
 - `index.html`, except Z7's one element.
+- The palette's and Duplicate's selection of an accepted add (J6).
 
 ## 5. Tests
 
 | Item | New or changed tests | Proof of failure |
 |---|---|---|
 | Z1 | A guard in `apps/client/tests/app-wiring.test.js` (new) reads `app.js`: one write to `hudWorldEl.textContent`, inside `showWorldName`; the `world:loaded` handler and the `__document__` branch both call it, the latter before its `return` | (a) drop the call from the `__document__` branch |
-| Z2 | `model-form` (gate): `closeCurrent()` calls only the holder's closer, once, and empties the gate; with no holder it's a no-op. The same guard file: `setEditMode`'s off branch calls `modelGate.closeCurrent()` | (b) remove `closeCurrent()` from the off branch; (b2) `closeCurrent` that forgets to empty the gate |
-| Z3 | `teleporter-form.test.js` (new), with a fake-element harness as `model-form.test.js`. It covers: open (fresh and reopen); refused while waiting; validation messages; a Save that sends once with `teleporter: true` and registers undo; a double Save sending one request; accepted, rejected and unknown answers; **an error hidden on the next Save**; **a late world list after a close, and after a newer opening, dropped**; close while waiting forgets only the wait; reset; the gate | (c) Save not hiding the error; (c2) the world list not tied to its opening; (c3) a rejection that doesn't re-enable Save |
+| Z2 | `model-form` (gate): `closeCurrent()` calls only the holder's closer, once, and empties the gate; with no holder it's a no-op. `model-form` (form): **type and Check a URL, close, `reset()`, reopen: the state and the input box are both empty**; a reset while saving forgets only the wait; render leaves a focused box alone. The same guard file: `setEditMode`'s off branch calls `modelGate.closeCurrent()` then `modelForm.reset()`; the `request.model` and `request.teleporter` branches of `onStructureAnswer` return without `selectAdded` for an answer the form doesn't own | (b) remove `closeCurrent()` from the off branch; (b2) `closeCurrent` that forgets to empty the gate; (b3) render not writing the input box; (b4) let a not-owned accepted model add fall through to `selectAdded` |
+| Z3 | `teleporter-form.test.js` (new), with a fake-element harness as `model-form.test.js`. It covers: `wire()` (choosing a listed world enables Save; typing a destination enables it, blank disables it; either hides an error; changing inputs after a rejection); open (fresh: fields emptied and the list in its loading or manual-only state **before** `listWorlds()` resolves; reopen keeps what was typed); refused while waiting; validation messages; a Save that sends once with `teleporter: true` and registers undo; a double Save sending one request; accepted (closes and selects), rejected and unknown answers; an answer for another seq returns `false` and changes nothing; **an error hidden on the next Save**; **a late world list after a close, and after a newer opening, dropped**; close while waiting forgets only the wait; reset; the gate. **Accepted after close:** with Edit off, and with Edit back on and another node selected, nothing is selected (through the module's `false` and the guard on `app.js`'s branch) | (c) Save not hiding the error; (c2) the world list not tied to its opening; (c3) a rejection that doesn't re-enable Save; (c4) an accepted answer for a closed form selecting the node |
 | Z4 | renderer-three `load-background`: the same refused value three times logs once; a different refused value logs; after an accepted value, or `retry()`, or `resetWorld()`, the first value logs again; each call still returns the refusal | (d) log every refusal |
-| Z5 | `sky-picker`: the root path, `https://a.example/<path>` and `https://b.example/<path>` all give the entry's id from either page origin; a query, a fragment, a different path or a near-miss name give Custom; None as before | (e) restore the string comparison |
-| Z6 | `edit-key-wiring`: scanner tests (`//` inside a string or URL kept, comments stripped, template literals kept); and the guard run against crafted sources: a `}, true)` capture after the body, `{ capture: true }`, and a consume call only in a comment, each failing the named rule | (f) a capture flag added after the real Edit-mode listener's body; (f2) its `stopImmediatePropagation()` commented out |
-| Z7 | `teleport-trigger`: `padNearSpawn` for a pad on spawn, just outside it, a group holding one, and a node with none | (g) ignore children |
+| Z5 | `sky-picker`: the root path, `https://a.example/<path>` and `https://b.example/<path>` all give the entry's id from either page origin; a query, a fragment, a different path or a near-miss name give Custom; None as before. **The SOM holds a catalog path from origin A, the picker runs on origin B, and `change(currentId)` makes zero `applyExtras` calls** | (e) restore the string comparison; (e2) drop the unchanged-value check |
+| Z6 | `edit-key-wiring`: scanner tests (`//` inside a string or URL kept, comments stripped, template literals kept); the top-level argument splitter (nested parentheses, object literals, strings with commas); and the guard run against crafted sources: a `}, true)` capture after the body, `{ capture: true }`, an unknown third argument, and a consume call only in a comment, each failing the named rule; **and passing cases: a handler whose body contains `true` and a variable named `capture`, with no third argument, and `{ capture: false }`** | (f) a capture flag added after the real Edit-mode listener's body; (f2) its `stopImmediatePropagation()` commented out |
+| Z7 | `teleport-trigger`: `padNearSpawn` for a pad on spawn, just outside it, a node with none, **an offset child pad in a translated and rotated group (near when the group's origin is not, and the reverse)**, and `worldPositionOf` called once per pad. The guard file: `refreshSpawnNote()` is called from `onHandleChange`, `commitVectorField`, the selection change, and the `som:set` handler for descendants | (g) ignore children; (g2) test the group's own position instead of each pad's; (g3) drop the call from `onHandleChange` |
 
 **Expected counts:** `apps/client` 766 + new; renderer-three 265 + new; the
 rest unchanged. The handoff gives each exact number next to its command.
@@ -407,8 +513,15 @@ for each run:
 5. A refused sky value, then three World Info renames: one `[sky]` line.
 6. A catalog sky stored as the root path, viewed from a page on a second
    origin: the picker names it.
-7. Drag a pad onto spawn: the note shows; drag it off: it hides.
-8. Regression: the key wiring as in polish-2 §5.1 (Ctrl+D, Delete in a text
+7. Drag a pad onto spawn: the note shows **during** the drag; drag it off:
+   it hides. The same with a group whose child pad is offset from the
+   group's origin.
+8. **Accepted after close:** a stubbed slow answer to a pad's Save; Edit off,
+   Edit on, select a cube; the answer arrives: the cube stays selected, and
+   Undo removes the pad. The same with a model's Save.
+9. **Model form draft:** type and Check a URL; Edit off and on; reopen Model:
+   the box is empty. Reconnect with a URL typed: the box is empty.
+10. Regression: the key wiring as in polish-2 §5.1 (Ctrl+D, Delete in a text
    field) and the library-sky checks 1–14.
 
 ## 6. DEV acceptance (operator, Firefox, hard reload, owner)
@@ -434,7 +547,7 @@ specifics:
   4. the `app.js` wiring for Z1, Z2 and Z3, plus Z7's element and note, and
      `app-wiring.test.js`;
   5. Z6;
-  6. full suites, proofs (a)–(g) with their sub-proofs, and the handoff.
+  6. full suites, proofs (a)–(g) with their sub-proofs ((b2)–(b4), (c2)–(c4), (e2), (f2), (g2), (g3)), and the handoff.
 - **`--max-runtime 3h`** at creation.
 - **Kickoff:** the front door verifies this file's hash and posts it on the
   kickoff. The kickoff only copies it, because it has only `kanban_*` tools
@@ -447,8 +560,12 @@ specifics:
 
 ## 8. Notes for the brief author
 - **Copy `createModelForm`'s shape for Z3,** down to `onAnswer`'s return
-  value. `onStructureAnswer`'s fall-through for an accepted pad must stay:
-  that's where the pad gets selected.
+  value and `wire()`. The form selects its own accepted pad. Its
+  `onStructureAnswer` branch never falls through to `selectAdded` (Z2): that
+  generic branch is only for palette and Duplicate adds now.
+- **The biggest risk in this round is changing form lifecycles while moving
+  code** (review). Test every transition the table names before wiring
+  `app.js`.
 - **`buildTeleporterDescriptor` stays a dependency** (it's from
   renderer-three, which `apps/client` tests can't import).
 - **Z2's gate call replaces the direct `closeTeleporterForm()` in
@@ -480,5 +597,20 @@ specifics:
    drafted alongside this one.
 
 ## 11. Review log
-- **Rev 0** (2026-10-22 evening): drafted from code reading and probes at
-  `1206a52`, with L1–L6 open.
+- **Rev 0** (2026-10-22 evening, `6072ff2`): drafted from code reading and
+  probes at `1206a52`, with L1–L6 open.
+- **Rev 1** (2026-10-22, ~21:45 PT): an outside review of Rev 0 (read-only,
+  against `1206a52`). Claude checked each finding in the code; all are
+  confirmed and taken.
+
+| # | Finding | Severity | Where it went |
+|---|---|---|---|
+| 1 | Edit off keeps the Model form's typed URL | Must-fix | P2, Z2 (`reset()` on Edit off; the input mirrors `state.url`), tests (b3), §5.1 check 9. **Wider than reported:** even `reset()` never cleared the visible box |
+| 2 | An accepted add whose form has closed still selects the node | Must-fix | P2, Z2 (owned versus not-owned), Z3's `onAnswer`, tests (b4) and (c4), §5.1 check 8. **Wider than reported:** the Model form has the same fall-through |
+| 3 | The spawn note isn't refreshed during a drag, and a group's position isn't its pad's | Must-fix (under L5 (a)) | P7, Z7 (`worldPositionOf` per pad; `refreshSpawnNote()` call sites), tests (g2) and (g3) |
+| 4 | The form's input handlers belong to the module | Should-fix | Z3 `wire()` and the fresh-open order; tests |
+| 5 | The picker doesn't refuse an unchanged pick | Should-fix | P5, Z5, test (e2) |
+| 6 | Searching all argument text for `true`/`capture` would reject valid listeners | Should-fix | Z6 (exact third argument), passing-case tests |
+| 7 | A hash in a path isn't a content guarantee | Nit | P5, Z5 wording |
+
+The reviewer recommends (a) for all of L1–L6, the same as this document.
