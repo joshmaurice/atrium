@@ -741,6 +741,78 @@ describe('the failure log (V2)', () => {
 })
 
 // ===========================================================================
+// Z4 (edit-polish-3, L3a) — a refused value reaches the log once
+// ===========================================================================
+
+describe('a rule refusal is logged once per refused value (Z4)', () => {
+  const VALUE = 'skyboxtest1.png'
+
+  test('the same refused value three times logs once', async () => {
+    const h = harness()
+    for (let i = 0; i < 3; i++) {
+      const result = await h.sky.update(sky(VALUE), null)
+      assert.equal(result.ok, false, `call ${i}: a refusal still answers with a failure`)
+    }
+    assert.equal(h.logs.length, 1, `expected one log line for three refusals of the same value, got ${h.logs.length}`)
+    assert.match(h.logs[0], new RegExp(`^\\[sky\\] .+ \\([a-z-]+\\) — ${VALUE}$`))
+  })
+
+  test('a different refused value logs again, and each one only once', async () => {
+    const h = harness()
+    await h.sky.update(sky(VALUE), null)
+    await h.sky.update(sky('other-name.png'), null)
+    await h.sky.update(sky('other-name.png'), null)
+    await h.sky.update(sky(VALUE), null)
+    assert.equal(h.logs.length, 3, `expected three log lines (A, B, A again), got ${h.logs.length}`)
+    assert.match(h.logs[0], new RegExp(`${VALUE}$`))
+    assert.match(h.logs[1], /other-name\.png$/)
+    assert.match(h.logs[2], new RegExp(`${VALUE}$`))
+  })
+
+  test('an accepted value clears the record: the same value logs again after one', async () => {
+    const h = harness()
+    await h.sky.update(sky(VALUE), null)
+    assert.equal(h.logs.length, 1)
+    // '' / no sky is an ACCEPTED value: it forgets the failure, as it always has.
+    const ok = await h.sky.update(null, null)
+    assert.deepEqual(ok, { ok: true })
+    await h.sky.update(sky(VALUE), null)
+    assert.equal(h.logs.length, 2, 'the value is logged again after an accepted value')
+  })
+
+  test('retry() clears the record for a refused value', async () => {
+    const h = harness()
+    await h.sky.update(sky(VALUE), null)
+    assert.equal(h.logs.length, 1)
+    const retried = await h.sky.retry()
+    assert.equal(retried.ok, false, 'the retry refuses again')
+    assert.equal(h.logs.length, 2, 'retry() forgets the refusal, so it is reported again')
+  })
+
+  test('resetWorld() clears the record for a refused value', async () => {
+    const h = harness()
+    await h.sky.update(sky(VALUE), null)
+    assert.equal(h.logs.length, 1)
+    h.sky.resetWorld()
+    await h.sky.update(sky(VALUE), null)
+    assert.equal(h.logs.length, 2, 'a new world ends the quiet spell')
+  })
+
+  test('a refusal still clears the slots and returns the reason every time', async () => {
+    const h = harness()
+    const first = await h.sky.update(sky(VALUE), null)
+    const second = await h.sky.update(sky(VALUE), null)
+    assert.deepEqual(second, first, 'the second answer is the same refusal, not a cached success')
+    assert.equal(second.ok, false)
+    assert.equal(typeof second.reason, 'string')
+    assert.equal(typeof second.message, 'string')
+    assert.equal(h.scene.background, null, 'no slot is written by a refusal')
+    assert.equal(h.scene.environment, null)
+    assert.equal(h.fetchImage.calls.length, 0, 'nothing is fetched for a refused value')
+  })
+})
+
+// ===========================================================================
 // The original reason survives a repeat (V3.3, round 2)
 // ===========================================================================
 

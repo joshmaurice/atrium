@@ -26,8 +26,17 @@ import { imageHeader } from './model-parse.js'
  *   pending     `{ generation, url, controller }` in flight, or null
  *   failed      `{ url, reason, message }` of the last failure, or null
  *   logged      has the current `failed` been re-reported by the shortcut?
+ *   refused     `{ value, reason }` of the last value refused BY RULE, or null
  *
  * `loaded` and `failed` are never both set: a failure clears `loaded`.
+ *
+ * Z4 (edit-polish-3, L3a) — `refused` records the VALUE a rule refusal named, so
+ * the same value refused again (a World Info rename, a description edit) is
+ * quiet: every World Info change used to log the same refusal again for every
+ * viewer. Only the LOGGING is gated — a refusal still clears the slots and
+ * answers `{ ok: false, reason, message }` every time. The record is forgotten
+ * exactly as `failed` is (`forgetFailure`): by an accepted value, by `retry()`
+ * and by `resetWorld()`.
  */
 
 /** V2 (round 2) — the retryable set, re-exported so picker and tests share it. */
@@ -134,6 +143,7 @@ export function createSkyLoader({
   let pending = null
   let failed = null          // { url, reason, message } — the last failure
   let shortcutLogged = false // has the shortcut re-reported this `failed`?
+  let refused = null         // { value, reason } — the last value refused by rule
   let last = null            // { bg, worldBaseUrl } — what retry() re-runs
   let disposed = false
 
@@ -180,6 +190,9 @@ export function createSkyLoader({
   function forgetFailure() {
     failed = null
     shortcutLogged = false
+    // Z4 — and the rule refusal's record: an accepted value, retry() and
+    // resetWorld() all end here, so a refusal reaches the log once.
+    refused = null
   }
 
   /**
@@ -225,11 +238,19 @@ export function createSkyLoader({
     // 2. resolve — an A1 value resolves as a model does; anything else is refused.
     const resolved = resolveSkyUrl(texture, worldBaseUrl)
     if (!resolved.ok) {
+      // Z4 — the refusal is logged ONCE per refused value. `refused` is read
+      // BEFORE `clearAll()` (which forgets it, as every accepted value does),
+      // and set again right after: the same value is quiet until a different
+      // value, retry() or a new world.
+      const previous = refused
       clearAll()
       const message = skyReasonText(resolved.reason)
-      // V2 — a refusal by rule is logged too, with the refused VALUE (there is
-      // no resolved URL to name).
-      logFailure(texture, resolved.reason, message)
+      refused = { value: texture, reason: resolved.reason }
+      if (previous?.value !== texture) {
+        // V2 — a refusal by rule is logged too, with the refused VALUE (there is
+        // no resolved URL to name).
+        logFailure(texture, resolved.reason, message)
+      }
       return { ok: false, reason: resolved.reason, message }
     }
     const url = resolved.url
