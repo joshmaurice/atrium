@@ -1,6 +1,9 @@
 # Revision — library-sky round 2 (after Claude's browser checks of `a94d56a9`)
 
-**Status:** for the operator's approval (2026-10-22, ~17:10 PT).
+**Status:** approved by the operator (2026-10-22). **Rev 1 (~17:10 PT):**
+§4 changed. The kickoff no longer checks the hash itself, because it has no
+shell (the first round-2 kickoff, `t_366520a1`, rightly blocked on that), and
+round 2 has its own sentinel.
 - **Base:** the reviewed round-1 tip
   `a94d56a98998b6eb7f1708499abc22166f01cec0` on `workflow/library-sky`.
   Round 2 commits on top of it, on the same branch.
@@ -118,14 +121,17 @@ anything yourself.
   never block this card.
 - **Titles:** use them exactly as written.
 
-**Spec by git reference.** The contract is
+**The contract is in git; you don't read it.** It is
 `devtasks/REVISION-library-sky.md` on `main`, together with
 `devtasks/PREBRIEF-library-sky.md` at `61c520acaa0308fa756d7fb0f652b109d2f1b77a`
 (sha256 `9c89ba58810db689788959f64364c6298aa578079366321a27e80590e12c31ee`).
-Read the revision with
-`git -C /workspace/atrium fetch origin main && git -C /workspace/atrium show origin/main:devtasks/REVISION-library-sky.md`.
-Its sha256 is posted on this card by the front door; check it, and block with
-`kind="capability"` on a mismatch.
+- **The front door has already checked the revision** and posted its commit
+  and sha256 on this card. **You have only `kanban_*` tools: do not try to
+  fetch or hash anything, and do not block for lack of a shell.**
+- Copy that commit and sha256 into cards 1 and 2. **They** have terminal, file
+  and git tools. Each reads the revision with
+  `git -C /workspace/atrium fetch origin main && git -C /workspace/atrium show <commit>:devtasks/REVISION-library-sky.md > /tmp/revision.md && sha256sum /tmp/revision.md`,
+  and blocks with `kind="capability"` on a mismatch.
 
 #### Graph
 1. **`Implement r2 — library-sky`.** Assignee `atrium-deepseek`, parent: this
@@ -148,14 +154,17 @@ Its sha256 is posted on this card by the front door; check it, and block with
    - **On a valid APPROVE of the exact 40-character SHA,** it blocks with
      `APPROVE <SHA40>: front door, build the release chain`.
    - **Otherwise,** it blocks for the operator with the verdict quoted.
-4. **Before you complete,** link card 3 to the existing sentinel `t_c944dbac`
-   as a parent. Do not create a sentinel.
+4. **Before you complete,** link card 3 to **round 2's sentinel** as a
+   parent. The front door creates it and posts its id on this card. Round 1's
+   sentinel `t_c944dbac` has already fired: do not use it. Do not create a
+   sentinel yourself.
 5. **The release chain** is the front door's, from the round-1 kickoff's
    templates (`t_99c9de3d`, comment 711) with the new SHA. Nothing reaches
    MAIN or PROD.
 
 #### Report back
-The three ids; the implementation's parent and its 7200 s cap; the review's
-opening line; the gate linked to the sentinel. Then complete this card.
+The three ids; the implementation's parent and its 7200 s cap; the hash line
+copied into cards 1 and 2; the review's opening line; the gate linked to
+round 2's sentinel. Then complete this card.
 
 ---
