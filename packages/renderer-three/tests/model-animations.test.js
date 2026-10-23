@@ -10,7 +10,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Object3D, AnimationClip, VectorKeyframeTrack } from 'three'
+import { Object3D, AnimationClip, VectorKeyframeTrack, LoopOnce } from 'three'
 import { buildInstance } from '../src/model-instances.js'
 import { createModelAnimations, ANIMATION_STATE } from '../src/model-animations.js'
 
@@ -67,6 +67,20 @@ const PLAYING = (clip, over = {}) => ({ clip, playing: true, loop: false, speed:
 // ===========================================================================
 // The action contract (P12)
 // ===========================================================================
+
+test('Z5: every action is LoopOnce with clamping — the mixer never decides', () => {
+  // P12: the defaults are LoopRepeat with clampWhenFinished false, and a real
+  // delta (or a later three.js) can wrap or disable a clip at its end. The rule
+  // is therefore pinned on the action itself, not only on the poses it happens to
+  // hold under `update(0)`.
+  const h = makeLayer([makeClip('Survey', 2, 0, 10)])
+  h.animations.set('Fox', PLAYING('Survey', { startedAt: 1_000_000 }))
+  const action = h.animations.actionFor('Fox')
+  assert.ok(action, 'an action was made')
+  assert.equal(action.loop, LoopOnce, 'LoopOnce, never the default LoopRepeat')
+  assert.equal(action.repetitions, 1)
+  assert.equal(action.clampWhenFinished, true, 'and it clamps at the end')
+})
 
 test('Z5: a once clip past its duration holds the last pose, on the object itself', () => {
   const h = makeLayer([makeClip('Survey', 2, 0, 10)])
