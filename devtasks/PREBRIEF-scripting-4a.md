@@ -1,7 +1,14 @@
 # Pre-brief: Phase 3 step 4 — scripting: the plan (4a–4d), and 4a (model animations) in detail
 
-Status: **DRAFT, Revision 1.1 (2026-10-23). Decisions D1–D6 (the whole step)
-and L1–L9 (4a) open (§3).**
+Status: **FINAL, Revision 1.2 (2026-10-23). Decisions D1–D6 and L1–L9
+approved by the operator (2026-10-23 00:52 PT), all as recommended in Rev
+1.1:**
+- D1, D3, D4 and D6 (a);
+- **D2 (a), provisional** on 4b's opening spike;
+- **D5 (a), as a direction only;** its conflict rule is 4b's;
+- L1–L4, L6, L7 and L9 (a);
+- **L5 (b):** the server stamps `startedAt`;
+- **L8 (a), as revised:** unique ids with their file index.
 - **Rev 1.1 applies a second outside review** (of Rev 1, "sound; seven
   fixes, no conceptual change"). The changes are listed in §10.
 - **Rev 1 applies an outside review of Rev 0** ("changes recommended, no
@@ -295,7 +302,7 @@ then checked the package's metadata and loaded it in Node (*probe*).
 
 ## 3. Decisions
 
-### The whole step (D1–D6)
+### The whole step (D1–D6) — approved 2026-10-23, as recommended
 These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 4a depends only on D1.
 
@@ -389,7 +396,7 @@ These set the direction for 4b–4d, so later pre-briefs don't reopen them.
 
   (b) writes to every world, even those that never use behaviours.
 
-### 4a (L1–L9)
+### 4a (L1–L9) — approved 2026-10-23, as recommended
 - **L1 — Where the state lives.**
   - **(a) Recommended: a sibling leaf, `extras.atrium.animation`,** on the
     model node, written as a whole object. It becomes the second writable
@@ -917,3 +924,6 @@ revision.
 | 6 | One Play/Stop button can't serve the ended state | Should-fix | L6, L7: two buttons; panel-state tests per state |
 | 7 | §9.1 still mapped by display order | Should-fix | §9.1: file index to id |
 | Nits | The Loop parenthetical; the base after edit-polish-3; the same server clock; P-section order; Z6's `extras`; `CREATABLE_PATHS` as a list; `textContent`; a discontinuity's own sample | — | All taken |
+- **Rev 1.2** (2026-10-23 00:52 PT): the operator approved every decision as
+  recommended. Only the status line and §3's headings changed. **4a's
+  kickoff waits for edit-polish-3's release, which sets its base.**
