@@ -396,6 +396,12 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
 
   /** The `world:loaded`/reconnect path: a closed form, nothing half-typed kept. */
   function reset() {
+    // V2 (round 2) — the box is cleared HERE, whether or not it holds focus.
+    // `render()`'s focus exception guards ordinary renders (a half-typed URL
+    // during a Check); a reset that empties the state must not leave the old
+    // text on screen, which is what a reset while the owner typed (Edit off, a
+    // reconnect, a world change) used to do.
+    if (elements.url) elements.url.value = ''
     state.url = ''
     state.result = null
     state.problem = null

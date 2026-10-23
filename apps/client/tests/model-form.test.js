@@ -577,6 +577,25 @@ test('Z2: a reset while saving forgets only the wait', async () => {
   assert.deepEqual(h.calls.selected, [], 'so nothing is selected by it')
 })
 
+test('V2: reset() clears the box even while it holds focus', () => {
+  const h = harness()
+  h.form.open()
+  h.form.onUrlInput('https://host/chair.glb')
+
+  // The owner is typing in the box: `render()` must leave it alone...
+  h.elements.url.ownerDocument = { activeElement: h.elements.url }
+  h.elements.url.value = 'https://host/ben'
+  h.form.render()
+  assert.equal(h.elements.url.value, 'https://host/ben', 'a render keeps the half-typed URL')
+
+  // ...but a reset empties the state AND the box, focused or not.
+  h.form.reset()
+  assert.equal(h.form.state.url, '', 'reset() clears the state')
+  assert.equal(h.elements.url.value, '', 'and the FOCUSED box with it (V2)')
+  assert.equal(h.form.isOpen(), false)
+  assert.equal(h.form.specForSave(), null)
+})
+
 test('Z2: render leaves a focused URL box alone', () => {
   const h = harness()
   h.form.open()
