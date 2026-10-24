@@ -27,7 +27,15 @@ export function parsePath(path) {
  * The match is on the path STRING, exactly: a non-canonical spelling such as
  * `extras..atrium.animation` is not the listed path and stays refused.
  */
-export const CREATABLE_PATHS = Object.freeze(['extras.atrium.animation'])
+export const CREATABLE_PATHS = Object.freeze(['extras.atrium.animation', 'extras.atrium.objectId'])
+
+/**
+ * 4b-1 E2 — the ONE path that may also create its missing `extras.atrium`
+ * INTERMEDIATE (review M1). Kept apart from CREATABLE_PATHS on purpose: generic
+ * intermediate creation is NOT widened, so `extras.atrium.animation` still
+ * fails on a node with no `atrium`, exactly as it did in 4a.
+ */
+const OBJECT_ID_LEAF = 'extras.atrium.objectId'
 
 function resolvePath(somNode, segments) {
   let current = somNode
@@ -115,6 +123,10 @@ export class SOMDocument extends SOMObject {
     this._animationsByName = new Map()
     // Global flat namespace: all named SOM objects (nodes, animations, document)
     this._objectsByName    = new Map()
+
+    // 4b-1 E2 (review M3) — the nodes `ingestExternalScene` creates, by
+    // IDENTITY. A WeakSet, so a disposed external node is never held alive.
+    this._externalNodes    = new WeakSet()
 
     // Register self as '__document__' in global namespace
     this._objectsByName.set('__document__', this)
@@ -940,6 +952,9 @@ export class SOMDocument extends SOMObject {
 
       const somNode = new SOMNode(node, this)
       this._nodeMap.set(node, somNode)
+      // 4b-1 E2 (review M3) — every node this pass creates is external, by
+      // IDENTITY. The server's `world.externalNodes` is a separate, unchanged set.
+      this._externalNodes.add(somNode)
       if (!this._nodesByName.has(prefixedName)) this._nodesByName.set(prefixedName, somNode)
       this._registerObject(prefixedName, somNode)
       this._registerNodeDispose(node, somNode)
@@ -988,6 +1003,23 @@ export class SOMDocument extends SOMObject {
   }
 
   setPath(somNode, path, value) {
+    // 4b-1 E2 (review M1) — ONE narrow intermediate creation, for exactly
+    // `extras.atrium.objectId`. `resolvePath` throws on a missing intermediate
+    // BEFORE the creatable check below is reached, so a node with no own
+    // `atrium` could never take the leaf. It runs FIRST, on the node's own
+    // `extras` object (every other `extras` key is kept).
+    //
+    // Refused, and deliberately not "fixed" into absent: an `extras` that is
+    // not a plain object, and an `atrium` that exists but is not a plain object
+    // — `atrium: null` counts as EXISTING (review N1), as `resolvePath`'s null
+    // check already does.
+    if (path === OBJECT_ID_LEAF) {
+      const extras = somNode?.extras
+      if (isPlainData(extras) && !Object.hasOwn(extras, 'atrium')) {
+        extras.atrium = {}
+      }
+    }
+
     const segments = parsePath(path)
     const { target, key } = resolvePath(somNode, segments)
     if (typeof key === 'string' && !keyIsPresent(target, key)) {
@@ -1000,5 +1032,95 @@ export class SOMDocument extends SOMObject {
       }
     }
     target[key] = value
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4b-1 E2 — object identity: external nodes, the two scans, the saved set
+  // ---------------------------------------------------------------------------
+
+  /**
+   * E2 (review M3) — true when `somNode` was created by `ingestExternalScene`.
+   *
+   * Answered from a private `WeakSet` filled in `copyNode`, NEVER from a name
+   * prefix: a prefix is a client-controlled string, and an owner could name a
+   * node `Crate/x` to impersonate external content.
+   *
+   * @param {object} somNode
+   * @returns {boolean}
+   */
+  isExternalNode(somNode) {
+    return somNode != null && this._externalNodes.has(somNode)
+  }
+
+  /**
+   * E2 — a node's own id, or `undefined`. Plain-object checks only: an `extras`
+   * or `atrium` that is not a plain data object, or an INHERITED `objectId`,
+   * gives no id.
+   *
+   * @param {object} somNode
+   * @returns {string|undefined}
+   */
+  _nodeObjectId(somNode) {
+    const extras = somNode?.extras
+    if (!isPlainData(extras)) return undefined
+    if (!Object.hasOwn(extras, 'atrium')) return undefined
+    const atrium = extras.atrium
+    if (!isPlainData(atrium)) return undefined
+    if (!Object.hasOwn(atrium, 'objectId')) return undefined
+    return atrium.objectId
+  }
+
+  /**
+   * E2 — every SAVED node: `allNodes` (L680, every node in document order) less
+   * the external ones. Shadowed duplicate-name nodes ARE saved: a later
+   * rename or remove can make them addressable.
+   *
+   * @returns {Array<object>}
+   */
+  _savedNodes() {
+    return this.allNodes.filter((n) => !this.isExternalNode(n))
+  }
+
+  /**
+   * E2 — is `id` held by any saved node? The UNIQUENESS scan: it counts every
+   * saved node, shadowed duplicate-name nodes included.
+   *
+   * @param {*} id
+   * @returns {boolean}
+   */
+  objectIdInUse(id) {
+    for (const node of this._savedNodes()) {
+      if (this._nodeObjectId(node) === id) return true
+    }
+    return false
+  }
+
+  /**
+   * E2 — the RESOLVER: turn an id into the one node it names, or a reason.
+   *
+   * - `not-found`: no saved node has the id;
+   * - `ambiguous`: more than one saved node has it (only possible in a document
+   *   loaded without the server's load healing — a file opened by the SOM
+   *   Inspector, say);
+   * - `unaddressable`: exactly one saved node has it, but EITHER
+   *   `getNodeByName(node.name)` OR `getObjectByName(node.name)` is something
+   *   else (a shadowed name, or a mesh, material, animation or camera owning
+   *   the name for `send` making it the other object).
+   *
+   * 4b-1 has no caller; 4b-2's runner calls it every time it turns an id into a
+   * name to send. Implemented and tested here anyway.
+   *
+   * @param {*} id
+   * @returns {{node: object} | {problem: string}}
+   */
+  resolveObjectId(id) {
+    const matches = this._savedNodes().filter((node) => this._nodeObjectId(node) === id)
+    if (matches.length === 0) return { problem: 'not-found' }
+    if (matches.length > 1) return { problem: 'ambiguous' }
+    const node = matches[0]
+    const name = node.name
+    if (this.getNodeByName(name) !== node) return { problem: 'unaddressable' }
+    if (this.getObjectByName(name) !== node) return { problem: 'unaddressable' }
+    return { node }
   }
 }

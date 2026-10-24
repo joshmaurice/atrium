@@ -29,8 +29,8 @@ function makeSom() {
 
 const ANIMATION = { clip: 'Walk', playing: true, loop: true, speed: 1, startedAt: 0 }
 
-test('Z2: CREATABLE_PATHS is the one listed path', () => {
-  assert.deepEqual([...CREATABLE_PATHS], ['extras.atrium.animation'])
+test('Z2: CREATABLE_PATHS is the listed set', () => {
+  assert.deepEqual([...CREATABLE_PATHS], ['extras.atrium.animation', 'extras.atrium.objectId'])
 })
 
 test('Z2: setPath creates extras.atrium.animation when it is missing', () => {

@@ -184,6 +184,12 @@ export function checkAtriumExtras(extras) {
     }
     if (!carriesModel({ extras })) return animationDeny('model-node')
   }
+  // 4b-1 E3 — `atrium.objectId` is checked when the key is PRESENT: the value
+  // must pass E1. UNIQUENESS is the `add` handler's, because it needs the world.
+  if (Object.hasOwn(atrium, 'objectId')) {
+    const problem = objectIdProblem(atrium.objectId)
+    if (problem) return deny(SEND_INVALID, objectIdReasonText(problem))
+  }
   return allow()
 }
 
@@ -399,6 +405,78 @@ export function checkAnimationValue(node, value) {
 function checkModelValue(model) {
   const problem = modelValueProblem(model)
   return problem ? modelDeny(problem) : allow()
+}
+
+// ---------------------------------------------------------------------------
+// scripting-4b-1 (E1, E3) — `extras.atrium.objectId`, the set-once identity leaf
+//
+// One rule set, two implementations: this and the client's
+// `packages/client/src/object-id.js`, pinned to each other by
+// `tests/fixtures/object-id-vectors.json`, which both tests read.
+// ---------------------------------------------------------------------------
+
+/** E1 — a lowercase RFC 4122 version-4 UUID (E-L1). */
+export const OBJECT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/** The exact plain text of the uniqueness refusal (E3; reviewed S-B). */
+export const OBJECT_ID_TAKEN = 'objectId is already taken in this world'
+
+/** The set-once node extras leaf (E-L3). */
+export const OBJECT_ID_LEAF = 'extras.atrium.objectId'
+
+/** The reason codes and their plain text (E1). */
+export const OBJECT_ID_MESSAGES = {
+  'object-id-type': 'objectId must be a string',
+  'object-id-form': 'objectId must be a lowercase RFC 4122 version-4 UUID',
+}
+
+/** The plain text for an object-id reason code. */
+export function objectIdReasonText(reason) {
+  return OBJECT_ID_MESSAGES[reason] ?? 'the objectId is invalid'
+}
+
+/**
+ * E1 — the value rule for `extras.atrium.objectId`. Returns a reason code, or
+ * null when the value is legal. Mirrors the client's `objectIdProblem`.
+ *
+ * @param {*} value
+ * @returns {string|null}
+ */
+export function objectIdProblem(value) {
+  if (typeof value !== 'string') return 'object-id-type'
+  if (!OBJECT_ID_RE.test(value)) return 'object-id-form'
+  return null
+}
+
+/**
+ * E3/E-L3 — the `send` half of the set-once leaf: the node rule, then the value
+ * rule, then uniqueness.
+ *
+ * The node must not already have an own `objectId` (the same value included).
+ * `null` is refused by the value rule (it is not a string), and there is no
+ * stamping. Uniqueness needs the world, so it comes in through the
+ * `objectIdInUse` callback the handler passes, exactly as `externalNames` and
+ * `avatarNames` do — `authorizeSend` stays pure (review N2).
+ *
+ * @param {object} node              the resolved SOMNode
+ * @param {*} value
+ * @param {((id: *) => boolean)|null} [objectIdInUse]
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkObjectIdValue(node, value, objectIdInUse = null) {
+  const extras = node?.extras
+  if (isPlainObject(extras)) {
+    const atrium = extras.atrium
+    if (isPlainObject(atrium) && Object.hasOwn(atrium, 'objectId')) {
+      return deny(SEND_INVALID_FIELD, 'objectId is already set')
+    }
+  }
+  const problem = objectIdProblem(value)
+  if (problem) return deny(SEND_INVALID, objectIdReasonText(problem))
+  if (typeof objectIdInUse === 'function' && objectIdInUse(value)) {
+    return deny(SEND_INVALID, OBJECT_ID_TAKEN)
+  }
+  return allow()
 }
 
 /**
@@ -641,7 +719,7 @@ function isExternallyLoaded(target, externalNames) {
  * @param {object}  [args.currentExtras]   the document's current root extras (A3)
  * @returns {{ok: boolean, code: string|null, message: string|null}}
  */
-export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null } = {}) {
+export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null, objectIdInUse = null } = {}) {
   if (!target) {
     return deny(SEND_NODE_MISSING, `${SEND_NODE_MISSING}: ${nodeName}`)
   }
@@ -665,7 +743,7 @@ export function authorizeSend({ target, nodeName, field, value, avatarNames = nu
     // RESOLVED node, not the addressed string, so a name that merely looks
     // like an avatar cannot smuggle a write through.
     const isLiveAvatar = avatarNames !== null && isLiveAvatarName(target.name, avatarNames)
-    return authorizeNodeSend({ node: target, field, value, isLiveAvatar })
+    return authorizeNodeSend({ node: target, field, value, isLiveAvatar, objectIdInUse })
   }
   if (target instanceof SOMCamera) {
     return authorizeCameraSend({ camera: target, nodeName, field, value })
@@ -685,7 +763,7 @@ export function authorizeSend({ target, nodeName, field, value, avatarNames = nu
 // SOMNode
 // ---------------------------------------------------------------------------
 
-function authorizeNodeSend({ node, field, value, isLiveAvatar }) {
+function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = null }) {
   // Live avatars are server-controlled: refuse every send, for everyone,
   // including the world owner, in every world mode.
   if (isLiveAvatar) {
@@ -728,6 +806,13 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar }) {
   // so a node that has lost its model cannot keep receiving the leaf.
   if (field === ANIMATION_LEAF) {
     return checkAnimationValue(node, value)
+  }
+
+  // scripting-4b-1 E-L3/E3 — the third node extras leaf: the set-once object
+  // identity. Allowed only on a node that has none, and only for a value that
+  // passes E1 and is unique in the world.
+  if (field === OBJECT_ID_LEAF) {
+    return checkObjectIdValue(node, value, objectIdInUse)
   }
 
   const materialMatch = MATERIAL_PATH_RE.exec(field)

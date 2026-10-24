@@ -7,6 +7,7 @@ import { resolve as resolvePath } from 'node:path'
 import { NodeIO } from '@gltf-transform/core'
 import { KHRLightsPunctual } from '@gltf-transform/extensions'
 import { SOMDocument, pruneCandidateProperties, pruneDocumentInPlace } from '@atrium/som'
+import { objectIdProblem } from './send-policy.js'
 
 /** Typed errors L3 throws. Both write nothing. */
 export const SERIALIZE_INDEX_MISMATCH       = 'SERIALIZE_INDEX_MISMATCH'
@@ -284,9 +285,96 @@ export function healDocumentOnLoad(document, { log = console } = {}) {
   return { counts, detachedRoots }
 }
 
+// ---------------------------------------------------------------------------
+// 4b-1 E3 (B4 (a)) — load healing for extras.atrium.objectId
+// ---------------------------------------------------------------------------
+
+function isPlainDataObject(v) {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const proto = Object.getPrototypeOf(v)
+  return proto === Object.prototype || proto === null
+}
+
+/** A document node's own `extras.atrium.objectId`, or undefined. Plain checks only. */
+function readNodeObjectId(gltfNode) {
+  const extras = gltfNode?.getExtras?.()
+  if (!isPlainDataObject(extras)) return undefined
+  const atrium = extras.atrium
+  if (!isPlainDataObject(atrium)) return undefined
+  if (!Object.hasOwn(atrium, 'objectId')) return undefined
+  return atrium.objectId
+}
+
+/** Delete only the `objectId` key: every other `extras` key, and an empty `atrium`, stay. */
+function dropNodeObjectId(gltfNode) {
+  const atrium = gltfNode?.getExtras?.()?.atrium
+  if (isPlainDataObject(atrium)) delete atrium.objectId
+}
+
+/**
+ * 4b-1 E3 (B4 (a)) — heal `extras.atrium.objectId` on a document being loaded,
+ * BEFORE the SOM is built, so both world kinds share one implementation
+ * (`createWorld` for file worlds, `createWorldFromDocument` for document
+ * worlds; the second already runs `healDocumentOnLoad`).
+ *
+ * Two rules, on the glTF DOCUMENT — where "saved node" is simply every document
+ * node, external nodes never being in view (file worlds ingest them only later,
+ * document worlds never do on the server):
+ *
+ *  1. An id held by TWO OR MORE nodes is removed from ALL of them. No node
+ *     keeps a duplicated id, so nothing can silently become "the" object a
+ *     saved reference meant.
+ *  2. An id that fails E1 is removed too: a malformed id can't be repaired,
+ *     only dropped, and a later set-once `send` can assign a fresh one.
+ *
+ * Logging: ONE line per duplicated id, with a count, and one line per malformed
+ * node, with its index. No node names are logged at all.
+ *
+ * @param {object} document   glTF-Transform Document
+ * @param {{log?: object|null}} [opts]
+ * @returns {{duplicated: number, malformed: number}}
+ */
+export function healDocumentObjectIds(document, { log = console } = {}) {
+  const nodes = document.getRoot().listNodes()
+
+  const holders = new Map()   // id -> count
+  for (const node of nodes) {
+    const id = readNodeObjectId(node)
+    if (id === undefined) continue
+    holders.set(id, (holders.get(id) ?? 0) + 1)
+  }
+
+  let duplicated = 0
+  for (const [id, count] of holders) {
+    if (count < 2) continue
+    duplicated += 1
+    for (const node of nodes) {
+      if (readNodeObjectId(node) === id) dropNodeObjectId(node)
+    }
+    log?.log?.(`[world] dropped duplicated objectId ${id} from ${count} nodes`)
+  }
+
+  let malformed = 0
+  nodes.forEach((node, index) => {
+    const id = readNodeObjectId(node)
+    if (id === undefined) return
+    if (objectIdProblem(id) !== null) {
+      dropNodeObjectId(node)
+      malformed += 1
+      log?.log?.(`[world] dropped malformed objectId on node ${index}`)
+    }
+  })
+
+  return { duplicated, malformed }
+}
+
 export async function createWorld(gltfPath, { baseUrl } = {}) {
   const io = createIO()
   const document = await io.read(gltfPath)
+
+  // 4b-1 E3 — load healing for object ids, before the SOM is built (B4 (a)).
+  healDocumentObjectIds(document)
+
   const som = new SOMDocument(document)
 
   // Derive base URL for resolving relative extras.atrium.source paths.
@@ -437,6 +525,9 @@ export async function createWorldFromDocument(documentJson) {
 
   // L4 — heal on load, before the SOM is built. No node is removed.
   healDocumentOnLoad(document)
+
+  // 4b-1 E3 — load healing for object ids, the same call a file world makes.
+  healDocumentObjectIds(document)
 
   const som = new SOMDocument(document)
 

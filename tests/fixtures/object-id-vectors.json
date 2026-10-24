@@ -1,0 +1,174 @@
+{
+  "note": "Shared by the server's and the client's E1 tests (scripting-4b-1): 'values' are candidate extras.atrium.objectId values. 'reason' is the shared reason code for a refused value (null/absent for an accepted one). Read by packages/server/test/*.test.js and packages/client/tests/*.test.js, so the two implementations of objectIdProblem cannot drift. A MISSING key is not here: it is not a value, and an `add` without an id is accepted (E3).",
+  "values": [
+    {
+      "label": "a fresh crypto.randomUUID (version 4, variant a)",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "ok": true
+    },
+    {
+      "label": "version 4, variant 9",
+      "value": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "ok": true
+    },
+    {
+      "label": "version 4, all-zero body, variant 8",
+      "value": "00000000-0000-4000-8000-000000000000",
+      "ok": true
+    },
+    {
+      "label": "version 4, variant b",
+      "value": "ffffffff-ffff-4fff-bfff-ffffffffffff",
+      "ok": true
+    },
+    {
+      "label": "a second distinct version-4 id",
+      "value": "123e4567-e89b-42d3-a456-426614174000",
+      "ok": true
+    },
+    {
+      "label": "uppercase UUID is refused (lowercase only)",
+      "value": "F47AC10B-58CC-4372-A567-0E02B2C3D479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a partially uppercase UUID is refused",
+      "value": "f47ac10b-58cc-4372-A567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a version-1 UUID is refused",
+      "value": "f47ac10b-58cc-1372-a567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a version-2 UUID is refused",
+      "value": "f47ac10b-58cc-2372-a567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a version-3 UUID is refused",
+      "value": "f47ac10b-58cc-3372-a567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a version-5 UUID is refused",
+      "value": "f47ac10b-58cc-5372-a567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "variant c is refused",
+      "value": "f47ac10b-58cc-4372-c567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "variant 7 is refused",
+      "value": "f47ac10b-58cc-4372-7567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "the empty string is refused",
+      "value": "",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a 37-character string is refused (one character too many)",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479x",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a valid id with a trailing newline is refused",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479\n",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a valid id with a leading space is refused",
+      "value": " f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a valid id with a trailing space is refused",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479 ",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a UUID with no dashes is refused",
+      "value": "f47ac10b58cc4372a5670e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a 35-character UUID is refused",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d47",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a non-hex character is refused",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d47g",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a braced UUID is refused",
+      "value": "{f47ac10b-58cc-4372-a567-0e02b2c3d479}",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "a URN UUID is refused",
+      "value": "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "underscores instead of dashes are refused",
+      "value": "f47ac10b_58cc_4372_a567_0e02b2c3d479",
+      "ok": false,
+      "reason": "object-id-form"
+    },
+    {
+      "label": "null is not a string",
+      "value": null,
+      "ok": false,
+      "reason": "object-id-type"
+    },
+    {
+      "label": "a number is not a string",
+      "value": 42,
+      "ok": false,
+      "reason": "object-id-type"
+    },
+    {
+      "label": "true is not a string",
+      "value": true,
+      "ok": false,
+      "reason": "object-id-type"
+    },
+    {
+      "label": "an object is not a string",
+      "value": {},
+      "ok": false,
+      "reason": "object-id-type"
+    },
+    {
+      "label": "an array is not a string",
+      "value": [],
+      "ok": false,
+      "reason": "object-id-type"
+    }
+  ]
+}

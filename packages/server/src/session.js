@@ -11,7 +11,7 @@ import { parsePath } from '@atrium/som'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost,
-  ANIMATION_LEAF,
+  ANIMATION_LEAF, OBJECT_ID_TAKEN,
 } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
@@ -713,6 +713,9 @@ export function attachSessionHandlers({
             avatarNames: liveAvatarNames(sessions.values()),
             currentExtras: world.som.extras,
             externalNames: world.externalNodeNames,
+            // 4b-1 E3 — the set-once objectId leaf's uniqueness needs the world,
+            // so the handler hands `authorizeSend` a callback (review N2).
+            objectIdInUse: (id) => world.som.objectIdInUse(id),
           })
           if (!decision.ok) {
             sendError(ws, msg.seq, decision.code, decision.message)
@@ -823,6 +826,16 @@ export function attachSessionHandlers({
             const nameCheck = world.som.checkNewName(msg.node.name)
             if (!nameCheck.ok) {
               sendError(ws, msg.seq, nameCheck.code, nameCheck.message)
+              break
+            }
+            // 4b-1 E3 — the objectId UNIQUENESS check, which needs the world and
+            // therefore lives here, AFTER the name rules and BEFORE any change
+            // to the world. The value's FORM is `checkAtriumExtras`'s (below).
+            // The refusal message is never "already in use": the palette retries
+            // any message matching /already in use/ (review S-B).
+            const idValue = msg.node.extras?.atrium?.objectId
+            if (idValue !== undefined && world.som.objectIdInUse(idValue)) {
+              sendError(ws, msg.seq, 'INVALID_VALUE', OBJECT_ID_TAKEN)
               break
             }
           }
