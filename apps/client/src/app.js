@@ -1479,7 +1479,10 @@ const epSkyRetry   = document.getElementById('ep-sky-retry')
 let skyPicker = null
 
 // ── The model row's clip controls (Z7, scripting-4a) ─────────────────────
-const epAnimRow    = document.getElementById('ep-anim-row')
+// W3 (round 3) — two rows: the label and the clip select, then the Loop box and
+// the two buttons. Shown and hidden together.
+const epAnimRow     = document.getElementById('ep-anim-row')
+const epAnimActions = document.getElementById('ep-anim-actions')
 const epAnimClip   = document.getElementById('ep-anim-clip')
 const epAnimLoop   = document.getElementById('ep-anim-loop')
 const epAnimPlay   = document.getElementById('ep-anim-play')
@@ -1781,6 +1784,15 @@ function attachSelected() {
     outline = null
   }
   if (selectedObj) {
+    // W2 (round 3) — a node selected before its first render (Duplicate and Undo
+    // select the new node at once) still carries stale world matrices, and
+    // `BoxHelper` measures with `Box3.setFromObject`, which walks with
+    // `updateWorldMatrix` and so never refreshes a `SkinnedMesh`'s
+    // `bindMatrixInverse`. Make the object's own transforms current FIRST: the
+    // outline is then built from fresh ones, and a click on it lands on the
+    // model. `outline.update()` per frame is unchanged.
+    selectedObj.updateWorldMatrix(true, false)
+    selectedObj.updateMatrixWorld(true)
     outline = new THREE.BoxHelper(selectedObj, 0xa78bfa)
     threeScene.add(outline)
   }
@@ -2911,10 +2923,13 @@ function renderAnimationRow(panel) {
   if (!epAnimRow) return
   if (!panel) {
     epAnimRow.style.display = 'none'
+    // W3 (round 3) — the actions row goes with the row it belongs to.
+    if (epAnimActions) epAnimActions.style.display = 'none'
     if (epAnimStatus) epAnimStatus.textContent = ''
     return
   }
   epAnimRow.style.display = ''
+  if (epAnimActions) epAnimActions.style.display = ''
   // V7 — the cache key is JSON.stringify: a clip id may contain any character,
   // `\u0000` included, so a joined key could collide two different lists.
   const optionsKey = JSON.stringify(panel.clips)
@@ -2929,6 +2944,9 @@ function renderAnimationRow(panel) {
     }
   }
   if (panel.clip !== null) epAnimClip.value = panel.clip
+  // W3 (round 3) — the select is cut short by its own width, so the chosen id is
+  // shown in full by its `title`.
+  epAnimClip.title = panel.clip ?? ''
   epAnimClip.disabled = !panel.clipEnabled
   epAnimLoop.checked = panel.loop
   epAnimLoop.disabled = !panel.loopEnabled

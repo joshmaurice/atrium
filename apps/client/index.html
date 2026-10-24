@@ -470,6 +470,16 @@
   }
   #edit-panel #ep-sky-status { font-size: 11px; color: #f87171; margin-bottom: 6px; }
   #edit-panel #ep-sky-retry { padding: 3px 8px; font-size: 11px; }
+  /* scripting-4a round 3 (W3) — the clip select takes the rest of its row and
+     shrinks instead of widening it: `min-width: 0` is what lets a flex item go
+     below its content's intrinsic width, so a 300-character clip id is cut short
+     by the control, and Play and Stop — on their own row below — stay inside the
+     250px panel. The chosen id is shown in full by the select's `title`. */
+  #edit-panel #ep-anim-row select {
+    flex: 1 1 auto; min-width: 0; max-width: 100%;
+    background: #222; border: 1px solid #444; color: #e2e8f0;
+    padding: 4px 8px; border-radius: 4px;
+  }
   #edit-panel .ep-actions { margin-top: 6px; margin-bottom: 0; }
   #edit-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
   #edit-panel .ep-buttons button.ep-danger:not(:disabled) { border-color: #7f1d1d; color: #fca5a5; }
@@ -693,9 +703,18 @@
            the clip select (the L8 ids), a Loop box, and TWO buttons, Play and
            Stop. app.js's model-animation-panel.js is the one writer of their
            text, their options and their disabled state; visitors never see the
-           row, because the panel is the owner's. -->
+           rows, because the panel is the owner's.
+
+           W3 (round 3) — the label and the select keep one row and the three
+           controls get a row of their own (#ep-anim-actions), aligned under the
+           select by the same empty 58px label cell every other row uses. The
+           250px panel is then never widened by a long clip id, and Play and Stop
+           are always fully inside it. app.js shows and hides the two rows
+           together. -->
       <div class="ep-row" id="ep-anim-row" style="display:none"><span>Animation</span>
         <select id="ep-anim-clip" aria-label="Clip"></select>
+      </div>
+      <div class="ep-row" id="ep-anim-actions" style="display:none"><span></span>
         <label id="ep-anim-loop-label" style="display:flex;align-items:center;gap:3px;font-size:11px">
           <input type="checkbox" id="ep-anim-loop" /> Loop
         </label>
