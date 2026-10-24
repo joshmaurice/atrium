@@ -308,17 +308,54 @@ async function startFakeHost() {
   const wss = new FakeWss()
   const sessions = new Map()
   const presence = createPresence()
+  // Every session object ever registered, so a test whose assertions FAIL can
+  // still stop each one's tick loop (a broken cleanupSession may drop a session
+  // from `sessions` before the test gets to it).
+  const seenSessions = new Set()
+  const trackingPresence = {
+    ...presence,
+    add(id) { const entry = presence.add(id); const s = sessions.get(id); if (s) seenSessions.add(s); return entry },
+  }
   const { closeKeepalive } = attachSessionHandlers({
-    wss, world: null, sessions, presence,
+    wss, world: null, sessions, presence: trackingPresence,
     worldOwnerUserId: 'user-a',
     keepaliveInterval: SWEEP_MS,
   })
   const stop = () => {
     closeKeepalive()
-    for (const s of sessions.values()) s.tickStop?.()
+    for (const s of [...seenSessions, ...sessions.values()]) s.tickStop?.()
   }
   return { wss, sessions, presence, stop }
 }
+
+test('E4: the handover skips a visitor that connected before the eligible owner', async () => {
+  // The role is `canEdit`'s, not the map's first OPEN socket: a visitor that
+  // joined between the host and the next owner is never chosen.
+  const { port } = await startHostWorld()
+  const a = await connect(port, 'user-a')
+  const v = await connect(port, 'user-z')
+  const b = await connect(port, 'user-a')
+  try {
+    await hello(a.ws, a.messages, 'owner-a')
+    await hello(v.ws, v.messages, 'visitor')
+    await hello(b.ws, b.messages, 'owner-b')
+
+    const vBefore = v.messages.length
+    a.ws.close()
+    await waitForClose(a.ws)
+
+    const handover = await waitFor(b.messages, (m) => m.type === 'script-host')
+    assert.ok(handover, 'the eligible owner gets the role')
+    assert.equal(handover.hostGen, 2)
+    await delay(80)
+    assert.deepEqual(
+      v.messages.slice(vBefore).filter((m) => m.type === 'script-host'), [],
+      'the visitor, earlier in the map, is never chosen')
+  } finally {
+    b.ws.close(); await waitForClose(b.ws)
+    v.ws.close(); await waitForClose(v.ws)
+  }
+})
 
 test('E4/M2: a late close for an id a NEW session took does not clean the new session up', async () => {
   const { wss, sessions, presence, stop } = await startFakeHost()

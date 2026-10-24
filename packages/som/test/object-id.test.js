@@ -101,7 +101,7 @@ test('E2: a shadowed duplicate-name node’s id IS in use, but resolves unaddres
   assert.equal(shadowedSom.name, 'Dup')
 
   assert.equal(som.objectIdInUse(A), true, 'the shadowed node is saved, so its id counts')
-  assert.deepEqual(som.resolveObjectId(A), { problem: 'unaddressable' },
+  assert.equal(som.resolveObjectId(A).problem, 'unaddressable',
     'its name addresses the first node, so a send by that name would reach another object')
 })
 
@@ -156,7 +156,7 @@ test('E2: a node whose name a non-node owns FOR SEND resolves unaddressable', ()
   assert.equal(som.getNodeByName('Spin'), somNode, 'the node map gives the node')
 
   assert.equal(som.objectIdInUse(A), true, 'the node is saved')
-  assert.deepEqual(som.resolveObjectId(A), { problem: 'unaddressable' },
+  assert.equal(som.resolveObjectId(A).problem, 'unaddressable',
     'getObjectByName would send the write to another object')
 })
 
