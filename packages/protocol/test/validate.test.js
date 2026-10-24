@@ -44,6 +44,7 @@ describe('hello (server)', () => {
       id: 'server-01',
       seq: 0,
       serverTime: Date.now(),
+      scriptHost: false,
       capabilities: { tick: { interval: 1000, minInterval: 50 } }
     })
     assert.equal(valid, true)
@@ -56,6 +57,7 @@ describe('hello (server)', () => {
       seq: 0,
       serverTime: Date.now(),
       avatarNodeName: 'avatar-a3f2c1d8',
+      scriptHost: false,
       capabilities: { tick: { interval: 1000, minInterval: 50 } }
     })
     assert.equal(valid, true)
@@ -610,7 +612,7 @@ describe('hello (server) canEdit (A1)', () => {
   it('accepts a server hello carrying canEdit', () => {
     const { valid } = validate('server', {
       type: 'hello', id: 'server-01', seq: 0, serverTime: Date.now(),
-      canPlaceTeleporters: true, canEdit: true,
+      canPlaceTeleporters: true, canEdit: true, scriptHost: false,
       capabilities: { tick: { interval: 1000, minInterval: 50 } },
     })
     assert.equal(valid, true)
@@ -619,7 +621,7 @@ describe('hello (server) canEdit (A1)', () => {
   it('refuses a non-boolean canEdit', () => {
     const { valid } = validate('server', {
       type: 'hello', id: 'server-01', seq: 0, serverTime: Date.now(),
-      canEdit: 'yes',
+      canEdit: 'yes', scriptHost: false,
       capabilities: { tick: { interval: 1000, minInterval: 50 } },
     })
     assert.equal(valid, false)

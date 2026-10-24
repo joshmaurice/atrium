@@ -299,6 +299,20 @@ export function attachSessionHandlers({
   const preHelloSockets = new Map()  // ws -> upgradeUserId | null
 
   // ---------------------------------------------------------------------------
+  // 4b-1 E4 — the script-host role, one per world host (P7: each world host
+  // calls attachSessionHandlers with its own state, so two worlds on one server
+  // have independent hosts and independent generations).
+  //
+  // `hostGen` starts at 1 and is NOT saved: a server restart starts again at 1,
+  // because every session reconnects. It ONLY EVER INCREASES — a role is never
+  // reactivated under an old generation (review S2).
+  // ---------------------------------------------------------------------------
+  const scriptHost = { sessionId: null, hostGen: 0 }
+
+  /** The keepalive sweep terminates a session at this many missed pings. */
+  const MISSED_PING_LIMIT = 2
+
+  // ---------------------------------------------------------------------------
   // evictNonOwners — disconnect every connection (session or pre-hello) whose
   // userId does not match the given ownerUserId. Sends WORLD_NOW_PRIVATE error
   // and closes with 1008. Used when a world is switched to private (V5).
@@ -377,14 +391,54 @@ export function attachSessionHandlers({
     return `${base}-${n}`
   }
 
+  /**
+   * 4b-1 E4 — send the role to a session: set it, bump the generation, and
+   * tell the session with `{ type: 'script-host', active: true, hostGen }`.
+   */
+  function grantScriptHost(session) {
+    scriptHost.hostGen += 1
+    scriptHost.sessionId = session.id
+    session.ws.send(JSON.stringify({ type: 'script-host', active: true, hostGen: scriptHost.hostGen }))
+  }
+
+  /**
+   * 4b-1 E4 — the handover, run AFTER the departed session has been removed, so
+   * the departing session can never be chosen, and exactly once per departure.
+   *
+   * The role goes to the FIRST session in `sessions` order that passed `canEdit`
+   * at its `hello`, has an OPEN socket, and whose `missedPings` is BELOW the
+   * sweep's limit — a session the same keepalive sweep is about to terminate is
+   * never chosen (review N7). With none eligible, `sessionId` stays null and the
+   * next eligible `hello` takes `hostGen + 1`.
+   */
+  function handOverScriptHost() {
+    scriptHost.sessionId = null
+    for (const s of sessions.values()) {
+      if (!s.canEdit) continue
+      if (s.ws?.readyState !== 1 /* OPEN */) continue
+      if ((s.missedPings ?? 0) >= MISSED_PING_LIMIT) continue
+      grantScriptHost(s)
+      return
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // cleanupSession — stop tick loop, drop from sessions/presence, remove
   // avatar node from SOM, broadcast remove + leave. Idempotent: a second
-  // call on an already-cleaned session is a no-op (presence.remove returns
-  // null when the session is already gone). Called from both the close
-  // handler (natural disconnect) and the hello-path eviction code.
+  // call on an already-cleaned session is a no-op. Called from the close
+  // handler (natural disconnect) and from the keepalive sweep.
   // ---------------------------------------------------------------------------
   function cleanupSession(s) {
+    // 4b-1 E4 (review M2) — IDENTITY-SAFE, first thing. Only the session object
+    // an id still maps to is ever removed under that id. The keepalive sweep
+    // terminates a socket and cleans up at once; the socket's close handler then
+    // calls this again for the same object. If a new connection took the same
+    // id in between, the OLD code deleted the NEW session's entries (removed its
+    // presence, broadcast `remove` and `leave` under its id, called
+    // `onSessionRemoved` for it). With this check the new session survives with
+    // its presence, avatar and role.
+    if (sessions.get(s.id) !== s) return
+
     const departedId = s.id
     const avatarNode = s.avatarNode
     s.tickStop?.()
@@ -413,6 +467,15 @@ export function attachSessionHandlers({
       if (typeof onSessionRemoved === 'function') {
         onSessionRemoved(departedId)
       }
+    }
+
+    // 4b-1 E4 (review S-E) — the HANDOVER is keyed on the identity check above
+    // (this exact session has just been removed), NEVER on whether
+    // `presence.remove` returned anything: tying the role to a second map that
+    // happens to be in step today would couple them. It runs outside the
+    // `removed` block on purpose.
+    if (scriptHost.sessionId === departedId) {
+      handOverScriptHost()
     }
   }
 
@@ -524,6 +587,9 @@ export function attachSessionHandlers({
             avatarNodeName: allocateAvatarName(sessionId),
             avatarNode: null,
             displayName: userDisplayName,
+            // 4b-1 E4 — eligibility, recorded at `hello`, so the handover never
+            // recomputes it.
+            canEdit: false,
           }
           // If the upgrade handler resolved a userId from the auth cookie,
           // attach it now (before the connection is fully established,
@@ -543,6 +609,21 @@ export function attachSessionHandlers({
             session.userId === worldOwnerUserId &&
             isMutator(session, false)
           const canPlaceTeleporters = canEdit
+          // 4b-1 E4 — eligibility is recorded on the session.
+          session.canEdit = canEdit
+
+          // 4b-1 E4 (E-L4 (a)) — the earliest-connected session that passed
+          // `canEdit` at its hello takes the role. A reconnecting former host is
+          // a new session with a new hello; it does NOT take the role while
+          // another session holds it.
+          let isScriptHost = false
+          let hostGen
+          if (canEdit && scriptHost.sessionId === null) {
+            scriptHost.hostGen += 1
+            scriptHost.sessionId = session.id
+            isScriptHost = true
+            hostGen = scriptHost.hostGen
+          }
 
           ws.send(JSON.stringify({
             type: 'hello',
@@ -553,6 +634,10 @@ export function attachSessionHandlers({
             displayName: session.displayName,
             canPlaceTeleporters,
             canEdit,
+            // 4b-1 E5 — required in EVERY server hello; `hostGen` present exactly
+            // when `scriptHost` is true.
+            scriptHost: isScriptHost,
+            ...(isScriptHost ? { hostGen } : {}),
             capabilities: {
               tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
             },
@@ -1026,7 +1111,7 @@ export function attachSessionHandlers({
 
   const keepaliveTimer = setInterval(() => {
     for (const [id, s] of sessions) {
-      if (s.missedPings >= 2) {
+      if (s.missedPings >= MISSED_PING_LIMIT) {
         s.ws.terminate()
         cleanupSession(s)
       } else {

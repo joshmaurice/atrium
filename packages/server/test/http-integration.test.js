@@ -890,6 +890,7 @@ test('F6: server hello schema validates with displayName', () => {
     seq: 1,
     serverTime: 1000,
     displayName: 'TestUser',
+    scriptHost: false,
   })
   assert.ok(result.valid, `server hello with displayName is valid: ${JSON.stringify(result.errors)}`)
 })

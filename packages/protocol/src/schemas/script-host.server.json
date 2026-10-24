@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "script-host (Server)",
+  "description": "scripting-4b-1 E4/E5 — the script-host role changing hands. Sent to the session that takes the role.",
+  "type": "object",
+  "required": ["type", "active", "hostGen"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "script-host" },
+    "active": { "type": "boolean", "description": "true when this session now holds the role, false when it has lost it" },
+    "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "The host generation this message refers to" }
+  }
+}

@@ -20,6 +20,7 @@ import leave from './schemas/leave.json' with { type: 'json' }
 import viewClient from './schemas/view-client.json' with { type: 'json' }
 import viewServer from './schemas/view-server.json' with { type: 'json' }
 import somDump from './schemas/som-dump.server.json' with { type: 'json' }
+import scriptHost from './schemas/script-host.server.json' with { type: 'json' }
 
 const ajv = new Ajv({ strict: false })
 
@@ -41,6 +42,7 @@ const validators = {
   'view:client':  ajv.compile(viewClient),
   'view:server':  ajv.compile(viewServer),
   'som-dump':     ajv.compile(somDump),
+  'script-host':  ajv.compile(scriptHost),
 }
 
 /**
@@ -70,7 +72,7 @@ export function validate(direction, message) {
 
 export const messageTypes = [
   'hello', 'ping', 'pong', 'tick', 'error',
-  'send', 'set', 'add', 'remove', 'join', 'leave', 'view'
+  'send', 'set', 'add', 'remove', 'join', 'leave', 'view', 'script-host'
 ]
 
 export { validators }

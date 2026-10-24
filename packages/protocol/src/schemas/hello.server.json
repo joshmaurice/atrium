@@ -3,7 +3,7 @@
   "title": "Hello (Server)",
   "description": "Server handshake response",
   "type": "object",
-  "required": ["type", "id", "seq", "serverTime"],
+  "required": ["type", "id", "seq", "serverTime", "scriptHost"],
   "properties": {
     "type": { "const": "hello" },
     "id": { "type": "string", "minLength": 1 },
@@ -14,6 +14,8 @@
     "displayName": { "type": "string", "description": "Server-assigned display name (pre-brief #9)" },
     "canPlaceTeleporters": { "type": "boolean", "description": "True when this session may place teleporter pads (world owner, policy permits owner mutation)" },
     "canEdit": { "type": "boolean", "description": "True when this session may edit the world (world owner, policy permits owner mutation)" },
+    "scriptHost": { "type": "boolean", "description": "scripting-4b-1 E4/E5 — true when this session holds the world's script-host role" },
+    "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "scripting-4b-1 E5 — the host generation, present exactly when scriptHost is true" },
     "capabilities": {
       "type": "object",
       "properties": {
@@ -32,5 +34,8 @@
       "additionalProperties": false
     }
   },
+  "if": { "required": ["scriptHost"], "properties": { "scriptHost": { "const": true } } },
+  "then": { "required": ["hostGen"] },
+  "else": { "not": { "required": ["hostGen"] } },
   "additionalProperties": false
 }
