@@ -70,6 +70,15 @@ if [ ! -f "$ROOT/khronos/Fox.glb" ] || [ ! -f "$ROOT/khronos/CesiumMan.glb" ]; t
   git -C "$ROOT/gsa" sparse-checkout set Models/Fox/glTF-Binary Models/CesiumMan/glTF-Binary
   cp "$ROOT/gsa/Models/Fox/glTF-Binary/Fox.glb" "$ROOT/gsa/Models/CesiumMan/glTF-Binary/CesiumMan.glb" "$ROOT/khronos/"
 fi
+#    FoxLong.glb: the fox with its first clip renamed to 301 characters (sel3.py's panel-fit check).
+[ -f "$ROOT/khronos/FoxLong.glb" ] || python3 -I -c '
+import json, struct, sys
+src, dst = sys.argv[1:]
+b = open(src, "rb").read(); n = struct.unpack("<I", b[12:16])[0]; j = json.loads(b[20:20 + n]); rest = b[20 + n:]
+j["animations"][0]["name"] = "Survey-" + "x" * 294
+js = json.dumps(j, separators=(",", ":")).encode(); js += b" " * ((4 - len(js) % 4) % 4)
+open(dst, "wb").write(struct.pack("<4sII", b"glTF", 2, 20 + len(js) + len(rest)) + struct.pack("<I4s", len(js), b"JSON") + js + rest)
+' "$ROOT/khronos/Fox.glb" "$ROOT/khronos/FoxLong.glb"
 
 python3 -c 'import playwright' 2>/dev/null || echo "WARNING: Python Playwright is missing (pip install --break-system-packages playwright)"
 echo "ready: start the server with HARNESS_ROOT=$ROOT node $ROOT/harness/server.mjs (Bash run_in_background)"

@@ -37,7 +37,7 @@ DEV acceptance.
     `anim.py`. `c1.py` is checks 1, 2, 2b and 3; `c4.py` is 4 and 5;
     `c6.py` is 6; `c7.py` is 7 and 8; `c8b.py` is the row right after
     placing a model; `c9.py` is 9; `clockprobe.py` prints each session's
-    clock window and frame time; `r2.py` is round 2's four checks (Played, selected while loading, missing clip, discontinuity) and the two-owner-tab select; `sel.py` is the round-3 check: after a reload, Duplicate and Undo of rigged models keep a true outline and stay clickable, and every clip control fits the panel.
+    clock window and frame time; `r2.py` is round 2's four checks (Played, selected while loading, missing clip, discontinuity) and the two-owner-tab select; `sel.py` is the round-3 check: after a reload, Duplicate and Undo of rigged models keep a true outline and stay clickable, and every clip control fits the panel (round 2's code; it shows the bug); `sel3.py` is round 3's check of the fix: the same after a reload, stopped and playing, plus a static model, and the panel fit with a 250-character clip id (`FoxLong.glb`, made by `setup.sh`).
 
 ## Setup (about 2 minutes)
 ```bash
