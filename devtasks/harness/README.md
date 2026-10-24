@@ -38,6 +38,12 @@ DEV acceptance.
     `c6.py` is 6; `c7.py` is 7 and 8; `c8b.py` is the row right after
     placing a model; `c9.py` is 9; `clockprobe.py` prints each session's
     clock window and frame time; `r2.py` is round 2's four checks (Played, selected while loading, missing clip, discontinuity) and the two-owner-tab select; `sel.py` is the round-3 check: after a reload, Duplicate and Undo of rigged models keep a true outline and stay clickable, and every clip control fits the panel (round 2's code; it shows the bug); `sel3.py` is round 3's check of the fix: the same after a reload, stopped and playing, plus a static model, and the panel fit with a 250-character clip id (`FoxLong.glb`, made by `setup.sh`).
+  - `checks/scripting-4b-1/`: step 4b-1's §5.1 checks. `c1.py` is checks 1, 2,
+    3 and 7 (ids on the four add paths, Duplicate/Undo/Redo before and after a
+    reload, the set-once leaf, a restart); `c4.py` is 4, 5 and 6 (the host
+    line in two owner tabs, supersession, a visitor); `c8.py` is 8 (load
+    healing, for a saved and a file world; it reads `$HARNESS_ROOT/server.log`,
+    so start the server with its output there).
 
 ## Setup (about 2 minutes)
 ```bash
@@ -73,6 +79,11 @@ gives fresh worlds.
   - `flaky=0|1` (`/skies/flaky.png` is 404 until set);
   - `missing=<path>` (that path returns 404);
   - `worldsDelay=<ms>` (`/api/worlds` answers after a delay).
+- **`/__doc?key=<world key>`** returns the server's world, serialized as
+  autosave does, without keeping it (a read-only look at the server's copy).
+- **`POST /__put?key=<world key>[&kind=file]`** loads the posted glTF as that
+  world, closing its sockets: as a saved document (`createWorldFromDocument`),
+  or with `kind=file` as a file world (`createWorld`). Scripting-4b-1 check 8.
 - **`/__save?key=<world key>`** serializes that world as autosave does
   (avatars excluded) and keeps the document. **`/__restart?key=…`** does the
   same, then closes every socket of that world. The next connect builds the
