@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 // Harness-only HTTPS + WSS server for the library-sky acceptance checks.
 import https from 'node:https'
-import { readFileSync, existsSync, statSync, createReadStream } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync, createReadStream } from 'node:fs'
 import { join, normalize, extname } from 'node:path'
 const ROOT = process.env.HARNESS_ROOT ?? '/tmp/atrium-harness'
 const WT = ROOT + '/wt'
@@ -67,12 +67,14 @@ function handler(req, res) {
   // scripting-4a §5.1 check 6 — save a world the way autosave does (avatars
   // excluded by identity), then restart it from that document: every socket is
   // closed and the next connect gets a fresh world built from the saved file.
-  if (p === '/__save' || p === '/__restart') {
+  // /__doc does the same serialization without keeping it (read-only view of the server's world).
+  if (p === '/__save' || p === '/__restart' || p === '/__doc') {
     const key = u.searchParams.get('key') ?? 'default'
     return void (async () => {
       const entry = await worldFor(key)
       const excludeNodes = [...entry.sessions.values()].map((s) => s.avatarNode).filter(Boolean)
       const doc = JSON.stringify(await entry.world.serialize({ excludeNodes }))
+      if (p === '/__doc') return send(res, 200, doc, 'application/json')
       saved.set(key, doc)
       if (p === '/__restart') {
         for (const ws of entry.wss.clients) ws.terminate()
@@ -80,6 +82,25 @@ function handler(req, res) {
       }
       send(res, 200, doc, 'application/json')
     })().catch((err) => send(res, 500, String(err?.stack ?? err)))
+  }
+  // scripting-4b-1 §5.1 check 8 — load a given glTF document as world <key>
+  // (POST body), as a saved document (createWorldFromDocument) or, with
+  // &kind=file, as a file world (createWorld). Closes that world's sockets.
+  if (p === '/__put' && req.method === 'POST') {
+    const key = u.searchParams.get('key') ?? 'default'
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    return void req.on('end', async () => {
+      try {
+        const doc = Buffer.concat(chunks).toString('utf8')
+        if (worlds.has(key)) { const e = await worlds.get(key); for (const ws of e.wss.clients) ws.terminate(); worlds.delete(key) }
+        if (u.searchParams.get('kind') === 'file') {
+          const f = join(ROOT, `put-${key}.gltf`); writeFileSync(f, doc); files.set(key, f); saved.delete(key)
+        } else { saved.set(key, doc); files.delete(key) }
+        const e = await worldFor(key)
+        send(res, 200, JSON.stringify(await e.world.serialize({ excludeNodes: [] })), 'application/json')
+      } catch (err) { send(res, 500, String(err?.stack ?? err)) }
+    })
   }
   if (p.startsWith('/khronos/')) {
     const rel = normalize(p.slice('/khronos/'.length))
@@ -138,9 +159,16 @@ function handler(req, res) {
 // Worlds: wss://host/w/<key>; key prefix picks the source document.
 const worlds = new Map()
 const saved = new Map()   // key -> the last /__save or /__restart document
+const files = new Map()   // key -> a file written by /__put?kind=file
 async function worldFor(key) {
   if (worlds.has(key)) return worlds.get(key)
   const promise = (async () => {
+    if (files.has(key)) {
+      const world = await createWorld(files.get(key), { baseUrl: `https://127.0.0.1:${PORT_A}/` })
+      const wss = new WebSocketServer({ noServer: true }); const sessions = new Map()
+      attachSessionHandlers({ wss, world, sessions, worldOwnerUserId: 'owner' })
+      return { wss, world, sessions }
+    }
     if (saved.has(key)) {
       const world = await createWorldFromDocument(saved.get(key))
       const wss = new WebSocketServer({ noServer: true }); const sessions = new Map()
