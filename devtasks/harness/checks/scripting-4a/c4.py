@@ -1,0 +1,41 @@
+# §5.1 checks 4 and 5: Once (ends on the last frame, nobody writes); Stop (rest pose from playing and from ended).
+from anim import *
+W = fresh('once')
+with sync_playwright() as pw:
+    br = new_browser(pw)
+    a = SPage(br); a.connect(W); a.edit_on()
+    fox = add_model(a, FOX, scale=0.01); cm = add_model(a, CESIUM)
+    b = SPage(br, origin=B); b.connect(W + '?visitor'); wait_loaded(b, fox); wait_loaded(b, cm)
+    rest_a, rest_b = pose(a, fox), pose(b, fox)
+    crest_a, crest_b = pose(a, cm), pose(b, cm)
+    print('bones', len(rest_a), 'rest A vs B', pose_diff(rest_a, rest_b))
+    # ---- check 4
+    v = play(a, fox, 'Survey', False)
+    dur = a.ev("(n) => __anim().modelAnimations.actionFor(n).getClip().duration", fox)
+    print('C4 played', v, 'duration', round(dur, 3))
+    a.page.wait_for_timeout(int(dur * 1000 * 0.5))
+    print('C4 midway A', err(a, fox), 'B', err(b, fox), 'row', row(a))
+    n_sent_a, n_sent_b = len(a.anim_sends()), len(b.anim_sends())
+    a.page.wait_for_timeout(int(dur * 1000 * 0.5) + 1500)
+    end_a, end_b = pose(a, fox), pose(b, fox)
+    print('C4 after end A', err(a, fox), 'B', err(b, fox))
+    print('C4 last frame A vs B', pose_diff(end_a, end_b), ' A vs rest', pose_diff(end_a, rest_a))
+    print('C4 row after end, no other event', row(a))
+    a.page.wait_for_timeout(2000)
+    print('C4 held 2 s later: A moved', pose_diff(end_a, pose(a, fox)), 'B moved', pose_diff(end_b, pose(b, fox)))
+    print('C4 sends during the end: A', a.anim_sends()[n_sent_a:], 'B', b.anim_sends()[n_sent_b:])
+    select(a, cm); select(a, fox)
+    print('C4 row after reselect', row(a))
+    print('C4 stored still playing:true', a.ev("(n) => atriumClient.som.getNodeByName(n).extras.atrium.animation", fox))
+    # ---- check 5: Stop from ended
+    stop(a, fox); a.page.wait_for_timeout(600)
+    print('C5 stop from ended: A vs rest', pose_diff(pose(a, fox), rest_a), 'B vs rest', pose_diff(pose(b, fox), rest_b), 'row', row(a))
+    # Stop from playing (looping Run), and CesiumMan
+    play(a, fox, 'Run', True); play(a, cm, 'animation_0', True); a.page.wait_for_timeout(1200)
+    print('C5 playing: A vs rest', pose_diff(pose(a, fox), rest_a), 'cesium A vs rest', pose_diff(pose(a, cm), crest_a))
+    stop(a, fox); stop(a, cm); a.page.wait_for_timeout(600)
+    print('C5 stop from playing: fox A', pose_diff(pose(a, fox), rest_a), 'B', pose_diff(pose(b, fox), rest_b),
+          '| cesium A', pose_diff(pose(a, cm), crest_a), 'B', pose_diff(pose(b, cm), crest_b), 'row', row(a))
+    print('C5 stored', a.ev("(n) => atriumClient.som.getNodeByName(n).extras.atrium", fox))
+    print('errors', a.errors, b.errors, [x for x in a.console + b.console if x.startswith('error') and '401' not in x][:5])
+    br.close()

@@ -1,0 +1,33 @@
+import sys, time, json
+import os; sys.path.insert(0, os.environ.get('HARNESS_ROOT', '/tmp/atrium-harness') + '/harness')
+from h import *
+SHOW = "0"  # round 2: no forced visibility
+with sync_playwright() as pw:
+    br = pw.chromium.launch(args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'])
+    ctl(catalog='small')
+    cat = json.loads(http('/apps/client/library/catalog.json'))
+    a = Page(br, origin=A)
+    a.connect('wss://127.0.0.1:8444/w/c13'); a.edit_on()
+    print('page origin', a.ev('location.origin'), 'worldBaseUrl', a.ev('atriumClient.worldBaseUrl'))
+    a.page.click('#ep-library'); time.sleep(0.3); a.ev(SHOW); time.sleep(1.5)
+    print('thumb src', a.ev("document.querySelector('.lg-tile img').src"), a.ev("document.querySelector('.lg-tile img').naturalWidth"))
+    before = set(a.ev("atriumClient.som.nodes.map(n=>n.name)"))
+    a.ev("(nm) => [...document.querySelectorAll('.lg-tile')].find(t => t.querySelector('img').alt === nm).click()", 'Big Block')
+    a.wait("() => __lib().libraryGrid.waiting === null")
+    name = [n for n in a.ev("atriumClient.som.nodes.map(n=>n.name)") if n not in before][0]
+    a.wait("(n) => ['loaded','failed'].includes(__mb.status(n)?.status)", arg=name, timeout=60000)
+    print('A stored model', a.ev("(n) => atriumClient.som.getNodeByName(n).extras.atrium.model", name), 'status', a.ev("(n) => __mb.status(n)", name))
+    a.page.select_option('#ep-sky', cat['skies'][1]['id'])
+    a.wait("() => __sky.loaded && !document.getElementById('ep-sky').disabled", timeout=60000)
+    print('A stored sky', a.ev("atriumClient.som.extras.atrium.background"), 'A select', a.ev("document.getElementById('ep-sky').value"))
+    # viewer on origin B (cross-origin fetches of A's absolute URLs)
+    b = Page(br, origin=B)
+    b.connect('wss://127.0.0.1:8444/w/c13')
+    b.wait("(n) => ['loaded','failed'].includes(__mb.status(n)?.status)", arg=name, timeout=60000)
+    b.wait("() => __sky.loaded || __sky.failedUrl", timeout=60000)
+    print('B page origin', b.ev('location.origin'), 'model status', b.ev("(n) => __mb.status(n)", name), 'sky loaded', b.ev("__sky.loaded?.url"), 'bg', b.bg())
+    b.edit_on(); time.sleep(0.5)
+    print('B select shows', b.ev("document.getElementById('ep-sky').value"))
+    print('errors', a.errors, b.errors, [f for f in b.failed if '401' not in f])
+    b.page.screenshot(path=SHOTS + '/r2-c13-crossorigin-viewerB.png')
+    a.close(); b.close(); br.close()
