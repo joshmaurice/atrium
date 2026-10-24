@@ -1,8 +1,21 @@
 # Pre-brief: Phase 3 step 4b — behaviours, owner-present: the plan (4b-1, 4b-2), the engine spike, and 4b-1 (identity and the script host) in detail
 
-Status: **Rev 0, DRAFT (2026-10-23), for the operator and an outside
-review.** Decisions B1–B6 and E-L1–E-L6 are open, each with a
-recommendation.
+Status: **Rev 1, DRAFT (2026-10-24), for the operator's decisions.**
+Decisions B1–B6 and E-L1–E-L6 are open, each with a recommendation.
+- **Rev 1 applies an outside review of Rev 0** (verdict: "revise before
+  implementation"; 4 must-fix, 7 should-fix, 5 nits). Claude checked each
+  finding against the code; M1 was also probed. All are taken. §10 lists
+  them.
+  - **The split (B1) and the engine (B2) stand.** The reviewer recommends
+    (a) for all twelve decisions, several as modified here.
+  - **Changed:**
+    - B4 now drops a duplicated id from **every** node that shares it;
+    - B5's lookup is split into a uniqueness check and a resolver, with
+      external nodes excluded by identity;
+    - E-L3's set-once leaf can create `extras.atrium`;
+    - cleanup is identity-guarded;
+    - the client signals loss of the role synchronously;
+    - the host line's wording.
 - **Drafted by Claude from `main` at `aa0702c8`.** Its code is identical to
   the released `147df814` (DEV, MAIN and PROD). Line numbers are at that
   commit. Claims marked *probe* were run against the real modules or the
@@ -52,7 +65,7 @@ It splits along a clean seam:
 
 | Round | What the owner gets | Server / protocol |
 |---|---|---|
-| **4b-1** | Nothing visible to visitors. Every new object gets a permanent id; the Edit panel tells an owner with two tabs which one runs behaviours | `objectId` rules on `add` and a set-once leaf; `hello.scriptHost` and `hostGen`; the `script-host` message with handover; schemas |
+| **4b-1** | Nothing visible to visitors. Every new object gets a permanent id; the Edit panel tells an owner with two tabs which one is the script host | `objectId` rules on `add` and a set-once leaf; `hello.scriptHost` and `hostGen`; the `script-host` message with handover; schemas |
 | **4b-2** | Behaviours: five templates in the Edit panel (on select show or hide, on select play or stop, on enter play and on exit stop, on select toggle a light, every N seconds play), run by the owner's script-host tab, saved with the world | `extras.atrium.behavior`: a writable leaf with a strict server check (size, op allowlist, `nodeMap`/`targets` ids) |
 
 **4b-1 first** because:
@@ -91,8 +104,10 @@ It splits along a clean seam:
   `model`, and since 4a `animation`.
 
 **P3. The server's add handler** (`session.js`, from L770):
-- **Avatar adds may not carry any `extras.atrium`** (K4/L5, L796–801). So an
-  avatar can never claim an `objectId`.
+- **Avatar adds may not carry Atrium data** (K4/L5, L796–801; the check is
+  `addCarriesAtriumExtras`, L113). The only `extras.atrium` an avatar may
+  carry is the exact marker `{ ephemeral: true }`. So an avatar can never
+  claim an `objectId`.
 - **Non-avatar adds:** the mutation gate, then the parent and name rules,
   then `checkAtriumExtras` (`send-policy.js` L159).
 - **An `add` carries one node,** with no children (`add.client.json`,
@@ -104,6 +119,27 @@ It splits along a clean seam:
 `ANIMATION_LEAF` (L729). `SOMDocument.CREATABLE_PATHS` (L30) is
 `['extras.atrium.animation']`. The step 4 pre-brief planned that 4b's
 set-once `objectId` leaf joins it (Z2).
+- **But `setPath` creates only the final key** (*probe*, review M1).
+  `resolvePath` (L32) throws when an intermediate segment is missing.
+  - On a node whose `extras` has no `atrium`:
+    - `setPath(…, 'extras.atrium.animation', …)` fails with `Path segment
+      "atrium" resolved to null/undefined`, even though that path is
+      creatable;
+    - so would an `objectId` leaf.
+  - On a node with `extras.atrium = {}` or a model value, the animation
+    leaf is created.
+  - 4a never met this, because its leaf is allowed only on model nodes,
+    which always carry `extras.atrium`. Most objects that would need a lazy
+    id (B3) have no `extras.atrium` at all.
+
+**P4b. External and shadowed nodes are in `allNodes`** (review M3).
+- `allNodes` (L680) lists every node in the glTF document. That includes:
+  - nodes copied in by `ingestExternalScene` (L930–945), whose extras are
+    copied too (`node.setExtras(extras)`);
+  - legacy nodes whose names are shadowed by an earlier node of the same
+    name (K5: the first registered wins in `_nodesByName`).
+- **The server tracks external nodes by identity** (`world.externalNodes`,
+  `world.js` L335–341). The SOM itself has no such mark.
 
 **P5. Who may edit** (`session.js`):
 - `isMutator` (L433): under the owner policy, `session.userId ===
@@ -116,6 +152,16 @@ set-once `objectId` leaf joins it (Z2).
 - **A duplicate live session id is refused** (`SESSION_CONFLICT`, L487), so
   a session is never replaced while connected. The role can only move on
   disconnect today (design §5.2).
+- **But cleanup isn't identity-safe** (review M2).
+  - `cleanupSession` deletes `sessions` and `presence` entries **by id**.
+  - The keepalive sweep (L1018) terminates a socket and cleans up at once.
+    The socket's close handler (L1001) then cleans up the same session
+    object again.
+  - If a new connection took the same session id in between, the late
+    second call deletes the *new* session's entries.
+  - The first-party client never reuses an id: it makes a new UUID on every
+    `connect`. But ids are client-chosen, and peers learn each other's ids
+    from `join`.
 
 **P6. The protocol is strict.**
 - `hello.server.json` has `additionalProperties: false` (L35). A new
@@ -124,6 +170,10 @@ set-once `objectId` leaf joins it (Z2).
   switch (L688–710) has no `default`. A `script-host` message therefore
   needs a case.
 - `canEdit` is a client field (L185), reset on every disconnect path.
+- **A superseded connection emits no `disconnected`** (review M4).
+  `connect()` while connected (L541) marks the old record stale, closes its
+  socket and emits `connecting` (L609), but never `disconnected` for the old
+  record. Listeners that stop work only on `disconnected` keep running.
 
 **P7. One world, one session set.** Each world host calls
 `attachSessionHandlers` with its own `sessions` map and
@@ -221,8 +271,9 @@ have independent hosts.
   - six `pointer/*` (pointers it didn't register: materials, cameras, morph
     targets, the read-only core set);
   - `ref/eq`, `Extras/Matrix_Updates` and `math/matDecomp-Shear`.
-- Every failure but the last is the spike adapter's missing coverage, not
-  the engine's.
+- **Most failures look like the spike adapter's missing coverage,** but
+  that's provisional (review N4). It holds until each case is reproduced
+  with a fuller adapter in 4b-2.
 
 **S6. Packaging.**
 - `build/index.js` is plain ESM with one bare import (`gl-matrix`), so it
@@ -249,7 +300,16 @@ have independent hosts.
     adapter-side measures (§2.2), and those measures become 4b-2's contract
     (§9.2).
     - **This is the operator's OK to vendor about 540 KB** of Apache-2.0 and
-      MIT code, with `NOTICE` entries.
+      MIT code (review N5):
+      - both packages' license texts kept beside the files, with `NOTICE`
+        entries;
+      - the versions pinned;
+      - the sha256 of each vendored file recorded, so an update is
+        auditable.
+    - **It confirms the engine *choice*, not production safety** (review
+      §2). The spike validated an integration approach, not Atrium's
+      adapter. 4b-2's acceptance gates (§9.2) are what show the real
+      adapter is safe on the browser's main thread.
   - (b) Reconsider (c), a hand-written interpreter for the template subset.
 
   The spike found nothing (b) would avoid that the adapter can't handle.
@@ -264,25 +324,42 @@ have independent hosts.
 - **B4 — A duplicate id found in a loaded document.** Neither the first-party
   client nor the server can make one after 4b-1, but a hand-edited or
   imported document could.
-  - **(a) Recommended: heal on load,** as `healDocumentOnLoad` does for
-    other faults. The first node in document order keeps the id; each later
-    one loses its `objectId`, with one log line per id.
-  - (b) Refuse to load the world.
+  - **(a) Recommended (Rev 1, review S1): heal on load by dropping the id
+    from *every* node that shares it,** with one log line per id giving the
+    node count.
+    - **No node keeps a duplicated id,** so nothing can silently become
+      "the" object a reference meant.
+    - A behaviour (4b-2) that named that id finds no object. It's disabled
+      and reported, never retargeted.
+    - The owner re-picks its target, and the set-once leaf gives each node
+      a fresh id.
+  - (b) Rev 0's rule: the first node in document order keeps the id.
+  - (c) Refuse to load the world.
 
-  (b) locks the owner out of their own world over a fault that's simple to
-  repair.
-- **B5 — Where the uniqueness rule lives.**
-  - **(a) Recommended: in the SOM,** as `SOMDocument.getNodeByObjectId(id)`,
-    a scan of `allNodes`.
-    - The server uses it for the `add` and set-once checks.
-    - 4b-2's runner uses the same call to resolve an id to a name.
-    - One implementation for every side, and no index to keep in step. A
-      world has hundreds of nodes, not millions.
+  (b) can redirect a saved behaviour's writes to an object its author never
+  chose, and the healed document is saved, so the evidence is lost. (c)
+  locks the owner out of their own world. (a) turns an ambiguity into a
+  visible, recoverable break.
+- **B5 — Where the identity rules live.**
+  - **(a) Recommended (Rev 1, review M3): in the SOM, as two scans with two
+    different jobs** (E2):
+    - **`objectIdInUse(id)`, for uniqueness,** looks at every *saved* node,
+      including shadowed duplicate-name nodes that a later rename or remove
+      could make addressable;
+    - **`resolveObjectId(id)`, for behaviours,** returns a node only when
+      exactly one saved node has the id **and** that node is the one its
+      name addresses. Otherwise it gives a reason (`not-found`,
+      `ambiguous`, `unaddressable`).
+    - **External nodes are excluded by identity:** the SOM records the
+      nodes `ingestExternalScene` creates. A name prefix isn't used.
+    - The server uses the first for `add` and the set-once leaf, and 4b-2's
+      runner uses the second. One implementation for every side, with no
+      index to keep in step. A world has hundreds of nodes, not millions.
   - (b) A maintained index (`Map`), updated at load, ingest, dispose and on
     the set-once leaf.
 
   (b) is faster but has five update points to get right. It can replace (a)
-  later behind the same call.
+  later behind the same calls.
 - **B6 — What 4b-2 decides, not 4b-1.** These are recorded so the 4b-1
   review doesn't reopen them:
   - D5's conflict rule (behaviours and the object being edited);
@@ -290,7 +367,10 @@ have independent hosts.
   - the five templates' exact graphs;
   - the resource limit values;
   - the target picker;
-  - the graph-to-animation mapping.
+  - the graph-to-animation mapping;
+  - the review's carried items (§9.1): when the runner may start (S5),
+    older clients holding the role (S6), and Duplicate remapping behaviour
+    references (S7).
 
 ### 4b-1 (E-L1–E-L6)
 - **E-L1 — The id's form.**
@@ -314,7 +394,9 @@ have independent hosts.
     - A node that already has an id refuses any `send` of the leaf, the same
       value included.
     - `null` is refused.
-    - It joins `CREATABLE_PATHS`.
+    - **It works on a node with no `extras.atrium`** (Rev 1, review M1). The
+      SOM creates the `atrium` object for this one path, and generic path
+      creation isn't widened (E2).
   - (b) No leaf: ids only on `add`. An existing object would then need a
     remove and re-add, which loses its undo history.
 - **E-L4 — Who is the script host.**
@@ -327,7 +409,12 @@ have independent hosts.
     - With none left there's no host until an eligible `hello`, which then
       takes `hostGen + 1`.
     - `hostGen` starts at 1 per world host and isn't saved: a server restart
-      starts again at 1, because every session reconnects.
+      starts again at 1, because every session reconnects. **It only ever
+      increases:** a role is never reactivated under an old generation
+      (review S2).
+    - **Cleanup and handover are identity-safe** (review M2, E4). Only the
+      session object that holds an id is ever removed under it, and the
+      handover runs only after that exact session's removal.
   - (b) The most recent owner session.
 
   (b) moves the role on every new tab, the churn design §5.2 avoids.
@@ -339,10 +426,11 @@ have independent hosts.
     comes with a reason to move the role (design §5.2 follow-up review A).
 - **E-L6 — What the owner sees in 4b-1.**
   - **(a) Recommended: one status line in the Edit panel,** under the title,
-    for an owner:
-    - "Behaviours run in this tab" when this session is the host;
-    - "Behaviours run in another tab or device" for any other owner session
-      (E8 says why it can't be more exact);
+    for an owner. Nothing runs in 4b-1, so it names the role, not behaviour
+    (review N3):
+    - "Script host: this tab" when this session is the host;
+    - "Script host: another tab or device" for any other owner session (E8
+      says why it can't be more exact);
     - nothing for a visitor or while disconnected.
   - (b) Nothing.
 
@@ -372,23 +460,51 @@ have independent hosts.
   does `tools/som-inspector/index.html` only if anything it loads imports
   it. `importmap-guard` stays green.
 
-### E2. The SOM: lookup, and a second creatable path
+### E2. The SOM: external nodes, two identity scans, and the set-once path
 In `packages/som/src/SOMDocument.js`:
-- **`getNodeByObjectId(id)`** returns the first node in `allNodes` order
-  whose own `extras.atrium.objectId === id`, or null (B5 (a)).
-  - Externally loaded nodes are skipped. They aren't saved world content,
-    and never carry ids.
-  - **Plain-object checks only,** as `CREATABLE_PATHS` uses: an `extras` or
-    `atrium` that isn't a plain object, or an inherited `objectId`, never
-    matches.
+- **External nodes are recorded by identity** (review M3).
+  - `ingestExternalScene`'s `copyNode` adds each node it creates to a
+    private `WeakSet`.
+  - **`isExternalNode(somNode)`** answers from that set, never from a name
+    prefix.
+  - The server's `world.externalNodes` is unchanged.
+- **"A saved node"** is any node in `allNodes` that isn't external. That
+  includes shadowed duplicate-name nodes (P4b).
+- **A node's id** is its own `extras.atrium.objectId`, read with
+  plain-object checks only. An `extras` or `atrium` that isn't a plain
+  object, or an inherited `objectId`, gives no id.
+- **`objectIdInUse(id)`** — true when any saved node has that id. Used for
+  uniqueness (E3).
+- **`resolveObjectId(id)`** returns `{ node }` or `{ problem }`:
+  - `not-found`: no saved node has the id;
+  - `ambiguous`: more than one saved node has it, which can happen only in
+    a document loaded without E3's healing (a file opened by the SOM
+    Inspector, say);
+  - `unaddressable`: one saved node has it, but `getNodeByName(node.name)`
+    is a different node (a shadowed name).
+
+  4b-1 has no caller. 4b-2's runner calls it every time it turns an id into
+  a name to send, so a rename, remove or re-add is followed, and a stale or
+  ambiguous mapping is refused.
 - **`CREATABLE_PATHS = ['extras.atrium.animation', 'extras.atrium.objectId']`.**
-  The existing own-property rule is unchanged (4a Z2).
+  The 4a own-property rule is unchanged.
+- **One narrow intermediate creation** (review M1). For exactly the path
+  `extras.atrium.objectId`, when the node's `extras` is a plain object and
+  has no own `atrium`, `setPath` first sets `extras.atrium = {}` on that
+  same extras object, keeping every other key, then creates `objectId`.
+  - **Refused:**
+    - an `extras` that isn't a plain object;
+    - an `atrium` that exists but isn't a plain object.
+  - **Every other path keeps today's rules,** `extras.atrium.animation`
+    included. Generic path creation isn't widened.
+  - The same SOM code runs on the server and in every client, so a
+    broadcast `set` of the leaf applies everywhere.
 
 ### E3. The server
 - **`add`** (non-avatar; avatars already refuse any `extras.atrium`, P3):
   `checkAtriumExtras` also checks `atrium.objectId` when the key is present.
   - The value must pass E1, or `INVALID_VALUE` with E1's message.
-  - **`world.som.getNodeByObjectId(id)` must be null,** or `INVALID_VALUE`
+  - **`world.som.objectIdInUse(id)` must be false,** or `INVALID_VALUE`
     with "objectId is already in use in this world".
   - The order: after the name rules, before any change to the world.
   - **No id is required:** an `add` without one is accepted as today, for
@@ -406,13 +522,19 @@ In `packages/som/src/SOMDocument.js`:
 - **Load (B4 (a)), in both world kinds:** document worlds already run
   `healDocumentOnLoad` (`world.js` L439, in `createWorldFromDocument`), and
   file worlds (`createWorld`, L287) don't. The id step is one function
-  called from both. It walks the document's nodes in order. Every `objectId` seen
-  before keeps the first node's claim and is removed from each later node,
-  with `[world] healed duplicate objectId <id> on "<name>"` logged once per
-  node.
-  - **An id that fails E1 is also removed on load,** with its own log line.
-    A malformed id can't be repaired, only dropped, and a later set-once
-    `send` can assign a fresh one.
+  called from both. It counts each id over the saved nodes (external nodes
+  aren't ingested yet at that point).
+  - **Every id held by two or more nodes is removed from all of them**
+    (B4 (a)).
+  - **Log one line per id** (review N2): `[world] dropped duplicated
+    objectId <id> from <n> nodes`. Names come from the document, so none
+    are logged raw; when a name is logged, it's through `JSON.stringify`.
+  - **An id that fails E1 is also removed on load,** with one line per
+    node: `[world] dropped malformed objectId on node <index>`. A malformed
+    id can't be repaired, only dropped, and a later set-once `send` can
+    assign a fresh one.
+  - **Nothing else is changed:** other `extras` keys stay, and an
+    `extras.atrium` left empty stays as `{}`.
 
 ### E4. The script host (server, `session.js`)
 - **State per world host:** `scriptHost = { sessionId: null, hostGen: 0 }`.
@@ -422,7 +544,18 @@ In `packages/som/src/SOMDocument.js`:
   Every other `hello` carries `scriptHost: false` and no `hostGen`.
   - **Eligibility is recorded on the session** (`session.canEdit`), so
     handover doesn't recompute it.
-- **On `cleanupSession` of the host:**
+- **`cleanupSession` becomes identity-safe** (review M2).
+  - **It first checks `sessions.get(s.id) === s`.** Only then does it
+    delete the `sessions` and `presence` entries and do the rest of its
+    current work.
+  - A second call for the same session object, or a call for an object an
+    id no longer maps to, does nothing.
+  - **This is a fix to existing behaviour,** and is tested on its own: a
+    keepalive termination, a new connection that takes the same session
+    id, then the first socket's late `close`. The new session must survive
+    with its presence, avatar and role.
+- **On `cleanupSession` of the host** (only after that exact session's
+  removal):
   1. the role is cleared;
   2. the server picks the first session in `sessions` order with
      `session.canEdit` true and an open socket;
@@ -441,36 +574,54 @@ In `packages/som/src/SOMDocument.js`:
   that isn't `hello`. `activate` is 4c's.
 
 ### E5. The protocol (`@atrium/protocol`)
-- **`hello.server.json`** gains:
-  - `scriptHost`: boolean;
-  - `hostGen`: integer, minimum 1;
-  - a rule that `hostGen` is present only when `scriptHost` is true
-    (`if`/`then`, or `dependentRequired` and a `not`, as the validator
-    supports).
+- **`hello.server.json`** (review S2):
+  - `scriptHost`, a boolean, is **required** in every server `hello`;
+  - `hostGen`, an integer from 1 to 2^53 − 1;
+  - **`scriptHost: true` requires `hostGen`, and `scriptHost: false`
+    forbids it** (`if`/`then`/`else`, as the validator supports).
 - **New `script-host.server.json`:**
-  - `{ type: 'script-host', active: boolean, hostGen: integer ≥ 1 }`;
+  - `{ type: 'script-host', active: boolean, hostGen: integer 1 … 2^53 − 1 }`;
   - all three required, `additionalProperties: false`;
   - registered with the server-side message set.
 - **Schema tests:** valid and invalid examples for both. This is the
   round's protocol change. Nothing else in the protocol changes.
 
 ### E6. The client (`AtriumClient`)
-- **`client.scriptHost`** is `{ active: boolean, hostGen: number | null }`:
-  - set from `hello` (`active: msg.scriptHost === true`, `hostGen:
-    msg.hostGen ?? null`);
-  - **reset to `{ active: false, hostGen: null }`** on every path that
-    resets `canEdit` (connecting, disconnected, a connect timeout, a
-    superseded connection).
-- **`script-host` messages:**
-  - a new dispatch case, `this._onScriptHost(msg, record)`. It ignores a
-    stale or closing record and a malformed message (not a boolean
-    `active`, not an integer `hostGen`);
-  - **it ignores a `hostGen` lower than the current one** (a late message
-    from an earlier assignment);
-  - otherwise it sets `scriptHost` and emits **`script-host:changed`** with
+- **`client.scriptHost`** is `{ active: boolean, hostGen: number | null }`,
+  set from `hello`.
+- **Every incoming role is checked with E5's rules** (review S2), in
+  `hello` and in `script-host` alike:
+  - `scriptHost`/`active` a boolean;
+  - `hostGen` a safe integer ≥ 1 exactly when active;
+  - absent when not active in `hello`.
+
+  A `hello` that fails is treated as `active: false` and logged once.
+- **`script-host` messages:** a new dispatch case,
+  `this._onScriptHost(msg, record)`.
+  - It ignores a stale or closing record and a malformed message.
+  - **Per connection, generations only increase.**
+    - `active: true` is accepted only with a `hostGen` greater than any
+      seen on this connection;
+    - `active: false` only with a `hostGen` at least the current one.
+    - Anything else is a late message from an earlier assignment, and is
+      ignored.
+  - Otherwise it sets `scriptHost` and emits **`script-host:changed`** with
     `{ active, hostGen }`.
 - **`hello` also emits `script-host:changed`,** after `canEdit` is set, so
   one listener covers both.
+- **Losing the role is signalled synchronously** (review M4). Whenever
+  `scriptHost.active` is true and the connection that holds it is
+  abandoned, the client sets `{ active: false, hostGen: null }` and emits
+  `script-host:changed` **before** it does anything else on that path. The
+  paths are:
+  - `connect()` superseding the connection, before it emits `connecting`;
+  - `disconnect()`, before it closes the socket;
+  - a connect timeout;
+  - the socket's close.
+  - **The invariant:** once a connection is abandoned, nothing listening
+    for the role still believes it holds it. That's 4b-2's guarantee that
+    no runner of an old connection keeps ticking, scheduling or sending.
+  - When the role wasn't active, these paths reset quietly, with no event.
 - **The client never decides the role itself.**
 
 ### E7. Ids on the client's add paths (`apps/client`)
@@ -503,10 +654,11 @@ In `packages/som/src/SOMDocument.js`:
     `disconnected` and when Edit mode turns on.
   - Its text comes from a pure helper (`hostStatusText({ canEdit,
     scriptHost, otherOwnerTabs })`), tested without a DOM.
-- **"Behaviours run in your other tab" needs to know another host exists.**
-  4b-1 doesn't tell non-hosts who the host is.
-  - **The text for a non-host owner is "Behaviours run in another tab or
-    device"** when `canEdit` is true and `scriptHost.active` is false.
+- **A more exact text, such as "your other tab", would need to know another
+  host exists,** and 4b-1 doesn't tell non-hosts who the host is.
+  - **The host sees "Script host: this tab".**
+  - **A non-host owner sees "Script host: another tab or device"** when
+    `canEdit` is true and `scriptHost.active` is false.
   - **This includes the moment there's no host at all,** which an owner tab
     can only be in while another owner session has just left and the
     handover is under way.
@@ -527,13 +679,13 @@ In `packages/som/src/SOMDocument.js`:
 | Item | Tests | Proof of failure |
 |---|---|---|
 | E1 | The vectors file read by both the server and the client tests: every accepted and refused case with its code. `newObjectId()` returns values that pass, 100 distinct | (a) accept uppercase in one copy only |
-| E2 | som: `getNodeByObjectId` finds a node, returns null for an unknown id, skips an external node, never matches an inherited `objectId` or a non-plain `atrium`; `setPath` creates `extras.atrium.objectId` when missing and still refuses `extras.atrium.other` | (b) match by `in` instead of an own property |
-| E3 | server, port 0: an owner `add` with a valid new id is accepted and broadcast with it; with a malformed id, `INVALID_VALUE`; with an id already in the world, `INVALID_VALUE` and the "in use" message, and nothing added; without an id, accepted. Set-once `send`: accepted on a node without an id and broadcast; refused `INVALID_FIELD` on a node with one (including the same value); refused for a duplicate or malformed value; refused for a visitor; refused on an avatar. After a `remove`, the id can be used again. **Load:** a document with one id on two nodes loads, keeps it on the first and logs once; a malformed id is dropped and logged; the healed document saves without the dropped ids | (c) skip the uniqueness check on `add`; (c2) allow the leaf when the node already has one |
-| E4 | server, port 0, two and three owner sessions plus a visitor: the first owner `hello` has `scriptHost: true, hostGen: 1`; the second owner's and the visitor's have `scriptHost: false` and no `hostGen`. **Handover:** closing the host sends the second owner `script-host` `active: true, hostGen: 2`, and nothing to the visitor. **The former host reconnects:** its new `hello` has `scriptHost: false` while the second holds the role. **No eligible session:** closing the last owner leaves no host, and the next owner `hello` gets `hostGen` 3. **Read-only policy:** no session is ever host. **Two worlds:** each has its own host and its own `hostGen` | (d) hand over to the first session in the map without the `canEdit` check (the visitor gets it); (d2) keep `hostGen` unchanged on handover |
-| E5 | protocol: valid and invalid `hello` (with `hostGen` and without; `hostGen` with `scriptHost: false` refused) and `script-host` (each field missing, wrong type, extra field) | (e) drop `additionalProperties: false` from `script-host` |
-| E6 | client, fake socket: `scriptHost` from `hello`; `script-host:changed` on `hello` and on a `script-host` message; a lower `hostGen` ignored; a malformed message ignored; `active: false` honoured; reset on disconnect, on a connect timeout and on a superseded connection; a stale record's message ignored | (f) accept a lower `hostGen` |
-| E7 | `object-identity`: `withNewObjectId` adds an id without touching other keys, replaces an existing one, and doesn't mutate its input. `edit-duplicate`: `prepareDuplicate` gives a new id; `prepareRestore` keeps the node's id; a malformed id refuses with the new message. Wiring guard (`app.js`): the palette, Model form, teleporter form and library paths pass through `withNewObjectId`; the retry and the structural re-add don't | (g) `prepareDuplicate` keeps the original's id; (g2) the structural re-add gets a new id |
-| E8 | `hostStatusText`: host, non-host owner, visitor, disconnected. Wiring guard: `refreshHostStatus` is called on `script-host:changed`, `connecting`, `disconnected` and Edit on | (h) show the host text to a non-host |
+| E2 | som: **external and shadowed nodes:** an external node carrying an id is ignored by `objectIdInUse` and `resolveObjectId`, by identity (`isExternalNode`), and doesn't block a new id; a shadowed duplicate-name node's id **is** in use, but resolves `unaddressable`; after its predecessor is removed or renamed, the same id resolves to it. **Scans:** `not-found`, `ambiguous` (two saved nodes, loaded without healing), and a found node; never matching an inherited `objectId` or a non-plain `extras`/`atrium`. **`setPath` (M1):** creates `extras.atrium.objectId` on a node with no `atrium` (other `extras` keys kept), with `atrium: {}`, and with existing `atrium` data; refuses a non-plain `atrium`; still refuses `extras.atrium.other`, and still refuses `extras.atrium.animation` without `atrium` | (b) match by `in` instead of an own property; (b2) create intermediates for every listed path; (b3) treat external nodes by name |
+| E3 | server, port 0: an owner `add` with a valid new id is accepted and broadcast with it; with a malformed id, `INVALID_VALUE`; with an id already in the world (including on a shadowed node), `INVALID_VALUE` and the "in use" message, nothing added, **no broadcast and no autosave**; without an id, accepted. Set-once `send`: accepted on a node with `extras: {}`, with no `atrium`, and with existing `atrium` data, and broadcast; refused `INVALID_FIELD` on a node with one (including the same value); refused for a duplicate or malformed value; refused for a visitor and on an avatar; **a refused one causes no broadcast and no autosave**. **Two connections** sending the same id for two nodes: the first accepted, the second refused. After a `remove`, the id can be used again. **Load:** one id on three nodes (one of them shadowed) is dropped from all three, with one log line giving the count; a malformed id is dropped and logged, then a set-once `send` on that node is accepted; the healed document saves without the dropped ids | (c) skip the uniqueness check on `add`; (c2) allow the leaf when the node already has one; (c3) keep the id on the first of the duplicates |
+| E4 | server, port 0, two and three owner sessions plus a visitor: the first owner `hello` has `scriptHost: true, hostGen: 1`; the second owner's and the visitor's have `scriptHost: false` and no `hostGen`. **Handover:** closing the host sends the second owner `script-host` `active: true, hostGen: 2`, and nothing to the visitor. **The former host reconnects:** its new `hello` has `scriptHost: false` while the second holds the role. **No eligible session:** closing the last owner leaves no host, and the next owner `hello` gets `hostGen` 3. **Read-only policy:** no session is ever host. **Two worlds:** each has its own host and its own `hostGen`. **Identity-safe cleanup (M2):** the host is terminated by the keepalive sweep; a new connection takes the same session id; the first socket's late `close` arrives. The new session, its presence and the role assignment survive, exactly one handover happened, and `hostGen` is as expected | (d) hand over to the first session in the map without the `canEdit` check (the visitor gets it); (d2) keep `hostGen` unchanged on handover; (d3) clean up by id without the identity check |
+| E5 | protocol: valid and invalid `hello` (`scriptHost` missing refused; `scriptHost: true` without `hostGen` refused; `hostGen` with `scriptHost: false` refused; `hostGen` 0 and 2^53 refused) and `script-host` (each field missing, wrong type, out of range, extra field) | (e) drop `additionalProperties: false` from `script-host`; (e2) drop the `true`-requires-`hostGen` rule |
+| E6 | client, fake socket: `scriptHost` from `hello`; a malformed `hello` role treated as inactive; `script-host:changed` on `hello` and on a `script-host` message; **generations:** `active: true` with a `hostGen` not greater than any seen is ignored, `active: false` below the current one is ignored; a malformed message ignored; `active: false` honoured. **Loss of role (M4), each emitting `active: false` synchronously, before `connecting` or the close:** `connect()` superseding an active host; `disconnect()` then an immediate `connect()`; a connect timeout; the socket closing; three rapid world switches; a delayed `script-host` for an old record ignored. No event when the role wasn't active | (f) accept a lower `hostGen`; (f2) reset the role on supersession without emitting |
+| E7 | `object-identity`: `withNewObjectId` adds an id without touching other keys, replaces an existing one, and doesn't mutate its input. `edit-duplicate`: `prepareDuplicate` gives a new id; `prepareRestore` keeps the node's id; a malformed id refuses with the new message. Wiring guard (`app.js`): the palette, Model form, teleporter form and library paths pass through `withNewObjectId`; the retry and the structural re-add don't. **Undo and redo of each form's add** (Model, teleporter, library), through the undo engine with a fake client: the re-added descriptor carries the original id. **A refused re-add:** another node took the id meanwhile (a raw `add`); the Undo re-add is refused, and the undo engine reports it as it does any refused re-add | (g) `prepareDuplicate` keeps the original's id; (g2) the structural re-add gets a new id |
+| E8 | `hostStatusText`: host ("Script host: this tab"), non-host owner ("Script host: another tab or device"), visitor and disconnected (nothing). Wiring guard: `refreshHostStatus` is called on `script-host:changed`, `connecting`, `disconnected` and Edit on | (h) show the host text to a non-host |
 
 **Proofs:** commit first; break the file, run, record the failing test
 names, restore the file **from a saved copy, never with `git checkout`**,
@@ -546,17 +698,21 @@ In the local harness (`devtasks/harness/`):
    the client's SOM and on the server.
 2. **Duplicate gets a new id; Undo of a delete keeps it;** redo of an
    undone add keeps it. Repeat after a page reload (the 4a lesson).
-3. **The set-once leaf:** a raw `send` on a node without an id is accepted;
-   a second is refused with the server's message.
-4. **Two owner tabs:** the first shows "Behaviours run in this tab", the
-   second "Behaviours run in another tab or device". Close the first: the
-   second switches at once. Reopen the first: it shows the other-tab text.
-5. **A visitor** sees no host line, and its `hello` has `scriptHost: false`.
-6. **Saved:** restart the world server from its saved document. The ids are
+3. **The set-once leaf:** a raw `send` on a node of the harness world that has no
+   `extras.atrium` (the floor) is accepted, and a second is refused with the
+   server's message.
+4. **Two owner tabs:** the first shows "Script host: this tab", the second
+   "Script host: another tab or device". Close the first, and the second
+   switches at once. Reopen the first, and it shows the other-tab text.
+5. **Supersession:** the host tab switches worlds with a new connection.
+   `script-host:changed` `active: false` fires before `connecting`, and the
+   other owner tab becomes host.
+6. **A visitor** sees no host line, and its `hello` has `scriptHost: false`.
+7. **Saved:** restart the world server from its saved document. The ids are
    unchanged.
-7. **Load healing:** a world document with a duplicated id loads, keeps the
-   first, and logs once.
-8. **Regression:** §5.1 of scripting-4a (its checks 1–10 and round 2's and
+8. **Load healing:** a world document with one id on two nodes loads with
+   the id on neither, and logs once.
+9. **Regression:** §5.1 of scripting-4a (its checks 1–10 and round 2's and
    round 3's), library-sky's and edit-polish-3's.
 
 ## 6. DEV acceptance (operator, Firefox, hard reload, owner)
@@ -566,9 +722,10 @@ In the local harness (`devtasks/harness/`):
 2. **Duplicate the cube:** the copy has a different id. **Delete the copy,
    Undo:** the same id as before the delete.
 3. **Open the world in a second tab, signed in:**
-   - the first tab's Edit panel says "Behaviours run in this tab";
-   - the second says "…in another tab or device";
-   - close the first tab, and the second changes to "…in this tab".
+   - the first tab's Edit panel says "Script host: this tab";
+   - the second says "Script host: another tab or device";
+   - close the first tab, and the second changes to "Script host: this
+     tab".
 4. **A private window, as a visitor:** no host line.
 5. **Reload:** the ids are unchanged, and an animated model (4a) still plays.
 
@@ -578,10 +735,11 @@ specifics:
 - **Steps, one commit each:**
   1. E1 and the vectors file, E2 (the SOM) and E3 (the server's id rules
      and load healing);
-  2. E4 and E5: the script host and the schemas;
-  3. E6: the client's role state;
+  2. E4 and E5: identity-safe cleanup, the script host and the schemas;
+  3. E6: the client's role state and its synchronous loss signal;
   4. E7 and E8: the add paths, Duplicate and the panel line;
-  5. full suites, proofs (a)–(h) with (c2), (d2) and (g2), and the handoff.
+  5. full suites, proofs (a)–(h) with (b2), (b3), (c2), (c3), (d2), (d3),
+     (e2), (f2) and (g2), and the handoff.
 - **`--max-runtime 3h`.**
 - **A protocol and server round:** DEV restarts at the deploy.
 - **The front door, the kickoff and the release chain:** the scripting-4a
@@ -596,8 +754,14 @@ specifics:
   - it's called from the close handler (L1001) and from the keepalive sweep
     (L1018), which terminates a socket whose close handler then calls it
     again;
-  - only the first call finds the session in `presence`;
-  - so a handover placed inside that block runs once per departure.
+  - with E4's identity check (`sessions.get(s.id) === s`) first, only the
+    first call for a session object does anything, even if a new session
+    has taken the same id in between;
+  - so a handover placed after that check runs once per departure.
+- **E2's intermediate creation is for one path only.** Put it beside
+  `CREATABLE_PATHS`, as a separate list or an explicit check. Don't
+  generalize `resolvesThroughPlainObjects`, and keep 4a's tests for the
+  animation leaf unchanged.
 - **E3's uniqueness check reads the world as it is at the moment of the
   `add`.** Two `add`s with the same id in flight are serialized by the
   server's single message loop: the second sees the first.
@@ -633,8 +797,51 @@ specifics:
 - **D5's rule and D4's in practice;** the 4a items in the 4a passdown §6.1;
   the "refused write continues on `out`" consequence (S3) surfaced in the
   owner's log.
+- **Carried from the Rev 0 review:**
+  - **Ambiguity never retargets (S1).** Every id → name step goes through
+    E2's `resolveObjectId`. A behaviour whose `nodeMap` or `targets` entry
+    resolves `not-found`, `ambiguous` or `unaddressable` is disabled and
+    reported, never pointed at another object. B4 (a)'s healing makes a
+    duplicated id `not-found`.
+  - **The runner starts only when the world is ready (S5).** It's enabled
+    only while **both** the connection that holds the role is the current
+    one **and** that connection's world has loaded (`hello` arrives before
+    the `som-dump`). It's re-evaluated on world load, role change and
+    connection change.
+  - **Older clients and the role (S6).** A tab still running 4b-1's code
+    after 4b-2 deploys has no runner. 4b-2's server elects only sessions
+    whose `hello` declares a runner (for example
+    `capabilities.scriptRunner: 1`), so an old tab never holds the role.
+    4b-1 needs no change for this.
+  - **Duplicate remaps behaviour references (S7, design §4.9).** A copy
+    with a behaviour gets new ids for the copied object, and its `nodeMap`
+    and `targets` entries that named the original are rewritten to the
+    copy. Grants to other objects are kept only where the 4b-2 pre-brief
+    says so.
 
 ### 9.2 The adapter, as the spike supports it
+**The 4b-2 pre-brief turns this into a testable contract** (review S4):
+- **Exact limits, and what counts toward each:** steps per tick, pending
+  delays, graph bytes, nodes, variables, queued events and adapter-held
+  state.
+- **The pending-delay cap is enforced before a timer is scheduled:** a
+  budgeted `flow/setDelay` checks before calling the engine's own. The
+  spike's `pushScheduledDelay` runs only after `setTimeout`.
+- **An overrun disables the whole behaviour,** and its queued work and
+  pending sends are discarded.
+- **Cleanup covers everything a retired engine left:** event listeners,
+  interpolation callbacks and pending coalesced sends, not only timers.
+  Tests show every callback from a retired engine is inert.
+- **The cycle check is precise:** it refuses or bounds *synchronous* flow
+  cycles, and allows delayed or event-driven loops (an `every N seconds`
+  template is one).
+- **Acceptance gates:**
+  - a browser smoke test of the vendored engine through the import map;
+  - the malicious-loop probes (`devtasks/spike-4b/t1*.mjs`) against the
+    real adapter;
+  - teardown tests.
+
+The measures it supports:
 - **One engine per behaviour per load.** A change, a disable, a world reset
   or losing the host role disposes it and drops it; it's never ticked again
   (S2).
@@ -658,6 +865,31 @@ specifics:
   supports, as a conformance test (S5).
 
 ## 10. Review log
-- **Rev 0** (2026-10-23): drafted by Claude from the design, the step 4
-  pre-brief, the 4a passdown, code reading at `aa0702c8`, and the D2 spike
-  (§2.2). Open: B1–B6 and E-L1–E-L6.
+- **Rev 0** (2026-10-23, `0a8bff8e`): drafted by Claude from the design,
+  the step 4 pre-brief, the 4a passdown, code reading at `aa0702c8`, and
+  the D2 spike (§2.2). Open: B1–B6 and E-L1–E-L6.
+- **Rev 1** (2026-10-24): an outside review of Rev 0 (read-only, against
+  `0a8bff8e`; "revise before implementation"). Claude checked each finding
+  against the code; M1 was also probed. All are taken.
+
+| # | Finding | Severity | Where it went |
+|---|---|---|---|
+| M1 | The set-once leaf can't create `extras.atrium`, so it fails on most existing objects | Must-fix | **Confirmed by probe:** on a node with no `atrium`, `setPath` refuses even 4a's creatable animation path (`Path segment "atrium" resolved to null/undefined`). P4, E-L3, E2's one-path intermediate creation, tests and (b2) |
+| M2 | `cleanupSession` isn't identity-safe if a session id is reused | Must-fix | Confirmed by reading (L387–417, L1001, L1018). P5, E-L4, E4's identity check (a fix to existing behaviour), its own test and (d3) |
+| M3 | The lookup doesn't exclude external or shadowed nodes | Must-fix | Confirmed (`allNodes`; `copyNode` copies extras). P4b, B5 (a) rewritten into `objectIdInUse` and `resolveObjectId`, external nodes by identity, tests and (b3) |
+| M4 | No synchronous loss-of-role signal; supersession emits no `disconnected` | Must-fix | Confirmed (`connect()` L541–609). P6, E6's synchronous `active: false`, its invariant, tests and (f2) |
+| S1 | Healing can silently retarget a saved reference | Should-fix | **B4 (a) changed:** a duplicated id is dropped from every node that shares it, so a reference breaks loudly. §9.1 rule; (c3) |
+| S2 | Tighten the host schema and client checks | Should-fix | E5 (`scriptHost` required; `true` ⇔ `hostGen`; safe-integer range), E6 (the same checks on receipt; generations only increase); (e2) |
+| S3 | Identity tests at the real boundaries | Should-fix | E2–E3 and E7 tests: lazy ids on three `extras` shapes, concurrent ids, malformed then set-once, three-node duplicates with a shadowed name, no broadcast or autosave on refusal, Undo/redo per form, a refused re-add |
+| S4 | §9.2 needs a testable execution and resource contract | Should-fix | §9.2's list and acceptance gates, for the 4b-2 pre-brief |
+| S5 | The runner must wait for the world | Should-fix | §9.1 |
+| S6 | Older clients holding the role in 4b-2 | Should-fix | §9.1 (a runner capability for election) |
+| S7 | Duplicate must remap behaviour references | Should-fix | §9.1 |
+| N1 | Avatars may carry `{ ephemeral: true }` | Nit | P3 |
+| N2 | Log per id or per node; unescaped names | Nit | E3: one line per id with a count; names only through `JSON.stringify` |
+| N3 | Nothing runs in 4b-1, so "Behaviours run in this tab" overstates it | Nit | E-L6, E8, §5.1, §6: "Script host: this tab" / "…another tab or device" |
+| N4 | "Every failure but the last is adapter coverage" is too strong | Nit | S5 reworded as provisional |
+| N5 | Vendoring: licenses, pins, hashes | Nit | B2 (a) |
+
+The reviewer recommends (a) for all twelve decisions: B4, B5, E-L3 and E-L4
+as modified here, and B2 as confirming the choice, not production safety.
