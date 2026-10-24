@@ -4,9 +4,13 @@
 import { WebIO } from '@gltf-transform/core'
 import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions'
 import { SOMDocument, SOMEvent } from '@atrium/som'
+import { OBJECT_ID_FIELD } from './object-id.js'
 
 /** Z2a (scripting-4a) — the node extras leaf the model-animation controls write. */
 export const MODEL_ANIMATION_FIELD = 'extras.atrium.animation'
+
+/** E6 (scripting-4b-1) — the set-once object-identity leaf, re-exported. */
+export { OBJECT_ID_FIELD }
 
 // ---------------------------------------------------------------------------
 // Minimal EventEmitter — works in Node.js and browsers without a build step
@@ -109,6 +113,40 @@ function createClock() {
 }
 
 // ---------------------------------------------------------------------------
+// scripting-4b-1 E6 — the script-host role, as the client sees it
+// ---------------------------------------------------------------------------
+
+/** E5/E6 — a host generation: a safe integer >= 1, or nothing. */
+function isHostGeneration(v) {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 1
+}
+
+const INACTIVE_ROLE = Object.freeze({ active: false, hostGen: null })
+
+/**
+ * E6/E5 — the role a server `hello` carries, or null when its fields do not
+ * have the schema's shape. `scriptHost` must be a boolean; `hostGen` must be a
+ * safe integer >= 1 exactly when it is true, and ABSENT when it is false.
+ */
+function roleFromHello(msg) {
+  const active = msg?.scriptHost
+  if (typeof active !== 'boolean') return null
+  if (active) return isHostGeneration(msg.hostGen) ? { active: true, hostGen: msg.hostGen } : null
+  return Object.hasOwn(msg, 'hostGen') ? null : { active: false, hostGen: null }
+}
+
+/**
+ * E6/E5 — the role a `script-host` message carries, or null when malformed.
+ * All three fields are required, so a non-active message still carries a
+ * `hostGen` (the generation it refers to).
+ */
+function roleFromScriptHost(msg) {
+  const active = msg?.active
+  if (typeof active !== 'boolean') return null
+  return isHostGeneration(msg.hostGen) ? { active, hostGen: msg.hostGen } : null
+}
+
+// ---------------------------------------------------------------------------
 // AtriumClient
 // ---------------------------------------------------------------------------
 
@@ -184,6 +222,13 @@ export class AtriumClient extends EventEmitter {
     this.canPlaceTeleporters = false
     this.canEdit = false
     this._transmitName = null
+
+    // 4b-1 E6 — the script-host role this client believes it holds. Set ONLY
+    // from the server's `hello` and `script-host` messages; the client never
+    // decides the role itself.
+    this.scriptHost = { active: false, hostGen: null }
+    // E6 — a malformed `hello` role is "logged once", not once per message.
+    this._scriptHostRoleWarned = false
   }
 
   /**
@@ -539,6 +584,12 @@ export class AtriumClient extends EventEmitter {
    * @returns {string} sessionId
    */
   connect(wsUrl, { avatar, displayName, worldBaseUrl: optWorldBaseUrl } = {}) {
+    // 4b-1 E6 (M4) — the role is released SYNCHRONOUSLY, first thing, before
+    // this path does anything else — in particular before `connecting` is
+    // emitted below. The invariant: once a connection is abandoned, nothing
+    // listening for the role still believes it holds it.
+    this._releaseScriptHost()
+
     // ---- Bump world gen ----
     const gen = this._worldGen + 1
     this._worldGen = gen
@@ -621,6 +672,9 @@ export class AtriumClient extends EventEmitter {
       // one server session and a late answer from a superseded connection is
       // dropped by the existing `dispatch` guard.
       pendingEdits: new Map(),
+      // E6 (review N4) — the per-connection high-water mark for `hostGen`,
+      // beside `pendingEdits`, so a NEW connection starts from zero.
+      hostGenSeen: 0,
       gen,
     }
     this._connectionRecord = record
@@ -694,6 +748,7 @@ export class AtriumClient extends EventEmitter {
         case 'view':       this._onView(msg, record);              break
         case 'join':       this._onJoin(msg, record);              break
         case 'leave':      this._onLeave(msg, record);             break
+        case 'script-host': this._onScriptHost(msg, record);        break
         case 'tick':       /* ignored */                            break
         case 'pong':       this._onPong(msg, record);               break
         case 'error': {
@@ -718,6 +773,10 @@ export class AtriumClient extends EventEmitter {
       record.closing = true
       if (record.stale) return
       this._log('Connection closed')
+
+      // 4b-1 E6 (M4) — the socket's close is one of the paths that abandons a
+      // connection, so the role goes first, synchronously.
+      this._releaseScriptHost()
 
       // Handle both call shapes:
       //   ws package:  onClose(code: number, reason: string)
@@ -783,6 +842,9 @@ export class AtriumClient extends EventEmitter {
         // 2) Mark stale + closing so no late events from this record
         record.stale = true
         record.closing = true
+        // 4b-1 E6 (M4) — a connect timeout abandons the connection: the role
+        // goes first, synchronously, before the socket is closed below.
+        this._releaseScriptHost()
         // 3) Clear current-connection state
         this._connectionRecord = null
         this._connected = false
@@ -810,6 +872,12 @@ export class AtriumClient extends EventEmitter {
    * @param {string} [reason] - Optional reason for disconnect
    */
   disconnect(reason) {
+    // 4b-1 E6 (M4) — before anything else on this path, and in particular
+    // before the socket is closed below. `disconnect()`'s `disconnected` is
+    // deferred to a setTimeout (and skipped entirely when a newer connection
+    // exists by then), so a listener cannot rely on it to learn the role ended.
+    this._releaseScriptHost()
+
     const record = this._connectionRecord
     if (!record) {
       // Even without a connection record, clear local pointer state
@@ -929,6 +997,49 @@ export class AtriumClient extends EventEmitter {
   // Incoming message handlers
   // ---------------------------------------------------------------------------
 
+  /**
+   * 4b-1 E6 (M4) — the ONE place the role is given up. Called at the top of
+   * every path that ABANDONS the current connection: `connect()` superseding
+   * one, `disconnect()`, a connect timeout, and the socket's close.
+   *
+   * `canEdit` is reset together with the role, BEFORE the event (review N5):
+   * otherwise a listener reading both in the same tick sees an owner without the
+   * role and computes the other-tab text.
+   *
+   * When the role was NOT active the reset is quiet, with no event.
+   *
+   * @returns {boolean}  true when a signal was emitted
+   */
+  _releaseScriptHost() {
+    const wasActive = this.scriptHost?.active === true
+    this.scriptHost = { ...INACTIVE_ROLE }
+    this.canEdit = false
+    if (wasActive) this.emit('script-host:changed', { ...INACTIVE_ROLE })
+    return wasActive
+  }
+
+  /**
+   * 4b-1 E6 — a `script-host` message. The `dispatch` guard above already drops
+   * one for a stale or closing record; a malformed message is ignored here.
+   *
+   * PER CONNECTION, GENERATIONS ONLY INCREASE. The high-water mark lives on the
+   * connection record (review N4), so a new connection starts from zero:
+   *   - `active: true` is accepted only with a `hostGen` GREATER than any seen
+   *     on this connection;
+   *   - `active: false` only with a `hostGen` AT LEAST the current one;
+   *   - anything else is a late message from an earlier assignment, and is
+   *     ignored.
+   */
+  _onScriptHost(msg, record) {
+    const role = roleFromScriptHost(msg)
+    if (role === null) return
+    const seen = record.hostGenSeen ?? 0
+    if (role.active ? !(role.hostGen > seen) : !(role.hostGen >= seen)) return
+    record.hostGenSeen = role.hostGen
+    this.scriptHost = { active: role.active, hostGen: role.hostGen }
+    this.emit('script-host:changed', { ...this.scriptHost })
+  }
+
   async _onServerHello(msg, record) {
     if (record.stale || record.closing) return
     // Clear connect timeout — connection established (pre-brief #4)
@@ -963,6 +1074,19 @@ export class AtriumClient extends EventEmitter {
     // same value; the old name stays as an alias for one release.
     this.canPlaceTeleporters = msg.canPlaceTeleporters === true
     this.canEdit = msg.canEdit === true
+
+    // 4b-1 E6 — the role from `hello`, read with E5's rules and AFTER canEdit
+    // is set, so ONE listener covers both `hello` and `script-host`. A hello
+    // that fails is treated as inactive and logged once.
+    const role = roleFromHello(msg)
+    if (role === null && !this._scriptHostRoleWarned) {
+      this._scriptHostRoleWarned = true
+      console.warn('[AtriumClient] hello carries a malformed script-host role — treated as inactive')
+    }
+    this.scriptHost = role ?? { ...INACTIVE_ROLE }
+    if (role?.active) record.hostGenSeen = Math.max(record.hostGenSeen ?? 0, role.hostGen)
+    this.emit('script-host:changed', { ...this.scriptHost })
+
     this._connected = true
     console.log(`[AtriumClient] Session ${this._sessionId} (${this._displayName})`)
     this.emit('session:ready', {
@@ -1108,6 +1232,37 @@ export class AtriumClient extends EventEmitter {
       node: name,
       field: MODEL_ANIMATION_FIELD,
       value,
+    })
+    return seq
+  }
+
+  /**
+   * E6 (scripting-4b-1) — set a node's object id (the set-once leaf). Sends
+   * `{type:'send', node: name, field: 'extras.atrium.objectId', value: id}` and
+   * returns the request seq, exactly as `setModelAnimation` does.
+   *
+   * Nothing changes locally until the answer: on the own echo the client applies
+   * THE BROADCAST'S value, as 4a's Z2a does. A rejection or an unknown answer
+   * changes nothing.
+   *
+   * 4b-1 has NO UI caller; 4b-2's behaviour form is its first one.
+   *
+   * @param {string} name
+   * @param {string} id
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  setObjectId(name, id) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._sendSeq
+    this.lastSendSeq = seq
+    this._trackEdit(seq, { type: 'send', node: name, field: OBJECT_ID_FIELD, value: id })
+    this._wsSend({
+      type: 'send',
+      seq,
+      node: name,
+      field: OBJECT_ID_FIELD,
+      value: id,
     })
     return seq
   }
@@ -1333,6 +1488,17 @@ export class AtriumClient extends EventEmitter {
         if (target) this._som.setPath(target, MODEL_ANIMATION_FIELD, msg.value)
       })
       this.emit('som:set', { nodeName: edit.node, path: MODEL_ANIMATION_FIELD, value: msg.value })
+    }
+
+    // 4b-1 E6 (S-A) — the THIRD case, exactly 4a's Z2a pattern: the set-once
+    // object id. Without it a `send` of the leaf would reach the server and
+    // every OTHER client, but never the sender's own SOM.
+    if (edit.type === 'send' && edit.field === OBJECT_ID_FIELD) {
+      this.applyLocally(() => {
+        const target = this._som?.getObjectByName?.(edit.node) ?? null
+        if (target) this._som.setPath(target, OBJECT_ID_FIELD, msg.value)
+      })
+      this.emit('som:set', { nodeName: edit.node, path: OBJECT_ID_FIELD, value: msg.value })
     }
 
     this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit })

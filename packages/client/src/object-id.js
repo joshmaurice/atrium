@@ -52,6 +52,9 @@ function defaultRandomUUID() {
   return globalThis.crypto.randomUUID()
 }
 
+/** E-L3 — the set-once node extras leaf the id is written through. */
+export const OBJECT_ID_FIELD = 'extras.atrium.objectId'
+
 /**
  * E1 — a new id. `crypto.randomUUID()`'s output always passes
  * `objectIdProblem`. The source is a parameter so a test can pin it.
