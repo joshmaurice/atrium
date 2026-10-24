@@ -40,7 +40,7 @@
 import { MODEL_LIMITS, createWorldLedger, sha256Hex, createJobDeadline, createSharedTasks, createTransferLimiter } from '@atrium/client/model-fetch'
 import { validateModelHost as defaultValidateModelHost, resolveModelUrl } from '@atrium/client/model-spec'
 import { templateKey, createTemplateCache, createTextureBudget, disposeTemplate, parseTemplate } from './model-parse.js'
-import { buildInstance, buildPlaceholder, disposeInstance, PLACEHOLDER_COLOURS } from './model-instances.js'
+import { buildInstance, buildPlaceholder, disposeInstance, refreshPlacedInstance, PLACEHOLDER_COLOURS } from './model-instances.js'
 
 /** L8 — the most model nodes one world renders (A10: in `som.allNodes` order). */
 export const MODEL_INSTANCE_LIMIT = 256
@@ -772,7 +772,17 @@ export function createModelBridge(deps = {}) {
 
   // ── attaching (A9) ─────────────────────────────────────────────────────
 
-  /** Everything is re-checked HERE, at the moment of attaching. */
+  /**
+   * Everything is re-checked HERE, at the moment of attaching.
+   *
+   * W1 (round 3) — an attach can happen before the first render (Duplicate and
+   * Undo select the new node at once), so the instance is left with current
+   * transforms and no bounds cached from the template. Every path that puts a
+   * wrapper in a host goes through here: the first attach, a re-attach after a
+   * world change and a re-host on `attachView`. The call ORDER of the bridge is
+   * unchanged — `setStatus`, `settle`, `onInstanceCreated`, `attachOrWait` — so
+   * the animation layer's first pose is already set when this runs.
+   */
   function attach(record) {
     if (!currentView) return false
     if (record.worldGeneration !== worldGeneration) return false
@@ -787,6 +797,8 @@ export function createModelBridge(deps = {}) {
     record.attachedGeneration = currentView.generation
     record.viewGeneration = currentView.generation
     host.add(record.wrapper)
+    // W1 (round 3) — the wrapper just went in, possibly before the first render.
+    refreshPlacedInstance(record.wrapper)
     return true
   }
 

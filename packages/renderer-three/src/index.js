@@ -16,7 +16,7 @@ export {
   rewriteGltfJson, createUrlModifier, revokeBlobs, objectUrlApi, countVertices, disposeTemplate, measureBounds,
 } from './model-parse.js'
 export {
-  buildInstance, buildPlaceholder, disposeInstance, retargetClip,
+  buildInstance, buildPlaceholder, disposeInstance, retargetClip, refreshPlacedInstance,
   MODEL_WRAPPER_FLAG, MODEL_NAME_KEY, PLACEHOLDER_COLOURS,
 } from './model-instances.js'
 export {

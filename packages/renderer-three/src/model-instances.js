@@ -140,6 +140,47 @@ export function buildInstance(template, { cloneFn = skeletonClone } = {}) {
   return { wrapper, scene: instanceScene, clips, clipIndices, animationNames, droppedTracks, removedAttachments }
 }
 
+/**
+ * W1 (round 3) — the bridge's placement refresh: make a just-attached instance's
+ * transforms current, and drop the bounds it may have cached from the template.
+ *
+ * Why this exists (DEV acceptance of round 2, W1/W2): `SkinnedMesh` caches
+ * `boundingBox` and `boundingSphere` the first time they are needed, computed
+ * from the CURRENT bone and bind matrices — `getVertexPosition` →
+ * `applyBoneTransform` reads each bone's `matrixWorld`, then `bindMatrixInverse`.
+ * That cache is kept until something sets it back to `null`, and `raycast` and
+ * `Box3.setFromObject` (so the `BoxHelper` outline) both use it. But
+ * `bindMatrixInverse` is refreshed only in `SkinnedMesh.updateMatrixWorld`, which
+ * the renderer calls each frame; `Box3.expandByObject` calls `updateWorldMatrix`
+ * instead, which does not. Duplicate and Undo select the new node at once
+ * (`selectAddedNode`), and a template already parsed is built and attached in the
+ * same task, BEFORE the first render — so the outline caches a box computed from
+ * the template's stale matrices. Wrong in orientation and position, and a click
+ * against it misses. It only shows on a `SkinnedMesh`, which is why the static
+ * library never showed it, and only after a reload, because before one the Model
+ * form's Check measures the template and leaves its matrices current.
+ *
+ * The order matters: the host chain above the wrapper first
+ * (`updateWorldMatrix(true, false)`), then every descendant — bones and each
+ * `SkinnedMesh`'s `bindMatrixInverse` included (`updateMatrixWorld(true)`) — and
+ * only then are the cached bounds dropped, so the next use recomputes them from
+ * those fresh matrices. A placeholder or a mesh without a skeleton is untouched
+ * apart from the first two steps: its bounds come from its geometry and were
+ * never wrong.
+ *
+ * @param {object} wrapper the instance's wrapper, already in its host
+ */
+export function refreshPlacedInstance(wrapper) {
+  if (!wrapper?.updateWorldMatrix) return
+  wrapper.updateWorldMatrix(true, false)
+  wrapper.updateMatrixWorld(true)
+  wrapper.traverse((object) => {
+    if (!object.isSkinnedMesh) return
+    object.boundingBox = null
+    object.boundingSphere = null
+  })
+}
+
 /** Z6 — the placeholder: an unnamed wireframe box whose base sits on origin. */
 export function buildPlaceholder(bounds = null) {
   const size = Array.isArray(bounds) && bounds.length === 3 ? bounds : [1, 1, 1]
