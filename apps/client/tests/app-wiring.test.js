@@ -305,3 +305,110 @@ describe('Z7 — refreshSpawnNote() is called from every listed site', () => {
     assert.match(source, /Near the spawn point: arriving visitors may land on this pad \(it won\\?'t fire until they step off\)/)
   })
 })
+
+// ===========================================================================
+// E7 — every new object gets an id, through ONE helper (scripting-4b-1)
+// ===========================================================================
+
+describe('E7 — the add paths pass through withNewObjectId', () => {
+  const code = () => stripComments(source)
+
+  /** The body of `anchor.addEventListener('<event>', … => { … })`, by brace counting. */
+  function listenerBody(anchor, event) {
+    const at = source.indexOf(`${anchor}.addEventListener('${event}'`)
+    assert.ok(at >= 0, `app.js registers ${anchor}'s ${event} listener`)
+    const open = source.indexOf('{', at)
+    let depth = 0
+    for (let i = open; i < source.length; i++) {
+      if (source[i] === '{') depth++
+      else if (source[i] === '}') { depth--; if (depth === 0) return source.slice(open + 1, i) }
+    }
+    return assert.fail(`${anchor}'s listener body is balanced`)
+  }
+
+  test('app.js imports the one helper', () => {
+    assert.match(source, /import \{ withNewObjectId \} from '\.\/object-identity\.js'/)
+  })
+
+  test('the palette add stamps the built primitive descriptor', () => {
+    const body = flatten(listenerBody('epPalette', 'click'))
+    assert.match(body, /withNewObjectId\(buildPrimitiveDescriptor\(/)
+    assert.match(body, /client\.addNode\(descriptor\)/, 'the stamped descriptor is what is sent')
+  })
+
+  test('the Model form, the teleporter form and the library all stamp their addNode deps', () => {
+    const deps = code().match(/addNode: \(descriptor\) => client\.addNode\(withNewObjectId\(descriptor\)\)/g) ?? []
+    assert.equal(deps.length, 3, `expected the three form deps, found ${deps.length}`)
+  })
+
+  test('there are exactly four call sites: the palette and the three deps', () => {
+    const calls = code().match(/withNewObjectId\(/g) ?? []
+    assert.equal(calls.length, 4, `expected four call sites, found ${calls.length}`)
+  })
+
+  test('the palette RETRY does not stamp: it reuses the recorded descriptor', () => {
+    const body = flatten(functionBody('retryAdd'))
+    assert.doesNotMatch(body, /withNewObjectId/)
+    assert.match(body, /\{ \.\.\.request\.descriptor, name \}/, 'the first attempt’s descriptor, id included')
+    assert.match(body, /client\.addNode\(descriptor\)/, 'the sent descriptor is the recorded one')
+  })
+
+  test('the structural re-add (Undo and redo) does not stamp', () => {
+    const at = code().indexOf('client.addNode(request.descriptor)')
+    assert.ok(at >= 0, 'the undo engine’s own re-add calls client.addNode directly')
+    const before = code().slice(Math.max(0, at - 120), at)
+    assert.doesNotMatch(before, /withNewObjectId/, 'the re-add is not wrapped')
+  })
+
+  test('Duplicate is not stamped in app.js: edit-duplicate.js owns that', () => {
+    const body = flatten(listenerBody('epDuplicate', 'click'))
+    assert.doesNotMatch(body, /withNewObjectId/)
+    assert.match(body, /client\.addNode\(check\.descriptor\)/)
+  })
+
+  test('the palette retry predicate is exactly /already in use/ (S-B)', () => {
+    // The id refusal is "objectId is already taken in this world", which this
+    // predicate never matches — so a palette add refused for its id is NOT
+    // retried. packages/server's E3 test pins the message itself.
+    assert.match(code(), /\/already in use\/\.test\(message \?\? ''\)/)
+  })
+})
+
+// ===========================================================================
+// E8 — the Edit panel's host line (scripting-4b-1)
+// ===========================================================================
+
+describe('E8 — refreshHostStatus() and the host line', () => {
+  test('the line exists in the page and has ONE writer', () => {
+    assert.match(html, /id="ep-host-status"/)
+    const writes = source.match(/epHostStatus\.textContent\s*=/g) ?? []
+    assert.equal(writes.length, 1, `expected one writer of #ep-host-status, found ${writes.length}`)
+  })
+
+  test('refreshHostStatus() reads the three facts through the pure helper', () => {
+    const body = flatten(functionBody('refreshHostStatus'))
+    assert.match(body, /hostStatusText\(\{/)
+    assert.match(body, /connected:\s*client\.connected === true/)
+    assert.match(body, /canEdit:\s*client\.canEdit === true/)
+    assert.match(body, /scriptHost:\s*client\.scriptHost/)
+  })
+
+  for (const [site, find] of [
+    ['script-host:changed', () => handlers('script-host:changed').find((body) => body.includes('refreshHostStatus()'))],
+    ['connecting',          () => handlers('connecting').find((body) => body.includes('refreshHostStatus()'))],
+    ['disconnected',        () => handlers('disconnected').find((body) => body.includes('refreshHostStatus()'))],
+  ]) {
+    test(`${site} refreshes the line`, () => {
+      const body = find()
+      assert.ok(body, `${site}: the site was found`)
+      assert.match(flatten(body), /refreshHostStatus\(\)/)
+    })
+  }
+
+  test('Edit mode turning on refreshes the line', () => {
+    const body = flatten(functionBody('setEditMode'))
+    assert.match(body, /if \(on\) \{ if \(!canEditNow\(\) \|\| modes\.edit\) return refreshHostStatus\(\)/,
+      'refreshed in the `on` branch, before the panel is shown')
+  })
+})
+

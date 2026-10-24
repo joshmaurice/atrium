@@ -37,6 +37,8 @@ import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-d
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
+import { withNewObjectId } from './object-identity.js'   // scripting-4b-1 E7
+import { hostStatusText } from './host-status.js'        // scripting-4b-1 E8
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -757,6 +759,7 @@ client.on('connecting', () => {
   endEditSession()
   teardownWorld()
   setConnectionState('connecting')
+  refreshHostStatus()
   // Clear teleporter state (T4)
   avatarReady = false
   readySessionId = null // V8: clear ready session on new connect
@@ -792,6 +795,7 @@ client.on('disconnected', () => {
   endEditSession()
   teardownWorld()
   setConnectionState('disconnected')
+  refreshHostStatus()
   // A9 — the same world reset the connecting path takes.
   modelBridge.resetWorld()
   modelAnimations?.clear()
@@ -810,6 +814,9 @@ client.on('disconnected', () => {
   const url = worldUrlInput.value.trim()
   if (url) { beginNewWorld(); client.loadWorld(url) }
 })
+
+// scripting-4b-1 E8 — the role changing hands is the line's main event.
+client.on('script-host:changed', () => { refreshHostStatus() })
 
 client.on('error', (err) => {
   console.error(`[app] client error: connected=${client.connected} message="${err.message}"`, err)
@@ -1444,6 +1451,7 @@ epTeleporter.addEventListener('click', () => {
 
 const editToggleBtn  = document.getElementById('edit-toggle-btn')
 const editPanel      = document.getElementById('edit-panel')
+const epHostStatus   = document.getElementById('ep-host-status')
 const epModes        = document.getElementById('ep-modes')
 const epSpaceBtn     = document.getElementById('ep-space')
 const epSnapGrid     = document.getElementById('ep-snap-grid')
@@ -1624,9 +1632,21 @@ function updateEditControls() {
   if (!allowed && modes.edit) setEditMode(false)
 }
 
+// scripting-4b-1 E8 (E-L6) — the ONE writer of the Edit panel's host line. The
+// text is a pure function of the three facts, so a test reads it without a DOM.
+function refreshHostStatus() {
+  if (!epHostStatus) return
+  epHostStatus.textContent = hostStatusText({
+    connected:  client.connected === true,
+    canEdit:    client.canEdit === true,
+    scriptHost: client.scriptHost ?? null,
+  })
+}
+
 function setEditMode(on) {
   if (on) {
     if (!canEditNow() || modes.edit) return
+    refreshHostStatus()
     modes.setEdit(true)
     if (document.pointerLockElement) document.exitPointerLock()
     ensureGizmo()
@@ -2288,7 +2308,9 @@ epPalette.addEventListener('click', (e) => {
   const forward = new THREE.Vector3()
   stage.camera.getWorldDirection(forward)
   const { position, rotation } = palettePlacement(origin, forward.toArray())
-  const descriptor = buildPrimitiveDescriptor({ kind, name, position, rotation })
+  // E7 — every new object carries a permanent id. The stamped descriptor is
+  // what the structure tracker records, so the retry reuses it unchanged.
+  const descriptor = withNewObjectId(buildPrimitiveDescriptor({ kind, name, position, rotation }))
   let seq
   try {
     seq = client.addNode(descriptor)
@@ -3072,7 +3094,7 @@ modelForm = createModelForm({
     // string where `firstFreeName` wants the suffix *function*, so every Save
     // threw `TypeError: suffix is not a function`.
     firstFreeName: (text) => modelName(text, isNameFree),
-    addNode: (descriptor) => client.addNode(descriptor),
+    addNode: (descriptor) => client.addNode(withNewObjectId(descriptor)),
     structureBegin: (seq, pending) => structure.begin('add', seq, pending),
     undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
     refreshActions: () => refreshEditActions(),
@@ -3112,7 +3134,7 @@ teleporterForm = createTeleporterForm({
     resolveDestination: (dest) => resolveWorldAddress(dest, currentWorldUrl),
     teleporterName: () => teleporterName(isNameFree),
     buildDescriptor: buildTeleporterDescriptor,
-    addNode: (descriptor) => client.addNode(descriptor),
+    addNode: (descriptor) => client.addNode(withNewObjectId(descriptor)),
     structureBegin: (seq, pending) => structure.begin('add', seq, pending),
     undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
     refreshActions: () => refreshEditActions(),
@@ -3235,7 +3257,7 @@ libraryGrid = createLibraryGrid({
       return palettePlacement(origin, forward.toArray())
     },
     storedUrl: (path) => storedUrl(path, client.worldBaseUrl ?? null, window.location.origin),
-    addNode: (descriptor) => client.addNode(descriptor),
+    addNode: (descriptor) => client.addNode(withNewObjectId(descriptor)),
     structureBegin: (seq, pending) => structure.begin('add', seq, pending),
     undoRegisterAdd: (seq, entry) => undo.registerAdd(seq, entry),
     selectNode: (name) => selectAdded(name),

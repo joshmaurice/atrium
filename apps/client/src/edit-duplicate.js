@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import { modelExtrasProblem, modelReasonText } from '@atrium/client/model-spec'
+import { objectIdProblem } from '@atrium/client/object-id'
+import { withNewObjectId } from './object-identity.js'
 
 /**
  * edit-duplicate.js — whether a node can be duplicated, and the `add`
@@ -76,6 +78,11 @@ function atriumProblem(extras) {
   if (!Object.hasOwn(extras, 'atrium')) return null
   const atrium = extras.atrium
   if (!isPlainObject(atrium)) return 'extras.atrium is not an object'
+  // scripting-4b-1 E7 — a legacy id the server would refuse is refused here,
+  // with its own message, rather than sent and refused.
+  if (Object.hasOwn(atrium, 'objectId') && objectIdProblem(atrium.objectId) !== null) {
+    return 'its object id is malformed'
+  }
   if (Object.hasOwn(atrium, 'teleporter')) {
     const tp = atrium.teleporter
     if (!isPlainObject(tp)) return 'its teleporter data is not an object'
@@ -270,7 +277,9 @@ export function duplicateRuleProblem(node) {
 export function prepareDuplicate(node, { name }) {
   const problem = duplicateRuleProblem(node)
   if (problem) return problem
-  const descriptor = buildDescriptor(node, name, DUPLICATE_OFFSET_X)
+  // E7 — the copy never carries the original's id. prepareRestore does not do
+  // this: a restore brings back the same object.
+  const descriptor = withNewObjectId(buildDescriptor(node, name, DUPLICATE_OFFSET_X))
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   return { ok: true, descriptor, bytes }

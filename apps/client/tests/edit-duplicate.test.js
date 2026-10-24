@@ -98,6 +98,9 @@ function cubeMesh(opts = {}) {
 }
 
 const NAME = 'Cube copy'
+// scripting-4b-1 E7 — the copy always carries a fresh v4 id.
+const ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 function expectRule(n, rule) {
   const r = prepareDuplicate(n, { name: NAME })
   assert.equal(r.ok, false, `expected refusal by ${rule}`)
@@ -318,7 +321,9 @@ test('a palette-style primitive is eligible; its copy equals it but for name and
   assert.deepStrictEqual(d.mesh.primitives[0].indices, Array.from(p.getIndices().getArray()))
   assert.deepStrictEqual(d.mesh.primitives[0].material,
     { pbrMetallicRoughness: { baseColorFactor: [0.8, 0.8, 0.8, 1], metallicFactor: 0, roughnessFactor: 0.8 } })
-  assert.equal('extras' in d, false, 'empty extras are not sent')
+  // scripting-4b-1 E7 — the copy carries exactly one extras key: its own new id.
+  assert.deepStrictEqual(Object.keys(d.extras), ['atrium'], 'the copy carries only its new id')
+  assert.match(d.extras.atrium.objectId, V4, 'a fresh, valid id')
   assert.ok(Array.isArray(d.mesh.primitives[0].attributes.POSITION), 'plain arrays, not typed arrays')
 })
 
@@ -329,14 +334,21 @@ test('(review #2) an eligible copy keeps everything the contract promises', () =
   })
   const d = prepareDuplicate(n, { name: NAME }).descriptor
   assert.equal(d.mesh.name, 'CrateMesh')
-  assert.deepStrictEqual(d.extras, { __atrium_visible: false, note: { deep: [1, 2] } })
+  // scripting-4b-1 E7 — the node's own keys survive; the copy gains its own id.
+  assert.deepStrictEqual(d.extras, {
+    __atrium_visible: false, note: { deep: [1, 2] }, atrium: { objectId: d.extras.atrium.objectId },
+  })
+  assert.match(d.extras.atrium.objectId, V4)
 })
 
 test('a teleporter pad is eligible; its copy keeps the destination as a deep copy', () => {
   const extras = { atrium: { teleporter: { destination: '/worlds/a/b' } } }
   const n = node({ mesh: cubeMesh(), extras })
   const d = prepareDuplicate(n, { name: 'teleporter-x copy' }).descriptor
-  assert.deepStrictEqual(d.extras, extras)
+  // scripting-4b-1 E7 — the copy's id is its own; every other extras key is kept.
+  assert.equal(d.extras.atrium.teleporter.destination, '/worlds/a/b')
+  assert.match(d.extras.atrium.objectId, V4)
+  assert.deepStrictEqual(Object.keys(d.extras.atrium).sort(), ['objectId', 'teleporter'])
   d.extras.atrium.teleporter.destination = '/elsewhere'
   assert.equal(extras.atrium.teleporter.destination, '/worlds/a/b', 'the original is untouched')
 })
@@ -391,17 +403,25 @@ function expectRestoreRule(n, rule) {
   return r
 }
 
-test('Y2: restore equals the copy but for the name and the translation, bit for bit', () => {
+test('Y2: restore equals the copy but for the name, the translation and the copy’s own id', () => {
   const n = node({ mesh: cubeMesh(), extras: { __atrium_visible: false } })
   const copy = prepareDuplicate(n, { name: 'Cube copy' })
   const restore = prepareRestore(n)
   assert.equal(restore.ok, true)
   assert.equal(restore.descriptor.name, 'Cube', 'the node’s own name')
   assert.deepStrictEqual(restore.descriptor.translation, n._n.translation, 'its own translation')
+  // scripting-4b-1 E7 — the copy always carries a NEW id; the restore brings the
+  // node back exactly, so it has none (the node had none).
+  assert.match(copy.descriptor.extras.atrium.objectId, V4, 'the copy has its own id')
+  assert.deepStrictEqual(restore.descriptor.extras, { __atrium_visible: false },
+    'the restore kept the node’s own extras, with no id added')
+  assert.equal(Object.hasOwn(restore.descriptor.extras, 'atrium'), false)
+  assert.deepStrictEqual(copy.descriptor.extras,
+    { __atrium_visible: false, atrium: { objectId: copy.descriptor.extras.atrium.objectId } })
   // everything else is exactly the copy’s
   assert.deepStrictEqual(
-    { ...restore.descriptor, name: null, translation: null },
-    { ...copy.descriptor, name: null, translation: null })
+    { ...restore.descriptor, name: null, translation: null, extras: null },
+    { ...copy.descriptor, name: null, translation: null, extras: null })
   assert.equal(restore.descriptor.mesh.primitives[0].material.roughnessFactor,
     copy.descriptor.mesh.primitives[0].material.roughnessFactor)
 })
@@ -476,3 +496,51 @@ test('the copy is a fresh object: changing it never reaches the source', () => {
   assert.deepStrictEqual(n._n.rotation, [0, 0, 0, 1])
   assert.deepStrictEqual(n._n.scale, [1, 1, 1])
 })
+
+// ── scripting-4b-1 E7 ───────────────────────────────────────────────────────
+
+test('E7: prepareDuplicate gives the copy a NEW id, never the original’s', () => {
+  const n = node({ mesh: cubeMesh(), extras: { atrium: { objectId: ID } } })
+  const r = prepareDuplicate(n, { name: NAME })
+  assert.equal(r.ok, true)
+  assert.match(r.descriptor.extras.atrium.objectId, V4, 'a fresh, valid id')
+  assert.notEqual(r.descriptor.extras.atrium.objectId, ID, 'never the original’s')
+})
+
+test('E7: prepareDuplicate gives an id even when the original has none', () => {
+  const r = prepareDuplicate(node({ mesh: cubeMesh() }), { name: NAME })
+  assert.equal(r.ok, true)
+  assert.match(r.descriptor.extras.atrium.objectId, V4)
+})
+
+test('E7: prepareRestore KEEPS the node’s id — it brings back the same object', () => {
+  const n = node({ mesh: cubeMesh(), extras: { atrium: { objectId: ID } } })
+  const r = prepareRestore(n)
+  assert.equal(r.ok, true)
+  assert.equal(r.descriptor.extras.atrium.objectId, ID)
+})
+
+test('E7: prepareRestore shares the node’s exact extras, id included', () => {
+  const n = node({ extras: { displayName: 'Cube one', atrium: { objectId: ID, ephemeral: true } } })
+  const r = prepareRestore(n)
+  assert.deepStrictEqual(r.descriptor.extras, { displayName: 'Cube one', atrium: { objectId: ID, ephemeral: true } })
+})
+
+test('E7: a malformed existing id is refused with its own message', () => {
+  for (const bad of ['not-a-uuid', '', 'F47AC10B-58CC-4372-A567-0E02B2C3D479', ID + '\n', 42, null]) {
+    const r = prepareDuplicate(node({ extras: { atrium: { objectId: bad } } }), { name: NAME })
+    assert.equal(r.ok, false, `${JSON.stringify(bad)} is refused`)
+    assert.equal(r.rule, 'atrium')
+    assert.match(r.reason, /its object id is malformed/)
+    // Duplicate refuses it too: the same rule guards both
+    const s = prepareRestore(node({ extras: { atrium: { objectId: bad } } }))
+    assert.equal(s.ok, false)
+    assert.match(s.reason, /its object id is malformed/)
+  }
+})
+
+test('E7: a valid existing id is not refused by the rule', () => {
+  assert.equal(prepareDuplicate(node({ extras: { atrium: { objectId: ID } } }), { name: NAME }).ok, true)
+  assert.equal(prepareRestore(node({ extras: { atrium: { objectId: ID } } })).ok, true)
+})
+
