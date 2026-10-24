@@ -1,7 +1,16 @@
 # Pre-brief: Phase 3 step 4b — behaviours, owner-present: the plan (4b-1, 4b-2), the engine spike, and 4b-1 (identity and the script host) in detail
 
-Status: **Rev 2 (2026-10-24), ready for the operator's decisions.**
-Decisions B1–B6 and E-L1–E-L6 are open, each with a recommendation.
+Status: **FINAL, Revision 2.1 (2026-10-24). Decisions B1–B6 and E-L1–E-L6
+approved by the operator (2026-10-24 01:48 PT), all as recommended in Rev
+2:**
+- B1 (a): 4b is two rounds, 4b-1 then 4b-2;
+- **B2 (a): the Khronos engine is confirmed as the choice,** with the OK to
+  vendor it and `gl-matrix` in 4b-2 under N5's terms. Its production safety
+  is 4b-2's acceptance gates (§9.2);
+- B3 (a), B4 (a) as revised in Rev 1, B5 (a) as revised in Rev 1 and Rev 2,
+  and B6 as listed;
+- E-L1 (a), E-L2 as proposed, E-L3 (a), E-L4 (a), E-L5 (a) and E-L6 (a).
+- **Rev 2.1 changes only this status line** (as 4a's Rev 1.2 did).
 - **Rev 2 applies a second outside review, of Rev 1** ("not FINAL as Rev 1,
   but close"; no must-fix, 5 should-fix, 8 nits). Claude checked each code
   claim. All are taken.
@@ -1052,3 +1061,6 @@ as modified here, and B2 as confirming the choice, not production safety.
 | §3 | The deferred items: S6 is a `hello.client.json` change; flag what's decided here, not in the design | — | §9.1 |
 
 Every recommendation stands, and nothing changed a decision.
+- **Rev 2.1** (2026-10-24 01:48 PT): the operator approved every decision as
+  recommended. Only the status line changed. **4b-1's kickoff is written
+  from the commit that carries this revision,** which is its base.
