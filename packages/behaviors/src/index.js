@@ -10,3 +10,6 @@ export {
   createBehaviorEngine, loadBehavior, installBudgetedLoops, NodeEventBus,
   BudgetExceeded, STEP_BUDGET, LOG_MESSAGE_MAX,
 } from './adapter.js'
+export {
+  createBehaviorRunner, SEND_FRAME_MS, SEND_KEYS_MAX, LOG_LINES_MAX,
+} from './runner.js'
