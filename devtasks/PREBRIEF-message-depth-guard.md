@@ -1,8 +1,8 @@
 # Pre-brief: a depth bound on every WebSocket message, and a fail-closed handler (security)
 
-Status: **DRAFT, Revision 0 (2026-10-25), for the operator's approval.** Nothing
-here is in force until the operator confirms decisions G1–G5 (§3).
-**Priority: before 4b-2 continues.** This affects PROD today.
+Status: **FINAL, Revision 0 (2026-10-25).** The operator confirmed decisions
+G1–G5 (§3) on 2026-10-25 at 14:52 PT, together with §5's proposed log line for
+each refusal. **Priority: before 4b-2 continues.** This affects PROD today.
 
 **Inputs:**
 - the second outside review of scripting-4b-2 (2026-10-25), finding **N3**:
@@ -155,9 +155,10 @@ it.**
 
 ## 5. Open questions for the brief author / critic
 - Is 64 right? The brief should cite §6.2's measurement.
-- Should the depth guard also log, as a line per refusal, so the operator
-  can see attempts in the journal? (Proposed: yes, one line with the session
-  id and the message type, rate-limited by the existing per-session limits.)
+- **Settled by the operator:** the depth guard logs one line per refusal
+  (the session id if there is one, the message's `type` if it's readable,
+  and the measured depth capped at the limit), so attempts show in the
+  journal. The existing per-session limits apply; no new rate limiter.
 
 ## 6. Test expectations
 
