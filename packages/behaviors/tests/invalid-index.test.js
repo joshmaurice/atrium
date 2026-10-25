@@ -12,10 +12,15 @@
 //     least one op this round refuses. Its cases, if any, must be refused too.
 //   behavior-invalid/cases.json — every invalid case with a readable graph, so
 //     the 100%-refused claim is not vacuous.
+//
+//   behavior-invalid/LICENSE-CC-BY-4.0.txt — the assets' own licence, copied
+//     byte for byte (R2: CC BY 4.0 needs attribution; the NOTICE entry and this
+//     guard are what record it).
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,6 +29,8 @@ import { behaviorCheck, BEHAVIOR_OPS } from '../src/behavior-spec.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SUBSET = JSON.parse(readFileSync(resolve(__dirname, '../../../tests/fixtures/behavior-invalid/index.json'), 'utf8'))
 const CASES = JSON.parse(readFileSync(resolve(__dirname, '../../../tests/fixtures/behavior-invalid/cases.json'), 'utf8'))
+const LICENSE_BYTES = readFileSync(resolve(__dirname, '../../../tests/fixtures/behavior-invalid/LICENSE-CC-BY-4.0.txt'))
+const NOTICE = readFileSync(resolve(__dirname, '../../../NOTICE'), 'utf8')
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const asValue = (graph) => ({
@@ -57,5 +64,28 @@ describe('F3 — the Khronos invalid-graph index', () => {
       assert.equal(typeof check.problem, 'string', `${entry.id} has a code`)
       assert.equal(typeof check.message, 'string', `${entry.id} has a message`)
     }
+  })
+})
+
+// R2 — the checked-in fixtures are derived from Khronos' CC BY 4.0 assets, so
+// attribution is a condition of shipping them. This guard pins the NOTICE entry
+// and the licence text that must sit beside them.
+
+describe('R2 — attribution for the Khronos-derived fixtures', () => {
+  test('NOTICE names the fixtures\' folder and the CC BY 4.0 licence', () => {
+    assert.match(NOTICE, /tests\/fixtures\/behavior-invalid\//, 'NOTICE names the fixtures folder')
+    assert.match(NOTICE, /CC BY 4\.0/, 'NOTICE names the licence')
+    assert.match(NOTICE, /creativecommons\.org\/licenses\/by\/4\.0\//, 'NOTICE links the licence')
+    assert.match(NOTICE, /KhronosGroup\/glTF-Test-Assets-Interactivity/, 'NOTICE names the source')
+    assert.match(NOTICE, /926bec45dfbe052bad4013ab5852ed2f4042bff5/, 'NOTICE names the pinned commit')
+    assert.match(NOTICE, /Khronos Group and Needle/, 'NOTICE carries the credit')
+  })
+
+  test('the licence text sits beside the fixtures, byte for byte', () => {
+    assert.match(LICENSE_BYTES.toString('utf8'), /Creative Commons Attribution 4\.0 International Public License/,
+      'LICENSE-CC-BY-4.0.txt is the CC BY 4.0 text')
+    assert.equal(createHash('sha256').update(LICENSE_BYTES).digest('hex'),
+      'c8041334a99cb48852b2139253cbde5f8ac87e27f124aed51223e0d5bf0080eb',
+      'the licence is the source\'s copy at 926bec45, byte for byte')
   })
 })

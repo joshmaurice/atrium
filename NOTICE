@@ -18,6 +18,18 @@ Vendored under packages/vendor/gl-matrix/ (the esm/ folder and LICENSE.md),
 copied byte-for-byte from the published npm tarball.
 https://github.com/toji/gl-matrix
 --------------------------------------------------------------------------------
+KhronosGroup/glTF-Test-Assets-Interactivity — the invalid-graph fixtures
+Copyright (c) 2025, The Khronos Group and Needle.
+Licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+Source: https://github.com/KhronosGroup/glTF-Test-Assets-Interactivity
+        commit 926bec45dfbe052bad4013ab5852ed2f4042bff5, Tests/Interactivity/invalid/
+Derived files, checked in under tests/fixtures/behavior-invalid/ (cases.json and
+index.json; written by packages/behaviors/scripts/build-invalid-subset.mjs): the
+KHR_interactivity JSON of each invalid case was extracted from its glTF file and
+collected into those two files. No graph was edited. The source licence ships
+beside them as tests/fixtures/behavior-invalid/LICENSE-CC-BY-4.0.txt.
+--------------------------------------------------------------------------------
 
 Each vendored package's full licence text ships beside its sources, as
 packages/vendor/<package>/LICENSE and packages/vendor/<package>/LICENSE.md.
