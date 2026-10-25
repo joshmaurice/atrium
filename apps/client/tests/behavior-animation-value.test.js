@@ -120,18 +120,23 @@ test('V3 — interval-animation: the adapter\'s own timer plays, and the value i
   const { client, runner, state } = setup([node])
 
   // The interval timer is the adapter's own, with the real clock: F1's floor is
-  // one second, so this is the shortest wait the contract allows.
-  const deadline = Date.now() + 3000
-  while (client.animations.length === 0 && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-    state.clock += 100
-    runner.tick()
+  // one second, so this is the shortest wait the contract allows. `dispose()` in
+  // a `finally` matters: a failing assertion must not leave the timer live, or
+  // the file would never exit.
+  try {
+    const deadline = Date.now() + 3000
+    while (client.animations.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      state.clock += 100
+      runner.tick()
+    }
+    assert.equal(client.animations.length, 1, 'the interval fired')
+    const sent = client.animations[0].value
+    assert.deepEqual(Object.keys(sent), [...ANIMATION_KEYS])
+    assert.equal(animationValueProblem(sent), null, 'the server would accept it')
+  } finally {
+    runner.dispose()
   }
-  assert.equal(client.animations.length, 1, 'the interval fired')
-  const sent = client.animations[0].value
-  assert.deepEqual(Object.keys(sent), [...ANIMATION_KEYS])
-  assert.equal(animationValueProblem(sent), null, 'the server would accept it')
-  runner.dispose()
 })
 
 // ── V5 — the adapter's clip check, end to end through `clipsFor` ───────────
@@ -160,11 +165,14 @@ test('V5 — a clip that is not on a LOADED model is refused, and nothing is sen
   assert.equal(client.animations.length, 0, 'the clip is not on the model: nothing was sent')
   assert.ok(runner.log.some((l) => l.message.includes('Walk')), `the log says why: ${JSON.stringify(runner.log)}`)
 
-  // The same graph with a clip the model HAS goes out.
-  node.extras.atrium.behavior = templateGraph('select-animation', { target: OWN, clip: 'Idle', action: 'play', loop: true }, { ownId: OWN })
-  client.emit('som:set', { nodeName: 'foz', path: 'extras.atrium.behavior', value: node.extras.atrium.behavior })
-  runner.select(node)
-  runOnce({ runner, state })
-  assert.equal(client.animations.length, 1, 'a real clip is sent')
-  runner.dispose()
+  try {
+    // The same graph with a clip the model HAS goes out.
+    node.extras.atrium.behavior = templateGraph('select-animation', { target: OWN, clip: 'Idle', action: 'play', loop: true }, { ownId: OWN })
+    client.emit('som:set', { nodeName: 'foz', path: 'extras.atrium.behavior', value: node.extras.atrium.behavior })
+    runner.select(node)
+    runOnce({ runner, state })
+    assert.equal(client.animations.length, 1, 'a real clip is sent')
+  } finally {
+    runner.dispose()
+  }
 })

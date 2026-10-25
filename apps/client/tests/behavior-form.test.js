@@ -36,7 +36,7 @@ function makeNode({ name, id = null, model = null, light = null, behavior }) {
   return node
 }
 
-function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
+function setup({ nodes = [], selected = null, status = {}, clips = {}, gate = null } = {}) {
   const elements = elementsFor()
   const calls = { setObjectId: [], sendField: [] }
   const applied = new Map()          // seq → { name, id } a setObjectId asked for
@@ -58,7 +58,7 @@ function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
     clearError: () => {},
     logLines: () => [],
   }
-  const form = createBehaviorForm({ elements, deps })
+  const form = createBehaviorForm({ elements, deps, gate })
   /**
    * F9/V10 — an accepted `setObjectId` is applied to its node by the CLIENT's
    * own echo (`client.setObjectId`'s tracked send), before the form sees
@@ -684,7 +684,8 @@ test('V13 — opening the Behaviour section never closes the gate\'s current for
   gate.register('model', () => closed.push('model'))
   gate.register('teleporter', () => closed.push('teleporter'))
   const node = makeNode({ name: 'crate', id: OWN })
-  const { form } = setup({ nodes: [node], selected: node })
+  const { form } = setup({ nodes: [node], selected: node, gate })
+  form.wire()                        // app.js wires the form, so `register` runs
 
   for (const owner of ['library', 'model', 'teleporter']) {
     gate.claim(owner)                  // claiming closes the PREVIOUS holder: expected
