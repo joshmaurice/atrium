@@ -86,7 +86,10 @@ export function templateGraph(id, params, { ownId } = {}) {
       const { nodeMap, targets } = mapsFor(target, ownId)
       const nodes = params.action === 'toggle'
         ? [
-            { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(1) } },
+            // onSelect flows to the WRITE node, not to pointer/get: `pointer/get`
+            // has no input flow (it is a value source, pulled by its consumer),
+            // so a flow to it is dropped and the toggle would never run.
+            { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(3) } },
             pointerGet(VIS('[n]'), T.bool),
             { op: 'math/not', values: { a: { node: 1, socket: 'value' } } },
             pointerSet(VIS('[n]'), T.bool, { node: 2, socket: 'value' }),
@@ -137,7 +140,9 @@ export function templateGraph(id, params, { ownId } = {}) {
     case 'select-light': {
       const { nodeMap, targets } = mapsFor(target, ownId)
       const nodes = [
-        { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(1) } },
+        // onSelect flows to the branch (a flow node), not to pointer/get: a
+        // value source has no input flow and the flow to it would be dropped.
+        { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(3) } },
         pointerGet(LIGHT('[n]'), T.float),
         { op: 'math/gt', values: { a: { node: 1, socket: 'value' }, b: lit(T.float, 0) } },
         {

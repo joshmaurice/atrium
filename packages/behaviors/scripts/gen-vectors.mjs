@@ -8,6 +8,7 @@ import { validateInteractivityGraph } from '@khronosgroup/gltf-interactivity-eng
 const OWN = '11111111-1111-4111-8111-111111111111'
 const TGT = '22222222-2222-4222-8222-222222222222'
 const clone = (v) => JSON.parse(JSON.stringify(v))
+const to = (node, socket = 'in') => ({ node, socket })
 
 const tpl = (id, params) => templateGraph(id, params, { ownId: OWN })
 
@@ -80,6 +81,33 @@ addOk('template: interval-animation', interval)
   const v = clone(animPlay)
   v.animations = Array.from({ length: 8 }, () => ({ object: TGT, clip: 'Idle', loop: true }))
   addOk('boundary: animations 8', v)
+}
+// The operator's note (2026-10-25), item 3: the two accepted boundaries that ARE
+// reachable. 64 graph nodes must pass the validator with a forward-only DAG.
+{
+  const v = clone(visHide)
+  v.graph.declarations = [
+    { op: 'event/onSelect', extension: 'KHR_node_selectability' },
+    { op: 'debug/log' },
+  ]
+  const nodes = [{ ...clone(v.graph.nodes[0]), declaration: 0, flows: { out: to(1) } }]
+  for (let i = 1; i <= 63; i++) {
+    nodes.push({
+      declaration: 1,
+      configuration: { message: { value: ['hi'] }, severity: { value: [0] } },
+      ...(i < 63 ? { flows: { out: to(i + 1) } } : {}),
+    })
+  }
+  v.graph.nodes = nodes
+  addOk('boundary: 64 graph nodes', v)
+}
+{
+  // 16 types: the four the templates use keep their indices, and the rest are
+  // `custom` signatures — the validator refuses DUPLICATE builtin signatures,
+  // but repeated `custom` ones are allowed (operator's note, item 3).
+  const v = clone(animPlay)
+  v.graph.types = [...v.graph.types, ...Array.from({ length: 12 }, () => ({ signature: 'custom' }))]
+  addOk('boundary: 16 types', v)
 }
 
 // --- refusals ----------------------------------------------------------------
@@ -302,6 +330,21 @@ addBad('the value is not an object', 'behavior-type', 42)
   const v = clone(animPlay)
   v.graph.nodes[1].declaration = 99
   addBad('a node whose declaration index is out of range', 'behavior-graph', v)
+}
+{
+  // The back-edge case, with allowed ops only: a flow from a later node to an
+  // earlier one. It passes every F1 rule and is refused by the validator with
+  // "output flow must point to a later node". This replaces r1's
+  // sequence -> sequence case (flow/sequence is not in F-L4).
+  const v = clone(visHide)
+  v.graph.declarations = [{ op: 'debug/log' }]
+  const logNode = (flows) => ({
+    declaration: 0,
+    configuration: { message: { value: ['hi'] }, severity: { value: [0] } },
+    ...(flows ? { flows } : {}),
+  })
+  v.graph.nodes = [logNode({ out: to(1) }), logNode({ out: to(2) }), logNode({ out: to(1) })]
+  addBad('a back edge (a flow to an earlier node)', 'behavior-graph', v)
 }
 {
   const v = clone(animPlay); v.graph = 'not an object'

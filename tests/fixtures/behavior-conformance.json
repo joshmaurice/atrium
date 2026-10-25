@@ -1,0 +1,6 @@
+{
+  "description": "F11 — the 4b-2 conformance subset: every Khronos conformance asset whose declarations are ALL in F-L4's op allowlist, from glTF-Test-Assets-Interactivity @ 926bec45. EMPTY in practice: every conformance asset uses at least one op this round refuses (event/onStart, variable/*, flow/sequence, …), so nothing survives the filter. Regenerate with `KHRONOS_ASSETS=… node packages/behaviors/scripts/conformance.mjs`.",
+  "source": "glTF-Test-Assets-Interactivity @ 926bec45dfbe052bad4013ab5852ed2f4042bff5",
+  "total": 156,
+  "expected": []
+}

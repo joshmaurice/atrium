@@ -1,0 +1,11 @@
+{
+  "description": "The 4b-2 subset of the Khronos invalid-graph index: every case whose declarations are ALL in F-L4's op allowlist. Empty in practice — every invalid case uses at least one op this round refuses; see `skipped`. The full readable set is in cases.json.",
+  "source": "glTF-Test-Assets-Interactivity @ 926bec45dfbe052bad4013ab5852ed2f4042bff5",
+  "total": 187,
+  "skipped": {
+    "opOutsideAllowlist": 180,
+    "notJson": 0,
+    "noGraph": 7
+  },
+  "cases": []
+}
