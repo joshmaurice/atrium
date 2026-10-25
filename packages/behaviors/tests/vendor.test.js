@@ -29,13 +29,18 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const VENDOR_DIR = resolve(REPO_ROOT, 'packages/vendor')
+// scripting-4b-2 round 4 (U1): the vendored packages moved one level up — out of
+// the removed nested `vendor/` subdirectory under `packages/` — and VENDORED.md
+// moved to the repo root. Their rows name files relative to packages/, and every
+// hash is unchanged.
+const PACKAGES_DIR = resolve(REPO_ROOT, 'packages')
+const VENDORED_MD = resolve(REPO_ROOT, 'VENDORED.md')
 
 const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex')
 
-/** Every `| <file> | <bytes> | <sha256> |` row of VENDORED.md. */
+/** Every `| <file> | <bytes> | <sha256> |` row of VENDORED.md (relative to packages/). */
 function vendoredRows() {
-  const text = readFileSync(resolve(VENDOR_DIR, 'VENDORED.md'), 'utf-8')
+  const text = readFileSync(VENDORED_MD, 'utf-8')
   const rows = []
   for (const line of text.split('\n')) {
     const match = /^\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*([0-9a-f]{64})\s*\|\s*$/.exec(line)
@@ -85,7 +90,7 @@ describe('F3 — VENDORED.md lists every vendored file with its hash', () => {
     test(`${row.file} matches its recorded bytes and sha256`, () => {
       let bytes
       try {
-        bytes = readFileSync(resolve(VENDOR_DIR, row.file))
+        bytes = readFileSync(resolve(PACKAGES_DIR, row.file))
       } catch {
         assert.fail(`VENDORED.md lists ${row.file}, which is not on disk`)
       }

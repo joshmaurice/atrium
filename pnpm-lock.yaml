@@ -30,10 +30,10 @@ importers:
     dependencies:
       '@khronosgroup/gltf-interactivity-engine':
         specifier: workspace:*
-        version: link:../vendor/gltf-interactivity-engine
+        version: link:../gltf-interactivity-engine
       gl-matrix:
         specifier: workspace:*
-        version: link:../vendor/gl-matrix
+        version: link:../gl-matrix
 
   packages/client:
     dependencies:
@@ -57,11 +57,19 @@ importers:
         specifier: ^8.0.0
         version: 8.19.0
 
+  packages/gl-matrix: {}
+
   packages/gltf-extension:
     dependencies:
       '@gltf-transform/core':
         specifier: ^4.0.0
         version: 4.3.0
+
+  packages/gltf-interactivity-engine:
+    dependencies:
+      gl-matrix:
+        specifier: workspace:*
+        version: link:../gl-matrix
 
   packages/interaction:
     dependencies:
@@ -110,7 +118,7 @@ importers:
         version: 4.3.0
       '@khronosgroup/gltf-interactivity-engine':
         specifier: workspace:*
-        version: link:../vendor/gltf-interactivity-engine
+        version: link:../gltf-interactivity-engine
       argon2:
         specifier: ^0.45.1
         version: 0.45.1
@@ -129,14 +137,6 @@ importers:
       '@gltf-transform/extensions':
         specifier: ^4.3.0
         version: 4.3.0
-
-  packages/vendor/gl-matrix: {}
-
-  packages/vendor/gltf-interactivity-engine:
-    dependencies:
-      gl-matrix:
-        specifier: workspace:*
-        version: link:../gl-matrix
 
   tools/protocol-inspector: {}
 

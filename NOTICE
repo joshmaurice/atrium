@@ -7,14 +7,14 @@ This product includes software developed by third parties.
 @khronosgroup/gltf-interactivity-engine 1.1.0
 Copyright (c) 2023-2025 The Khronos Group Inc.
 Licensed under the Apache License, Version 2.0.
-Vendored under packages/vendor/gltf-interactivity-engine/ (build/index.js and
+Vendored under packages/gltf-interactivity-engine/ (build/index.js and
 LICENSE), copied byte-for-byte from the published npm tarball.
 https://github.com/KhronosGroup/glTF-InteractivityGraph-AuthoringTool
 --------------------------------------------------------------------------------
 gl-matrix 3.4.4
 Copyright (c) 2015-2024 Brandon Jones, Colin MacKenzie IV.
 Licensed under the MIT License.
-Vendored under packages/vendor/gl-matrix/ (the esm/ folder and LICENSE.md),
+Vendored under packages/gl-matrix/ (the esm/ folder and LICENSE.md),
 copied byte-for-byte from the published npm tarball.
 https://github.com/toji/gl-matrix
 --------------------------------------------------------------------------------
@@ -32,6 +32,6 @@ beside them as tests/fixtures/behavior-invalid/LICENSE-CC-BY-4.0.txt.
 --------------------------------------------------------------------------------
 
 Each vendored package's full licence text ships beside its sources, as
-packages/vendor/<package>/LICENSE and packages/vendor/<package>/LICENSE.md.
+packages/<package>/LICENSE and packages/<package>/LICENSE.md.
 Versions, tarballs and the sha256 of every vendored file are recorded in
-packages/vendor/VENDORED.md.
+VENDORED.md at the repo root.
