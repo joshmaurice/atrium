@@ -84,19 +84,24 @@ export function templateGraph(id, params, { ownId } = {}) {
     case 'select-visibility': {
       const show = params.action !== 'hide'
       const { nodeMap, targets } = mapsFor(target, ownId)
+      // The pointer's `[n]` literal is the target's own nodeMap index: 1 for the
+      // usual [own, target], and 0 when the target IS the behaviour node (a
+      // self-toggle), where a literal 1 would be out of range and F1 would
+      // refuse the template's own output.
+      const n = nodeMap.indexOf(target)
       const nodes = params.action === 'toggle'
         ? [
             // onSelect flows to the WRITE node, not to pointer/get: `pointer/get`
             // has no input flow (it is a value source, pulled by its consumer),
             // so a flow to it is dropped and the toggle would never run.
             { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(3) } },
-            pointerGet(VIS('[n]'), T.bool),
+            pointerGet(VIS('[n]'), T.bool, n),
             { op: 'math/not', values: { a: { node: 1, socket: 'value' } } },
-            pointerSet(VIS('[n]'), T.bool, { node: 2, socket: 'value' }),
+            pointerSet(VIS('[n]'), T.bool, { node: 2, socket: 'value' }, n),
           ]
         : [
             { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(1) } },
-            pointerSet(VIS('[n]'), T.bool, lit(T.bool, show)),
+            pointerSet(VIS('[n]'), T.bool, lit(T.bool, show), n),
           ]
       return finish('select-visibility', params, {
         graph: buildGraph(nodes),
@@ -139,19 +144,20 @@ export function templateGraph(id, params, { ownId } = {}) {
 
     case 'select-light': {
       const { nodeMap, targets } = mapsFor(target, ownId)
+      const n = nodeMap.indexOf(target)
       const nodes = [
         // onSelect flows to the branch (a flow node), not to pointer/get: a
         // value source has no input flow and the flow to it would be dropped.
         { op: 'event/onSelect', configuration: onSelectConfiguration(), flows: { out: to(3) } },
-        pointerGet(LIGHT('[n]'), T.float),
+        pointerGet(LIGHT('[n]'), T.float, n),
         { op: 'math/gt', values: { a: { node: 1, socket: 'value' }, b: lit(T.float, 0) } },
         {
           op: 'flow/branch',
           values: { condition: { node: 2, socket: 'value' } },
           flows: { true: to(4), false: to(5) },
         },
-        pointerSet(LIGHT('[n]'), T.float, lit(T.float, 0)),
-        pointerSet(LIGHT('[n]'), T.float, lit(T.float, params.intensity)),
+        pointerSet(LIGHT('[n]'), T.float, lit(T.float, 0), n),
+        pointerSet(LIGHT('[n]'), T.float, lit(T.float, params.intensity), n),
       ]
       return finish('select-light', params, {
         graph: buildGraph(nodes),
@@ -191,19 +197,19 @@ function eventConfiguration(index) {
   return { event: { value: [index] } }
 }
 
-function pointerGet(pointer, type) {
+function pointerGet(pointer, type, n = 1) {
   return {
     op: 'pointer/get',
     configuration: { pointer: { value: [pointer] }, type: { value: [type] } },
-    values: { n: lit(T.int, 1) },
+    values: { n: lit(T.int, n) },
   }
 }
 
-function pointerSet(pointer, type, value) {
+function pointerSet(pointer, type, value, n = 1) {
   return {
     op: 'pointer/set',
     configuration: { pointer: { value: [pointer] }, type: { value: [type] } },
-    values: { n: lit(T.int, 1), value },
+    values: { n: lit(T.int, n), value },
   }
 }
 

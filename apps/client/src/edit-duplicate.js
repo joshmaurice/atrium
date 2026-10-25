@@ -4,6 +4,8 @@
 import { modelExtrasProblem, modelReasonText } from '@atrium/client/model-spec'
 import { objectIdProblem } from '@atrium/client/object-id'
 import { withNewObjectId } from './object-identity.js'
+import { newObjectId } from '@atrium/client/object-id'
+import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
 
 /**
  * edit-duplicate.js — whether a node can be duplicated, and the `add`
@@ -91,6 +93,13 @@ function atriumProblem(extras) {
   }
   const modelProblem = modelExtrasProblem(extras)
   if (modelProblem) return `its model data would be refused (${modelReasonText(modelProblem)})`
+  // scripting-4b-2 F10 — the behaviour leaf is checked here too, with F1, so a
+  // copy (or a restore) of a malformed behaviour is refused with its own text
+  // rather than sent and refused by the server.
+  if (Object.hasOwn(atrium, 'behavior') && atrium.behavior !== null) {
+    const check = behaviorCheck(atrium.behavior, { ownId: atrium.objectId })
+    if (check.problem) return `its behaviour is malformed (${check.message})`
+  }
   return null
 }
 
@@ -266,6 +275,40 @@ export function duplicateRuleProblem(node) {
 }
 
 /**
+ * F10 (scripting-4b-2) — the copy's SELF-references. Every `nodeMap`, `targets`
+ * and `animations[].object` entry equal to the original's id becomes the copy's
+ * new id, and `template.params.target` with it (Rev 2, M3), so reopening the
+ * copy's form and saving unchanged keeps the copy as its own target. Every other
+ * entry is a GRANT the owner made, and is kept as it is (F-L10). Pure.
+ *
+ * @param {object} behavior   the `extras.atrium.behavior` value
+ * @param {string} fromId     the original's object id
+ * @param {string} toId       the copy's new object id
+ * @returns {object}          a copy of `behavior` (the input is never mutated)
+ */
+export function remapBehaviorTargets(behavior, fromId, toId) {
+  if (behavior == null || typeof behavior !== 'object' || !fromId || !toId) return behavior
+  const swap = (id) => (id === fromId ? toId : id)
+  const copy = structuredClone(behavior)
+  if (Array.isArray(copy.nodeMap)) copy.nodeMap = copy.nodeMap.map(swap)
+  if (Array.isArray(copy.targets)) copy.targets = copy.targets.map(swap)
+  if (Array.isArray(copy.animations)) copy.animations = copy.animations.map((entry) => (entry && typeof entry === 'object' ? { ...entry, object: swap(entry.object) } : entry))
+  if (copy.template && typeof copy.template === 'object' && copy.template.params && typeof copy.template.params === 'object') {
+    copy.template = { ...copy.template, params: { ...copy.template.params, target: swap(copy.template.params.target) } }
+  }
+  return copy
+}
+
+/** The descriptor, with the copy's behaviour remapped, if it carries one. */
+function withRemappedBehavior(descriptor, fromId, toId) {
+  const atrium = descriptor.extras?.atrium
+  if (!atrium || typeof atrium !== 'object' || !Object.hasOwn(atrium, 'behavior')) return descriptor
+  const behavior = remapBehaviorTargets(atrium.behavior, fromId, toId)
+  if (behavior === atrium.behavior) return descriptor
+  return { ...descriptor, extras: { ...descriptor.extras, atrium: { ...atrium, behavior } } }
+}
+
+/**
  * Can this node be duplicated, and if so, what does the copy look like?
  * Rules 1–9 of N3, in order; the first that fails is reported.
  *
@@ -279,7 +322,10 @@ export function prepareDuplicate(node, { name }) {
   if (problem) return problem
   // E7 — the copy never carries the original's id. prepareRestore does not do
   // this: a restore brings back the same object.
-  const descriptor = withNewObjectId(buildDescriptor(node, name, DUPLICATE_OFFSET_X))
+  const originalId = node.getExtras()?.atrium?.objectId
+  const copyId = newObjectId()
+  const built = buildDescriptor(node, name, DUPLICATE_OFFSET_X)
+  const descriptor = withRemappedBehavior(withNewObjectId(built, () => copyId), originalId, copyId)
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   return { ok: true, descriptor, bytes }

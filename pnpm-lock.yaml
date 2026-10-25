@@ -10,6 +10,9 @@ importers:
 
   apps/client:
     dependencies:
+      '@atrium/behaviors':
+        specifier: workspace:*
+        version: link:../../packages/behaviors
       '@atrium/client':
         specifier: workspace:*
         version: link:../../packages/client

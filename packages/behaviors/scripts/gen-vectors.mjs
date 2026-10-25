@@ -27,6 +27,10 @@ const animSelf = tpl('select-animation', { target: OWN, clip: 'Idle', action: 'p
 const prox = tpl('proximity-animation', { target: TGT, clip: 'Walk', loop: true, radius: 3 })
 const light = tpl('select-light', { target: TGT, intensity: 2.5 })
 const interval = tpl('interval-animation', { target: TGT, clip: 'Idle', loop: true, seconds: 30 })
+// The degenerate self-target: nodeMap is [own] and the pointer's `[n]` literal
+// is 0. A hard-coded 1 would be out of range here and F1 would refuse the
+// template's own output.
+const visSelf = tpl('select-visibility', { target: OWN, action: 'toggle' })
 
 addOk('template: select-visibility hide', visHide)
 addOk('template: select-visibility show', visShow)
@@ -37,6 +41,7 @@ addOk('template: select-animation on its own node', animSelf)
 addOk('template: proximity-animation', prox)
 addOk('template: select-light', light)
 addOk('template: interval-animation', interval)
+addOk('template: select-visibility on its own node', visSelf)
 
 // --- boundaries that are legal ----------------------------------------------
 {

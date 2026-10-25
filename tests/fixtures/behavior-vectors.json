@@ -1105,6 +1105,141 @@
       }
     },
     {
+      "name": "template: select-visibility on its own node",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "pointer/get"
+            },
+            {
+              "op": "math/not"
+            },
+            {
+              "op": "pointer/set"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "nodeIndex": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "stopPropagation": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 3,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/nodes/[n]/extensions/KHR_node_visibility/visible"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                }
+              }
+            },
+            {
+              "declaration": 2,
+              "values": {
+                "a": {
+                  "node": 1,
+                  "socket": "value"
+                }
+              }
+            },
+            {
+              "declaration": 3,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/nodes/[n]/extensions/KHR_node_visibility/visible"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "value": {
+                  "node": 2,
+                  "socket": "value"
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111"
+        ],
+        "targets": [],
+        "animations": [],
+        "template": {
+          "id": "select-visibility",
+          "params": {
+            "target": "11111111-1111-4111-8111-111111111111",
+            "action": "toggle"
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      }
+    },
+    {
       "name": "boundary: clip 300 characters",
       "value": {
         "kind": "graph",
