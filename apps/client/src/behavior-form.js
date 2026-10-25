@@ -124,6 +124,16 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
   const text = (element, value) => { if (element) element.textContent = value ?? '' }
 
+  /**
+   * V1 — a form field's `data-field`, written as a PROPERTY of the live
+   * `dataset` map (`field.dataset.field = …`), never by assigning `dataset`
+   * itself: `DOMStringMap` has only a getter, and
+   * `field.dataset = { … }` throws `TypeError` in a real page (round 5 §1.2
+   * item 1). Every `dataset` write in this file obeys that rule, and
+   * `behavior-wiring.test.js` guards it for the whole of `apps/client/src`.
+   */
+  const setDataField = (element, field) => { if (element) element.dataset.field = field }
+
   // -------------------------------------------------------------------------
   // Reading the SOM
   // -------------------------------------------------------------------------
@@ -159,12 +169,20 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     return (id ? deps.clipIds?.(id) : null) ?? []
   }
 
+  /**
+   * V11 — a node's value in the target picker: its own id, or `name:<name>` for
+   * a node that has none yet (Save gives it one first). The picker's option
+   * values and `state.targetId` are always the same string, so the select and
+   * the form can never disagree.
+   */
+  const pickerValue = (node) => (node ? (node.extras?.atrium?.objectId ?? `name:${node.name}`) : null)
+
   // -------------------------------------------------------------------------
   // Open / close
   // -------------------------------------------------------------------------
 
   function defaultsFor(id, target) {
-    const params = { target: target?.extras?.atrium?.objectId ?? null }
+    const params = { target: pickerValue(target) }
     for (const key of TEMPLATE_FIELDS[id]) {
       if (key === 'target') continue
       if (key === 'action') params.action = TEMPLATE_ACTIONS[id][0]
@@ -218,7 +236,13 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       state.params = {}
       state.targetId = null
     }
-    gate?.claim(name)
+    // V13 — the Behaviour section is NOT one of the gate's mutually exclusive
+    // forms: it is part of the Edit panel and is shown with every selection, so
+    // opening it must never close the library grid, the Model form or the
+    // destination form. `gate.claim(name)` used to run on every refresh (which
+    // closed the grid after a library placement — library-sky's c23/c4), and
+    // `close()` no longer releases, because nothing was ever claimed.
+    // `setEditMode(false)` closes the section explicitly instead.
     render()
   }
 
@@ -227,7 +251,6 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     state.node = null
     // M4 — closing ends any Save sequence in flight.
     bump()
-    gate?.release(name)
     render()
   }
 
@@ -261,8 +284,15 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       state.params = {}
       state.targetId = null
     } else {
-      state.params = defaultsFor(id, deps.selected?.())
-      state.targetId = state.params.target
+      // V11 — the default target is one this template can actually use: the
+      // selected node when the template's picker offers it, otherwise the
+      // list's first entry. An empty list leaves `targetId` null, and Save is
+      // disabled, so the wrong kind of target is never sent.
+      const list = pickable()
+      const selectedNode = deps.selected?.() ?? null
+      const chosen = (selectedNode && list.includes(selectedNode)) ? selectedNode : (list[0] ?? null)
+      state.params = defaultsFor(id, chosen)
+      state.targetId = state.params.target ?? null
     }
     render()
   }
@@ -291,12 +321,29 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   // The Save sequence (M4)
   // -------------------------------------------------------------------------
 
+  /**
+   * V10 — the snapshot's TARGET object, checked before every stage: still in
+   * the SOM (`deps.nodes()` contains it), and carrying the id the snapshot
+   * expects — none before the stage that gives it one, that id after. The
+   * target is never looked up again, by name or by id, so a target that is
+   * removed and replaced by a node of the same name, or one whose id changes
+   * underneath, cancels the sequence instead of following the impostor (the
+   * outside review's M7).
+   */
+  function targetAsRecorded(snapshot) {
+    if (!snapshot.target) return true
+    const nodes = deps.nodes?.() ?? []
+    if (!nodes.includes(snapshot.target)) return false
+    const liveId = snapshot.target.extras?.atrium?.objectId ?? null
+    return liveId === (snapshot.targetOwnId ?? null)
+  }
+
   function aliveAsRecorded(snapshot) {
     const node = deps.selected?.()
     return state.open
       && state.generation === snapshot.generation
       && node === snapshot.node
-      && (snapshot.targetId === null || nodeById(snapshot.targetId) !== null || snapshot.snapshotTargetExists === false)
+      && targetAsRecorded(snapshot)
   }
 
   function dispatchStage(snapshot) {
@@ -314,13 +361,16 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
         return
       }
       snapshot.nodeId = id
+      // V11 — the target may BE the behaviour node: its id is this one, and
+      // stage 2 must not give the same node a second id.
+      if (snapshot.target === snapshot.node) snapshot.targetOwnId = id
       state.pending = { seq, stage: 1, generation: snapshot.generation }
       render()
       return
     }
 
-    // Stage 2 — the target's own id, if it has none yet.
-    if (snapshot.targetName && !snapshot.targetOwnId) {
+    // Stage 2 — the target's own id, if it has none yet and is another node.
+    if (snapshot.targetName && !snapshot.targetOwnId && snapshot.target !== snapshot.node) {
       const id = deps.newObjectId?.()
       let seq
       try { seq = deps.write?.setObjectId?.(snapshot.targetName, id) } catch (error) {
@@ -361,6 +411,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     if (!state.open || !state.node || state.saving) return null
     if (!state.custom && state.template === NONE_LABEL) return null
     const target = targetNode()
+    // V11 — a template is never saved without a usable target: an empty picker
+    // (the light template in a world with no lights) leaves Save disabled.
+    if (!state.custom && !state.targetId) return null
     const snapshot = {
       generation: state.generation,
       node: state.node,
@@ -368,10 +421,12 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       nodeId: ownId(),
       targetId: state.targetId,
       targetName: target?.name ?? null,
-      targetOwnId: target?.extras?.atrium?.objectId ?? null,
-      // A target the picker offered but the SOM has since lost: stage 1 still
-      // runs (the id the node got is harmless), nothing further does.
-      snapshotTargetExists: target !== null,
+      // V10 — the target's SOM node object, kept for the whole sequence, and
+      // its id as it is expected to be: the one it has, or none yet.
+      target,
+      targetOwnId: target
+        ? (target === state.node ? (ownId() ?? null) : (target.extras?.atrium?.objectId ?? null))
+        : null,
       template: state.template,
       params: { ...state.params },
       custom: state.custom,
@@ -402,13 +457,20 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     return seq
   }
 
+  /**
+   * V2 (M6, S1) — Enabled is a real `<button>`, so its listener is `click`
+   * (see `wire`), it never carries `.checked`, and the label is the state.
+   *
+   * It is available for a template's value AND for a Custom graph, as F9 says
+   * ("Enabled and Remove only"): the stored value is REWRITTEN with `enabled`
+   * changed and nothing else — a Custom graph is never regenerated. It is
+   * disabled only while a write is in flight; "None" has no Enabled at all.
+   */
   function setEnabled(enabled) {
-    if (state.custom) return null
-    if (state.template === NONE_LABEL) return null
-    const current = state.saved
-    if (!current) return null
+    if (!state.saved) return null
+    if (!state.custom && state.template === NONE_LABEL) return null
     state.enabled = enabled !== false
-    const value = { ...current, enabled: state.enabled }
+    const value = { ...state.saved, enabled: state.enabled }
     let seq
     try { seq = deps.write?.sendField?.(state.node.name, 'extras.atrium.behavior', value) } catch (error) {
       state.error = error?.message ?? String(error)
@@ -489,10 +551,10 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
           // A node without an id is listed too: Save gives it one first (F9).
           option.value = id ?? `name:${node.name}`
           option.textContent = node.name
-          if (id && id === state.targetId) option.selected = true
+          if (option.value === state.targetId) option.selected = true
           field.appendChild(option)
         }
-        field.dataset = { ...(field.dataset ?? {}), field: 'target' }
+        setDataField(field, 'target')
       } else if (key === 'action') {
         field = create('select')
         for (const action of TEMPLATE_ACTIONS[state.template]) {
@@ -502,7 +564,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
           if (action === state.params.action) option.selected = true
           field.appendChild(option)
         }
-        field.dataset = { ...(field.dataset ?? {}), field: 'action' }
+        setDataField(field, 'action')
       } else if (key === 'clip') {
         const clips = clipIdsFor(targetNode())
         if (clips.length > 0) {
@@ -518,17 +580,17 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
           field = create('input')
           field.value = state.params.clip ?? ''
         }
-        field.dataset = { ...(field.dataset ?? {}), field: 'clip' }
+        setDataField(field, 'clip')
       } else if (key === 'loop') {
         field = create('input')
         field.type = 'checkbox'
         field.checked = state.params.loop !== false
-        field.dataset = { ...(field.dataset ?? {}), field: 'loop' }
+        setDataField(field, 'loop')
       } else if (key === 'radius' || key === 'seconds') {
         field = create('input')
         field.type = 'number'
         field.value = String(state.params[key] ?? '')
-        field.dataset = { ...(field.dataset ?? {}), field: key }
+        setDataField(field, key)
       }
       if (field) {
         row.appendChild(field)
@@ -596,12 +658,16 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
     const isNone = state.template === NONE_LABEL
     if (elements.enabled) {
-      elements.enabled.disabled = state.custom || isNone || Boolean(state.saving)
+      // V2 — "None" has no Enabled; a Custom graph does (S1). Disabled only
+      // while ITS OWN write is in flight (the enabled sequence), and the label
+      // IS the state.
+      const enabledWrite = state.pending?.stage === 'enabled'
+      elements.enabled.disabled = isNone || Boolean(state.saving) || enabledWrite
       elements.enabled.textContent = state.enabled ? 'Enabled' : 'Disabled'
-      elements.enabled.checked = state.enabled
     }
     if (elements.save) {
-      elements.save.disabled = state.custom || isNone || Boolean(state.saving)
+      // V11 — a template with no usable target can't be saved either.
+      elements.save.disabled = state.custom || isNone || !state.targetId || Boolean(state.saving)
       elements.save.textContent = state.saving ? 'Saving…' : 'Save'
     }
     // "Custom graph" shows Enabled and Remove only.
@@ -631,7 +697,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     if (elements.select) elements.select.addEventListener('change', () => onTemplateChange(elements.select.value))
     if (elements.save) elements.save.addEventListener('click', () => save())
     if (elements.remove) elements.remove.addEventListener('click', () => remove())
-    if (elements.enabled) elements.enabled.addEventListener('change', () => setEnabled(Boolean(elements.enabled.checked)))
+    if (elements.enabled) elements.enabled.addEventListener('click', () => setEnabled(!state.enabled))
     if (elements.params) {
       elements.params.addEventListener('change', (event) => {
         const field = event?.target?.dataset?.field

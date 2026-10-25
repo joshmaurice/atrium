@@ -29,6 +29,8 @@ import {
 } from '../src/behavior-form.js'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
 import { HOST_THIS_TAB, hostStatusText } from '../src/host-status.js'
+// V12 (round 5) — ONE strict element fake, shared with behavior-form.test.js.
+import { el } from './strict-element.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const appSource = readFileSync(resolve(__dirname, '../src/app.js'), 'utf-8')
@@ -67,20 +69,10 @@ function wiring() {
 
 // ── a tiny element stand-in, and the form driven over every case ──────────
 
-function el(tag = 'div') {
-  const node = {
-    tagName: tag, style: {}, dataset: {}, children: [], _text: '', _listeners: {},
-    value: '', checked: false, disabled: false, selected: false, type: '', title: '',
-    appendChild(child) { node.children.push(child); node.firstChild = node.children[0] ?? null; return child },
-    removeChild(child) { node.children = node.children.filter((c) => c !== child); node.firstChild = node.children[0] ?? null; return child },
-    addEventListener(type, fn) { node._listeners[type] = fn },
-  }
-  Object.defineProperty(node, 'textContent', {
-    get: () => node._text,
-    set: (value) => { node._text = String(value ?? '') },
-  })
-  return node
-}
+// V12 (round 5) — the ONE strict element fake, shared with
+// behavior-form.test.js: `dataset`, `style` and `classList` are getter-only,
+// `checked`/`change` exist only on a checkbox or radio input, and a button
+// dispatches `click` only.
 
 function makeNode({ name, id = null, model = null, light = null } = {}) {
   return {

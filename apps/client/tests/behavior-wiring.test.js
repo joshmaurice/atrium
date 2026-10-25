@@ -8,7 +8,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,9 +24,14 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
     assert.match(source, /runner\?\.setGesture\(/)
   })
 
-  test('the form registers with the SAME gate the panel\'s other forms use', () => {
+  test('V13 — the Behaviour section is NOT one of the gate\'s forms, and Edit off closes it', () => {
+    // It is still built with the panel's gate for `register`-only bookkeeping,
+    // but it must never CLAIM it: claiming closed the library grid after every
+    // placement (§1.4).
     assert.match(source, /behaviorForm = createBehaviorForm\(\{[\s\S]{0,600}?gate: modelGate/)
-    assert.match(source, /behaviorForm\.wire\(\)/)
+    assert.doesNotMatch(source, /behaviorForm\?\.open\([\s\S]{0,80}gate\.claim/, 'no claim at open')
+    assert.match(source, /modelGate\.closeCurrent\(\)[\s\S]{0,600}?behaviorForm\?\.close\(\)/,
+      'Edit off closes the Behaviour section explicitly')
   })
 
   test('the answers route to the form', () => {
@@ -101,5 +106,45 @@ describe('scripting-4b-2 r3 (T1) — #ep-behavior-hint is the section\'s one hel
     const code = source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
     assert.match(code, /const epBehaviorHint\s*=\s*document\.getElementById\('ep-behavior-hint'\)/)
     assert.match(code, /createBehaviorForm\(\{[\s\S]{0,600}?hint: epBehaviorHint/)
+  })
+})
+
+describe('scripting-4b-2 r5 (V1, V2, V12) — the page obeys the DOM\'s own rules', () => {
+  const SRC_FILES = readdirSync(resolve(__dirname, '../src')).filter((f) => f.endsWith('.js'))
+  /** Code only: a mention of the bug inside a comment is not the bug. */
+  const code = (text) => text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+
+  test('V1/V12 — no apps/client/src file assigns a getter-only DOM property', () => {
+    // `dataset`, `style`, `classList`, `children` and `parentNode` are
+    // getter-only in the browser: `el.dataset = { … }` throws `TypeError`.
+    // §1.2 item 1 was exactly this line, in behavior-form.js.
+    for (const file of SRC_FILES) {
+      const text = code(readFileSync(resolve(__dirname, '../src', file), 'utf-8'))
+      for (const prop of ['dataset', 'style', 'classList', 'children', 'parentNode']) {
+        const pattern = new RegExp(`\\.${prop}\\s*=[^=]`)
+        const line = text.split('\n').findIndex((l) => pattern.test(l))
+        assert.equal(line, -1, `${file}: assigns .${prop} at line ${line + 1}`)
+      }
+    }
+  })
+
+  test('V1 — the form writes a field\'s data attribute as a property, never the map itself', () => {
+    const form = code(readFileSync(resolve(__dirname, '../src/behavior-form.js'), 'utf-8'))
+    assert.match(form, /dataset\.field\s*=/, 'the data attribute is set on the live map')
+    assert.doesNotMatch(form, /\.dataset\s*=\s*\{/, 'and never by assigning the map')
+  })
+
+  test('V2 — the Enabled listener is `click`, and no code reads its `.checked`', () => {
+    const form = code(readFileSync(resolve(__dirname, '../src/behavior-form.js'), 'utf-8'))
+    assert.match(form, /elements\.enabled\.addEventListener\('click'/)
+    assert.doesNotMatch(form, /elements\.enabled\.checked/)
+  })
+
+  test('V2 — the three action buttons are type="button" so a form never submits', () => {
+    for (const id of ['ep-behavior-enabled', 'ep-behavior-save', 'ep-behavior-remove']) {
+      assert.match(html, new RegExp(`<button type="button" id="${id}"`), `#${id}`)
+    }
   })
 })

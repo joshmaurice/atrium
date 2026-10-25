@@ -11,6 +11,8 @@ import assert from 'node:assert/strict'
 
 import { prepareDuplicate, prepareRestore, remapBehaviorTargets, duplicateRuleProblem } from '../src/edit-duplicate.js'
 import { templateGraph } from '@atrium/behaviors/templates'
+import { createBehaviorForm } from '../src/behavior-form.js'
+import { el, elementsFor } from './strict-element.mjs'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'
@@ -95,4 +97,35 @@ test('F10 — a malformed behaviour refuses with the new text', () => {
 test('F10 — a null behaviour is the "no behaviour" value and is not a problem', () => {
   const original = node({ extras: { atrium: { objectId: OWN, behavior: null } } })
   assert.equal(duplicateRuleProblem(original), null)
+})
+
+// ── V1 (round 5) — the copy reopens, and the section stays open ───────────
+
+test('V1 — a duplicated node with a behaviour reopens in the form without throwing', () => {
+  // Round 4 threw here too: opening the form on a node that ALREADY has a
+  // behaviour went through `selectForEdit → refreshEditPanel →
+  // refreshBehaviorRow`, and the render assigned `field.dataset` (which a real
+  // page refuses). Duplicate left the section open on the copy; now it renders.
+  const original = node({ extras: { atrium: { objectId: OWN, behavior: templateGraph('select-visibility', { target: OWN, action: 'hide' }, { ownId: OWN }) } } })
+  const result = prepareDuplicate(original, { name: 'Cube copy' })
+  assert.equal(result.ok, true)
+
+  const copy = { name: 'Cube copy', extras: result.descriptor.extras }
+  const elements = elementsFor()
+  const form = createBehaviorForm({
+    elements,
+    deps: {
+      selected: () => copy,
+      nodes: () => [copy],
+      status: () => ({}),
+      write: { setObjectId: () => 1, sendField: () => 2 },
+      createElement: (tag) => el(tag),
+      logLines: () => [],
+    },
+  })
+  assert.doesNotThrow(() => form.open(copy))
+  assert.equal(form.state.template, 'select-visibility', 'the copy reopens as its template')
+  assert.equal(form.state.targetId, copy.extras.atrium.objectId, 'targeting the copy')
+  assert.equal(elements.save.disabled, false, 'and it can be saved unchanged')
+  assert.ok(elements.params.children.length > 0, 'with its parameters rendered')
 })

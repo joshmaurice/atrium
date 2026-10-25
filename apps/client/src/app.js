@@ -1708,6 +1708,12 @@ function setEditMode(on) {
     // duplicate what the gate already does. Closing while a Save is unanswered
     // forgets the form's wait only: the answer is still recorded by undo (Y7).
     modelGate.closeCurrent()
+    // V13 (round 5) — Edit off closes the Behaviour section explicitly: it is
+    // part of the Edit panel, not one of the gate's mutually exclusive forms
+    // (it never claims the gate), so `closeCurrent()` can't reach it. M4's
+    // cancellation on Edit off still holds: `close()` bumps the generation, so
+    // a Save in flight stops and says "Save cancelled".
+    behaviorForm?.close()
     // Z2 — and Edit off discards the Model form's draft (`reset()` clears the
     // URL, the Check result and the pin, and forgets any wait). The destination
     // form starts empty on its next fresh opening, and the grid has no draft.
