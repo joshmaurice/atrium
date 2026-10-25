@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws'
 import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
+import { MAX_MESSAGE_DEPTH, messageDepth } from './message-depth.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeUserId } from './http-routes.js'
 import { parsePath } from '@atrium/som'
@@ -518,6 +519,28 @@ export function attachSessionHandlers({
         msg = JSON.parse(raw)
       } catch {
         sendError(ws, null, 'UNKNOWN_MESSAGE', 'Invalid JSON')
+        return
+      }
+
+      // ---------------------------------------------------------------------
+      // G1 — the depth guard. One gate on EVERY inbound message, of every type,
+      // for every field, including messages sent before `hello`: it runs right
+      // after JSON.parse and before the schema check, so the validator, the
+      // switch and every handler see only messages within the limit.
+      //
+      // A deeper message is refused and nothing else happens: no world change,
+      // no broadcast, no save, and the socket stays open. `seq` is echoed only
+      // when the top-level `seq` is a number.
+      // ---------------------------------------------------------------------
+      const depth = messageDepth(msg)
+      if (depth > MAX_MESSAGE_DEPTH) {
+        console.error(
+          `[session] depth guard: session=${session ? session.id : '-'} ` +
+          `type=${typeof msg?.type === 'string' ? msg.type : '-'} ` +
+          `depth=${Math.min(depth, MAX_MESSAGE_DEPTH)}`
+        )
+        sendError(ws, typeof msg?.seq === 'number' ? msg.seq : null,
+          'UNKNOWN_MESSAGE', 'message nested too deeply')
         return
       }
 
