@@ -679,6 +679,11 @@ export class AtriumClient extends EventEmitter {
     }
     this._connectionRecord = record
 
+    // scripting-4b-2 F-L12 (GLM's NIT on 4b-1) — the malformed-`hello` warning
+    // is once per CONNECTION, not once per page: a new connection record resets
+    // it beside the other per-connection state.
+    this._scriptHostRoleWarned = false
+
     this._log(`Connecting to ${wsUrl}`)
 
     // ---- Create socket (catch synchronous throw - pre-brief #9) ----
@@ -721,7 +726,9 @@ export class AtriumClient extends EventEmitter {
       const helloMsg = {
         type: 'hello',
         id:   sessionId,
-        capabilities: { tick: { interval: 5000 } },
+        // scripting-4b-2 F-L6 — this build runs behaviour graphs, so the server
+        // may elect it the script host.
+        capabilities: { tick: { interval: 5000 }, scriptRunner: 1 },
       }
       if (this._transmitName != null) {
         helloMsg.displayName = this._transmitName
@@ -1267,6 +1274,40 @@ export class AtriumClient extends EventEmitter {
     return seq
   }
 
+  /**
+   * scripting-4b-2 F5 — a generic tracked field send that applies NOTHING
+   * locally. It exists for the behaviour runner, whose writes must reach the
+   * host's own SOM only when the server answers, so the host's view and every
+   * visitor's agree, and so the undo engine never sees a local SOM mutation it
+   * did not make.
+   *
+   * The own echo applies THE BROADCAST'S VALUE through `applyLocally` +
+   * `setPath`, then emits `som:set`, then `edit:accepted` — the Z2a pattern,
+   * generalised to any field that asks for it (`applyEcho: true` on the tracked
+   * edit). A rejection changes nothing. The Edit panel's own apply-first path is
+   * untouched: its listeners do not set this flag.
+   *
+   * @param {string} name
+   * @param {string} field
+   * @param {*} value
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  sendField(name, field, value) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._sendSeq
+    this.lastSendSeq = seq
+    this._trackEdit(seq, { type: 'send', node: name, field, value, applyEcho: true })
+    this._wsSend({
+      type: 'send',
+      seq,
+      node: name,
+      field,
+      value,
+    })
+    return seq
+  }
+
   // ---------------------------------------------------------------------------
   // Edit tracking (A3) — one pending map per connection record
   // ---------------------------------------------------------------------------
@@ -1499,6 +1540,17 @@ export class AtriumClient extends EventEmitter {
         if (target) this._som.setPath(target, OBJECT_ID_FIELD, msg.value)
       })
       this.emit('som:set', { nodeName: edit.node, path: OBJECT_ID_FIELD, value: msg.value })
+    }
+
+    // scripting-4b-2 F5 — the FOURTH case and the generic one: a tracked send
+    // that asked for its echo to be applied (`sendField`). The runner's writes
+    // apply the BROADCAST'S value, so the host's SOM matches every visitor's.
+    if (edit.type === 'send' && edit.applyEcho === true) {
+      this.applyLocally(() => {
+        const target = this._som?.getObjectByName?.(edit.node) ?? null
+        if (target) this._som.setPath(target, edit.field, msg.value)
+      })
+      this.emit('som:set', { nodeName: edit.node, path: edit.field, value: msg.value })
     }
 
     this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit })

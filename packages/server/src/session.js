@@ -11,7 +11,7 @@ import { parsePath } from '@atrium/som'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost,
-  ANIMATION_LEAF, OBJECT_ID_TAKEN,
+  ANIMATION_LEAF, OBJECT_ID_TAKEN, BEHAVIOR_LEAF, BEHAVIOR_NODES_PER_WORLD, behaviorCountIn,
 } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
@@ -402,19 +402,29 @@ export function attachSessionHandlers({
   }
 
   /**
+   * scripting-4b-2 F-L6 — a session may hold the role only when it passed
+   * `canEdit` at its hello AND declared `capabilities.scriptRunner === 1`. A
+   * 4b-1 tab keeps `canEdit` and its panel but never becomes the script host.
+   */
+  function canRunBehaviors(session) {
+    return session?.canEdit === true && session?.capabilities?.scriptRunner === 1
+  }
+
+  /**
    * 4b-1 E4 — the handover, run AFTER the departed session has been removed, so
    * the departing session can never be chosen, and exactly once per departure.
    *
    * The role goes to the FIRST session in `sessions` order that passed `canEdit`
-   * at its `hello`, has an OPEN socket, and whose `missedPings` is BELOW the
-   * sweep's limit — a session the same keepalive sweep is about to terminate is
-   * never chosen (review N7). With none eligible, `sessionId` stays null and the
-   * next eligible `hello` takes `hostGen + 1`.
+   * at its `hello` AND declared the script-runner capability (F-L6), has an OPEN
+   * socket, and whose `missedPings` is BELOW the sweep's limit — a session the
+   * same keepalive sweep is about to terminate is never chosen (review N7). With
+   * none eligible, `sessionId` stays null and the next eligible `hello` takes
+   * `hostGen + 1`.
    */
   function handOverScriptHost() {
     scriptHost.sessionId = null
     for (const s of sessions.values()) {
-      if (!s.canEdit) continue
+      if (!canRunBehaviors(s)) continue
       if (s.ws?.readyState !== 1 /* OPEN */) continue
       if ((s.missedPings ?? 0) >= MISSED_PING_LIMIT) continue
       grantScriptHost(s)
@@ -618,7 +628,7 @@ export function attachSessionHandlers({
           // another session holds it.
           let isScriptHost = false
           let hostGen
-          if (canEdit && scriptHost.sessionId === null) {
+          if (canEdit && session.capabilities?.scriptRunner === 1 && scriptHost.sessionId === null) {
             scriptHost.hostGen += 1
             scriptHost.sessionId = session.id
             isScriptHost = true
@@ -801,6 +811,9 @@ export function attachSessionHandlers({
             // 4b-1 E3 — the set-once objectId leaf's uniqueness needs the world,
             // so the handler hands `authorizeSend` a callback (review N2).
             objectIdInUse: (id) => world.som.objectIdInUse(id),
+            // scripting-4b-2 F2/S1 — the 64-behaviour cap needs the world too,
+            // and it counts OTHER nodes, so the node being written is excluded.
+            behaviorCount: (node) => behaviorCountIn(world.som, node),
           })
           if (!decision.ok) {
             sendError(ws, msg.seq, decision.code, decision.message)
@@ -952,6 +965,16 @@ export function attachSessionHandlers({
             const modelCheck = checkModelHost(msg.node)
             if (!modelCheck.ok) {
               sendError(ws, msg.seq, modelCheck.code, modelCheck.message)
+              break
+            }
+            // scripting-4b-2 F2 — the 64-behaviour cap on the `add` path, where
+            // E3 placed the object-id uniqueness check: after the name rules,
+            // before `world.addNode`, so a refusal changes nothing.
+            const addedBehavior = msg.node.extras?.atrium?.behavior
+            if (addedBehavior !== undefined && addedBehavior !== null &&
+                behaviorCountIn(world.som, null) >= BEHAVIOR_NODES_PER_WORLD) {
+              sendError(ws, msg.seq, 'INVALID_VALUE',
+                `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
               break
             }
           }

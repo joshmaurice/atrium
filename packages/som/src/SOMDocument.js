@@ -27,7 +27,7 @@ export function parsePath(path) {
  * The match is on the path STRING, exactly: a non-canonical spelling such as
  * `extras..atrium.animation` is not the listed path and stays refused.
  */
-export const CREATABLE_PATHS = Object.freeze(['extras.atrium.animation', 'extras.atrium.objectId'])
+export const CREATABLE_PATHS = Object.freeze(['extras.atrium.animation', 'extras.atrium.objectId', 'extras.atrium.behavior'])
 
 /**
  * 4b-1 E2 — the ONE path that may also create its missing `extras.atrium`

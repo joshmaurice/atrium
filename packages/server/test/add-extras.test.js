@@ -177,7 +177,7 @@ test('K4: a non-avatar add with no extras, no atrium, or no teleporter is accept
     const rows = [
       { name: 'k4-none',      node: { name: 'k4-none' } },
       { name: 'k4-noatrium',  node: { name: 'k4-noatrium', extras: { displayName: 'x' } } },
-      { name: 'k4-notele',    node: { name: 'k4-notele', extras: { atrium: { behavior: { spin: true } } } } },
+      { name: 'k4-notele',    node: { name: 'k4-notele', extras: { atrium: { something: { spin: true } } } } },
       { name: 'k4-emptydest', node: { name: 'k4-emptydest', extras: { atrium: { teleporter: { destination: '' } } } } },
       { name: 'k4-max',       node: { name: 'k4-max', extras: { atrium: { teleporter: { destination: 'a'.repeat(2048) } } } } },
     ]

@@ -28,7 +28,7 @@
       "label": "atrium.model absent",
       "extras": {
         "atrium": {
-          "behavior": {
+          "unusedAtriumKey": {
             "spin": true
           }
         }

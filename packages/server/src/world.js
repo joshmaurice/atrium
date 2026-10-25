@@ -7,7 +7,7 @@ import { resolve as resolvePath } from 'node:path'
 import { NodeIO } from '@gltf-transform/core'
 import { KHRLightsPunctual } from '@gltf-transform/extensions'
 import { SOMDocument, pruneCandidateProperties, pruneDocumentInPlace } from '@atrium/som'
-import { objectIdProblem } from './send-policy.js'
+import { objectIdProblem, behaviorCheck, BEHAVIOR_NODES_PER_WORLD } from './send-policy.js'
 
 /** Typed errors L3 throws. Both write nothing. */
 export const SERIALIZE_INDEX_MISMATCH       = 'SERIALIZE_INDEX_MISMATCH'
@@ -368,12 +368,96 @@ export function healDocumentObjectIds(document, { log = console } = {}) {
   return { duplicated, malformed }
 }
 
+/** The `extras.atrium.behavior` value stored on a glTF-Transform node, or undefined. */
+function readNodeBehavior(gltfNode) {
+  const atrium = gltfNode?.getExtras?.()?.atrium
+  if (!isPlainDataObject(atrium)) return undefined
+  return Object.hasOwn(atrium, 'behavior') ? atrium.behavior : undefined
+}
+
+/**
+ * Replace only the `behavior` key with `null`: every other `extras` key stays,
+ * and the saved document carries the null (F2's healing rule says the value is
+ * "replaced by null", so the key survives — unlike `objectId`, which is removed).
+ */
+function dropNodeBehavior(gltfNode) {
+  const atrium = gltfNode?.getExtras?.()?.atrium
+  if (isPlainDataObject(atrium)) atrium.behavior = null
+}
+
+/**
+ * scripting-4b-2 F2 — heal `extras.atrium.behavior` on a document being loaded,
+ * AFTER `healDocumentObjectIds` (so a behaviour whose node lost its id to id
+ * healing is dropped in the same pass) and BEFORE the SOM is built. Both world
+ * kinds call it, so they share one implementation.
+ *
+ * Three rules, in document order, one log line per dropped behaviour:
+ *
+ *  1. a node with NO own `objectId` keeps no behaviour — its `nodeMap[0]` could
+ *     never resolve, and F1's own-id rule is the first thing `send` applies;
+ *  2. a behaviour that fails F1 (with the node's own id as `nodeMap[0]`) is
+ *     dropped;
+ *  3. past the 64th behaviour node the value is dropped: the world's limit is
+ *     the SERVER's, and a hand-made document must not exceed it in silence.
+ *
+ * @param {object} document   glTF-Transform Document
+ * @param {{log?: object|null}} [opts]
+ * @returns {{noId: number, malformed: number, overLimit: number}}
+ */
+export function healDocumentBehaviors(document, { log = console } = {}) {
+  const nodes = document.getRoot().listNodes()
+  let noId = 0
+  let malformed = 0
+  let overLimit = 0
+  let behaviorsKept = 0
+
+  nodes.forEach((node, index) => {
+    const behavior = readNodeBehavior(node)
+    if (behavior === undefined) return
+
+    const id = readNodeObjectId(node)
+    if (typeof id !== 'string' || id.length === 0) {
+      dropNodeBehavior(node)
+      noId += 1
+      log?.log?.(`[world] dropped behavior on node ${index}: no object id`)
+      return
+    }
+
+    if (behavior !== null) {
+      const check = behaviorCheck(behavior, { ownId: id })
+      if (check.problem) {
+        dropNodeBehavior(node)
+        malformed += 1
+        log?.log?.(`[world] dropped malformed behavior on node ${index}: ${check.problem}`)
+        return
+      }
+    }
+
+    // The 64 cap counts the behaviours that SURVIVE the two rules above.
+    if (behavior !== null) {
+      if (behaviorsKept >= BEHAVIOR_NODES_PER_WORLD) {
+        dropNodeBehavior(node)
+        overLimit += 1
+        log?.log?.(`[world] dropped behavior on node ${index}: over the world limit`)
+        return
+      }
+      behaviorsKept += 1
+    }
+  })
+
+  return { noId, malformed, overLimit }
+}
+
 export async function createWorld(gltfPath, { baseUrl } = {}) {
   const io = createIO()
   const document = await io.read(gltfPath)
 
   // 4b-1 E3 — load healing for object ids, before the SOM is built (B4 (a)).
   healDocumentObjectIds(document)
+
+  // scripting-4b-2 F2 — behaviour healing, AFTER the id healing, so a behaviour
+  // whose node just lost its id is dropped in the same pass.
+  healDocumentBehaviors(document)
 
   const som = new SOMDocument(document)
 
@@ -528,6 +612,9 @@ export async function createWorldFromDocument(documentJson) {
 
   // 4b-1 E3 — load healing for object ids, the same call a file world makes.
   healDocumentObjectIds(document)
+
+  // scripting-4b-2 F2 — behaviour healing, the same call a file world makes.
+  healDocumentBehaviors(document)
 
   const som = new SOMDocument(document)
 

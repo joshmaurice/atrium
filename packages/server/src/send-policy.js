@@ -32,6 +32,7 @@
 // ---------------------------------------------------------------------------
 
 import { SOMDocument, SOMNode, SOMCamera, SOMLight, SOMAnimation } from '@atrium/som'
+import { validateInteractivityGraph } from '@khronosgroup/gltf-interactivity-engine'
 
 // ---------------------------------------------------------------------------
 // Error codes (A5)
@@ -190,6 +191,11 @@ export function checkAtriumExtras(extras) {
     const problem = objectIdProblem(atrium.objectId)
     if (problem) return deny(SEND_INVALID, objectIdReasonText(problem))
   }
+  // scripting-4b-2 F2/C3 — `atrium.behavior` is checked when the key is PRESENT,
+  // with the descriptor's own `objectId` as the node's id. A behaviour with no
+  // object id is refused here, before the first world change.
+  const behaviorCheckResult = checkAtriumBehavior(extras)
+  if (!behaviorCheckResult.ok) return behaviorCheckResult
   return allow()
 }
 
@@ -479,6 +485,467 @@ export function checkObjectIdValue(node, value, objectIdInUse = null) {
   return allow()
 }
 
+// ---------------------------------------------------------------------------
+// scripting-4b-2 (F1) — `extras.atrium.behavior`, the fourth writable node
+// extras leaf
+//
+// One rule set, two implementations: this and the client's
+// `packages/behaviors/src/behavior-spec.js`, pinned to each other by
+// `tests/fixtures/behavior-vectors.json`, which both read.
+//
+// The server is the gate. `behaviorProblem` runs the engine's own
+// `validateInteractivityGraph` LAST, after every rule above it, so a vector's
+// reason code is always the rule's and never the validator's — and every
+// accepted value is one the engine's validator accepts, not merely one
+// `loadBehaveGraph` would load (§2.3: the validator is not the loader). The
+// import is at the TOP of this file on purpose: a broken vendoring must fail
+// every server test at load, not at the first behaviour.
+// ---------------------------------------------------------------------------
+
+/** The fourth node extras leaf (F-L2). */
+export const BEHAVIOR_LEAF = 'extras.atrium.behavior'
+
+/** F7's limits. */
+export const BEHAVIOR_BYTES_MAX    = 16384
+export const BEHAVIOR_NODES_MAX    = 64
+export const BEHAVIOR_DECLS_MAX    = 32
+export const BEHAVIOR_TYPES_MAX    = 16
+export const BEHAVIOR_EVENTS_MAX   = 8
+export const BEHAVIOR_NODEMAP_MIN  = 1
+export const BEHAVIOR_NODEMAP_MAX  = 16
+export const BEHAVIOR_TARGETS_MAX  = 16
+export const BEHAVIOR_ANIMS_MAX    = 8
+export const BEHAVIOR_CLIP_MAX     = 300
+export const BEHAVIOR_PROX_MIN     = 0.5
+export const BEHAVIOR_PROX_MAX     = 50
+export const BEHAVIOR_INTERVAL_MIN = 1
+export const BEHAVIOR_INTERVAL_MAX = 3600
+export const BEHAVIOR_SPEED_MIN    = 0.1
+export const BEHAVIOR_SPEED_MAX    = 10
+export const BEHAVIOR_LIGHT_MIN    = 0.01
+export const BEHAVIOR_DEPTH_MAX    = 8
+
+/** The whole-world behaviour limit (F2/S1): the count is of OTHER saved nodes. */
+export const BEHAVIOR_NODES_PER_WORLD = 64
+
+/** The exact key set of the stored value (F-L2). */
+const BEHAVIOR_KEYS = [
+  'kind', 'graph', 'nodeMap', 'targets', 'animations', 'proximity', 'interval', 'template', 'enabled', 'origin',
+]
+
+/** F-L4 — the op allowlist, exactly the templates' ops plus debug/log. */
+const BEHAVIOR_OPS = [
+  'event/onSelect', 'event/receive', 'flow/branch', 'pointer/get', 'pointer/set',
+  'math/not', 'math/gt', 'animation/start', 'animation/stop', 'debug/log',
+]
+
+/** F-L7 — the three event ids this round dispatches. */
+const BEHAVIOR_EVENT_IDS = ['atrium/enter', 'atrium/exit', 'atrium/interval']
+
+/** F8 — the five template ids. */
+const BEHAVIOR_TEMPLATE_IDS = [
+  'select-visibility', 'select-animation', 'proximity-animation', 'select-light', 'interval-animation',
+]
+
+/** S9 — event/onSelect is declared WITH its extension, and exactly so. */
+const ONSELECT_EXTENSION = 'KHR_node_selectability'
+
+/** M1 — the pointer paths. `[n]` is the INT index socket; `{n}` never matches. */
+const BEHAVIOR_POINTER_PATTERNS = [
+  /^\/nodes\/(\[n\]|\d+)\/(translation|rotation|scale)$/,
+  /^\/nodes\/(\[n\]|\d+)\/extensions\/KHR_node_visibility\/visible$/,
+  /^\/extensions\/KHR_lights_punctual\/lights\/(\[n\]|\d+)\/intensity$/,
+]
+
+/** The reason codes and their plain text. */
+export const BEHAVIOR_MESSAGES = {
+  'behavior-type':       'the behaviour must be a plain object with only the behaviour keys',
+  'behavior-kind':       'kind must be "graph"',
+  'behavior-origin':     'origin must be "local"',
+  'behavior-enabled':    'enabled must be a boolean',
+  'behavior-bytes':      `the behaviour exceeds ${BEHAVIOR_BYTES_MAX} characters`,
+  'behavior-graph':      'the graph is not a valid KHR_interactivity graph',
+  'behavior-size':       'the graph exceeds a behaviour limit',
+  'behavior-op':         'the graph uses an operation or declaration this round does not run',
+  'behavior-event':      'the graph declares an event this round does not dispatch',
+  'behavior-pointer':    'a pointer path or index is not one this round allows',
+  'behavior-literal':    'an animation reference or speed is not a literal this round allows',
+  'behavior-map':        'nodeMap or targets is malformed',
+  'behavior-animations': 'animations is malformed',
+  'behavior-proximity':  'proximity does not match the graph\'s events',
+  'behavior-interval':   'interval does not match the graph\'s events',
+  'behavior-template':   'template is malformed or is not one of the five templates',
+}
+
+/** The plain text for a behaviour reason code (its detail appended when present). */
+export function behaviorReasonText(reason, detail = null) {
+  const text = BEHAVIOR_MESSAGES[reason] ?? 'the behaviour value is invalid'
+  return detail ? `${text}: ${detail}` : text
+}
+
+const isBehaviorBool = isBool
+const isBehaviorFinite = isFiniteNumber
+
+/** E1 — does the value carry an own object id? Read, never mutated. */
+function ownObjectId(node) {
+  const atrium = node?.extras?.atrium
+  if (!isPlainObject(atrium)) return undefined
+  return Object.hasOwn(atrium, 'objectId') ? atrium.objectId : undefined
+}
+
+/** A graph literal: `{ type, value: [ … ] }` with exactly one entry. */
+function behaviorLiteral(input) {
+  if (!isPlainObject(input)) return null
+  if (!Array.isArray(input.value) || input.value.length !== 1) return null
+  return input.value[0]
+}
+
+/** True when `input` is a socket connection rather than a literal. */
+function behaviorSocket(input) {
+  return isPlainObject(input) && input.node !== undefined && input.socket !== undefined
+}
+
+/** The op of a node's declaration, or null. */
+function behaviorDeclarationOp(graph, index) {
+  const declarations = Array.isArray(graph?.declarations) ? graph.declarations : []
+  const decl = declarations[index]
+  return isPlainObject(decl) ? decl.op : null
+}
+
+/** Every graph node with its declaration's op resolved, in order. */
+function behaviorNodes(graph) {
+  const out = []
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
+  for (const node of nodes) {
+    out.push({ node, op: isPlainObject(node) ? behaviorDeclarationOp(graph, node.declaration) : null })
+  }
+  return out
+}
+
+/** The set of declared event ids. */
+function behaviorDeclaredEvents(graph) {
+  const ids = new Set()
+  const events = Array.isArray(graph?.events) ? graph.events : []
+  for (const entry of events) if (isPlainObject(entry) && typeof entry.id === 'string') ids.add(entry.id)
+  return ids
+}
+
+const behaviorClipOk = (v) => typeof v === 'string' && v.length >= 1 && v.length <= BEHAVIOR_CLIP_MAX
+const behaviorRadiusOk = (v) => isBehaviorFinite(v) && v >= BEHAVIOR_PROX_MIN && v <= BEHAVIOR_PROX_MAX
+const behaviorSecondsOk = (v) => Number.isInteger(v) && v >= BEHAVIOR_INTERVAL_MIN && v <= BEHAVIOR_INTERVAL_MAX
+const behaviorIdOk = (v) => typeof v === 'string' && OBJECT_ID_RE.test(v)
+
+function behaviorParamKeysProblem(params, keys) {
+  for (const key of Object.keys(params)) if (!keys.includes(key)) return true
+  for (const key of keys) if (!Object.hasOwn(params, key)) return true
+  return false
+}
+
+/** Rev 2 S5 — `template.params`, one rule per template, no other keys. */
+export function behaviorParamsOk(id, params) {
+  if (!isPlainObject(params)) return false
+  switch (id) {
+    case 'select-visibility':
+      if (behaviorParamKeysProblem(params, ['target', 'action'])) return false
+      return behaviorIdOk(params.target) && (params.action === 'show' || params.action === 'hide' || params.action === 'toggle')
+    case 'select-animation':
+      if (behaviorParamKeysProblem(params, ['target', 'clip', 'action', 'loop'])) return false
+      return behaviorIdOk(params.target) && behaviorClipOk(params.clip) &&
+        (params.action === 'play' || params.action === 'stop') && isBehaviorBool(params.loop)
+    case 'proximity-animation':
+      if (behaviorParamKeysProblem(params, ['target', 'clip', 'loop', 'radius'])) return false
+      return behaviorIdOk(params.target) && behaviorClipOk(params.clip) &&
+        isBehaviorBool(params.loop) && behaviorRadiusOk(params.radius)
+    case 'select-light':
+      if (behaviorParamKeysProblem(params, ['target', 'intensity'])) return false
+      return behaviorIdOk(params.target) && isBehaviorFinite(params.intensity) &&
+        params.intensity >= BEHAVIOR_LIGHT_MIN
+    case 'interval-animation':
+      if (behaviorParamKeysProblem(params, ['target', 'clip', 'loop', 'seconds'])) return false
+      return behaviorIdOk(params.target) && behaviorClipOk(params.clip) &&
+        isBehaviorBool(params.loop) && behaviorSecondsOk(params.seconds)
+    default:
+      return false
+  }
+}
+
+/** The `[n]` / `<int>` index a pointer names, or null. */
+function behaviorPointerIndex(node, pointer, nodeMapLength) {
+  const match = /\/(\[n\]|\d+)\//.exec(pointer)
+  if (!match) return null
+  let index
+  if (match[1] === '[n]') {
+    const values = isPlainObject(node) ? node.values : null
+    if (!isPlainObject(values)) return null
+    if (behaviorSocket(values.n)) return null
+    index = behaviorLiteral(values.n)
+  } else {
+    index = Number(match[1])
+  }
+  if (!Number.isInteger(index) || index < 0 || index >= nodeMapLength) return null
+  return index
+}
+
+/**
+ * F1 — the verdict for `extras.atrium.behavior`, as
+ * `{ problem, message }`. `problem` is a reason code or null; `message` is null
+ * when the value may be stored and carries the engine's own text when the
+ * validator refuses the graph.
+ *
+ * @param {*} value                    the proposed `extras.atrium.behavior`
+ * @param {{ownId?: string}} [options] the node's own object id, when it has one
+ * @returns {{problem: string|null, message: string|null}}
+ */
+export function behaviorCheck(value, { ownId } = {}) {
+  const fail = (problem, detail = null) => ({ problem, message: behaviorReasonText(problem, detail) })
+
+  // S8 — the forbidden-key and depth walk runs FIRST of all.
+  if (!isPlainObject(value)) return fail('behavior-type')
+  if (hasForbiddenKey(value)) return fail('behavior-type')
+  if (maxDepth(value) > BEHAVIOR_DEPTH_MAX) return fail('behavior-type')
+
+  for (const key of Object.keys(value)) {
+    if (!BEHAVIOR_KEYS.includes(key)) return fail('behavior-type')
+  }
+
+  if (value.kind !== 'graph') return fail('behavior-kind')
+  if (value.origin !== 'local') return fail('behavior-origin')
+  if (!isBehaviorBool(value.enabled)) return fail('behavior-enabled')
+
+  let serialized
+  try { serialized = JSON.stringify(value) } catch { return fail('behavior-type') }
+  if (serialized === undefined) return fail('behavior-type')
+  if (serialized.length > BEHAVIOR_BYTES_MAX) return fail('behavior-bytes')
+
+  const graph = value.graph
+  if (!isPlainObject(graph)) return fail('behavior-graph')
+
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : null
+  const declarations = Array.isArray(graph.declarations) ? graph.declarations : null
+  const types = Array.isArray(graph.types) ? graph.types : null
+
+  if (!nodes || nodes.length > BEHAVIOR_NODES_MAX) return fail('behavior-size')
+  if (!declarations || declarations.length > BEHAVIOR_DECLS_MAX) return fail('behavior-size')
+  if (!types || types.length > BEHAVIOR_TYPES_MAX) return fail('behavior-size')
+  if (Object.hasOwn(graph, 'variables')) return fail('behavior-size')
+  if (Object.hasOwn(graph, 'events')) {
+    if (!Array.isArray(graph.events)) return fail('behavior-event')
+    if (graph.events.length === 0) return fail('behavior-size')
+    if (graph.events.length > BEHAVIOR_EVENTS_MAX) return fail('behavior-size')
+  }
+
+  const seen = new Set()
+  for (const decl of declarations) {
+    if (!isPlainObject(decl) || typeof decl.op !== 'string') return fail('behavior-op')
+    if (!BEHAVIOR_OPS.includes(decl.op)) return fail('behavior-op')
+    if (decl.op === 'event/onSelect') {
+      const keys = Object.keys(decl)
+      if (keys.length !== 2 || keys.some((k) => k !== 'op' && k !== 'extension')) return fail('behavior-op')
+      if (decl.extension !== ONSELECT_EXTENSION) return fail('behavior-op')
+    } else if (Object.keys(decl).length !== 1) {
+      return fail('behavior-op')
+    }
+    const identity = `${decl.op}|${decl.extension ?? ''}`
+    if (seen.has(identity)) return fail('behavior-op')
+    seen.add(identity)
+  }
+
+  for (const { node, op } of behaviorNodes(graph)) {
+    if (op !== 'event/onSelect') continue
+    if (!isPlainObject(node)) return fail('behavior-op')
+    const configuration = node.configuration
+    if (!isPlainObject(configuration)) return fail('behavior-op')
+    if (behaviorLiteral(configuration.nodeIndex) !== 0) return fail('behavior-op')
+    if (behaviorLiteral(configuration.stopPropagation) !== false) return fail('behavior-op')
+  }
+
+  const events = Array.isArray(graph.events) ? graph.events : []
+  for (const entry of events) {
+    if (!isPlainObject(entry)) return fail('behavior-event')
+    const keys = Object.keys(entry)
+    if (keys.length !== 1 || keys[0] !== 'id') return fail('behavior-event')
+    if (!BEHAVIOR_EVENT_IDS.includes(entry.id)) return fail('behavior-event')
+  }
+  const declared = behaviorDeclaredEvents(graph)
+
+  const nodeMap = value.nodeMap
+  if (!Array.isArray(nodeMap) || nodeMap.length < BEHAVIOR_NODEMAP_MIN || nodeMap.length > BEHAVIOR_NODEMAP_MAX) {
+    return fail('behavior-map')
+  }
+  if (!nodeMap.every(behaviorIdOk)) return fail('behavior-map')
+  if (new Set(nodeMap).size !== nodeMap.length) return fail('behavior-map')
+  if (ownId !== undefined && nodeMap[0] !== ownId) return fail('behavior-map')
+
+  const targets = value.targets
+  if (!Array.isArray(targets) || targets.length > BEHAVIOR_TARGETS_MAX) return fail('behavior-map')
+  if (!targets.every(behaviorIdOk)) return fail('behavior-map')
+  if (new Set(targets).size !== targets.length) return fail('behavior-map')
+
+  const animations = value.animations
+  if (!Array.isArray(animations) || animations.length > BEHAVIOR_ANIMS_MAX) return fail('behavior-animations')
+  for (const entry of animations) {
+    if (!isPlainObject(entry)) return fail('behavior-animations')
+    const keys = Object.keys(entry)
+    if (keys.length !== 3 || keys.some((k) => k !== 'object' && k !== 'clip' && k !== 'loop')) {
+      return fail('behavior-animations')
+    }
+    if (!behaviorIdOk(entry.object)) return fail('behavior-animations')
+    if (!behaviorClipOk(entry.clip)) return fail('behavior-animations')
+    if (!isBehaviorBool(entry.loop)) return fail('behavior-animations')
+  }
+
+  const animationNodes = behaviorNodes(graph)
+  const hasAnimationOp = animationNodes.some(({ op }) => op === 'animation/start' || op === 'animation/stop')
+  if (hasAnimationOp && animations.length === 0) return fail('behavior-animations')
+
+  for (const { node, op } of animationNodes) {
+    if (op === 'pointer/get' || op === 'pointer/set') {
+      const configuration = isPlainObject(node) ? node.configuration : null
+      const pointer = isPlainObject(configuration) ? behaviorLiteral(configuration.pointer) : null
+      if (typeof pointer !== 'string') return fail('behavior-pointer')
+      if (!BEHAVIOR_POINTER_PATTERNS.some((re) => re.test(pointer))) return fail('behavior-pointer')
+      if (behaviorPointerIndex(node, pointer, nodeMap.length) === null) return fail('behavior-pointer')
+      continue
+    }
+    if (op === 'animation/start' || op === 'animation/stop') {
+      const values = isPlainObject(node) ? node.values : null
+      const animation = isPlainObject(values) ? behaviorLiteral(values.animation) : null
+      if (typeof animation !== 'string') return fail('behavior-literal')
+      const match = /^\/animations\/(\d+)$/.exec(animation)
+      if (!match) return fail('behavior-literal')
+      const i = Number(match[1])
+      if (!Number.isInteger(i) || i < 0 || i >= animations.length) return fail('behavior-literal')
+      if (op === 'animation/start') {
+        const speed = isPlainObject(node) ? behaviorLiteral(node.values?.speed) : null
+        if (!isBehaviorFinite(speed) || speed < BEHAVIOR_SPEED_MIN || speed > BEHAVIOR_SPEED_MAX) {
+          return fail('behavior-literal')
+        }
+      }
+      continue
+    }
+  }
+
+  const needsProximity = declared.has('atrium/enter') || declared.has('atrium/exit')
+  if (Object.hasOwn(value, 'proximity')) {
+    const proximity = value.proximity
+    if (!isPlainObject(proximity)) return fail('behavior-proximity')
+    const keys = Object.keys(proximity)
+    if (keys.length !== 1 || keys[0] !== 'radius') return fail('behavior-proximity')
+    if (!behaviorRadiusOk(proximity.radius)) return fail('behavior-proximity')
+    if (!needsProximity) return fail('behavior-proximity')
+  } else if (needsProximity) {
+    return fail('behavior-proximity')
+  }
+
+  const needsInterval = declared.has('atrium/interval')
+  if (Object.hasOwn(value, 'interval')) {
+    const interval = value.interval
+    if (!isPlainObject(interval)) return fail('behavior-interval')
+    const keys = Object.keys(interval)
+    if (keys.length !== 1 || keys[0] !== 'seconds') return fail('behavior-interval')
+    if (!behaviorSecondsOk(interval.seconds)) return fail('behavior-interval')
+    if (!needsInterval) return fail('behavior-interval')
+  } else if (needsInterval) {
+    return fail('behavior-interval')
+  }
+
+  if (Object.hasOwn(value, 'template')) {
+    const template = value.template
+    if (!isPlainObject(template)) return fail('behavior-template')
+    const keys = Object.keys(template)
+    if (keys.length !== 2 || keys.some((k) => k !== 'id' && k !== 'params')) return fail('behavior-template')
+    if (!BEHAVIOR_TEMPLATE_IDS.includes(template.id)) return fail('behavior-template')
+    if (!behaviorParamsOk(template.id, template.params)) return fail('behavior-template')
+  }
+
+  // §8 — the validator runs LAST. It is the gate, not the loader.
+  try {
+    validateInteractivityGraph(graph)
+  } catch (error) {
+    return fail('behavior-graph', error?.message ?? String(error))
+  }
+
+  return { problem: null, message: null }
+}
+
+/** F1 — the reason code for a behaviour value, or null when it may be stored. */
+export function behaviorProblem(value, options = {}) {
+  return behaviorCheck(value, options).problem
+}
+
+/**
+ * F2 — how many SAVED nodes other than `excludeNode` carry a non-null
+ * `extras.atrium.behavior`. The 64-behaviour cap's count (S1): it is of OTHER
+ * nodes, so the node being written is never counted against itself and its 64th
+ * behaviour can always be rewritten or toggled. External nodes are not saved
+ * nodes and do not count.
+ *
+ * @param {object} som                  the world's SOMDocument
+ * @param {object|null} [excludeNode]
+ * @returns {number}
+ */
+export function behaviorCountIn(som, excludeNode = null) {
+  let count = 0
+  for (const node of som?.allNodes ?? []) {
+    if (node === excludeNode) continue
+    if (typeof som.isExternalNode === 'function' && som.isExternalNode(node)) continue
+    const behavior = node?.extras?.atrium?.behavior
+    if (behavior !== undefined && behavior !== null) count += 1
+  }
+  return count
+}
+
+/**
+ * F2 — the `send` half of the fourth leaf. The node's OWN id is the first rule
+ * (N3: the form gives the node its `objectId` first, so the leaf never meets a
+ * missing `extras.atrium`); `null` is the "no behaviour" value and is accepted;
+ * then F1; then the world's 64-behaviour cap, which counts OTHER nodes (S1), so
+ * a node that already carries one can always rewrite it.
+ *
+ * @param {object} node
+ * @param {*} value
+ * @param {((excludeNode: object) => number)|null} [behaviorCount]
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkBehaviorValue(node, value, behaviorCount = null) {
+  const id = ownObjectId(node)
+  if (typeof id !== 'string' || id.length === 0) {
+    return deny(SEND_INVALID_FIELD, 'give the object an id before a behaviour')
+  }
+  if (value === null) return allow()
+  const check = behaviorCheck(value, { ownId: id })
+  if (check.problem) return deny(SEND_INVALID, check.message)
+  if (typeof behaviorCount === 'function' && behaviorCount(node) >= BEHAVIOR_NODES_PER_WORLD) {
+    return deny(SEND_INVALID, `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
+  }
+  return allow()
+}
+
+/**
+ * F2 — the `add` half: a behaviour carried by an `add` descriptor is checked
+ * when the key is present, with the descriptor's OWN `objectId` as the node's id
+ * (C3: a behaviour with no object id is refused with "a behaviour needs an
+ * object id", and nothing is added).
+ *
+ * @param {*} extras
+ * @returns {{ok: boolean, code: string|null, message: string|null}}
+ */
+export function checkAtriumBehavior(extras) {
+  if (!isPlainObject(extras)) return allow()
+  const atrium = extras.atrium
+  if (!isPlainObject(atrium)) return allow()
+  if (!Object.hasOwn(atrium, 'behavior')) return allow()
+  const value = atrium.behavior
+  const id = Object.hasOwn(atrium, 'objectId') ? atrium.objectId : undefined
+  if (typeof id !== 'string' || id.length === 0) {
+    return deny(SEND_INVALID, 'a behaviour needs an object id')
+  }
+  if (value === null) return allow()
+  const check = behaviorCheck(value, { ownId: id })
+  if (check.problem) return deny(SEND_INVALID, check.message)
+  return allow()
+}
+
 /**
  * Z1/A6 — the node-level check: the value rules plus "a node carrying
  * `extras.atrium.model` has no mesh". Called by the `add` handler so a mesh
@@ -719,7 +1186,7 @@ function isExternallyLoaded(target, externalNames) {
  * @param {object}  [args.currentExtras]   the document's current root extras (A3)
  * @returns {{ok: boolean, code: string|null, message: string|null}}
  */
-export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null, objectIdInUse = null } = {}) {
+export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null, objectIdInUse = null, behaviorCount = null } = {}) {
   if (!target) {
     return deny(SEND_NODE_MISSING, `${SEND_NODE_MISSING}: ${nodeName}`)
   }
@@ -743,7 +1210,7 @@ export function authorizeSend({ target, nodeName, field, value, avatarNames = nu
     // RESOLVED node, not the addressed string, so a name that merely looks
     // like an avatar cannot smuggle a write through.
     const isLiveAvatar = avatarNames !== null && isLiveAvatarName(target.name, avatarNames)
-    return authorizeNodeSend({ node: target, field, value, isLiveAvatar, objectIdInUse })
+    return authorizeNodeSend({ node: target, field, value, isLiveAvatar, objectIdInUse, behaviorCount })
   }
   if (target instanceof SOMCamera) {
     return authorizeCameraSend({ camera: target, nodeName, field, value })
@@ -763,7 +1230,7 @@ export function authorizeSend({ target, nodeName, field, value, avatarNames = nu
 // SOMNode
 // ---------------------------------------------------------------------------
 
-function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = null }) {
+function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = null, behaviorCount = null }) {
   // Live avatars are server-controlled: refuse every send, for everyone,
   // including the world owner, in every world mode.
   if (isLiveAvatar) {
@@ -813,6 +1280,13 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = n
   // passes E1 and is unique in the world.
   if (field === OBJECT_ID_LEAF) {
     return checkObjectIdValue(node, value, objectIdInUse)
+  }
+
+  // scripting-4b-2 F2 — the fourth node extras leaf: the behaviour graph. The
+  // node must carry its own objectId, null is the "no behaviour" value, then F1,
+  // then the world's 64-behaviour cap (which counts OTHER nodes).
+  if (field === BEHAVIOR_LEAF) {
+    return checkBehaviorValue(node, value, behaviorCount)
   }
 
   const materialMatch = MATERIAL_PATH_RE.exec(field)

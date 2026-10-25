@@ -25,7 +25,8 @@
           ]
         },
         "physics": { "type": "boolean" },
-        "chat": { "type": "boolean" }
+        "chat": { "type": "boolean" },
+        "scriptRunner": { "type": "integer", "const": 1, "description": "scripting-4b-2 F-L6: 1 declares this tab can run behaviour graphs." }
       },
       "additionalProperties": false
     }

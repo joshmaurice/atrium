@@ -30,7 +30,19 @@ function makeSom() {
 const ANIMATION = { clip: 'Walk', playing: true, loop: true, speed: 1, startedAt: 0 }
 
 test('Z2: CREATABLE_PATHS is the listed set', () => {
-  assert.deepEqual([...CREATABLE_PATHS], ['extras.atrium.animation', 'extras.atrium.objectId'])
+  assert.deepEqual([...CREATABLE_PATHS],
+    ['extras.atrium.animation', 'extras.atrium.objectId', 'extras.atrium.behavior'])
+})
+
+test('F2: setPath creates extras.atrium.behavior when it is missing', () => {
+  const som = makeSom()
+  const node = som.getNodeByName('Model')
+  assert.equal(Object.hasOwn(node.extras.atrium, 'behavior'), false, 'the leaf starts missing')
+  const value = { kind: 'graph', enabled: true, origin: 'local' }
+  som.setPath(node, 'extras.atrium.behavior', value)
+  assert.equal(Object.hasOwn(node.extras.atrium, 'behavior'), true, 'the leaf is an OWN property now')
+  assert.deepEqual(node.extras.atrium.behavior, value, 'the value is set whole')
+  assert.deepEqual(node.extras.atrium.model, MODEL, 'the sibling model leaf is untouched')
 })
 
 test('Z2: setPath creates extras.atrium.animation when it is missing', () => {

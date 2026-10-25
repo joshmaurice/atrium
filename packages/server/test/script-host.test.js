@@ -82,8 +82,8 @@ async function connect(port, as = null) {
   return { ws, messages }
 }
 
-async function hello(ws, messages, id) {
-  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 } } }))
+async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 1 }) {
+  ws.send(JSON.stringify({ type: 'hello', id, capabilities }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
   return reply
@@ -291,7 +291,7 @@ class FakeSocket {
   close(code) { this.closed = true; this.readyState = 3; this._fire('close', code) }
   _fire(event, ...args) { for (const fn of this._handlers[event] ?? []) fn(...args) }
   ofType(type) { return this.sent.filter((m) => m.type === type) }
-  sendHello(id) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 } } })) }
+  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 1 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
 }
 
 class FakeWss {
@@ -445,5 +445,57 @@ test('E4/N7: the handover skips a candidate the same sweep is about to terminate
     assert.equal(sessions.get('CCCCcccc').ws, C)
   } finally {
     stop()
+  }
+})
+
+// ===========================================================================
+// scripting-4b-2 F-L6 — the election needs canEdit AND scriptRunner: 1
+// ===========================================================================
+
+test('F-L6: an owner hello without scriptRunner never holds the role, and is never handed one', async () => {
+  const { port } = await startHostWorld()
+  const plain = await connect(port, 'user-a')
+  const capable = await connect(port, 'user-a')
+  const capable2 = await connect(port, 'user-a')
+  try {
+    // The first owner hello carries no runner capability: canEdit, no role.
+    const hPlain = await hello(plain.ws, plain.messages, 'plain-owner', { tick: { interval: 5000 } })
+    assert.equal(hPlain.canEdit, true, 'it still owns the world')
+    assert.equal(hPlain.scriptHost, false, 'but it is not the script host')
+    assert.equal('hostGen' in hPlain, false)
+
+    // The next capable owner takes the role.
+    const hCapable = await hello(capable.ws, capable.messages, 'capable-owner')
+    assert.equal(hCapable.scriptHost, true)
+    assert.equal(hCapable.hostGen, 1)
+
+    const hCapable2 = await hello(capable2.ws, capable2.messages, 'capable-owner-2')
+    assert.equal(hCapable2.scriptHost, false, 'the role is held')
+
+    // The capable host leaves: the role must NOT go to the capability-less
+    // owner ahead of it in session order, and must go to the next capable one.
+    capable.ws.close(); await waitForClose(capable.ws)
+    const handed = await waitFor(capable2.messages, (m) => m.type === 'script-host' && m.active === true)
+    assert.ok(handed, 'the next capable owner is handed the role')
+    assert.equal(handed.hostGen, 2)
+
+    const leftover = plain.messages.filter((m) => m.type === 'script-host')
+    assert.deepEqual(leftover, [], 'the capability-less owner is passed over in silence')
+  } finally {
+    plain.ws.close(); await waitForClose(plain.ws)
+    capable2.ws.close(); await waitForClose(capable2.ws)
+  }
+})
+
+test('F-L6: a hello whose scriptRunner is not 1 is refused by the schema', async () => {
+  const { port } = await startHostWorld()
+  const a = await connect(port, 'user-a')
+  try {
+    a.ws.send(JSON.stringify({ type: 'hello', id: 'bad-cap', capabilities: { scriptRunner: 2 } }))
+    const err = await waitFor(a.messages, (m) => m.type === 'error')
+    assert.ok(err, 'the message is refused')
+    assert.equal(err.code, 'UNKNOWN_MESSAGE')
+  } finally {
+    a.ws.close(); await waitForClose(a.ws)
   }
 })
