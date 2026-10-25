@@ -398,3 +398,42 @@ test('(f) an array nested 100,000 deep is refused with no RangeError anywhere', 
     await stopChild(state)
   }
 })
+
+// ===========================================================================
+// §6.1 (g) — G2, the fail-closed handler
+// ===========================================================================
+
+test('(g) a handler path that throws is answered, logged once, and the server keeps serving', async () => {
+  // world.addNode throws in the child (DEPTH_SERVER_THROW): the throw is inside
+  // the listener body, which is exactly the G2 boundary.
+  const state = await startChild({
+    DEPTH_SERVER_OWNER: 'user-a',
+    DEPTH_SERVER_SOCKET_USER: 'user-a',
+    DEPTH_SERVER_THROW: 'addNode',
+  })
+  const { ws, messages } = await connect(state.port)
+  try {
+    await hello(ws, messages, 'gggg7777')
+
+    const from = messages.length
+    ws.send(JSON.stringify({ type: 'add', seq: 9201, node: { name: 'box-throws-01' } }))
+    const err = await waitFor(messages, m => m.type === 'error' && m.seq === 9201, from)
+    assert.ok(err, 'the handler failure is answered')
+    assert.equal(err.code, 'UNKNOWN_MESSAGE')
+    assert.equal(err.message, 'the message could not be processed')
+
+    await delay(80)
+    assert.equal(messages.slice(from).some(m => m.type === 'add'), false, 'nothing was broadcast')
+    assert.equal((await childNodes(state)).includes('box-throws-01'), false, 'the world did not change')
+
+    const logged = state.stderr.split('\n').filter(l => l.includes('[session] message handler error:'))
+    assert.equal(logged.length, 1, `exactly one log line, got ${JSON.stringify(logged)}`)
+    assert.equal(logged[0], '[session] message handler error: Error stub addNode failure')
+
+    await assertStillServing(state, ws, messages)
+  } finally {
+    ws.close()
+    await waitForClose(ws)
+    await stopChild(state)
+  }
+})
