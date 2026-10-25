@@ -77,8 +77,13 @@ export function panelState({ status = null, value = null, clip = null, loop = fa
     // select SHOWS (a new playing value replaces the saved one), and Stop for
     // the saved value. Stop needs no clip list — it writes `null`, and is the
     // only way out when nothing is playable at all.
+    //
+    // scripting-4a item 3 (F-L12) — Stop is enabled whenever a SAVED PLAYING
+    // VALUE exists, whatever the clip list says: a model with no clips at all
+    // still needs its way out.
     playEnabled: enabled && (state === 'stopped' || state === 'ended' || state === 'clip-missing'),
-    stopEnabled: !waiting && (state === 'playing' || state === 'ended' || state === 'clip-missing'),
+    stopEnabled: !waiting && (state === 'playing' || state === 'ended' || state === 'clip-missing'
+      || (state === 'no-clips' && value?.playing === true)),
   }
 }
 
@@ -273,8 +278,13 @@ export function createAnimationControls({ deps = {} } = {}) {
     stop,
     /** The three answers. A seq this control does not own is ignored (L7). */
     onAccepted(seq) {
-      if (!inFlight.has(seq)) return false
+      const node = inFlight.get(seq)
+      if (!node) return false
       inFlight.delete(seq)
+      // scripting-4a item 1 (F-L12) — a pick lasts only until its OWN write is
+      // answered: after that the SAVED value is the truth, so the select follows
+      // another session's playing value (or this one's echo) from here on.
+      if (node === selected()) choice.explicit = false
       render()
       return true
     },
@@ -282,6 +292,8 @@ export function createAnimationControls({ deps = {} } = {}) {
       const node = inFlight.get(seq)
       if (!node) return false
       inFlight.delete(seq)
+      // Item 1 — a refused pick is over too: the select falls back to the value.
+      if (node === selected()) choice.explicit = false
       // The reason goes to the edit error line, and ONLY when the node it was
       // sent for is still the selection.
       if (node === selected()) deps.showError?.(message || 'the animation was refused')
@@ -289,8 +301,10 @@ export function createAnimationControls({ deps = {} } = {}) {
       return true
     },
     onUnknown(seq) {
-      if (!inFlight.has(seq)) return false
+      const node = inFlight.get(seq)
+      if (!node) return false
       inFlight.delete(seq)
+      if (node === selected()) choice.explicit = false
       render()
       return true
     },

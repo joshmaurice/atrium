@@ -80,7 +80,9 @@ describe('panelState — which control is offered (L7)', () => {
     // V6/R2 (a) — the one state L7 is amended for.
     ['clip-missing', { playEnabled: true, stopEnabled: true }],
     ['loading', { playEnabled: false, stopEnabled: false }],
-    ['no-clips', { playEnabled: false, stopEnabled: false }],
+    // F-L12 item 3 (scripting-4a, taken by 4b-2) — a model with NO clips but a
+    // saved PLAYING value still offers Stop: it is the only way out.
+    ['no-clips', { playEnabled: false, stopEnabled: true }],
   ]
   for (const [state, expected] of cases) {
     test(`${state}: play=${expected.playEnabled} stop=${expected.stopEnabled}`, () => {
@@ -341,7 +343,7 @@ test('V2: a model selected while loading plays the clip that arrives with the lo
     'it writes the clip the row shows')
 })
 
-test('V2: an explicit pick of the third clip survives a refresh', () => {
+test('V2 + F-L12 item 1: a pick lasts only until its own write is answered', () => {
   const statuses = new Map([['Fox', status('stopped')]])   // Survey, Walk, Run
   const h = makeControls({ statuses })
   h.node('Fox', null)
@@ -356,7 +358,12 @@ test('V2: an explicit pick of the third clip survives a refresh', () => {
   assert.deepEqual(h.writes.at(-1).value, playValue({ clip: 'Run' }), 'and Play uses it')
   h.controls.onAccepted(seq)
   h.controls.refresh()
-  assert.equal(h.lastPanel.clip, 'Run', 'a refresh after the answer keeps it too')
+  // scripting-4a item 1 (F-L12, taken by 4b-2) — after ITS OWN write is
+  // answered the SAVED value is the truth, so the pick is over and the select
+  // falls back to what the value offers (here: the node is still stopped, so
+  // the first offered clip). That is what makes the select follow another
+  // session's playing value.
+  assert.equal(h.lastPanel.clip, 'Survey', 'the pick is over once its write is answered')
 })
 
 test('V2: an explicit pick that disappears from the list is replaced by the shown clip', () => {

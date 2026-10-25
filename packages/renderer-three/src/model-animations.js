@@ -316,12 +316,26 @@ export function createModelAnimations({ bridge = null, now = () => Date.now(), o
    *
    * V1 — each entry's state is reported once when it changes (`playing` →
    * `ended`, for example); a frame where nothing changes calls nothing.
+   *
+   * F-L12 item 2 — it also RETURNS how many entries it actually stepped, as a
+   * diagnostic seam beside `mixerFor`/`actionFor`: a stopped entry is skipped,
+   * so a frame with only stopped entries returns 0.
+   *
+   * @returns {number}  the entries this frame did work for
    */
   function update() {
+    let stepped = 0
     for (const entry of entries.values()) {
+      // scripting-4a item 2 (F-L12) — a stopped entry costs NOTHING per frame:
+      // it is skipped, instead of calling the stop path again every frame. The
+      // stop itself happened on the frame the value changed (and in
+      // `onInstanceCreated`), so nothing is missed.
+      if (!isPlaying(wanted.get(entry.name) ?? null)) continue
       stepEntry(entry)
       reportChange(entry.name)
+      stepped += 1
     }
+    return stepped
   }
 
   /**

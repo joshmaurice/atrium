@@ -419,6 +419,29 @@ test('Z5: with nothing playing, update touches no mixer', () => {
   assert.equal(updates, 2, 'and a stopped entry costs nothing per frame')
 })
 
+// F-L12 item 2 (scripting-4a, taken by 4b-2): update() must SKIP a stopped
+// entry, not just be harmless for it. `snapshotOf`/`stateFor` are built per
+// stepped entry per frame, so the observable is how many entries a frame
+// actually stepped — the diagnostic count `update()` returns.
+test('F-L12 item 2: a stopped entry is skipped, a playing one is stepped', () => {
+  const h = makeLayer([makeClip('Walk', 10, 0, 10)])
+
+  assert.equal(h.animations.update(), 0, 'no value at all: nothing is stepped')
+
+  h.animations.set('Fox', PLAYING('Walk', { startedAt: 1_000_000 }))
+  h.setClock(1_001_000)
+  assert.equal(h.animations.update(), 1, 'a playing entry is stepped')
+
+  h.animations.set('Fox', null)
+  assert.equal(h.animations.update(), 0, 'a stopped entry is skipped, not re-stopped every frame')
+  assert.equal(h.animations.status('Fox').state, ANIMATION_STATE.stopped, 'and it is still stopped')
+
+  // Re-applying the value plays it again: the skip must not have lost the entry.
+  h.animations.set('Fox', PLAYING('Walk', { startedAt: 1_000_000 }))
+  h.setClock(1_002_000)
+  assert.equal(h.animations.update(), 1, 'the entry is still there to step once it plays')
+})
+
 test('Z5: no clips at all is no-clips', () => {
   const h = makeLayer([])
   h.animations.set('Fox', PLAYING('anything'))

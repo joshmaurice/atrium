@@ -552,3 +552,89 @@ test('Z3: a connect timeout leaves no timer running', () => {
     }, 120)
   })
 })
+
+// ===========================================================================
+// F-L12 item 5 (scripting-4a, taken by 4b-2): the recovery cases 4a did not
+// cover — a lost recovery pong, overlapping bursts, and the steady ping that
+// keeps running through a recovery.
+// ===========================================================================
+
+test('V4 (F-L12 item 5): a lost recovery pong keeps the burst going', () => {
+  const h = makeHarness()
+  h.handshake()
+  h.advanceTo(T0 + PING_BURST_INTERVAL_MS * (PING_BURST_COUNT - 1))
+  h.answer(5)                                   // rtt 0: the first estimate
+  h.advanceTo(T0 + PING_STEADY_INTERVAL_MS)
+  const steady = h.pings().at(-1)
+  h.advanceTo(h.sentAt(steady.clientTime))
+  h.answer(steady.clientTime, { skew: 60_000 }) // the discontinuity
+  assert.equal(h.client.serverClockReady, false, 'the clock is recovering')
+
+  // The recovery burst: its FIRST ping is lost; the second answers.
+  h.advanceTo(h.mono())
+  const lost = h.pings().at(-1)
+  h.advanceTo(h.mono() + PING_BURST_INTERVAL_MS)
+  const good = h.pings().at(-1)
+  assert.ok(good.clientTime > lost.clientTime, 'a fresh key, never the lost one')
+
+  h.answer(good.clientTime, { skew: 60_000 })
+  assert.equal(h.samples().length, 1, 'only an ANSWERED ping makes a sample')
+  assert.equal(h.offset(), BASE_OFFSET + 60_000, 'the estimate moved to the new clock')
+  assert.equal(h.client.serverClockReady, true, 'the lost ping did not hold recovery back')
+
+  // The lost ping is still outstanding. Its late answer is a plain sample —
+  // nothing restarts because a ping went unanswered.
+  assert.equal(h.sentAt(lost.clientTime) !== undefined, true, 'the lost ping is still unanswered')
+  h.answer(lost.clientTime, { skew: 60_000 })
+  assert.equal(h.samples().length, 2, 'its late answer is just another sample')
+  assert.equal(h.offset(), BASE_OFFSET + 60_000, 'and it agrees with the estimate')
+})
+
+test('V4 (F-L12 item 5): a discontinuity mid-burst clears the keys without reusing one', () => {
+  const h = makeHarness()
+  h.handshake()
+  h.advanceTo(T0 + PING_BURST_INTERVAL_MS * 2)  // pings 1, 2, 3 of the burst are out
+  assert.equal(h.pingCount(), 3, 'the burst is still in flight')
+  const estimate = h.offset()
+
+  h.answer(3, { skew: 60_000 })                 // the discontinuity, mid-burst
+  assert.deepEqual([1, 2].map((k) => h.sentAt(k) !== undefined), [false, false],
+    'V4: the outstanding keys went with the window')
+  assert.equal(h.offset(), estimate, 'the estimate is kept while it recovers')
+  assert.equal(h.client.serverClockReady, false, 'and the clock is not ready')
+
+  // The new burst runs alongside the old one’s remaining timers: the keys never
+  // collide, so an old timer’s ping can never be taken for a new one’s.
+  h.advanceTo(h.mono())
+  const first = h.pings().at(-1)
+  assert.ok(first.clientTime > 3, 'a key the old burst never used')
+  h.answer(first.clientTime, { skew: 60_000 })
+  assert.equal(h.client.serverClockReady, true, 'the recovery burst rebuilt the estimate')
+  assert.equal(h.offset(), BASE_OFFSET + 60_000, 'and it is the server’s new clock')
+})
+
+test('Z3 (F-L12 item 5): the steady ping keeps running through a recovery', () => {
+  const h = makeHarness()
+  h.handshake()
+  h.advanceTo(T0 + PING_BURST_INTERVAL_MS * (PING_BURST_COUNT - 1))
+  h.answer(5)                                   // the first estimate
+  h.advanceTo(T0 + PING_STEADY_INTERVAL_MS)
+  const steady = h.pings().at(-1)
+  h.advanceTo(h.sentAt(steady.clientTime))
+  h.answer(steady.clientTime, { skew: 60_000 }) // the discontinuity
+  assert.equal(h.client.serverClockReady, false)
+
+  // The steady interval is NOT cancelled by the recovery burst: it fires again
+  // in the recovery window, and its key was added AFTER `sent.clear()`, so it is
+  // a legitimate measurement — the rule is per key, not per ping style.
+  h.advanceTo(T0 + PING_STEADY_INTERVAL_MS * 2)
+  const next = h.pings().at(-1)
+  assert.ok(next.clientTime > steady.clientTime, 'a fresh key, added after sent.clear()')
+  assert.equal(h.sentAt(steady.clientTime), undefined, 'the old steady key was cleared')
+  assert.equal(h.sentAt(next.clientTime) !== undefined, true, 'the new one is outstanding')
+
+  h.answer(next.clientTime, { skew: 60_000 })
+  assert.equal(h.samples().length, 1, 'its answer is a legitimate sample')
+  assert.equal(h.offset(), BASE_OFFSET + 60_000, 'and it carries the new clock')
+  assert.equal(h.client.serverClockReady, true, 'readiness returns with it')
+})
