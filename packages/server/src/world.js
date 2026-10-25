@@ -424,7 +424,17 @@ export function healDocumentBehaviors(document, { log = console } = {}) {
     }
 
     if (behavior !== null) {
-      const check = behaviorCheck(behavior, { ownId: id })
+      // V9 — the LOAD path fails closed too: a check that throws drops this one
+      // behaviour (to null) instead of taking the load, or the process, down.
+      let check
+      try {
+        check = behaviorCheck(behavior, { ownId: id })
+      } catch (error) {
+        dropNodeBehavior(node)
+        malformed += 1
+        log?.log?.(`[world] dropped malformed behavior on node ${index}: ${error?.message ?? 'the check threw'} (could not be checked)`)
+        return
+      }
       if (check.problem) {
         dropNodeBehavior(node)
         malformed += 1

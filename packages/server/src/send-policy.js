@@ -699,10 +699,11 @@ function behaviorPointerIndex(node, pointer, nodeMapLength) {
 export function behaviorCheck(value, { ownId } = {}) {
   const fail = (problem, detail = null) => ({ problem, message: behaviorReasonText(problem, detail) })
 
-  // S8 — the forbidden-key and depth walk runs FIRST of all.
+  // S8 / V9 — the forbidden-key and depth walk runs FIRST of all, and it is
+  // iterative: a value nested a few thousand deep is REFUSED, never a stack
+  // overflow (M2).
   if (!isPlainObject(value)) return fail('behavior-type')
-  if (hasForbiddenKey(value)) return fail('behavior-type')
-  if (maxDepth(value) > BEHAVIOR_DEPTH_MAX) return fail('behavior-type')
+  if (walkGuards(value, BEHAVIOR_DEPTH_MAX) !== null) return fail('behavior-type')
 
   for (const key of Object.keys(value)) {
     if (!BEHAVIOR_KEYS.includes(key)) return fail('behavior-type')
@@ -1042,24 +1043,37 @@ function jsonEqual(a, b) {
 }
 
 /** Deepest nesting of plain objects/arrays; a scalar is depth 1. */
-function maxDepth(value, depth = 1) {
-  if (typeof value !== 'object' || value === null) return depth
-  let deepest = depth
-  for (const v of Object.values(value)) {
-    const d = maxDepth(v, depth + 1)
-    if (d > deepest) deepest = d
+/**
+ * V9 — ONE iterative walk over the value: the reserved keys AND the depth
+ * limit, with an explicit stack and NO recursion.
+ *
+ * Round 4 had two recursive helpers here (`maxDepth`, `hasForbiddenKey`). A
+ * `send` of a behaviour whose `graph` is an array nested 6,500 deep made
+ * `hasForbiddenKey` throw `RangeError: Maximum call stack size exceeded`, and
+ * nothing caught it: the process exited and took every world on it down (the
+ * outside review's M2).
+ *
+ * It stops at the FIRST thing it finds and never descends past `limit`, so a
+ * 100,000-deep array is refused without ever being visited.
+ *
+ * @param {*} value
+ * @param {number} limit  the caller's own depth limit: `BEHAVIOR_DEPTH_MAX` for
+ *                        a behaviour, `MAX_EXTRAS_DEPTH` for document extras
+ * @returns {'forbidden'|'too-deep'|null}
+ */
+function walkGuards(value, limit) {
+  if (typeof value !== 'object' || value === null) return null
+  const stack = [[value, 1]]
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop()
+    if (depth > limit) return 'too-deep'
+    if (typeof node !== 'object' || node === null) continue
+    for (const key of Object.keys(node)) {
+      if (FORBIDDEN_KEYS.has(key)) return 'forbidden'
+      stack.push([node[key], depth + 1])
+    }
   }
-  return deepest
-}
-
-/** True if any key at any depth is __proto__ / prototype / constructor. */
-function hasForbiddenKey(value) {
-  if (typeof value !== 'object' || value === null) return false
-  for (const key of Object.keys(value)) {
-    if (FORBIDDEN_KEYS.has(key)) return true
-    if (hasForbiddenKey(value[key])) return true
-  }
-  return false
+  return null
 }
 
 /**
@@ -1392,11 +1406,14 @@ function authorizeDocumentSend(field, value, currentExtras) {
   if (serialized === undefined || serialized.length > MAX_EXTRAS_BYTES) {
     return deny(SEND_DENIED, 'document extras exceed the size limit')
   }
-  if (maxDepth(value) > MAX_EXTRAS_DEPTH) {
-    return deny(SEND_DENIED, 'document extras exceed the depth limit')
-  }
-  if (hasForbiddenKey(value)) {
+  // V9 — the same one iterative walk, with the document extras' own limit and
+  // their existing messages.
+  const guard = walkGuards(value, MAX_EXTRAS_DEPTH)
+  if (guard === 'forbidden') {
     return deny(SEND_DENIED, 'document extras contain a reserved key')
+  }
+  if (guard === 'too-deep') {
+    return deny(SEND_DENIED, 'document extras exceed the depth limit')
   }
 
   const changes = []

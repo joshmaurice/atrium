@@ -34,6 +34,15 @@ function sendError(ws, seq, code, message) {
 }
 
 /**
+ * V9 — one log line when a send or add check throws. The message is refused
+ * with `INVALID_VALUE` ("the value could not be checked") and everything else
+ * carries on: this line is what tells the operator which field failed.
+ */
+function logCheckFailure(session, field, error) {
+  console.error(`[session ${session?.id ?? '?'}] the check for "${field}" threw: ${error?.message ?? error}`)
+}
+
+/**
  * True when any node in `somNode`'s subtree is a live avatar node (A4).
  * Defence in depth once the `add`-under-avatar rule exists.
  */
@@ -800,21 +809,34 @@ export function attachSessionHandlers({
           // the A4 value check on the teleporter destination leaf, and its code
           // stays INVALID_VALUE.
           const sendTarget = resolveSendTarget(world.som, msg.node)
-          const decision = authorizeSend({
-            target: sendTarget,
-            nodeName: msg.node,
-            field: msg.field,
-            value: msg.value,
-            avatarNames: liveAvatarNames(sessions.values()),
-            currentExtras: world.som.extras,
-            externalNames: world.externalNodeNames,
-            // 4b-1 E3 — the set-once objectId leaf's uniqueness needs the world,
-            // so the handler hands `authorizeSend` a callback (review N2).
-            objectIdInUse: (id) => world.som.objectIdInUse(id),
-            // scripting-4b-2 F2/S1 — the 64-behaviour cap needs the world too,
-            // and it counts OTHER nodes, so the node being written is excluded.
-            behaviorCount: (node) => behaviorCountIn(world.som, node),
-          })
+          // V9 — the check itself is fallible, and it FAILS CLOSED: any
+          // exception it throws (including from `behaviorCheck`) refuses THIS
+          // message with `INVALID_VALUE`, the session, the world and the process
+          // carry on, and the server logs one line naming the session and the
+          // field. Nothing is checked here that a failing check could leave
+          // half-applied: the refusal happens before `world.setField`.
+          let decision
+          try {
+            decision = authorizeSend({
+              target: sendTarget,
+              nodeName: msg.node,
+              field: msg.field,
+              value: msg.value,
+              avatarNames: liveAvatarNames(sessions.values()),
+              currentExtras: world.som.extras,
+              externalNames: world.externalNodeNames,
+              // 4b-1 E3 — the set-once objectId leaf's uniqueness needs the world,
+              // so the handler hands `authorizeSend` a callback (review N2).
+              objectIdInUse: (id) => world.som.objectIdInUse(id),
+              // scripting-4b-2 F2/S1 — the 64-behaviour cap needs the world too,
+              // and it counts OTHER nodes, so the node being written is excluded.
+              behaviorCount: (node) => behaviorCountIn(world.som, node),
+            })
+          } catch (error) {
+            logCheckFailure(session, msg.field, error)
+            sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+            break
+          }
           if (!decision.ok) {
             sendError(ws, msg.seq, decision.code, decision.message)
             break
@@ -954,7 +976,21 @@ export function attachSessionHandlers({
           // Every refusal here comes before the first world change (the
           // displayName overwrite below and addNode).
           if (!isAvatar) {
-            const extrasCheck = checkAtriumExtras(msg.node.extras)
+            // V9 — the `add` checks fail closed too: an exception from any of
+            // them refuses the whole `add` with `INVALID_VALUE`, before the
+            // first world change.
+            let checks
+            try {
+              checks = {
+                extras: checkAtriumExtras(msg.node.extras),
+                model: checkModelHost(msg.node),
+              }
+            } catch (error) {
+              logCheckFailure(session, 'add', error)
+              sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+              break
+            }
+            const extrasCheck = checks.extras
             if (!extrasCheck.ok) {
               sendError(ws, msg.seq, extrasCheck.code, extrasCheck.message)
               break
@@ -962,7 +998,7 @@ export function attachSessionHandlers({
             // models-by-url (Z1/A6): the node-level half of the model rules —
             // a node carrying extras.atrium.model may not carry a mesh. Runs
             // with the value check, before the first world change.
-            const modelCheck = checkModelHost(msg.node)
+            const modelCheck = checks.model
             if (!modelCheck.ok) {
               sendError(ws, msg.seq, modelCheck.code, modelCheck.message)
               break

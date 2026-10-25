@@ -124,24 +124,32 @@ function isPlainObject(v) {
   return proto === Object.prototype || proto === null
 }
 
-function hasForbiddenKey(value) {
-  if (typeof value !== 'object' || value === null) return false
-  for (const key of Object.keys(value)) {
-    if (FORBIDDEN_KEYS.has(key)) return true
-    if (hasForbiddenKey(value[key])) return true
+/**
+ * V9 — ONE iterative walk over the value: the reserved keys AND the depth
+ * limit, with an explicit stack and NO recursion (the same change as the
+ * server's copy in `send-policy.js`, so the shared vectors still pass on both
+ * sides). Round 4's recursive pair overflowed the stack on a value nested a few
+ * thousand deep — on the server that took the process down (M2).
+ *
+ * It stops at the FIRST thing it finds and never descends past `limit`.
+ *
+ * @param {*} value
+ * @param {number} limit  `BEHAVIOR_DEPTH_MAX`
+ * @returns {'forbidden'|'too-deep'|null}
+ */
+function walkGuards(value, limit) {
+  if (typeof value !== 'object' || value === null) return null
+  const stack = [[value, 1]]
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop()
+    if (depth > limit) return 'too-deep'
+    if (typeof node !== 'object' || node === null) continue
+    for (const key of Object.keys(node)) {
+      if (FORBIDDEN_KEYS.has(key)) return 'forbidden'
+      stack.push([node[key], depth + 1])
+    }
   }
-  return false
-}
-
-/** Deepest nesting of plain objects/arrays; a scalar is depth 1. */
-function maxDepth(value, depth = 1) {
-  if (typeof value !== 'object' || value === null) return depth
-  let deepest = depth
-  for (const v of Object.values(value)) {
-    const d = maxDepth(v, depth + 1)
-    if (d > deepest) deepest = d
-  }
-  return deepest
+  return null
 }
 
 const isE1 = (v) => typeof v === 'string' && OBJECT_ID_RE.test(v)
@@ -248,11 +256,12 @@ export function templateParamsOk(id, params) {
 export function behaviorCheck(value, { ownId } = {}) {
   const fail = (problem, message) => ({ problem, message: message ?? behaviorReasonText(problem) })
 
-  // S8 — the forbidden-key and depth walk runs FIRST of all, before anything
-  // looks at the value's shape.
+  // S8 / V9 — the forbidden-key and depth walk runs FIRST of all, before
+  // anything looks at the value's shape, and it is ITERATIVE: a value nested a
+  // few thousand deep is refused, never a stack overflow. This copy is the one
+  // the browser uses, and the shared vectors pin both copies to the same rules.
   if (!isPlainObject(value)) return fail('behavior-type')
-  if (hasForbiddenKey(value)) return fail('behavior-type')
-  if (maxDepth(value) > BEHAVIOR_DEPTH_MAX) return fail('behavior-type')
+  if (walkGuards(value, BEHAVIOR_DEPTH_MAX) !== null) return fail('behavior-type')
 
   for (const key of Object.keys(value)) {
     if (!BEHAVIOR_KEYS.includes(key)) return fail('behavior-type')
