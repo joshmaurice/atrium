@@ -1,7 +1,8 @@
 # Pre-brief: Phase 3 step 4b-2 — behaviours, owner-present: the vendored engine, the adapter and runner, the `behavior` leaf, and the five templates
 
-Status: **DRAFT, Revision 2 (2026-10-24). Decisions F-L1–F-L12 approved by
-the operator (2026-10-24 17:42 PT), all as recommended:**
+Status: **FINAL, Revision 2.1 (2026-10-24). Decisions F-L1–F-L12 approved by
+the operator (2026-10-24 17:42 PT), all as recommended; the operator made
+Rev 2 FINAL (2026-10-24 18:35 PT):**
 - F-L1 (a) one round, seven steps; F-L2 (a) design §5.4 plus `animations`,
   `proximity` and `template`; F-L3 (a) form and limits on the server,
   existence at run time; F-L4 (a) the templates' ops only; F-L5 (a) drop
@@ -53,7 +54,9 @@ the operator (2026-10-24 17:42 PT), all as recommended:**
     carry their behaviour's id and generation (S3); the adapter's `world`
     interface is pinned whole (S4); `template.params` is checked per
     template and must regenerate the saved graph (S5).
-  - **Still DRAFT.** It goes FINAL on the operator's word.
+- **Rev 2.1 changes only this status line and §10** (as 4b's Rev 2.1
+  did). **4b-2's kickoff is written from the commit that carries this
+  revision,** which is its base.
 - **Drafted by Claude from `main` at `a246f80c`.** Its code is identical to
   the released `8358b043` (DEV, MAIN and PROD): the two commits on top
   (`2db57dc`, `a246f80c`) touch only `devtasks/`. Line numbers are at that
@@ -1349,3 +1352,6 @@ The P-claims table of the review found every `file:line` holding at
 
 The reviewer: with M1–M4 resolved, "consider the pre-brief ready for
 FINAL".
+- **Rev 2.1** (2026-10-24 18:35 PT): the operator made Rev 2 FINAL. Only
+  the status line and this entry changed. The kickoff,
+  `devtasks/KICKOFF-scripting-4b-2.md`, is written from this commit.
