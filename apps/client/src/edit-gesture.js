@@ -66,6 +66,11 @@ export const REMOVED_MESSAGE = 'This object was removed.'
  * @returns {number[]}
  */
 export function sanitizeTransform(field, value) {
+  // V4 (round 5) — a value that is not a vector passes through unchanged. The
+  // Visible checkbox commits a BOOLEAN through this same path, and round 4's
+  // last line (`return [...value]`) threw "value is not iterable" on it, so the
+  // checkbox un-hid nothing. Scale, rotation and translation are untouched.
+  if (!Array.isArray(value)) return value
   if (field === 'scale') return value.map(v => Math.max(MIN_SCALE, v))
   if (field === 'rotation') {
     const len = Math.hypot(...value)

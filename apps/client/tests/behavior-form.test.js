@@ -36,7 +36,7 @@ function makeNode({ name, id = null, model = null, light = null, behavior }) {
   return node
 }
 
-function setup({ nodes = [], selected = null, status = {} } = {}) {
+function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
   const elements = elementsFor()
   const calls = { setObjectId: [], sendField: [] }
   const applied = new Map()          // seq → { name, id } a setObjectId asked for
@@ -51,6 +51,8 @@ function setup({ nodes = [], selected = null, status = {} } = {}) {
       sendField: (name, field, value) => { calls.sendField.push([name, field, value]); return ++seq },
     },
     newObjectId: () => `9999${String(++clock).padStart(4, '0')}-9999-4999-8999-999999999999`,
+    // V5 — the form's clip picker, from the same source the adapter checks.
+    clipIds: (objectId) => clips[objectId],
     createElement: (tag) => el(tag),
     showError: () => {},
     clearError: () => {},
@@ -709,4 +711,32 @@ test('V13 — Edit off closes the section and cancels a Save in flight (M4)', ()
   accept(1)                                          // the answer arrives anyway
   assert.equal(calls.sendField.length, 0, 'nothing further went out')
   assert.equal(form.state.status, BEHAVIOR_STATUS.cancelled, '"Save cancelled", once')
+})
+
+// ── V5 — the clip picker ──────────────────────────────────────────────────
+
+test('V5 — a loaded model shows its clips as a `<select>`', () => {
+  const model = makeNode({ name: 'foz', id: TGT, model: { url: 'a.glb' } })
+  const cube = makeNode({ name: 'crate', id: OWN })
+  const { form, elements } = setup({ nodes: [cube, model], selected: model, clips: { [TGT]: ['Idle', 'Walk'] } })
+  form.open(model)
+  form.onTemplateChange('select-animation')
+  form.onParamChange('target', TGT)
+  form.render()
+
+  const fields = elements.params.children.map((row) => row.children[0])
+  const clipField = fields.find((f) => f.dataset.field === 'clip')
+  assert.ok(clipField, 'the clip field is rendered')
+  assert.equal(clipField.tagName, 'select', 'a loaded model gives a select, not a text box')
+  assert.deepEqual(clipField.children.map((o) => o.value), ['Idle', 'Walk'])
+  assert.equal(clipField.children[0].selected, true, 'the first clip is the default')
+
+  // A model whose clips the host does not know yet keeps the text box.
+  const { form: f2, elements: e2 } = setup({ nodes: [cube, model], selected: model })
+  f2.open(model)
+  f2.onTemplateChange('select-animation')
+  f2.onParamChange('target', TGT)
+  f2.render()
+  const clip2 = e2.params.children.map((row) => row.children[0]).find((f) => f.dataset.field === 'clip')
+  assert.equal(clip2.tagName, 'input', 'no ids, no select')
 })

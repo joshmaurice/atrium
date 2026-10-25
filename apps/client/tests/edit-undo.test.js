@@ -981,3 +981,30 @@ describe('edit-undo: redo-stack rules (Y1, R6)', () => {
     assert.equal(app.undo.undoCount, 0)
   })
 })
+
+// ── V4 (round 5) — a Visible change is undone and redone ───────────────────
+
+describe('edit-undo: V4 (round 5) — the Visible field', () => {
+  test('a Visible change is captured, undone and redone through the same path as a transform\'s', () => {
+    const app = makeApp()
+    const a = app.put(somNode('Cube'))
+    a.visible = false                      // the commit applied it locally
+    app.settle(a, [{ field: 'visible', from: true, to: false }])
+    assert.equal(app.undo.undoCount, 1, 'the boolean is on the stack')
+
+    app.undo.run('undo')
+    const undoSeq = app.sent.at(-1).seq
+    assert.equal(app.sent.at(-1).field, 'visible')
+    assert.equal(app.sent.at(-1).value, true, 'Undo un-hides')
+    assert.equal(a.visible, true, 'and the node holds it again')
+    app.answer(undoSeq, 'accepted')
+    assert.equal(app.undo.redoCount, 1)
+
+    app.undo.run('redo')
+    assert.equal(app.sent.at(-1).field, 'visible')
+    assert.equal(app.sent.at(-1).value, false, 'Redo hides it again')
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.equal(a.visible, false)
+    assert.equal(app.undo.undoCount, 1, 'and the entry is back where it started')
+  })
+})

@@ -148,3 +148,23 @@ describe('scripting-4b-2 r5 (V1, V2, V12) — the page obeys the DOM\'s own rule
     }
   })
 })
+
+describe('scripting-4b-2 r5 (V5, V6) — the clip ids and the own capsule', () => {
+  test('V5 — app.js feeds the form the SAME clip ids the adapter checks', () => {
+    const code = source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+    assert.match(code, /import \{ clipsFor \} from '\.\/behavior-clips\.js'/)
+    assert.match(code, /clipIds: \(objectId\) => clipStatusFor\(objectId\)\.clipIds/,
+      'the form\'s picker reads the one source')
+    assert.match(code, /clips: clipStatusFor/, 'and so does the runner (the adapter\'s clip check)')
+    assert.doesNotMatch(code, /clip ids are not exposed/, 'round 4\'s excuse is gone')
+  })
+
+  test('V6 — the V key and the disconnect reset both show/hide the capsule through `setNodeVisible`', () => {
+    assert.match(source,
+      /avatar\.localNode\.visible = (false|true)[\s\S]{0,400}?if \(docView\) setNodeVisible\(docView, avatar\.localNode, !firstPerson\)/,
+      'the V handler')
+    assert.match(source,
+      /function teardownWorld\(\)[\s\S]{0,400}?setNodeVisible\(docView, avatar\??\.localNode, true\)/,
+      'the reset on disconnect')
+  })
+})

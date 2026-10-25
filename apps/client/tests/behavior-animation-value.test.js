@@ -18,6 +18,7 @@ import assert from 'node:assert/strict'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { templateGraph } from '@atrium/behaviors/templates'
 import { animationValueProblem, ANIMATION_KEYS } from '@atrium/client/animation-spec'
+import { clipsFor } from '../src/behavior-clips.js'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const AVATAR = '44444444-4444-4444-8444-444444444444'
@@ -50,13 +51,13 @@ function makeClient(nodes) {
   }
 }
 
-function makeNode({ name, id = null, behavior, ephemeral = false } = {}) {
+function makeNode({ name, id = null, behavior, model = null, ephemeral = false } = {}) {
   return {
     name,
     parent: null,
     translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1], visible: true,
     light: null,
-    extras: { atrium: { ...(id ? { objectId: id } : {}), ...(behavior === undefined ? {} : { behavior }), ...(ephemeral ? { ephemeral: true } : {}) } },
+    extras: { atrium: { ...(id ? { objectId: id } : {}), ...(model ? { model } : {}), ...(behavior === undefined ? {} : { behavior }), ...(ephemeral ? { ephemeral: true } : {}) } },
   }
 }
 
@@ -130,5 +131,40 @@ test('V3 — interval-animation: the adapter\'s own timer plays, and the value i
   const sent = client.animations[0].value
   assert.deepEqual(Object.keys(sent), [...ANIMATION_KEYS])
   assert.equal(animationValueProblem(sent), null, 'the server would accept it')
+  runner.dispose()
+})
+
+// ── V5 — the adapter's clip check, end to end through `clipsFor` ───────────
+
+test('V5 — a clip that is not on a LOADED model is refused, and nothing is sent', () => {
+  // The picker's list and the adapter's check are the same source (V5), so this
+  // runs 4a's `status` shape through `clipsFor` and the real runner.
+  const value = templateGraph('select-animation', { target: OWN, clip: 'Walk', action: 'play', loop: true }, { ownId: OWN })
+  const node = makeNode({ name: 'foz', id: OWN, behavior: value, model: { url: 'a.glb' } })
+  const client = makeClient([node])
+  const state = { clock: 0 }
+  const runner = createBehaviorRunner({
+    client,
+    now: () => state.clock,
+    position: (n) => n?.translation,
+    clips: (objectId) => clipsFor(objectId, {
+      resolveObjectId: (id) => client.som.resolveObjectId(id),
+      modelAnimations: { status: () => ({ clips: ['Idle'], state: 'stopped' }) },
+    }),
+  })
+  client.emit('world:loaded', { name: 'w' })
+  client.emit('script-host:changed', { active: true, hostGen: 1 })
+
+  runner.select(node)
+  runOnce({ runner, state })
+  assert.equal(client.animations.length, 0, 'the clip is not on the model: nothing was sent')
+  assert.ok(runner.log.some((l) => l.message.includes('Walk')), `the log says why: ${JSON.stringify(runner.log)}`)
+
+  // The same graph with a clip the model HAS goes out.
+  node.extras.atrium.behavior = templateGraph('select-animation', { target: OWN, clip: 'Idle', action: 'play', loop: true }, { ownId: OWN })
+  client.emit('som:set', { nodeName: 'foz', path: 'extras.atrium.behavior', value: node.extras.atrium.behavior })
+  runner.select(node)
+  runOnce({ runner, state })
+  assert.equal(client.animations.length, 1, 'a real clip is sent')
   runner.dispose()
 })

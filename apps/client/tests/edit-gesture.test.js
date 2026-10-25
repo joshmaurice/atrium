@@ -704,3 +704,44 @@ describe('edit-gesture: an undo’s or a redo’s own send (Y3)', () => {
       [{ node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [4, 0, 0] }] }])
   })
 })
+
+// ── V4 (round 5) — Visible goes through the tracker ────────────────────────
+
+describe('edit-gesture: V4 (round 5) — the Visible field', () => {
+  test('sanitizeTransform returns a NON-vector value unchanged', () => {
+    // Round 4's last line was `return [...value]`, so a boolean threw
+    // "value is not iterable" and the Visible checkbox un-hid nothing.
+    assert.equal(sanitizeTransform('visible', false), false)
+    assert.equal(sanitizeTransform('visible', true), true)
+    // …and the three transform fields behave exactly as before.
+    assert.deepEqual(sanitizeTransform('scale', [1, -2, 3]), [1, MIN_SCALE, 3])
+    assert.deepEqual(sanitizeTransform('translation', [1, 2, 3]), [1, 2, 3])
+    assert.deepEqual(sanitizeTransform('rotation', [0, 0, 0, 2]), [0, 0, 0, 1])
+  })
+
+  test('a Visible commit is ONE send each way, and the echo settles it', () => {
+    const w = makeWorld()
+    const n = node()
+    n.visible = true
+
+    const seq = w.tracker.commit(n, 'visible', false)
+    assert.equal(typeof seq, 'number', 'commit sent')
+    assert.equal(w.sent.length, 1, 'one send')
+    assert.equal(w.sent[0].field, 'visible')
+    assert.equal(w.sent[0].value, false)
+    assert.equal(n.visible, false, 'and it is applied locally first, as a transform is')
+    w.tracker.accepted(seq)
+    assert.equal(w.tracker.pendingCount, 0, 'the answer settles it')
+
+    // The same value twice sends NOTHING (the tracker's own rule).
+    assert.equal(w.tracker.commit(n, 'visible', false), null)
+    assert.equal(w.sent.length, 1)
+
+    const back = w.tracker.commit(n, 'visible', true)
+    assert.equal(w.sent.length, 2)
+    assert.equal(w.sent[1].value, true)
+    w.tracker.accepted(back)
+    assert.equal(n.visible, true, 'and it un-hides')
+    assert.equal(w.reverts.length, 0, 'nothing was reverted')
+  })
+})

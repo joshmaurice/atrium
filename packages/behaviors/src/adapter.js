@@ -117,12 +117,17 @@ export function installBudgetedLoops(engine) {
 // ---------------------------------------------------------------------------
 
 class BehaviorDecorator extends ADecorator {
-  constructor(engine, { nodeMap, world, logOnce, mayWrite }) {
+  constructor(engine, { nodeMap, world, logOnce, mayWrite, log }) {
     super(engine)
     this.nodeMap = nodeMap
     this.world = world
     this.logOnce = logOnce
     this.mayWrite = mayWrite
+    // V5 (round 5) — `onAnimation` reports through `this.log` (an index past the
+    // table, a clip that is not on the model). It was never wired, so the S7
+    // path threw `this.log is not a function` inside the tick and disabled the
+    // whole behaviour the moment the clip check became live.
+    this.log = log
     this.worldNodes = nodeMap.map(() => ({}))
     this.worldAnimations = []
 
@@ -333,7 +338,10 @@ export function createBehaviorEngine({
     return granted
   }
 
-  const decorator = new BehaviorDecorator(engine, { nodeMap, world, logOnce, mayWrite })
+  const decorator = new BehaviorDecorator(engine, {
+    nodeMap, world, logOnce, mayWrite,
+    log: (severity, message) => report(severity, message),
+  })
   decorator.animations = animations
   decorator.worldAnimations = animations.map((a) => ({ name: a.clip }))
 

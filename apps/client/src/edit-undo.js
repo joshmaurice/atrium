@@ -43,15 +43,25 @@ export const DELETE_CHANGED_MESSAGE =
 export const UNDOING_MESSAGE = 'Undoing…'
 
 /** How the panel names a transform field in a message. */
-const FIELD_NAME = { translation: 'position', rotation: 'rotation', scale: 'scale' }
+const FIELD_NAME = { translation: 'position', rotation: 'rotation', scale: 'scale', visible: 'visibility' }
 /** The verb a single-field transform entry's label uses (Y1). */
-const FIELD_VERB = { translation: 'Move', rotation: 'Rotate', scale: 'Scale' }
+const FIELD_VERB = { translation: 'Move', rotation: 'Rotate', scale: 'Scale', visible: 'Show or hide' }
 
 function same(a, b) {
   if (a === b) return true
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
+}
+
+/**
+ * V4 (round 5) — the undo stack holds transform VECTORS and, now, the Visible
+ * field's BOOLEAN. `[...value]` is what threw "value is not iterable" on a
+ * boolean, so every copy of a change's value goes through here: a vector is
+ * copied, anything else passes through unchanged.
+ */
+function copyValue(value) {
+  return Array.isArray(value) ? [...value] : value
 }
 
 /** Exact equality, every number and every key — the comparison Y1 uses. */
@@ -194,7 +204,7 @@ export function createEditUndo({
     }
     for (const r of results) {
       if (!r.changes || r.changes.length === 0) continue
-      const changes = r.changes.map((c) => ({ field: c.field, from: [...c.from], to: [...c.to] }))
+      const changes = r.changes.map((c) => ({ field: c.field, from: copyValue(c.from), to: copyValue(c.to) }))
       pushEntry({
         kind: 'transform',
         label: changes.length === 1 ? FIELD_VERB[changes[0].field] : 'Transform',
@@ -568,8 +578,8 @@ export function createEditUndo({
       // U11 — an undo may send a normalized value, so the mirror check must
       // compare against what the node now holds
       entry.changes = entry.changes.map((c) => (direction === 'undo'
-        ? { field: c.field, from: [...(node[c.field] ?? c.from)], to: c.to }
-        : { field: c.field, from: c.from, to: [...(node[c.field] ?? c.to)] }))
+        ? { field: c.field, from: copyValue(node[c.field] ?? c.from), to: c.to }
+        : { field: c.field, from: c.from, to: copyValue(node[c.field] ?? c.to) }))
     }
     const readded = (kind === 'add' && direction === 'redo') || (kind === 'delete' && direction === 'undo')
     const removed = (kind === 'add' && direction === 'undo') || (kind === 'delete' && direction === 'redo')

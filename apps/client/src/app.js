@@ -18,6 +18,7 @@ import { createEditModes } from './edit-modes.js'
 import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { createBehaviorForm, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
+import { clipsFor } from './behavior-clips.js'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
 import { worldPosition, subtreeSome } from './world-position.js'
@@ -760,6 +761,9 @@ function teardownWorld() {
   labels.clear()
   padLabelNames = new Set()
   firstPerson = false   // reset to third-person for next session
+  // V6 (round 5) — the same ONE visibility path as the `V` key: coming back to
+  // third person shows the capsule again, through the node's view object.
+  if (docView && avatar?.localNode) setNodeVisible(docView, avatar.localNode, true)
   updateHud()
   updateHintText()
 }
@@ -2836,6 +2840,11 @@ document.addEventListener('keydown', (e) => {
       avatar.cameraNode.translation = [0, CAMERA_OFFSET_Y, CAMERA_OFFSET_Z]
       avatar.localNode.visible = true
     }
+    // V6 (round 5) — F6's ONE visibility path is the node's view object, and
+    // `setNodeVisible` only runs on a `som:set`. The avatar's visibility is
+    // local (nothing is sent), so nothing would redraw it: the own capsule is
+    // written here the same way. §5.1 check 9 watches this.
+    if (docView) setNodeVisible(docView, avatar.localNode, !firstPerson)
     updateHintText()
     return
   }
@@ -2896,18 +2905,17 @@ function runnerStatus() {
   return { state: 'running' }
 }
 
-/** F4's `clipStatus`, from the model bridge. */
-function clipsFor(objectId) {
-  const resolved = client.som?.resolveObjectId?.(objectId)
-  const node = resolved?.node
-  if (!node) return { status: 'none' }
-  const record = modelBridge?.status?.(node.name)
-  if (!record) return { status: 'none' }
-  if (record.status !== 'loaded') return { status: record.status }
-  // The host's clip ids are not exposed to the page yet, so the adapter's clip
-  // check stays inert and the write goes out (S7's gate is pinned by the
-  // adapter's own tests). A stale clip is the viewers' `clip-missing` state.
-  return { status: 'loaded' }
+/**
+ * V5 (round 5) — F4's `clipStatus`, from 4a's model animations, for the form's
+ * picker AND for the adapter's own clip check. One source, so the picker and
+ * the check can never disagree (round 4 answered `loaded` with no ids here,
+ * which left the picker a text box and the clip check inert).
+ */
+function clipStatusFor(objectId) {
+  return clipsFor(objectId, {
+    resolveObjectId: (id) => client.som?.resolveObjectId?.(id),
+    modelAnimations,
+  })
 }
 
 behaviorForm = createBehaviorForm({
@@ -2931,6 +2939,9 @@ behaviorForm = createBehaviorForm({
       sendField: (name, field, value) => client.sendField(name, field, value),
     },
     newObjectId,
+    // V5 — the form's clip picker reads the SAME source the adapter's clip
+    // check does: a loaded model shows its clips as a `<select>`.
+    clipIds: (objectId) => clipStatusFor(objectId).clipIds,
     showError: (text) => showEditError(text),
     clearError: () => clearEditError(),
     document,
@@ -2947,7 +2958,7 @@ runner = createBehaviorRunner({
   client,
   now: () => performance.now(),
   frame: 50,
-  clips: clipsFor,
+  clips: clipStatusFor,
   position: (node) => (node ? worldPosition(node) : undefined),
   onEntry: () => { if (behaviorForm?.openState) behaviorForm.render() },
 })
