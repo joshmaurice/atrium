@@ -1,0 +1,23 @@
+{
+  "name": "@atrium/behaviors",
+  "version": "0.1.0",
+  "description": "Atrium behaviours — the renderer-neutral behavior graph adapter, the send runner and the behaviour templates. No DOM, no Three.js.",
+  "license": "MIT",
+  "author": "Tony Parisi / Metatron Studio",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./behavior-spec": "./src/behavior-spec.js",
+    "./adapter": "./src/adapter.js",
+    "./runner": "./src/runner.js",
+    "./templates": "./src/templates.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@khronosgroup/gltf-interactivity-engine": "workspace:*",
+    "gl-matrix": "workspace:*"
+  }
+}
