@@ -740,6 +740,11 @@
         <select id="ep-behavior-template" aria-label="Behaviour template"></select>
       </div>
       <div id="ep-behavior-params" style="display:none"></div>
+      <!-- scripting-4b-2 r3 (T1) — the Behaviour section's ONE help element,
+           the writer of the chosen template's help lines. `behavior-form.js`
+           owns its text and its visibility (hidden when empty); app.js passes
+           it to `createBehaviorForm` as `elements.hint`. -->
+      <div class="ep-status" id="ep-behavior-hint" style="display:none;color:#94a3b8"></div>
       <div class="ep-buttons ep-actions" id="ep-behavior-actions" style="display:none">
         <button id="ep-behavior-enabled" title="Run or pause this behaviour">Enabled</button>
         <button id="ep-behavior-save" title="Save the behaviour">Save</button>

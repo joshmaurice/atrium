@@ -70,6 +70,7 @@ describe('scripting-4b-2 — the page carries the section\'s elements', () => {
     'ep-behavior-row', 'ep-behavior-template', 'ep-behavior-params', 'ep-behavior-actions',
     'ep-behavior-enabled', 'ep-behavior-save', 'ep-behavior-remove',
     'ep-behavior-status', 'ep-behavior-note', 'ep-behavior-log', 'ep-behavior-log-lines',
+    'ep-behavior-hint',
     'ep-visible',
   ]
   for (const id of ids) {
@@ -77,4 +78,28 @@ describe('scripting-4b-2 — the page carries the section\'s elements', () => {
       assert.match(html, new RegExp(`id="${id}"`))
     })
   }
+})
+
+// ── T1 (r3): the one help element, wired ─────────────────────────────────
+
+describe('scripting-4b-2 r3 (T1) — #ep-behavior-hint is the section\'s one help element', () => {
+  test('it sits inside the Behaviour section, between the params and the actions', () => {
+    const row = html.indexOf('id="ep-behavior-row"')
+    const params = html.indexOf('id="ep-behavior-params"')
+    const hint = html.indexOf('id="ep-behavior-hint"')
+    const actions = html.indexOf('id="ep-behavior-actions"')
+    for (const [what, at] of [['row', row], ['params', params], ['hint', hint], ['actions', actions]]) {
+      assert.notEqual(at, -1, `#ep-behavior-${what} is in index.html`)
+    }
+    assert.ok(row < params && params < hint && hint < actions,
+      `order: row ${row} < params ${params} < hint ${hint} < actions ${actions}`)
+  })
+
+  test('app.js passes it to createBehaviorForm as the form\'s hint element', () => {
+    // Whole-line `//` comments are dropped first: a COMMENTED-OUT wire passes
+    // nothing, so the guard must not accept one.
+    const code = source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+    assert.match(code, /const epBehaviorHint\s*=\s*document\.getElementById\('ep-behavior-hint'\)/)
+    assert.match(code, /createBehaviorForm\(\{[\s\S]{0,600}?hint: epBehaviorHint/)
+  })
 })

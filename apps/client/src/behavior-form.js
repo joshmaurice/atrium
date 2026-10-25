@@ -33,6 +33,26 @@ export const HINT_TEXT = 'Behaviour changes are saved with the world.'
 /** R1 (C2) — the sentence appended to the hint for `select-light` ONLY. */
 export const HINT_LIGHT_ON = 'If the light was off when you saved, \'on\' uses intensity 1.'
 
+/**
+ * T1 (F8, N7) — the toggling templates' help line. A toggle reads the SOM,
+ * which the echo updates, so two clicks inside one round trip collapse to one
+ * change; the line is what stops the owner double-clicking.
+ */
+export const HINT_ONE_CLICK = 'One click per change.'
+
+/**
+ * T1 (F4) — the three animation templates' help line: a clip's end triggers
+ * nothing (`done` never fires in 4b-2).
+ */
+export const HINT_CLIP_END = 'A clip\'s end doesn\'t trigger anything.'
+
+/**
+ * T1 (F8) — the light template's picker sentence, when the world has no
+ * lights to offer. It renders in the hint element with that template's other
+ * lines (`elements.noLights` was a second, unwired path and stays a no-op).
+ */
+export const NO_LIGHTS = 'This world has no lights'
+
 /** F9 — the status texts. */
 export const BEHAVIOR_STATUS = Object.freeze({
   running: 'Running',
@@ -449,7 +469,11 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     const container = elements.params
     if (!container) return
     while (container.firstChild) container.removeChild(container.firstChild)
-    if (!state.open || state.custom || state.template === NONE_LABEL) { show(container, false); return }
+    if (!state.open || state.custom || state.template === NONE_LABEL) {
+      show(container, false)
+      renderHint('')
+      return
+    }
     show(container, true)
 
     for (const key of TEMPLATE_FIELDS[state.template]) {
@@ -511,20 +535,54 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
         container.appendChild(row)
       }
     }
-    text(elements.hint, elements.hintText ?? '')
+    // T1 — `elements.hintText` is the hint's source (R1), and `renderHint` is
+    // its ONE writer: the text and its visibility move together, so an empty
+    // hint is hidden and never keeps an old template's line.
+    renderHint(elements.hintText)
     if (elements.noLights) show(elements.noLights, state.template === 'select-light' && pickable().length === 0)
   }
 
-  /** R1 — the hint is the generic sentence, plus C2's for `select-light` only. */
+  /** T1 — the hint element's one writer. Empty means hidden, never stale. */
+  function renderHint(value) {
+    const hint = elements.hint
+    if (!hint) return
+    const line = value ?? ''
+    text(hint, line)
+    show(hint, line !== '')
+  }
+
+  /**
+   * R1 + T1 — the hint is the generic sentence (R1), then C2's sentence for
+   * `select-light` (R1: right after the generic sentence), then the chosen
+   * template's own help lines: "One click per change." for the two toggling
+   * templates, a clip's end triggering nothing for the three animation ones,
+   * and the picker's "This world has no lights" when `select-light` has no
+   * light to offer. Nothing for "None" or "Custom graph".
+   */
   function hintText() {
-    return state.template === 'select-light' ? `${HINT_TEXT} ${HINT_LIGHT_ON}` : HINT_TEXT
+    if (state.custom || state.template === NONE_LABEL) return ''
+    const lines = [HINT_TEXT]
+    if (state.template === 'select-light') lines.push(HINT_LIGHT_ON)
+    if (state.template === 'select-visibility' || state.template === 'select-light') lines.push(HINT_ONE_CLICK)
+    if (state.template === 'select-animation'
+      || state.template === 'proximity-animation'
+      || state.template === 'interval-animation') lines.push(HINT_CLIP_END)
+    if (state.template === 'select-light' && pickable().length === 0) lines.push(NO_LIGHTS)
+    return lines.join(' ')
   }
 
   function render() {
     const open = state.open
     show(elements.row, open)
     show(elements.log, open)
-    if (!open) { show(elements.params, false); show(elements.actions, false); text(elements.status, ''); return }
+    if (!open) {
+      show(elements.params, false)
+      show(elements.actions, false)
+      text(elements.status, '')
+      elements.hintText = ''
+      renderHint('')
+      return
+    }
     show(elements.actions, true)
 
     if (elements.select) {
@@ -565,6 +623,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   /** `renderParams` reads this to word the picker (F8: "This world has no lights"). */
   elements.hint = elements.hint ?? null
   elements.hintText = HINT_TEXT
+  // T1 — the form is the hint element's one writer, so it starts it the way it
+  // keeps it: empty, and hidden while empty.
+  renderHint('')
 
   function wire() {
     if (elements.select) elements.select.addEventListener('change', () => onTemplateChange(elements.select.value))

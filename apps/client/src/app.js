@@ -1484,6 +1484,7 @@ const epVisible      = document.getElementById('ep-visible')       // scripting-
 const epBehaviorRow      = document.getElementById('ep-behavior-row')
 const epBehaviorTemplate = document.getElementById('ep-behavior-template')
 const epBehaviorParams   = document.getElementById('ep-behavior-params')
+const epBehaviorHint     = document.getElementById('ep-behavior-hint')   // r3 (T1)
 const epBehaviorActions  = document.getElementById('ep-behavior-actions')
 const epBehaviorEnabled  = document.getElementById('ep-behavior-enabled')
 const epBehaviorSave     = document.getElementById('ep-behavior-save')
@@ -2906,6 +2907,10 @@ function clipsFor(objectId) {
 behaviorForm = createBehaviorForm({
   elements: {
     row: epBehaviorRow, select: epBehaviorTemplate, params: epBehaviorParams,
+    // T1 — the form's hint element: the one it writes the chosen template's
+    // help lines into. Without it the form's hint is computed and rendered
+    // nowhere (round 3's finding).
+    hint: epBehaviorHint,
     actions: epBehaviorActions, enabled: epBehaviorEnabled, save: epBehaviorSave,
     remove: epBehaviorRemove, status: epBehaviorStatus, note: epBehaviorNote,
     log: epBehaviorLog, logLines: epBehaviorLogLines,

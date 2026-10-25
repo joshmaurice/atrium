@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 
 import {
   createBehaviorForm, NONE_LABEL, CUSTOM_LABEL, BEHAVIOR_STATUS, matchesTemplate, targetKindFor,
+  HINT_TEXT, HINT_LIGHT_ON, HINT_ONE_CLICK, HINT_CLIP_END, NO_LIGHTS, UNDO_NOTE,
 } from '../src/behavior-form.js'
 import { templateGraph, TEMPLATE_IDS } from '@atrium/behaviors/templates'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
@@ -36,7 +37,7 @@ function el(tag = 'div') {
 const elementsFor = () => ({
   row: el(), select: el('select'), params: el(), actions: el(),
   enabled: el('button'), save: el('button'), remove: el('button'),
-  status: el(), note: el(), logLines: el(),
+  status: el(), note: el(), hint: el(), logLines: el(),          // `hint` — r3 (T1)
 })
 
 function makeNode({ name, id = null, model = null, light = null, behavior }) {
@@ -344,24 +345,105 @@ test('R1 — a light at 2.5 keeps 2.5', () => {
 })
 
 test('R1 — the hint carries C2\'s sentence for select-light and for nothing else', () => {
+  // The wording is pinned twice: by these literals and by the module's exports.
+  assert.equal(GENERIC_HINT, HINT_TEXT)
+  assert.equal(C2_SENTENCE, HINT_LIGHT_ON)
+
   const light = makeNode({ name: 'Sun', id: TGT, light: { intensity: 2 } })
   const node = makeNode({ name: 'crate', id: OWN })
   const { form, elements } = setup({ nodes: [node, light], selected: node })
   form.open(node)
   form.onTemplateChange('select-light')
-  assert.equal(elements.hintText, `${GENERIC_HINT} ${C2_SENTENCE}`)
+  // R1 — C2's sentence comes straight after the generic sentence. Round 3 (T1)
+  // appends the template's own lines after it; it does not move C2's.
+  assert.ok(elements.hintText.startsWith(`${GENERIC_HINT} ${C2_SENTENCE}`), elements.hintText)
   // The same rendering path: `renderParams` writes `elements.hintText` into the hint.
-  elements.hint = el()
   form.render()
-  assert.equal(elements.hint.textContent, `${GENERIC_HINT} ${C2_SENTENCE}`)
+  assert.equal(elements.hint.textContent, elements.hintText)
 
   for (const id of TEMPLATE_IDS) {
     if (id === 'select-light') continue
     form.onTemplateChange(id)
-    assert.equal(elements.hintText, GENERIC_HINT, `${id} keeps the generic hint`)
     assert.equal(elements.hintText.includes(C2_SENTENCE), false, `${id} shows no C2 sentence`)
   }
   form.onTemplateChange(NONE_LABEL)
   assert.equal(elements.hintText.includes(C2_SENTENCE), false, 'None shows no C2 sentence')
+})
+
+// ── T1 (r3): the hint element is written for every template, and cleared ───
+
+test('T1 — the hint element carries each template\'s own lines, and "None" clears it', () => {
+  const light = makeNode({ name: 'Sun', id: TGT, light: { intensity: 2 } })
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements } = setup({ nodes: [node, light], selected: node })
+  form.open(node)
+
+  const expected = {
+    'select-visibility':    { shows: [HINT_ONE_CLICK], hides: [HINT_LIGHT_ON, HINT_CLIP_END, NO_LIGHTS] },
+    'select-light':         { shows: [HINT_LIGHT_ON, HINT_ONE_CLICK], hides: [HINT_CLIP_END, NO_LIGHTS] },
+    'select-animation':     { shows: [HINT_CLIP_END], hides: [HINT_LIGHT_ON, HINT_ONE_CLICK, NO_LIGHTS] },
+    'proximity-animation':  { shows: [HINT_CLIP_END], hides: [HINT_LIGHT_ON, HINT_ONE_CLICK, NO_LIGHTS] },
+    'interval-animation':   { shows: [HINT_CLIP_END], hides: [HINT_LIGHT_ON, HINT_ONE_CLICK, NO_LIGHTS] },
+  }
+
+  for (const id of TEMPLATE_IDS) {
+    form.onTemplateChange(id)
+    const line = elements.hint.textContent
+    assert.ok(line.includes(HINT_TEXT), `${id}: the generic sentence is there`)
+    assert.equal(line, elements.hintText, `${id}: the hint element gets the computed line`)
+    for (const s of expected[id].shows) assert.ok(line.includes(s), `${id} shows "${s}"`)
+    for (const s of expected[id].hides) assert.equal(line.includes(s), false, `${id} shows no "${s}"`)
+    assert.equal(elements.hint.style.display, '', `${id}: the hint is shown`)
+  }
+
+  form.onTemplateChange(CUSTOM_LABEL)
+  assert.equal(elements.hint.textContent, '', 'Custom graph clears the hint')
+  form.onTemplateChange(NONE_LABEL)
+  assert.equal(elements.hint.textContent, '', 'None clears the hint')
+  assert.equal(elements.hint.style.display, 'none', 'and hides it')
+})
+
+test('T1 — select-light with no lights to offer says so in the hint', () => {
+  const plain = makeNode({ name: 'crate', id: TGT })
+  const node = makeNode({ name: 'me', id: OWN })
+  const { form, elements } = setup({ nodes: [node, plain], selected: node })
+  form.open(node)
+  form.onTemplateChange('select-light')
+  assert.ok(elements.hint.textContent.includes(NO_LIGHTS), elements.hint.textContent)
+
+  form.onTemplateChange('select-visibility')
+  assert.equal(elements.hint.textContent.includes(NO_LIGHTS), false, 'only the light template')
+
+  const withLight = makeNode({ name: 'Sun', id: OTHER, light: { intensity: 1 } })
+  const { form: f2, elements: e2 } = setup({ nodes: [node, withLight], selected: node })
+  f2.open(node)
+  f2.onTemplateChange('select-light')
+  assert.equal(e2.hint.textContent.includes(NO_LIGHTS), false, 'a light is on offer')
+})
+
+test('T1 — an empty hint is hidden, and closing the form clears it', () => {
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements } = setup({ nodes: [node], selected: node })
+  assert.equal(elements.hint.textContent, '', 'nothing before a selection')
+  assert.equal(elements.hint.style.display, 'none', 'and it starts hidden')
+
+  form.open(node)
+  assert.equal(elements.hint.textContent, '', 'nothing for "None"')
+  assert.equal(elements.hint.style.display, 'none')
+
+  form.onTemplateChange('select-animation')
+  assert.equal(elements.hint.style.display, '', 'shown once there is a line')
+  form.close()
+  assert.equal(elements.hint.textContent, '', 'closing clears it')
+  assert.equal(elements.hint.style.display, 'none', 'and hides it again')
+})
+
+test('T1 — the D4 sentence is rendered once, in the note, never in the hint', () => {
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements } = setup({ nodes: [node], selected: node })
+  form.open(node)
+  form.onTemplateChange('select-visibility')
+  assert.equal(elements.note.textContent, UNDO_NOTE, 'D4 is in the note')
+  assert.equal(elements.hint.textContent.includes(UNDO_NOTE), false, 'and not repeated in the hint')
 })
 
