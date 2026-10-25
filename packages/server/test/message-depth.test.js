@@ -428,7 +428,7 @@ test('(g) a handler path that throws is answered, logged once, and the server ke
 
     const logged = state.stderr.split('\n').filter(l => l.includes('[session] message handler error:'))
     assert.equal(logged.length, 1, `exactly one log line, got ${JSON.stringify(logged)}`)
-    assert.equal(logged[0], '[session] message handler error: Error stub addNode failure')
+    assert.equal(logged[0], '[session] message handler error: type=add Error: stub addNode failure')
 
     await assertStillServing(state, ws, messages)
   } finally {

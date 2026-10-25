@@ -1127,7 +1127,11 @@ export function attachSessionHandlers({
         // last line, not a substitute). No process-level handler: outside this
         // listener an unknown failure still exits and systemd restarts.
         // -----------------------------------------------------------------
-        console.error(`[session] message handler error: ${err?.name ?? 'Error'} ${err?.message ?? ''}`)
+        console.error(
+          `[session] message handler error: ` +
+          `type=${typeof msg?.type === 'string' ? msg.type : '-'} ` +
+          `${err?.name ?? 'Error'}: ${err?.message ?? ''}`
+        )
         sendError(ws, typeof msg?.seq === 'number' ? msg.seq : null,
           'UNKNOWN_MESSAGE', 'the message could not be processed')
       }
