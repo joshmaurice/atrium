@@ -270,3 +270,98 @@ test('F9 — the light template with no lights says so', () => {
   assert.equal(form.state.template, 'select-light')
   assert.deepEqual(elements.params.children.map((row) => row.children[0]).map((f) => f.children.length), [0], 'no target offered')
 })
+
+// ── R1 (C2, completed): the light template's on-value and its help text ────
+// The revision's R1: each case goes through Save with the form's real
+// `templateGraph` and a fake client (the `setup` deps above).
+
+const GENERIC_HINT = 'Behaviour changes are saved with the world.'
+const C2_SENTENCE = 'If the light was off when you saved, \'on\' uses intensity 1.'
+
+/** The on-branch literal: `flow/branch`'s `false` flow lands on a `pointer/set`. */
+function onBranchLiteral(value) {
+  const { graph } = value
+  const ops = graph.declarations.map((d) => d.op)
+  const branch = graph.nodes.findIndex((n) => ops[n.declaration] === 'flow/branch')
+  assert.notEqual(branch, -1, 'the select-light graph has a flow/branch')
+  const onIndex = graph.nodes[branch].flows.false.node
+  assert.equal(ops[graph.nodes[onIndex].declaration], 'pointer/set', 'the false branch writes the light')
+  return graph.nodes[onIndex].values.value.value[0]
+}
+
+/** Save `select-light` on a fresh node, targeting a light at `light`. */
+function saveLightOn(light) {
+  const lightNode = makeNode({ name: 'Sun', id: TGT, light })
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements, calls } = setup({ nodes: [node, lightNode], selected: node })
+  form.open(node)
+  form.onTemplateChange('select-light')
+  form.onParamChange('target', TGT)
+  form.save()
+  return { form, elements, calls }
+}
+
+test('R1 — a light at intensity 0 writes an on-branch literal of 1', () => {
+  const { calls } = saveLightOn({ intensity: 0 })
+  assert.equal(calls.sendField.length, 1, 'the leaf goes out (both ids already exist)')
+  assert.deepEqual(calls.sendField[0].slice(0, 2), ['crate', 'extras.atrium.behavior'])
+  const value = calls.sendField[0][2]
+  assert.equal(value.template.id, 'select-light')
+  assert.equal(onBranchLiteral(value), 1, 'the on-branch literal is 1, not 0.01')
+  assert.equal(value.template.params.intensity, 1)
+  assert.equal(behaviorCheck(value, { ownId: OWN }).problem, null, 'and the server would accept it')
+})
+
+test('R1 — a light whose intensity is non-finite or missing writes on = 1', () => {
+  const cases = [
+    ['NaN', { intensity: NaN }],
+    ['Infinity', { intensity: Infinity }],
+    ['-Infinity', { intensity: -Infinity }],
+    ['a missing intensity', {}],
+    ['a non-numeric intensity', { intensity: '2' }],
+    ['no light object at all', null],
+  ]
+  for (const [what, light] of cases) {
+    const { calls } = saveLightOn(light)
+    const value = calls.sendField[0][2]
+    assert.equal(onBranchLiteral(value), 1, `${what} → 1`)
+    assert.equal(value.template.params.intensity, 1, `${what} → params.intensity 1`)
+  }
+})
+
+test('R1 — a light at 0.005 floors to 0.01', () => {
+  const { calls } = saveLightOn({ intensity: 0.005 })
+  const value = calls.sendField[0][2]
+  assert.equal(onBranchLiteral(value), 0.01, 'the floor, not 1')
+  assert.equal(value.template.params.intensity, 0.01)
+})
+
+test('R1 — a light at 2.5 keeps 2.5', () => {
+  const { calls } = saveLightOn({ intensity: 2.5 })
+  const value = calls.sendField[0][2]
+  assert.equal(onBranchLiteral(value), 2.5)
+  assert.equal(value.template.params.intensity, 2.5)
+})
+
+test('R1 — the hint carries C2\'s sentence for select-light and for nothing else', () => {
+  const light = makeNode({ name: 'Sun', id: TGT, light: { intensity: 2 } })
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements } = setup({ nodes: [node, light], selected: node })
+  form.open(node)
+  form.onTemplateChange('select-light')
+  assert.equal(elements.hintText, `${GENERIC_HINT} ${C2_SENTENCE}`)
+  // The same rendering path: `renderParams` writes `elements.hintText` into the hint.
+  elements.hint = el()
+  form.render()
+  assert.equal(elements.hint.textContent, `${GENERIC_HINT} ${C2_SENTENCE}`)
+
+  for (const id of TEMPLATE_IDS) {
+    if (id === 'select-light') continue
+    form.onTemplateChange(id)
+    assert.equal(elements.hintText, GENERIC_HINT, `${id} keeps the generic hint`)
+    assert.equal(elements.hintText.includes(C2_SENTENCE), false, `${id} shows no C2 sentence`)
+  }
+  form.onTemplateChange(NONE_LABEL)
+  assert.equal(elements.hintText.includes(C2_SENTENCE), false, 'None shows no C2 sentence')
+})
+

@@ -27,6 +27,12 @@ export const CUSTOM_LABEL = 'Custom graph'
 /** D4 — the one line under the status, shown once. */
 export const UNDO_NOTE = 'Behaviour changes are saved with the world and aren’t undone by Undo.'
 
+/** R1 — the generic hint, shown under the picker for every template. */
+export const HINT_TEXT = 'Behaviour changes are saved with the world.'
+
+/** R1 (C2) — the sentence appended to the hint for `select-light` ONLY. */
+export const HINT_LIGHT_ON = 'If the light was off when you saved, \'on\' uses intensity 1.'
+
 /** F9 — the status texts. */
 export const BEHAVIOR_STATUS = Object.freeze({
   running: 'Running',
@@ -153,9 +159,13 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
   function lightIntensity(node) {
     const value = node?.light?.intensity
-    // C2 — a light saved at 0 gets `I = 1`, never 0.01.
+    // C2 — a light saved at 0 (off), or one whose intensity is missing or
+    // non-finite, gets `I = 1`, not 0.01: "on" must actually turn it on. Every
+    // other saved intensity is kept as it was, floored at 0.01 (F8's "a
+    // literal, at least 0.01") — so 0.005 becomes 0.01, not 1.
     if (typeof value !== 'number' || !Number.isFinite(value)) return 1
-    return value >= 0.01 ? value : 1
+    if (value === 0) return 1
+    return value >= 0.01 ? value : 0.01
   }
 
   function open(node = deps.selected?.()) {
@@ -505,6 +515,11 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     if (elements.noLights) show(elements.noLights, state.template === 'select-light' && pickable().length === 0)
   }
 
+  /** R1 — the hint is the generic sentence, plus C2's for `select-light` only. */
+  function hintText() {
+    return state.template === 'select-light' ? `${HINT_TEXT} ${HINT_LIGHT_ON}` : HINT_TEXT
+  }
+
   function render() {
     const open = state.open
     show(elements.row, open)
@@ -516,6 +531,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       elements.select.value = state.custom ? CUSTOM_LABEL : state.template
       elements.select.disabled = Boolean(state.saving)
     }
+    // R1 — `elements.hintText` is the hint's source, as before; only its value
+    // now follows the template. `renderParams` renders it, unchanged.
+    elements.hintText = hintText()
     renderParams()
 
     const isNone = state.template === NONE_LABEL
@@ -546,7 +564,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
   /** `renderParams` reads this to word the picker (F8: "This world has no lights"). */
   elements.hint = elements.hint ?? null
-  elements.hintText = 'Behaviour changes are saved with the world.'
+  elements.hintText = HINT_TEXT
 
   function wire() {
     if (elements.select) elements.select.addEventListener('change', () => onTemplateChange(elements.select.value))
