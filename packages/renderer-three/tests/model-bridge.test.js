@@ -17,6 +17,7 @@ import { parseTemplate, createTextureBudget, estimateTextureBytes, parseReasonTe
 import { createJobDeadline, fetchModel, createWorldLedger, createSharedTasks, createTransferLimiter, MODEL_LIMITS } from '@atrium/client/model-fetch'
 import { imageGlb, multiImageGlb } from './glb-fixture.js'
 import { validateModelHost } from '@atrium/client/model-spec'
+import { hasInvisibleAncestor } from '../src/visibility.js'
 
 /** A SOM node stand-in: identity, name, a glTF node object and model extras. */
 function somNode(name, model = { url: 'https://h/m.glb' }, { mesh = null } = {}) {
@@ -155,6 +156,46 @@ test('Z5: a model node gets a wrapper under its host, and a loaded status', asyn
   assert.equal(children.length, 1, 'one wrapper under the host')
   assert.equal(children[0].userData.atriumModel, true)
   assert.ok(!children[0].isGroup, 'the wrapper is a plain Object3D (P3)')
+})
+
+// ---------------------------------------------------------------------------
+// F6 / C1 (operator correction, 2026-10-25) — there is ONE visibility path: the
+// host node's VIEW OBJECT. A placed model's wrapper is a child of it, so three's
+// own inheritance hides and shows the instance. The bridge must NEVER write the
+// wrapper's (or the instance's) own `visible` from the host: that would be a
+// second copy, and hiding the host, then attaching (the attach is asynchronous),
+// then showing the host would leave the wrapper stuck hidden.
+// ---------------------------------------------------------------------------
+
+test('F6/C1: hide the host, attach its instance, then show the host — the instance draws', async () => {
+  const h = harness()
+  const node = somNode('Chair')
+  node.visible = false
+  h.addNode(node)
+  const host = h.hostFor('Chair')
+  host.visible = false                     // the host object carries the SOM value
+  await tick()                             // the wrapper attaches while the host is hidden
+
+  const wrapper = h.childrenOf('Chair')[0]
+  assert.ok(wrapper, 'the wrapper attached')
+  assert.equal(wrapper.visible, true, 'the bridge never writes the wrapper its own `visible`')
+  assert.equal(hasInvisibleAncestor(wrapper), true, 'three inherits the host, so it is hidden')
+
+  host.visible = true                      // show the host
+  assert.equal(hasInvisibleAncestor(wrapper), false,
+    'the instance draws — the value is the host object’s, never a stale copy')
+
+  // The reverse order: attach while the host shows, then hide it.
+  const h2 = harness()
+  const node2 = somNode('Desk')
+  h2.addNode(node2)
+  await tick()
+  const host2 = h2.hostFor('Desk')
+  const wrapper2 = h2.childrenOf('Desk')[0]
+  host2.visible = true
+  assert.equal(hasInvisibleAncestor(wrapper2), false, 'it draws')
+  host2.visible = false
+  assert.equal(hasInvisibleAncestor(wrapper2), true, 'and hides with the host')
 })
 
 test('Z5/A6/S7: a node with no model gets nothing; a node the spec rejects shows bad-spec', async () => {

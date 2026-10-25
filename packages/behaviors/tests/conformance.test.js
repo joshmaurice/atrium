@@ -27,21 +27,16 @@ describe('F11 — the conformance subset', () => {
     assert.equal(EXPECTED.source.includes(KHRONOS_ASSETS_COMMIT), true, 'the assets commit is pinned')
   })
 
-  test('the subset recomputes exactly against the checked-in list', (t) => {
+  test('the subset recomputes against the checked-in list, and every asset runs', async (t) => {
     if (!ASSETS) {
       // The ONE allowed skip of the round: the Khronos assets are not on the host.
-      t.skip('KHRONOS_ASSETS is not set — the conformance subset cannot be recomputed (skipped, not failed)')
+      // Recomputing the list and running it are one conformance run, so they skip
+      // together — one skip, not two.
+      t.skip('KHRONOS_ASSETS is not set — the conformance subset cannot be recomputed or run (skipped, not failed)')
       return
     }
     assert.deepEqual(conformanceSubset(ASSETS), EXPECTED.expected,
       'the checked-in list must match the assets exactly')
-  })
-
-  test('every asset in the subset passes through the real adapter', async (t) => {
-    if (!ASSETS) {
-      t.skip('KHRONOS_ASSETS is not set — the conformance run cannot happen')
-      return
-    }
     const results = await runConformance(ASSETS)
     assert.deepEqual(results.filter((r) => r.result !== 'pass'), [], 'every subset asset passes')
     assert.equal(results.length, EXPECTED.expected.length, 'the run covers the expected list')
