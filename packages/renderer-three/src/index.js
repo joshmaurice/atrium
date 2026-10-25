@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 export { PointerInputBridge } from './PointerInputBridge.js'
+export { hasInvisibleAncestor, visibleHits, firstVisibleHit, setNodeVisible, applyVisibility, listViewObjects } from './visibility.js'
 export { projectRayToPlane, computeParentInverse } from './drag-math.js'
 export { buildClipsFromSOM } from './build-clips.js'
 export { initDocumentView } from './document-view.js'

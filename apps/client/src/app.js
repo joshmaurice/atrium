@@ -4,7 +4,7 @@
 import * as THREE from 'three'
 import { AtriumClient }          from '@atrium/client'
 import { LabelOverlay }          from './LabelOverlay.js'
-import { Stage, PointerInputBridge, initDocumentView, createSkyLoader, buildAvatarDescriptor, buildTeleporterDescriptor, buildPrimitiveDescriptor } from '@atrium/renderer-three'
+import { Stage, PointerInputBridge, initDocumentView, createSkyLoader, buildAvatarDescriptor, buildTeleporterDescriptor, buildPrimitiveDescriptor, setNodeVisible, applyVisibility, visibleHits } from '@atrium/renderer-three'
 import { register, login, logout, me } from './auth.js'
 import { computeWsUrl, buildWorldWsUrl, resolveWorldAddress, isValidDestination, shouldUseFileBase, sameOriginAsAccount } from './wsUrl.js'
 import { createTeleportTrigger, TELEPORT_TRIGGER_RADIUS, nearSpawn, padNearSpawn } from './teleport-trigger.js'
@@ -674,6 +674,11 @@ client.on('world:loaded', ({ name, description, author }) => {
   ;({ docView, sceneGroup } = initDocumentView(renderer, threeScene, client.som, { prevDocView: docView, prevSceneGroup: sceneGroup }))
   stage.setSceneGroup(sceneGroup)
   modelBridge.attachView(docView, sceneGroup)
+
+  // F6 (scripting-4b-2) — at view creation every node's view object takes the
+  // SOM's current `visible`. Placed models are children of their host's object,
+  // so three's inheritance covers them: no second visibility path.
+  applyVisibility(docView, client.som)
 
   // Z4 — the Sky picker follows the world too.
   skyPicker?.sync()
@@ -1464,6 +1469,7 @@ const epNameStatus   = document.getElementById('ep-name-status')
 const epSpawnNote    = document.getElementById('ep-spawn-note')     // Z7, edit-polish-3
 const epError        = document.getElementById('ep-error')
 const epVectorInputs = [...epFields.querySelectorAll('input[data-field]')]
+const epVisible      = document.getElementById('ep-visible')       // scripting-4b-2 F6
 const epPalette      = document.getElementById('ep-palette')        // 1b-2 N1
 const epPaletteBtns  = [...epPalette.querySelectorAll('button[data-kind]')]
 
@@ -1832,7 +1838,11 @@ function pickEditTarget(e) {
   // primitive objects are skipped: a mesh is often named like another node.
   const lookup = { getNodeByName: (n) => client.som.getNodeByName(n), isDuplicatedName }
   const hits = []
-  for (const hit of raycaster.intersectObjects(sceneGroup.children, true)) {
+  // F6 (S10) — in Edit mode hidden objects STAY selectable (F-L8: the owner can
+  // select one, its outline shows, and the Visible checkbox un-hides it), so
+  // this call keeps the hidden hits (`includeHidden: true`). Outside Edit mode
+  // `PointerInputBridge._hitTest` is what skips them.
+  for (const hit of visibleHits(raycaster.intersectObjects(sceneGroup.children, true), { includeHidden: true })) {
     const node = nodeForHitObject(hit.object, lookup)
     if (node) hits.push(node)
   }
@@ -1934,6 +1944,9 @@ function refreshEditVectors() {
     input.value = fmt(values[input.dataset.field][Number(input.dataset.i)])
     input.dataset.shown = input.value
   }
+  // F6 — the Visible checkbox reads the SOM's own value, through the one
+  // visibility path (`extras.__atrium_visible`, SOMNode.visible).
+  if (epVisible) epVisible.checked = selected.visible !== false
 }
 
 // Why the selected node's name can't be edited, or '' — the same rules the
@@ -1960,6 +1973,7 @@ function refreshNameField() {
   const locked = fieldsDisabled({ renaming, blocked: editDispatchBlocked() })
   syncGizmoEnabled()
   for (const input of epVectorInputs) input.disabled = locked
+  if (epVisible) epVisible.disabled = locked       // F6 — disabled in flight
   epName.disabled = locked || !!reason
   epName.title = reason
   if (document.activeElement !== epName) {
@@ -2014,6 +2028,20 @@ function commitVectorField(field) {
 for (const input of epVectorInputs) {
   input.addEventListener('keydown', onEditFieldKey)
   input.addEventListener('change', () => commitVectorField(input.dataset.field))
+}
+
+// F6 (scripting-4b-2) — the Visible checkbox goes out through the SAME tracker
+// as every node field: one dispatch path, one place that sees the block.
+if (epVisible) {
+  epVisible.addEventListener('change', () => {
+    if (!selected) return
+    if (editDispatchBlocked()) {
+      epVisible.checked = selected.visible !== false
+      return
+    }
+    editTracker.commit(selected, 'visible', epVisible.checked)
+    refreshEditVectors()
+  })
 }
 
 epName.addEventListener('keydown', onEditFieldKey)
@@ -2205,6 +2233,7 @@ function refreshEditActions() {
     blocked,
   })
   for (const input of epVectorInputs) input.disabled = locked
+  if (epVisible) epVisible.disabled = locked
   const nameProblem = nameFieldProblem(selected)
   epName.disabled = locked || !!nameProblem
   epName.title = nameProblem
@@ -2551,6 +2580,17 @@ client.on('edit:unknown',  ({ seq }) => {
 // A remote change to the selection, or to a material it shares, can change
 // whether it may be duplicated.
 client.on('som:set', () => { if (modes.edit) refreshEditActions(); refreshModelRow() })
+
+// F6 (scripting-4b-2) — the renderer honours `visible` on the node's view
+// object. This fires for a local write's echo and for a visitor's broadcast
+// alike, so the host and every visitor agree. In Edit mode the checkbox reads
+// the SOM again.
+client.on('som:set', ({ nodeName, path } = {}) => {
+  if (path !== 'visible') return
+  const node = client.som?.getNodeByName(nodeName)
+  if (node && docView) setNodeVisible(docView, node, node.visible !== false)
+  if (modes.edit && node === selected) refreshEditVectors()
+})
 client.on('som:rename', ({ from, to } = {}) => {
   if (modes.edit) refreshEditActions()
   // A rename changes the name an instance is keyed on, so the scene catches up.

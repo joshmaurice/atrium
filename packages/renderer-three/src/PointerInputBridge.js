@@ -3,6 +3,7 @@
 
 import * as THREE from 'three'
 import { walkUpToSOMNode } from './hit-test.js'
+import { firstVisibleHit } from './visibility.js'
 
 /**
  * PointerInputBridge — consolidates all renderer-side pointer wiring.
@@ -92,16 +93,18 @@ export class PointerInputBridge {
    * for off-geometry events.
    * Returns { node, hit } or null.
    */
-  _hitTest(domEvent) {
+  _hitTest(domEvent, { includeHidden = false } = {}) {
     const rect = this._canvas.getBoundingClientRect()
     this._ndc.x =  ((domEvent.clientX - rect.left) / rect.width)  * 2 - 1
     this._ndc.y = -((domEvent.clientY - rect.top)  / rect.height) * 2 + 1
     this._raycaster.setFromCamera(this._ndc, this._getCamera())
     const root = this._getSceneRoot()
     if (!root || !this._client.som) return null
-    const hits = this._raycaster.intersectObject(root, true)
-    if (hits.length === 0) return null
-    return this._resolveHit(hits[0])
+    // F6 (S10) — the NEXT hit with no invisible ancestor, never `hits[0]`: a
+    // hidden object in front of a visible one must not swallow the click.
+    const hit = firstVisibleHit(this._raycaster.intersectObject(root, true), { includeHidden })
+    if (!hit) return null
+    return this._resolveHit(hit)
   }
 
   _resolveHit(hit) {
