@@ -1,6 +1,7 @@
 # Revision — scripting-4b-2 round 5 (the browser checks and the outside review of the published tip)
 
-**Status:** DRAFT Rev 0, for the operator's approval. Not in force.
+**Status:** approved by the operator (2026-10-25 11:10 PT), Rev 0 as
+drafted: V1–V14 in one round; S3 and S4 follow-ups.
 - **Base:** round 4's published tip `957140bd92843b61b4ed692a4e368846f0d313ef`
   on `workflow/scripting-4b-2` (GLM APPROVE, `t_0bc9416b`; published by
   `t_58fd67a9`; on DEV as release merge `8ab5e52f` by `t_043bcfe0`). Round 5
