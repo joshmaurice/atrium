@@ -1,6 +1,6 @@
 # Pre-brief: Phase 3 step 4b-2 — behaviours, owner-present: the vendored engine, the adapter and runner, the `behavior` leaf, and the five templates
 
-Status: **DRAFT, Revision 1 (2026-10-24). Decisions F-L1–F-L12 approved by
+Status: **DRAFT, Revision 2 (2026-10-24). Decisions F-L1–F-L12 approved by
 the operator (2026-10-24 17:42 PT), all as recommended:**
 - F-L1 (a) one round, seven steps; F-L2 (a) design §5.4 plus `animations`,
   `proximity` and `template`; F-L3 (a) form and limits on the server,
@@ -35,6 +35,24 @@ the operator (2026-10-24 17:42 PT), all as recommended:**
     `dispose()` (S5); the send queue is keyed by id (S6); the clip check
     is gated on a loaded model (S7); forbidden keys and depth (S8); the hit
     filter takes the next hit (S10).
+- **Rev 2 applies a second outside review, of Rev 1** ("revise before
+  kickoff, but the design is close"; 4 must-fix, 5 should-fix, 4 nits;
+  specification-level, against the code at `a246f80c` through GitHub, no
+  clone). Claude checked its two code claims (`setEditMode`, the server's
+  `package.json`) and the undo engine's rule. **All are taken.** No
+  decision changes; §10 lists them. The reviewer: resolve M1–M4 and "then
+  consider the pre-brief ready for FINAL".
+  - **Changed in the contract:** the send limit is one coalesced send per
+    50 ms per world, a rate, not a flush count (M1); animations use the
+    same authority predicate as pointer writes — self, descendant or grant
+    (M2); Duplicate remaps `template.params.target` too (M3); the form's
+    multi-stage Save is bound to a snapshot and a generation, and stops on
+    selection change, Edit off or disconnect (M4); an in-flight echo during
+    a gesture is reconciled by the gesture's own writes (S1); vendoring is
+    step 1 and the server declares the dependency (S2); queue entries
+    carry their behaviour's id and generation (S3); the adapter's `world`
+    interface is pinned whole (S4); `template.params` is checked per
+    template and must regenerate the saved graph (S5).
   - **Still DRAFT.** It goes FINAL on the operator's word.
 - **Drafted by Claude from `main` at `a246f80c`.** Its code is identical to
   the released `8358b043` (DEV, MAIN and PROD): the two commits on top
@@ -82,7 +100,8 @@ the operator (2026-10-24 17:42 PT), all as recommended:**
 | **The repo** | The Khronos engine and `gl-matrix`, vendored and pinned (B2 (a)); the adapter (`@atrium/behaviors`); node visibility finally rendered |
 
 **It is one round with seven steps** (F-L1), each a commit, in the order
-that lets the server and the engine be reviewed before any UI exists. **It
+that lets the engine, the server and the adapter be reviewed before any UI
+exists. **It
 is the round that runs world-supplied graphs,** so it keeps both outside
 reviews (4b-1 passdown §3): this pre-brief, and the whole round from base
 to tip.
@@ -381,8 +400,8 @@ adapter; one ESM file with one bare import.
 ## 3. Decisions (F-L1–F-L12)
 
 - **F-L1 — One round, seven steps.**
-  - **(a) Recommended: one round,** in the step order of §7 (server and SOM
-    → vendoring and the adapter in Node → the runner → the renderer →
+  - **(a) Recommended: one round,** in the step order of §7 (vendoring →
+    server and SOM → the adapter in Node → the runner → the renderer →
     the form and panel → tests and conformance), each step a commit, with
     `--max-runtime 4h`.
   - (b) Two rounds: 4b-2a (steps 1–4: everything but the form; behaviours
@@ -659,13 +678,13 @@ adapter; one ESM file with one bare import.
     (M1: `[n]` is the engine's **int** index socket; `{n}` is a `ref`
     socket, which the decorator never registers, so any `{…}` is refused
     outright), or whose index (the literal in the path, or the node's
-    literal int `n` value for `[n]`) isn't an integer below
+    literal int `n` value for `[n]`) isn't a non-negative integer below
     `nodeMap.length`. A socket-connected index is refused. The three
     transform fields are kept for 4d (N2): no template writes them, and
     `authorizeNodeSend` bounds them (a unit quaternion, a non-zero scale);
   - `behavior-literal`: an `animation/start` or `animation/stop` whose
-    `animation` isn't a literal `/animations/<i>` with `i` below
-    `animations.length`, or an `animation/start` whose `speed` isn't a
+    `animation` isn't a literal `/animations/<i>` with `i` a non-negative
+    integer below `animations.length`, or an `animation/start` whose `speed` isn't a
     literal in 0.1–10;
   - `behavior-map`: `nodeMap` or `targets` not an array of 1–16 (resp.
     0–16) strings that each pass E1; a duplicate within an array;
@@ -680,7 +699,11 @@ adapter; one ESM file with one bare import.
     `seconds` in 1–3600; or absent while the graph declares
     `atrium/interval`; or present while it doesn't;
   - `behavior-template`: present but not `{ id, params }` with `id` one of
-    the five template ids and `params` a plain object of at most 1 KiB.
+    the five template ids and `params` **passing that template's parameter
+    rule** (Rev 2, S5): `target` an E1 id; `action` one of its enum;
+    `clip` a string of 1–300; `loop` a boolean; `radius` 0.5–50; `seconds`
+    an integer 1–3600; no other keys. Consistency with the graph isn't the
+    server's: the form checks it (F9).
 - **Where:** the client's copy in `packages/behaviors/src/behavior-spec.js`
   (renderer-neutral, imports the vendored validator), the server's in
   `send-policy.js`. **Both read `tests/fixtures/behavior-vectors.json`:**
@@ -743,7 +766,10 @@ adapter; one ESM file with one bare import.
 
 ### F3. The vendored engine, in Node and in the page (F-L11)
 - The two packages, `NOTICE`, `VENDORED.md` with hashes, the workspace
-  globs; `pnpm install` links them. `apps/client/index.html`'s import map
+  globs; **`packages/server/package.json` and `packages/behaviors/package.json`
+  declare `"@khronosgroup/gltf-interactivity-engine": "workspace:*"`**
+  (Rev 2, S2: the server has no such dependency today); `pnpm install`
+  links them. `apps/client/index.html`'s import map
   gains `@khronosgroup/gltf-interactivity-engine` and `gl-matrix` (local
   paths); `tools/som-inspector` and `apps/playground` only if the guard
   needs it (nothing they load imports the engine). `importmap-guard` stays
@@ -763,10 +789,23 @@ world, now, setTimeout, clearTimeout, log })` returns `{ tick(),
 select(index), proximity(positions), dispose() }` and owns **one engine
 per behaviour per load** (§9.2). **It loads with `loadBehaveGraph(graph,
 false)`** (S3): `true` would run the queue at once and start the engine's
-own `setTimeout` loop (§2.3). `world` is the adapter's view of the SOM: `get(index,
-field)`, `set(index, field, value)` (returns `false` when refused),
-`lightIntensity(index)` / `setLightIntensity(index, value)`,
-`play(object, clip, loop, speed)`, `stop(object, clip)`, `worldPosition(index)`.
+own `setTimeout` loop (§2.3). `world` is the adapter's view of the SOM, **the whole interface** (Rev 2,
+S4), every call total — a failure is a return value, never a throw:
+- `resolve(index)` → `{ objectId, name }` or `{ problem }` (through
+  `resolveObjectId`); `isOwnOrDescendant(index)` → boolean (the SOM
+  ancestor walk from `nodeMap[index]` to `nodeMap[0]`); `isGranted(index)`
+  → boolean (`targets`); `hasLight(index)` → boolean;
+- `get(index, field)` → the value or `undefined`; `set(index, field,
+  value)` → `true`, or `false` when refused by authority or unresolved;
+- `lightIntensity(index)` → number or `undefined`; `setLightIntensity(index,
+  value)` → `true` / `false` as `set`;
+- `clipStatus(objectId)` → `{ status: 'loading' | 'loaded' | 'failed' |
+  'none', clipIds }` (`clipIds` only when `loaded`); `play(objectId, clip,
+  loop, speed)` and `stop(objectId, clip)` → `true` / `false` as `set`;
+- `worldPosition(index)` → `[x, y, z]` or `undefined`.
+
+The runner implements it over the client's SOM; the adapter's tests use a
+fake with the same shape.
 - **The event bus** is the spike's `NodeEventBus` shape on `EventTarget`
   (the engine's `DOMEventBus` needs `document`), owned by the adapter, with
   `dispose()` clearing its interpolation maps and listeners after the
@@ -791,8 +830,10 @@ field)`, `set(index, field, value)` (returns `false` when refused),
   table entry at the resolved index and the graph's literal `speed`; the
   graph's `startTime` and `endTime` are ignored (4a's leaf has no end time;
   `done` never fires in 4b-2, documented in the template form's help).
-  `animation/stop` → `world.stop(object, clip)`. The object must be the
-  own node or in `targets`, by the same check. **The clip is checked
+  `animation/stop` → `world.stop(object, clip)`. **The object passes the
+  same authority predicate as a pointer write: the own node, a descendant
+  of it in the SOM, or an id in `targets`** (Rev 2, M2: a template aimed
+  at a child model needs no grant, as F8 says). **The clip is checked
   against the model's `clipIds` only when the host's instance is
   `loaded`** (S7: `clipIds` exist once `model-bridge` has built the
   instance, asynchronously; before that, or on a `failed` model, the write
@@ -870,20 +911,34 @@ field)`, `set(index, field, value)` (returns `false` when refused),
     proximity pass runs first, with the local avatar's world position and
     every peer avatar node's.
   - **Sends are coalesced per `(objectId, kind, field)`** — kind: node,
-    light or animation — in one map for the world, and flushed **at most
-    20 per second per world** (a 50 ms interval; the newest value per key
-    wins). **The name is resolved at flush** through `resolveObjectId`
-    (the light's qualified name from the host node's name), so a rename
-    between enqueue and flush is followed (S6; F12's "resolved from an id
-    at the moment of sending"); a key that no longer resolves is dropped
-    and logged. The map holds **at most 100 keys**; a behaviour whose
-    write would add the 101st is disabled with `over-send-cap`. Each flush
-    calls `sendField` (node fields, light fields under the qualified name)
-    or `setModelAnimation` (play/stop).
+    light or animation — in one ordered map for the world, **and the world
+    gets one send opportunity every 50 ms, carrying one coalesced value:
+    at most 20 sends per second, as a rate** (Rev 2, M1: not twenty keys
+    per flush). The queue is FIFO by a key's first enqueue; a later write
+    to a queued key replaces its value in place. **Every entry carries the
+    behaviour id and engine generation that produced it** (S3), so
+    disposing one engine drops exactly its entries. **The name is resolved
+    at the opportunity** through `resolveObjectId` (the light's qualified
+    name from the host node's name), so a rename between enqueue and send
+    is followed (S6; F12's "resolved from an id at the moment of
+    sending"); a key that no longer resolves is dropped and logged. The
+    map holds **at most 100 keys**; a behaviour whose write would add the
+    101st is disabled with `over-send-cap`. Each opportunity calls
+    `sendField` (node fields, light fields under the qualified name) or
+    `setModelAnimation` (play/stop), and records the seq against the
+    behaviour.
   - **The drag rule (F-L5):** `app.js` tells the runner the edited node
     (`setGesture(nodeName | null)`); while set, a send whose target is that
     node, a descendant or an ancestor is dropped and logged once per
-    gesture.
+    gesture. **A send already on the wire when the gesture starts** (Rev
+    2, S1) is not recalled: its echo is applied to the SOM as any echo is,
+    the gesture's own per-frame write re-asserts the owner's value on the
+    next frame (one frame at most), and the gesture's final send, which
+    leaves after the echo, is what the server keeps. The undo engine
+    judges "changed elsewhere" by comparing live values at undo time
+    (`edit-undo.js` L505–540), so a behaviour write to a field an undo
+    entry covers makes that undo refuse loudly, never silently overwrite —
+    which is D4's intent.
   - **`select` comes from the viewport, not the SOM** (M3): `app.js`'s
     viewport `click` handler gets a sibling branch for `!modes.edit` —
     `e.target === canvas`, `pressDown` and `isSelectClick` (the 4 px slop
@@ -989,8 +1044,22 @@ becomes.
     a refusal stops the sequence and shows the server's text.
   - **Save writes `templateGraph(id, params)`;** Remove writes `null`;
     Enabled toggles `enabled` by rewriting the value with the flag
-    flipped. A behaviour without `template` (4d's imports) shows "Custom
-    graph" with Enabled and Remove only.
+    flipped. A behaviour without `template` (4d's imports), **or whose
+    `templateGraph(template.id, template.params)` doesn't deep-equal its
+    saved `graph`, `nodeMap`, `targets`, `animations`, `proximity` and
+    `interval`** (Rev 2, S5: a hand edit, or an older template version),
+    shows "Custom graph" with Enabled and Remove only.
+  - **Save is one sequence bound to one snapshot** (Rev 2, M4): on Save
+    the form records the behaviour node and the target by SOM node
+    identity and id, and a form generation. Each stage is dispatched only
+    if the generation is current and both nodes are still alive and
+    selected as they were; **a selection change, Edit off (`setEditMode`
+    closes forms through the gate, `app.js` L1652–1687 — the Behaviour
+    form registers with that gate), `connecting`, `disconnected` or the
+    target's removal bumps the generation,** so no further stage goes out.
+    Answers for stages already sent are resolved as usual (the id a node
+    got is kept; it's harmless on its own) and nothing continues. The
+    status line shows "Save cancelled" once.
   - **The status line:** "Running" / "Disabled: <reason text>" / "Not
     running: this tab isn't the script host" / "Behaviours run in another
     tab; clicks here don't trigger them" (a non-host owner tab, F-L9) /
@@ -1007,7 +1076,9 @@ becomes.
 ### F10. Duplicate and Undo (F-L10)
 - `prepareDuplicate` remaps the copy's self-references (every
   `nodeMap`/`targets`/`animations[].object` entry equal to the original's
-  id → the new id) and keeps the rest. `atriumProblem` checks `behavior`
+  id → the new id, **and `template.params.target` when it equals the
+  original's id**, Rev 2 M3, so reopening the copy's form and saving
+  unchanged keeps the copy as its own target) and keeps the rest. `atriumProblem` checks `behavior`
   with F1 (`ownId` = the node's id) and refuses "its behaviour is
   malformed". `prepareRestore` changes nothing.
 - A re-add refused by F2's checks is reported as any refused re-add
@@ -1046,12 +1117,12 @@ becomes.
 | F1 | The vectors file read by both copies: every template's canonical output accepted **by both copies and by `validateInteractivityGraph`**; every code with a boundary pair; a `{n}` pointer refused; a socket-connected index; `variables: []`; `events: []`; a bare `event/onSelect`; a disallowed op; a pointer with an index at `nodeMap.length`; `atrium/interval` without `interval`; a `__proto__` key in `template.params`; depth 9; `kind: 'js'`; a 16,385-character value | (a) accept `flow/while` in one copy only; (a2) accept `{n}` in one copy only |
 | F2 | server, port 0: an owner `send` of a valid leaf on a node with an id is accepted, broadcast, saved; refused `INVALID_FIELD` on a node without an id; refused `INVALID_VALUE` with F1's text for each code (a sample of six); `null` accepted; the 65th behaviour node refused and **nothing changed, no broadcast, no autosave**; **at 64, the 64th node's behaviour can be rewritten and toggled** (S1); `add` with a valid behaviour and id accepted, with a malformed one refused, with a behaviour and no id refused; **load:** a malformed behaviour dropped to `null` with the log line, a behaviour on a node with no id dropped (including one whose id was healed away), the 65th dropped; the saved document has the `null`s. **Election:** an owner `hello` without `scriptRunner` gets `scriptHost: false` and is never handed the role; with it, the E4 tests still pass; a `hello` with `scriptRunner: 2` is refused by the schema | (b) skip the own-id check; (b2) drop the 64 cap; (b3) elect without the capability |
 | F3 | The engine resolves in Node by its bare name; the hashes in `VENDORED.md` match the files (a test computes them); the invalid index subset is 100% rejected; the import map has both entries and the guard is green | (c) change one byte of the vendored file (the hash test fails) |
-| F4 | `createBehaviorEngine` with a fake world and fake timers: **authority:** a write to the own node, a descendant and a granted target applies; to an ungranted node, a renamed-away target (through a fake `resolveObjectId` returning `unaddressable`) and an index past `nodeMap` it is refused, logged once, and the graph continues on `out`; a throwing world setter is wrapped (the tick survives); **animations:** `animation/start` calls `play` with the table entry and the literal speed, `stop` calls `stop`, an index past the table takes `err`, a clip not in `clipIds` is refused; **budget:** `t1`'s three bounded cases dispose the engine at 10,001 with `over-budget`, and a tick afterwards throws; `t1b`'s and `t1c`'s cases stop through the subclasses (allowlist bypassed); a `sequence → sequence` cycle loaded with the allowlist and validator bypassed overflows and is caught and disposed; **interval:** with fake timers, `atrium/interval` is dispatched first after `seconds` then every `seconds`, the graph runs on the next tick, and `dispose()` clears the timer with the injected `clearTimeout` before `engine.dispose()`; `dispose()` also clears interpolation maps and listeners, and a tick after dispose throws; `t2` (b)'s reload leaves nothing live because a reload is dispose-then-create; `loadBehaveGraph` is called with `false`; **events:** `select(1)` on a child reaches `onSelect` on index 0; `proximity` fires `enter` once for two avatars inside and `exit` once when both leave; `debug/log` reaches `log` cut to 200 characters | (d) set the hook on the decorator, not the engine (the budget counts 0); (d2) park the engine on `over-budget` instead of disposing (the timer still fires); (d3) refuse by throwing (the tick dies); (d4) load with `runGraph` true (the fake-timer test sees the engine tick itself) |
-| F5 | client, fake socket: `sendField` sends the exact message, tracks the edit, changes nothing before the echo, applies the broadcast value on the echo then `som:set` and `edit:accepted`; a rejection changes nothing; the Edit panel's mutation path is unchanged (an existing test still passes). **The runner** with a fake client: enabled only with the role, `canEdit` and a loaded world, in each order; `active: false` disposes every engine before the test's next line; a reload on `som:set` of the leaf is dispose-then-create; disabled reasons for each case; **coalescing:** 30 writes to one field in one frame send once; 25 distinct keys in one frame send 20 then 5 at the next flush; the 101st key disables its behaviour; **a rename between enqueue and flush** sends to the new name (S6); **the drag rule:** with `setGesture('crate')`, sends to `crate`, its child and its parent are dropped and logged once, others pass, and nothing is replayed on `setGesture(null)`; **select:** `runner.select` on a model's inner node reaches the behaviour on the placed object; avatars are never scanned or listened to; **three rapid world switches** leave no engine alive (E6's test, extended). **In `app.js` (wiring guard and a DOM-free test of the branch):** a press-and-release 10 px apart on the behaviour node triggers nothing, a right-click triggers nothing, a 2 px click with Edit mode off calls `runner.select`, and with Edit mode on selects instead (M3) | (e) tick after `active: false` (the engine is still alive); (e2) apply the value locally before the echo; (e3) replay dropped sends after the gesture; (e4) take `select` from the SOM `click` (the 10 px case fires) |
+| F4 | `createBehaviorEngine` with a fake world and fake timers: **authority:** a write to the own node, a descendant and a granted target applies; to an ungranted node, a renamed-away target (through a fake `resolve` returning a problem) and an index past `nodeMap` it is refused, logged once, and the graph continues on `out`; a throwing world setter is wrapped (the tick survives); **animations:** `animation/start` calls `play` with the table entry and the literal speed, `stop` calls `stop`, **both on a child model with no grant** (M2), an index past the table takes `err`, a clip not in `clipIds` is refused only when `clipStatus` is `loaded`; **budget:** `t1`'s three bounded cases dispose the engine at 10,001 with `over-budget`, and a tick afterwards throws; `t1b`'s and `t1c`'s cases stop through the subclasses (allowlist bypassed); a `sequence → sequence` cycle loaded with the allowlist and validator bypassed overflows and is caught and disposed; **interval:** with fake timers, `atrium/interval` is dispatched first after `seconds` then every `seconds`, the graph runs on the next tick, and `dispose()` clears the timer with the injected `clearTimeout` before `engine.dispose()`; `dispose()` also clears interpolation maps and listeners, and a tick after dispose throws; `t2` (b)'s reload leaves nothing live because a reload is dispose-then-create; `loadBehaveGraph` is called with `false`; **events:** `select(1)` on a child reaches `onSelect` on index 0; `proximity` fires `enter` once for two avatars inside and `exit` once when both leave; `debug/log` reaches `log` cut to 200 characters | (d) set the hook on the decorator, not the engine (the budget counts 0); (d2) park the engine on `over-budget` instead of disposing (the timer still fires); (d3) refuse by throwing (the tick dies); (d4) load with `runGraph` true (the fake-timer test sees the engine tick itself) |
+| F5 | client, fake socket: `sendField` sends the exact message, tracks the edit, changes nothing before the echo, applies the broadcast value on the echo then `som:set` and `edit:accepted`; a rejection changes nothing; the Edit panel's mutation path is unchanged (an existing test still passes). **The runner** with a fake client: enabled only with the role, `canEdit` and a loaded world, in each order; `active: false` disposes every engine before the test's next line; a reload on `som:set` of the leaf is dispose-then-create; disabled reasons for each case; **coalescing and the rate** (M1): 30 writes to one field in one frame send once; 25 distinct keys in one frame go out one per 50 ms, the last at 1,200 ms; **under sustained pressure** (100 keys rewritten every frame for 2 s with fake timers) exactly 40 sends leave; disposing one engine drops only its entries (S3); the 101st key disables its behaviour; **a rename between enqueue and flush** sends to the new name (S6); **the drag rule:** with `setGesture('crate')`, sends to `crate`, its child and its parent are dropped and logged once, others pass, and nothing is replayed on `setGesture(null)`; **select:** `runner.select` on a model's inner node reaches the behaviour on the placed object; avatars are never scanned or listened to; **three rapid world switches** leave no engine alive (E6's test, extended). **In `app.js` (wiring guard and a DOM-free test of the branch):** a press-and-release 10 px apart on the behaviour node triggers nothing, a right-click triggers nothing, a 2 px click with Edit mode off calls `runner.select`, and with Edit mode on selects instead (M3) | (e) tick after `active: false` (the engine is still alive); (e2) apply the value locally before the echo; (e3) replay dropped sends after the gesture; (e4) take `select` from the SOM `click` (the 10 px case fires) |
 | F6 | renderer-three: a `visible: false` mutation hides the node's object and a placed instance (through the wrapper's parent); `true` shows them; **a hit on a hidden object in front of a visible one returns the visible one** unless `includeHidden` (S10); the Visible checkbox writes `visible` through `writeSend` and is disabled in flight | (f) ignore `visible` in the bridge; (f2) filter hidden hits in Edit mode too; (f3) return `null` instead of the next hit |
 | F8 | `templateGraph` for each id and each `action`/`loop` variant passes F1 **and `validateInteractivityGraph`** (`r1`'s cases, as a test), and **runs**: through `createBehaviorEngine` with a fake world, `select-visibility` hides, shows and toggles; `select-animation` plays and stops; `proximity-animation` plays on `enter` and stops on `exit`; `select-light` sets 0 then `I`; `interval-animation` plays every `seconds` with fake timers and stops on dispose | (g) drop `nodeMap[0]`'s own id (the server refuses every template); (g2) spell a pointer `{n}` (the validator refuses it) |
-| F9 | `behavior-form` without a DOM: Save on a node without an id sends `setObjectId` first and the leaf only after `edit:accepted`; a refused id stops the sequence; Remove sends `null`; Enabled rewrites with the flag; a `template`-less value shows "Custom graph"; the status texts for each runner state; the picker filters per template; the light template with no lights. Wiring guards in `app.js` for the answer routing, the resets and `refreshBehaviorRow` | (h) write the leaf before the id is answered |
-| F10 | `edit-duplicate`: a copy's self-references are remapped and a grant to another object is kept; a malformed behaviour refuses with the new text; `prepareRestore` keeps the value | (i) keep the original's id in the copy's `nodeMap` |
+| F9 | `behavior-form` without a DOM: Save on a node without an id sends `setObjectId` first and the leaf only after `edit:accepted`; **all three stages complete in order and the final value is the template's** (nit); a refused id stops the sequence; **a selection change after the first acknowledgement, and Edit off after the first, each stop the sequence with no further send and "Save cancelled"** (M4); Remove sends `null`; Enabled rewrites with the flag; a `template`-less value, and one whose params don't regenerate its graph, show "Custom graph" (S5); the status texts for each runner state; the picker filters per template; the light template with no lights. Wiring guards in `app.js` for the answer routing, the gate registration, the resets and `refreshBehaviorRow` | (h) write the leaf before the id is answered; (h2) dispatch the second stage after a selection change |
+| F10 | `edit-duplicate`: a copy's self-references are remapped, **`template.params.target` included, and the copy's form reopens with the copy as its target and saves unchanged** (M3); a grant to another object is kept; a malformed behaviour refuses with the new text; `prepareRestore` keeps the value | (i) keep the original's id in the copy's `nodeMap`; (i2) leave `template.params.target` on the original |
 | F11 | the conformance subset's expected list matches; the probes-as-tests pass | (j) widen the allowlist in the subset filter (new assets appear and the list mismatches) |
 | F-L12 | 4a's items 1, 2, 3 and 5 each get the test the 4a passdown §6.1 describes; `_scriptHostRoleWarned` resets on a second `hello` | (k) keep the pick after another session's playing value changes |
 
@@ -1092,6 +1163,9 @@ In the harness (`devtasks/harness/`, new `checks/scripting-4b-2/`):
    `behavior-pointer`.
 8. **Saved:** restart the world server from its saved document; the
    behaviours are there and run; a hidden cube is still hidden.
+8b. **Duplicate a model that plays its own animation on select:** the
+   copy's behaviour targets the copy; its form reopens with the copy as
+   the target; Save unchanged keeps it (M3).
 9. **Regression:** 4b-1's §5.1 checks, 4a's, library-sky's and
    edit-polish-3's; **and first person:** the own capsule now disappears
    on `V` and returns on the second `V` (F6's one visible change to
@@ -1122,11 +1196,12 @@ In the harness (`devtasks/harness/`, new `checks/scripting-4b-2/`):
 ## 7. Worker rules and release path
 As scripting-4b-1 (`devtasks/KICKOFF-scripting-4b-1.md`), with this round's
 specifics:
-- **Steps, one commit each:**
-  1. F1 (both copies and the vectors), F2 (the SOM path, the server's leaf
+- **Steps, one commit each, every commit runnable** (Rev 2, S2: the
+  server imports the engine from step 2 on, so the engine lands first):
+  1. F3: vendoring, `NOTICE`, `VENDORED.md`, the dependency entries, the
+     Node and hash tests, the import-map entries;
+  2. F1 (both copies and the vectors), F2 (the SOM path, the server's leaf
      and `add` checks, healing, the election rule and the schema);
-  2. F3: vendoring, `NOTICE`, `VENDORED.md`, the Node and hash tests, the
-     import-map entries;
   3. F4: the adapter and its tests, the probes as tests (`t1`, `t1b`,
      `t1c`, `t2` (a), (c), (d), `r1`, `r2`), the conformance subset (F11);
   4. F5: `sendField`, the runner, its tests;
@@ -1134,6 +1209,10 @@ specifics:
   6. F8–F10: the templates, the form and panel, Duplicate;
   7. F-L12's items, full suites, proofs (a)–(k) with every sub-proof, and
      the handoff.
+- **Each commit's report lists the suites run at that step and names
+  any test deferred to a later step** (Rev 2, nit): a step-3 adapter test
+  can't exercise the runner, and the report says so rather than leaving
+  it unrun in silence.
 - **`--max-runtime 4h`.**
 - **A protocol and server round:** DEV restarts at the deploy.
 - **Both outside reviews:** this pre-brief (done once, on Rev 0.1; Rev 1
@@ -1247,3 +1326,26 @@ specifics:
 
 The P-claims table of the review found every `file:line` holding at
 `28c7288`. Nothing changed a decision.
+- **Rev 2** (2026-10-24, `29625e5` reviewed): a second outside review, of
+  Rev 1 ("revise before kickoff, but the design is close"; no clone, the
+  code read at `a246f80c` through GitHub). Claude checked its code claims
+  (`setEditMode` closes forms through the gate, `app.js` L1652–1687; the
+  server's `package.json` has no engine dependency) and the undo engine's
+  "changed elsewhere" rule (`edit-undo.js` L505–540, live values compared
+  at undo time). All are taken.
+
+| # | Finding | Severity | Where it went |
+|---|---|---|---|
+| M1 | "20 per second" contradicted its test (20 keys per flush) | Must-fix | F5: one send per 50 ms, a rate; the sustained-pressure test |
+| M2 | Animations omitted descendants from the authority rule | Must-fix | F4 (the same predicate as pointer writes); child-model test |
+| M3 | Duplicate left `template.params.target` on the original | Must-fix | F10; test and proof (i2); §5.1 check 8b |
+| M4 | The multi-stage Save had no lifecycle rule | Must-fix | F9 (snapshot, generation, the gate; cancelled on selection change, Edit off, disconnect, target removal); tests and proof (h2) |
+| S1 | An in-flight send's echo during a gesture | Should-fix | F5 (applied; re-asserted by the gesture's next write; the final send wins; undo refuses loudly) |
+| S2 | Step 1 imported an engine step 2 vendored; no server dependency | Should-fix | §7 (vendoring first, every commit runnable); F3 (the `workspace:*` entries) |
+| S3 | The queue couldn't drop one behaviour's entries | Should-fix | F5 (behaviour id and generation per entry); test |
+| S4 | The adapter's `world` interface was incomplete | Should-fix | F4 (the whole interface, total functions) |
+| S5 | `template.params` unchecked for reopening | Should-fix | F1 `behavior-template` (per-template rule); F9 ("Custom graph" unless the params regenerate the saved graph) |
+| N1–N4 | Non-negative indices; the full three-stage Save test; a duplicate-and-reopen check; per-commit test reports | Nit | F1; §5 F9; §5.1 check 8b; §7 |
+
+The reviewer: with M1–M4 resolved, "consider the pre-brief ready for
+FINAL".
