@@ -1,7 +1,9 @@
 # Revision — scripting-4b-2 round 5 (the browser checks and the outside review of the published tip)
 
-**Status:** approved by the operator (2026-10-25 11:10 PT), Rev 0 as
-drafted: V1–V14 in one round; S3 and S4 follow-ups.
+**Status:** approved by the operator (2026-10-25 11:10 PT): V1–V14 in one
+round; S3 and S4 follow-ups. **Rev 0.1** (same day, before the kickoff): §1.3's
+M2 row corrected after Claude's check of PROD's tree, and the PROD follow-up
+removed. The contract (§2–§4) is unchanged from Rev 0.
 - **Base:** round 4's published tip `957140bd92843b61b4ed692a4e368846f0d313ef`
   on `workflow/scripting-4b-2` (GLM APPROVE, `t_0bc9416b`; published by
   `t_58fd67a9`; on DEV as release merge `8ab5e52f` by `t_043bcfe0`). Round 5
@@ -114,7 +116,7 @@ Two independent passes over `957140bd`, after it was published and deployed:
 | Finding | Holds? | Where |
 |---|---|---|
 | **M1** a queued write isn't re-checked for authority when it's sent | **Yes.** `opportunity()` finds the producing record and discards it (`void record`); neither the producer's generation nor F4's rule is checked again. The code's own comment says it is | `runner.js` L249–273 |
-| **M2** deep nesting overflows the server's validation walk | **Yes, and it takes the server down.** Claude reproduced it on a second harness server: one owner `send` of a behaviour whose `graph` is an array nested 6,500 deep (13 kB) threw `RangeError: Maximum call stack size exceeded` in `hasForbiddenKey` (`send-policy.js` L1058), which nothing catches. The process exited; every world on it dropped and new tabs got connection refused. The same recursive walks guard document `extras` (L1395–1398), and did before this round, so PROD probably has the same exposure through that field; Claude didn't test PROD's tree. The load path (`world.js` L427) runs the same check on saved and file worlds. The client copy in `behavior-spec.js` L127–141 is recursive too | `send-policy.js` L699–705, L1045–1063; `session.js` L803 |
+| **M2** deep nesting overflows the server's validation walk | **Yes, and it takes the server down.** Claude reproduced it on a second harness server: one owner `send` of a behaviour whose `graph` is an array nested 6,500 deep (13 kB) threw `RangeError: Maximum call stack size exceeded` in `hasForbiddenKey` (`send-policy.js` L1058), which nothing catches. The process exited; every world on it dropped and new tabs got connection refused. The same recursive walks guard document `extras` (L1395–1398), but that path serializes first, inside a `try`. Claude checked PROD's tree (`8358b043`) on a spare harness server: a document `extras` send nested 6,500 and 30,000 deep is refused with "document extras are not serializable", and the server keeps serving. **So PROD isn't exposed; only 4b-2's behaviour check is,** because S8 runs its walks before serializing. The load path (`world.js` L427) runs the same check on saved and file worlds. The client copy in `behavior-spec.js` L127–141 is recursive too | `send-policy.js` L699–705, L1045–1063; `session.js` L803 |
 | **M3** a write queued before a drag goes out during it | **Yes.** The gesture is checked only in `enqueue`; `opportunity` doesn't check it. The spec's rule ("while set, a send whose target is that node … is dropped") covers it. Claude's check 6 enqueued during the drag, so it didn't see this | `runner.js` L227–235, L249 |
 | **M4** an engine the adapter disposed stays in the frame loop | **Yes.** `tick` keeps the record, calls the disposed engine every frame (it throws, swallowed), writes "behaviour disabled — …" to the log **every frame**, and leaves its queued sends in place. The spec: "every disable is a `dispose()`", and S3 drops a disposed engine's entries | `runner.js` L289–304 |
 | **M5** the 101st key doesn't disable its behaviour | **Yes.** `engines.get(nodeByName(objectId)?.name)` looks a UUID up as a name, so it finds nothing, and setting `reason` wouldn't dispose anything if it did. The spec says the behaviour is disabled with `over-send-cap` | `runner.js` L236–241 |
@@ -386,11 +388,6 @@ disable.
   fixtures within F-L4's ops (pointer get/set, `onSelect`, `receive`,
   `branch`, animation start/stop) with expected results, for 4c or 4d, when
   the allowlist grows.
-- **PROD's document-extras walk** (V9's pre-existing path): PROD runs the
-  same recursive walk on document `extras`, an owner-only send, so it probably
-  has the same exposure today (untested). V9 fixes it when 4b-2 reaches PROD.
-  If the operator wants it sooner, it's a separate one-file hotfix of
-  `send-policy.js` and `session.js`, not part of this round.
 
 **Before DEV acceptance**, after round 5's release chain publishes and
 deploys:
