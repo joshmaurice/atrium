@@ -1,7 +1,21 @@
 # Pre-brief: Phase 3 step 4b-2 — behaviours, owner-present: the vendored engine, the adapter and runner, the `behavior` leaf, and the five templates
 
-Status: **DRAFT, Revision 0 (2026-10-24). Decisions F-L1–F-L12 are open for
-the operator.** Nothing here is FINAL.
+Status: **DRAFT, Revision 0.1 (2026-10-24). Decisions F-L1–F-L12 approved by
+the operator (2026-10-24 17:42 PT), all as recommended:**
+- F-L1 (a) one round, seven steps; F-L2 (a) design §5.4 plus `animations`,
+  `proximity` and `template`; F-L3 (a) form and limits on the server,
+  existence at run time; F-L4 (a) the templates' ops only; F-L5 (a) drop
+  sends to the edited subtree and its ancestors during a gesture, never
+  replay; F-L6 (a) `hello.capabilities.scriptRunner`; F-L7 (a) custom
+  events with occupancy semantics; F-L8 (a) hidden objects rendered, not
+  clickable, still editable; F-L9 (a) the host's own clicks outside Edit
+  mode; F-L10 (a) Duplicate remaps self-references and keeps grants;
+  F-L11 (a) a workspace package per vendored module; F-L12 (a) 4a's items
+  1, 2, 3 and 5 and GLM's NIT, item 4 deferred.
+- **Rev 0.1 changes only this status line.** It is not FINAL: the outside
+  review of the pre-brief (4b-1 passdown §3 and §6.1) hasn't happened, and
+  its findings may change the contract within the approved decisions. The
+  revision that applies it goes FINAL on the operator's word.
 - **Drafted by Claude from `main` at `a246f80c`.** Its code is identical to
   the released `8358b043` (DEV, MAIN and PROD): the two commits on top
   (`2db57dc`, `a246f80c`) touch only `devtasks/`. Line numbers are at that
@@ -1030,7 +1044,10 @@ specifics:
   §6.3); 4a's item 4 if a polish round hasn't taken it.
 
 ## 10. Review log
-- **Rev 0** (2026-10-24, `a246f80c`): drafted by Claude from the 4b
+- **Rev 0** (2026-10-24, `b1e159ac`): drafted by Claude from the 4b
   pre-brief §9 and B6, the design, the step 4 pre-brief, the two passdowns,
   code reading at `a246f80c`, the spike rerun (§2.3) and the new probe
   `t6`. Open: F-L1–F-L12.
+- **Rev 0.1** (2026-10-24 17:42 PT): the operator approved F-L1–F-L12 as
+  recommended. Only the status line changed. Still DRAFT, pending the
+  outside review of this pre-brief.
