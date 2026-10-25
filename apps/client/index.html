@@ -732,6 +732,25 @@
         <button id="ep-anim-stop" title="Stop and return to the rest pose">Stop</button>
       </div>
       <div class="ep-status" id="ep-anim-status"></div>
+      <!-- scripting-4b-2 (F9) — the Behaviour section. `behavior-form.js` is the
+           one writer of everything inside it: the template select, the
+           per-template parameter fields, Enabled, Save, Remove, the status line,
+           the one-time Undo note and the node's own log lines. -->
+      <div class="ep-row" id="ep-behavior-row" style="display:none"><span>Behaviour</span>
+        <select id="ep-behavior-template" aria-label="Behaviour template"></select>
+      </div>
+      <div id="ep-behavior-params" style="display:none"></div>
+      <div class="ep-buttons ep-actions" id="ep-behavior-actions" style="display:none">
+        <button id="ep-behavior-enabled" title="Run or pause this behaviour">Enabled</button>
+        <button id="ep-behavior-save" title="Save the behaviour">Save</button>
+        <button id="ep-behavior-remove" class="ep-danger" title="Remove the behaviour">Remove</button>
+      </div>
+      <div class="ep-status" id="ep-behavior-status"></div>
+      <div class="ep-status" id="ep-behavior-note" style="color:#94a3b8"></div>
+      <details id="ep-behavior-log" style="display:none">
+        <summary style="cursor:pointer;font-size:11px;color:#94a3b8">Log</summary>
+        <div id="ep-behavior-log-lines" style="font-size:10px;color:#94a3b8;max-height:80px;overflow:auto"></div>
+      </details>
       <!-- edit-polish-3 (Z7, L5a) — the spawn note: app.js's refreshSpawnNote() is
            the one writer of its text and its visibility, and it is hidden until a
            selected pad (or a group holding one) sits near the spawn point. The

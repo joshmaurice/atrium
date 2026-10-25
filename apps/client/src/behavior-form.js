@@ -508,6 +508,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   function render() {
     const open = state.open
     show(elements.row, open)
+    show(elements.log, open)
     if (!open) { show(elements.params, false); show(elements.actions, false); text(elements.status, ''); return }
     show(elements.actions, true)
 

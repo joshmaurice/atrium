@@ -17,6 +17,9 @@ import { resolveSelectionRoot } from '@atrium/interaction'
 import { createEditModes } from './edit-modes.js'
 import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
+import { createBehaviorForm, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
+import { createBehaviorRunner } from '@atrium/behaviors/runner'
+import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
 import { worldPosition, subtreeSome } from './world-position.js'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 // `firstFreeName` is imported for the guard's sake only: app.js no longer calls
@@ -25,6 +28,7 @@ import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 // module's exports that appears in app.js to be in its import list (V2).
 import { palettePlacement, paletteName, teleporterName, copyName, modelName, firstFreeName } from './edit-palette.js'
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
+import { newObjectId } from '@atrium/client/object-id'
 import { createTeleporterForm } from './teleporter-form.js'
 import { createLibraryGrid, libraryAnswerError } from './library-grid.js'
 import { loadCatalog, storedUrl, EMPTY_CATALOG } from './library-catalog.js'
@@ -790,6 +794,9 @@ client.on('connecting', () => {
   // Z7 — and the clip controls' wait and remembered choice.
   animationControls?.reset()
   refreshModelRow()
+  // F9 — the Behaviour form resets with the world (M4: `connecting` bumps the
+  // generation, so no stage of a Save goes out afterwards).
+  behaviorForm?.reset()
   // Close the destination form (Z3 — its own module forgets the wait and closes)
   teleporterForm?.reset()
   // Hide failure panel (connecting covers teleport/Go back retry)
@@ -811,6 +818,8 @@ client.on('disconnected', () => {
   skyPicker?.reset()
   animationControls?.reset()
   refreshModelRow()
+  // F9 — the Behaviour form resets with the world (M4).
+  behaviorForm?.reset()
   // Close the destination form (Z3 — its own module forgets the wait and closes)
   teleporterForm?.reset()
 
@@ -1470,6 +1479,32 @@ const epSpawnNote    = document.getElementById('ep-spawn-note')     // Z7, edit-
 const epError        = document.getElementById('ep-error')
 const epVectorInputs = [...epFields.querySelectorAll('input[data-field]')]
 const epVisible      = document.getElementById('ep-visible')       // scripting-4b-2 F6
+// scripting-4b-2 (F9) — the Behaviour section's elements. `behavior-form.js` is
+// the one writer of everything inside them; app.js only hands them over.
+const epBehaviorRow      = document.getElementById('ep-behavior-row')
+const epBehaviorTemplate = document.getElementById('ep-behavior-template')
+const epBehaviorParams   = document.getElementById('ep-behavior-params')
+const epBehaviorActions  = document.getElementById('ep-behavior-actions')
+const epBehaviorEnabled  = document.getElementById('ep-behavior-enabled')
+const epBehaviorSave     = document.getElementById('ep-behavior-save')
+const epBehaviorRemove   = document.getElementById('ep-behavior-remove')
+const epBehaviorStatus   = document.getElementById('ep-behavior-status')
+const epBehaviorNote     = document.getElementById('ep-behavior-note')
+const epBehaviorLog      = document.getElementById('ep-behavior-log')
+const epBehaviorLogLines = document.getElementById('ep-behavior-log-lines')
+
+/** F9 — the picker's options: "None", the five display names, and "Custom graph". */
+if (epBehaviorTemplate) {
+  const option = (value, label) => {
+    const element = document.createElement('option')
+    element.value = value
+    element.textContent = label
+    return element
+  }
+  epBehaviorTemplate.appendChild(option(NONE_LABEL, NONE_LABEL))
+  for (const id of TEMPLATE_IDS) epBehaviorTemplate.appendChild(option(id, TEMPLATE_LABELS[id]))
+  epBehaviorTemplate.appendChild(option(CUSTOM_LABEL, CUSTOM_LABEL))
+}
 const epPalette      = document.getElementById('ep-palette')        // 1b-2 N1
 const epPaletteBtns  = [...epPalette.querySelectorAll('button[data-kind]')]
 
@@ -1531,6 +1566,8 @@ const editTracker = createEditTracker({
   writeLocal: (node, field, value) => client.applyLocally(() => { node[field] = value }),
   // Assigning outside applyLocally sends; lastSendSeq moves only if it did.
   writeSend: (node, field, value) => {
+    // F-L5 — a form write in flight is a gesture too.
+    runner?.setGesture(node.name)
     const before = client.lastSendSeq
     node[field] = value
     return client.lastSendSeq !== before ? client.lastSendSeq : null
@@ -1543,6 +1580,8 @@ const editTracker = createEditTracker({
   // Y3 — one settle batch at a time: what the server accepted becomes an entry
   onTransformsSettled: (results, info) => {
     undo.onTransformsSettled(results, info)
+    // F-L5 — the gesture is over; nothing is replayed.
+    runner?.setGesture(null)
     refreshEditActions()
   },
 })
@@ -1729,10 +1768,16 @@ function onHandleDragging(isDragging) {
   if (isDragging) {
     // Y4 — no gesture begins while an undo or a redo is in flight or a
     // structural request is pending: the dispatch path, not just the button
-    if (selected && !editDispatchBlocked()) activeGesture = editTracker.begin(selected)
+    if (selected && !editDispatchBlocked()) {
+      activeGesture = editTracker.begin(selected)
+      // F-L5 — the drag rule: behaviour sends to the edited node, its
+      // descendants and its ancestors are dropped while the gesture lasts.
+      runner?.setGesture(selected.name)
+    }
   } else if (activeGesture) {
     activeGesture.end()
     activeGesture = null
+    runner?.setGesture(null)
   }
   refreshEditActions()
 }
@@ -1873,7 +1918,18 @@ viewportEl.addEventListener('mousedown', (e) => {
 }, true)
 
 viewportEl.addEventListener('click', (e) => {
-  if (!modes.edit) return
+  // F5/M3 (scripting-4b-2) — OUTSIDE Edit mode a click is the host's `select`:
+  // the same slop and button rules as a selection (M3: a SOM `click` fires on
+  // any button and any distance, so it is not used), and the same hit
+  // resolution as `pickEditTarget`.
+  if (!modes.edit) {
+    if (e.target !== canvas) return
+    const down = pressDown
+    pressDown = null
+    if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
+    runner?.select(pickBehaviorTarget(e))
+    return
+  }
   if (e.target !== canvas) return
   const down = pressDown
   pressDown = null
@@ -1883,6 +1939,24 @@ viewportEl.addEventListener('click', (e) => {
   selectForEdit(node)
   if (refused) showEditError(refused)
 })
+
+/** F5 — the SOM node under the cursor, for the host's `select` outside Edit mode. */
+function pickBehaviorTarget(e) {
+  if (!sceneGroup || !client.som) return null
+  const rect = viewportEl.getBoundingClientRect()
+  const ndc = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1,
+  )
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(ndc, stage.camera)
+  const hit = visibleHits(raycaster.intersectObjects(sceneGroup.children, true))[0]
+  if (!hit) return null
+  return nodeForHitObject(hit.object, {
+    getNodeByName: (n) => client.som.getNodeByName(n),
+    isDuplicatedName,
+  })
+}
 
 // ── The spawn note (Z7, edit-polish-3 L5a) ──────────────────────────────
 //
@@ -1929,6 +2003,7 @@ function refreshEditPanel() {
   refreshEditVectors()
   refreshNameField()
   refreshModelRow()
+  refreshBehaviorRow()
 }
 
 // Position, rotation (degrees) and scale. A field being typed in is left alone.
@@ -2564,22 +2639,33 @@ client.on('edit:accepted', ({ seq }) => {
   skyPicker?.onAccepted(seq)
   // Z7 — the clip controls own their own wait; a seq they do not own is ignored.
   animationControls?.onAccepted(seq)
+  // F9 — the Behaviour form's own wait.
+  behaviorForm?.onAnswer('edit:accepted', { seq })
   onStructureAnswer(seq, 'accepted')
 })
 client.on('edit:rejected', ({ seq, code, message }) => {
   skyPicker?.onRejected(seq, message || code)
   animationControls?.onRejected(seq, message || code)
+  behaviorForm?.onAnswer('edit:rejected', { seq, code, message: message || code })
   onStructureAnswer(seq, 'rejected', message || code)
 })
 client.on('edit:unknown',  ({ seq }) => {
   skyPicker?.onUnknown(seq)
   animationControls?.onUnknown(seq)
+  behaviorForm?.onAnswer('edit:unknown', { seq })
   onStructureAnswer(seq, 'unknown')
 })
 
 // A remote change to the selection, or to a material it shares, can change
 // whether it may be duplicated.
 client.on('som:set', () => { if (modes.edit) refreshEditActions(); refreshModelRow() })
+
+// F9 (scripting-4b-2) — the row re-renders on `som:set` of the leaf (its own
+// echo and a remote write alike). `refreshBehaviorRow` re-opens only when the
+// SELECTION changed, so a Save's echo never cancels the sequence it belongs to.
+client.on('som:set', ({ path } = {}) => {
+  if (path === 'extras.atrium.behavior' || path === 'extras' || path === 'name') refreshBehaviorRow()
+})
 
 // F6 (scripting-4b-2) — the renderer honours `visible` on the node's view
 // object. This fires for a local write's echo and for a visitor's broadcast
@@ -2779,6 +2865,100 @@ viewportEl.addEventListener('wheel', (e) => {
 // Tick loop
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Behaviours (scripting-4b-2, F5 and F9)
+//
+// The RUNNER (packages/behaviors) is one engine per behaviour node, on the host
+// tab; the FORM (behavior-form.js) is the panel's Behaviour section. app.js is
+// wiring only: it hands both the page's pieces and its own facts.
+// ---------------------------------------------------------------------------
+
+let runner = null
+let behaviorForm = null
+let lastBehaviorNode = null
+
+/** F9's status line, from the role, `canEdit` and the runner's own record. */
+function runnerStatus() {
+  if (client.scriptHost?.active !== true) {
+    // A non-host OWNER tab gets F-L9's text; a tab that isn't an owner at all
+    // (a visitor never sees the panel) gets the plainer one.
+    return client.canEdit === true ? { state: 'other-tab' } : { state: 'idle' }
+  }
+  const record = selected ? runner?.engines.get(selected.name) : null
+  if (record?.reason) return { state: 'disabled', reason: record.reason }
+  return { state: 'running' }
+}
+
+/** F4's `clipStatus`, from the model bridge. */
+function clipsFor(objectId) {
+  const resolved = client.som?.resolveObjectId?.(objectId)
+  const node = resolved?.node
+  if (!node) return { status: 'none' }
+  const record = modelBridge?.status?.(node.name)
+  if (!record) return { status: 'none' }
+  if (record.status !== 'loaded') return { status: record.status }
+  // The host's clip ids are not exposed to the page yet, so the adapter's clip
+  // check stays inert and the write goes out (S7's gate is pinned by the
+  // adapter's own tests). A stale clip is the viewers' `clip-missing` state.
+  return { status: 'loaded' }
+}
+
+behaviorForm = createBehaviorForm({
+  elements: {
+    row: epBehaviorRow, select: epBehaviorTemplate, params: epBehaviorParams,
+    actions: epBehaviorActions, enabled: epBehaviorEnabled, save: epBehaviorSave,
+    remove: epBehaviorRemove, status: epBehaviorStatus, note: epBehaviorNote,
+    log: epBehaviorLog, logLines: epBehaviorLogLines,
+  },
+  gate: modelGate,
+  deps: {
+    selected: () => selected,
+    nodes: () => client.som?.allNodes ?? [],
+    status: () => runnerStatus(),
+    write: {
+      setObjectId: (name, id) => client.setObjectId(name, id),
+      sendField: (name, field, value) => client.sendField(name, field, value),
+    },
+    newObjectId,
+    showError: (text) => showEditError(text),
+    clearError: () => clearEditError(),
+    document,
+    createElement: (tag) => document.createElement(tag),
+    logLines: (name) => (runner?.log ?? [])
+      .filter((line) => line.node === name)
+      .slice(-8)
+      .map((line) => `[${new Date(line.time).toLocaleTimeString()}] ${line.message}`),
+  },
+})
+behaviorForm.wire()
+
+runner = createBehaviorRunner({
+  client,
+  now: () => performance.now(),
+  frame: 50,
+  clips: clipsFor,
+  position: (node) => (node ? worldPosition(node) : undefined),
+  onEntry: () => { if (behaviorForm?.openState) behaviorForm.render() },
+})
+
+/** F9 — the row renders on selection, and again on `som:set` of the leaf. */
+function refreshBehaviorRow() {
+  if (!behaviorForm) return
+  if (!selected) {
+    lastBehaviorNode = null
+    behaviorForm.close()
+    return
+  }
+  if (selected !== lastBehaviorNode) {
+    lastBehaviorNode = selected
+    behaviorForm.open(selected)
+  } else {
+    behaviorForm.render()
+  }
+}
+
+
+
 let lastTick = performance.now()
 
 function tick(now) {
@@ -2791,6 +2971,10 @@ function tick(now) {
   // BEFORE the stage renders, so every viewer draws the frame the world's state
   // asks for.
   modelAnimations?.update()
+  // F5 — behaviours tick once per rendered frame, after the model animations and
+  // before the stage renders: the proximity pass first, then the one coalesced
+  // send opportunity this frame allows.
+  runner?.tick()
   stage.tick(dt)
   labels.update()
   tickEditMode()
@@ -3209,6 +3393,7 @@ function beginNewWorld() {
   skyPicker?.reset()
   animationControls?.reset()
   refreshModelRow()
+  behaviorForm?.reset()       // F9 — the Behaviour form goes with the world
 }
 
 // ---------------------------------------------------------------------------

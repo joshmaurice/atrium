@@ -17,7 +17,7 @@
  * 4b-1 does not tell non-hosts who the host is.
  */
 
-export const HOST_THIS_TAB = 'Script host: this tab'
+export const HOST_THIS_TAB = 'Script host: this tab (behaviours run here)'
 export const HOST_OTHER_TAB = 'Script host: another tab or device'
 
 /**
