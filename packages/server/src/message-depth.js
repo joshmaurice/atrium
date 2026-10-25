@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { appendFileSync } from 'node:fs'
-
 // ---------------------------------------------------------------------------
 // message-depth — the depth bound on every inbound WebSocket message (G1).
 //
@@ -72,33 +70,3 @@ export function messageDepth(value, limit = MAX_MESSAGE_DEPTH) {
   return max
 }
 
-// ---------------------------------------------------------------------------
-// §6.2 measurement (test mode only).
-//
-// When ATRIUM_DEPTH_RECORD names a file, every inbound message's measured depth
-// and type are appended there, one JSON line per message, so a run of the
-// existing suites reports the deepest legitimate message it sends
-// (test/message-depth-measure.test.js, which asserts it is 32 or less). The
-// variable is unset in production, where the caller's one null check is all
-// that runs.
-// ---------------------------------------------------------------------------
-
-const recordFile = process.env.ATRIUM_DEPTH_RECORD ?? null
-
-/**
- * Append one `{"type":…,"depth":…}` line for an inbound message, when the
- * measurement is enabled. Best effort: a recording failure never affects the
- * server.
- *
- * @param {*} type the message's `type`, if it is a string
- * @param {number} depth the measured depth
- */
-export function recordMessageDepth(type, depth) {
-  if (recordFile === null) return
-  try {
-    const name = typeof type === 'string' ? JSON.stringify(type) : 'null'
-    appendFileSync(recordFile, `{"type":${name},"depth":${depth}}\n`)
-  } catch {
-    // Measurement only: never let it disturb the server.
-  }
-}

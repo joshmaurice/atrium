@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws'
 import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
-import { MAX_MESSAGE_DEPTH, messageDepth, recordMessageDepth } from './message-depth.js'
+import { MAX_MESSAGE_DEPTH, messageDepth } from './message-depth.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeUserId } from './http-routes.js'
 import { parsePath } from '@atrium/som'
@@ -536,7 +536,6 @@ export function attachSessionHandlers({
         // when the top-level `seq` is a number.
         // ---------------------------------------------------------------------
         const depth = messageDepth(msg)
-        recordMessageDepth(msg?.type, depth)
         if (depth > MAX_MESSAGE_DEPTH) {
           console.error(
             `[session] depth guard: session=${session ? session.id : '-'} ` +

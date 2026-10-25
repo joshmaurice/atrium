@@ -5,10 +5,13 @@
 //
 // MAX_MESSAGE_DEPTH = 64 is only defensible against a measured number, so this
 // file runs the EXISTING server suites (each file individually, as the deploy
-// does) with the depth measurement switched on
-// (message-depth.js's ATRIUM_DEPTH_RECORD hook, a no-op unless the variable is
-// set). Every message those suites send to their server is recorded, and the
-// deepest of them must be 32 or less — half the guard's limit.
+// does) with the depth measurement switched on. The recorder is TEST CODE
+// (helpers/depth-recorder.mjs), loaded into each run with `node --import`: it
+// wraps the server's inbound messages from the outside, so packages/server/src
+// carries ONLY G1 (the walk + the guard) and G2 (the try/catch) — no test-mode
+// branch, environment flag or hook. Every message those suites send to their
+// server is recorded, and the deepest of them must be 32 or less — half the
+// guard's limit.
 //
 // Excluded, each for a stated reason:
 //   message-depth.test.js          sends deliberately over-deep messages
@@ -33,6 +36,7 @@ import { MAX_MESSAGE_DEPTH } from '../src/message-depth.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SERVER_ROOT = resolve(__dirname, '..')
+const RECORDER = resolve(__dirname, 'helpers/depth-recorder.mjs')
 const PER_FILE_TIMEOUT_MS = 150_000
 
 const EXCLUDED = new Set([
@@ -76,7 +80,8 @@ test('§6.2: the deepest legitimate message the existing suites send is 32 or le
     // inherits it does not run the file it is given.
     const env = { ...process.env, ATRIUM_DEPTH_RECORD: record }
     delete env.NODE_TEST_CONTEXT
-    const result = spawnSync(process.execPath, ['--test', `test/${file}`], {
+    const result = spawnSync(process.execPath,
+      ['--import', RECORDER, '--test', `test/${file}`], {
       cwd: SERVER_ROOT,
       env,
       encoding: 'utf8',
@@ -98,7 +103,7 @@ test('§6.2: the deepest legitimate message the existing suites send is 32 or le
     if (max > deepest.depth) deepest = { type, depth: max }
   }
 
-  assert.ok(messages > 0, 'the recording is empty: the measurement hook did not run')
+  assert.ok(messages > 0, 'the recording is empty: the recorder did not run')
 
   for (const row of perFile) {
     console.log(`  ${row.file.padEnd(42)} messages=${String(row.count).padStart(5)} deepest=${row.depth} (${row.type ?? '-'})`)
