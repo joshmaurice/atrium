@@ -1,7 +1,7 @@
 # Revision — scripting-4b-2 round 4 (the host's workspace rules refuse `packages/vendor/*`)
 
-**Status:** DRAFT, Rev 0 (2026-10-25), for the operator's approval. Nothing
-here is in force until the operator approves it.
+**Status:** approved by the operator (2026-10-25 09:58 PT), Rev 0 as
+drafted: U1 in one round, F-L11's directory amended.
 - **Base:** round 3's reviewed tip `c0e563f0e0f09ad4b1433dc9714f85dde2740164`
   on `workflow/scripting-4b-2` (GLM APPROVE, `t_4b921a88`). Round 4 commits on
   top of it, on the same branch, in the existing worktree
