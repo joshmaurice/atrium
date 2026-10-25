@@ -285,6 +285,7 @@ export function createBehaviorEngine({
     select() {},
     proximity() {},
     dispose() {},
+    mayWrite() { return false },
   }
 
   if (!skipRules) {
@@ -430,6 +431,17 @@ export function createBehaviorEngine({
     select,
     proximity: proximityFn,
     dispose,
+    /**
+     * V7 (round 5) — the adapter's own authority predicate, addressed by OBJECT
+     * ID, so the runner re-checks a queued write with the SAME function the
+     * setters use. There is no second copy of F4's rule. An id that isn't in
+     * `nodeMap` may not be written (F4 registers pointers for `nodeMap` indices
+     * only).
+     */
+    mayWrite: (objectId) => {
+      const index = nodeMap.indexOf(objectId)
+      return index !== -1 && mayWrite(index)
+    },
     get problem() { return null },
     get message() { return null },
     get reason() { return reason },
