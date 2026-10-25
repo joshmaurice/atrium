@@ -1,6 +1,7 @@
 # Revision — scripting-4b-2 round 6 (the browser checks of round 5's published tip)
 
-**Status:** DRAFT Rev 0, for the operator's approval. Not in force.
+**Status:** approved by the operator (2026-10-25 13:07 PT), Rev 0 as
+drafted: W1–W6 in one round, W3's "Changed in another tab" rule included.
 - **Base:** round 5's published tip `c042ef5a581de161788d3f6132d9dacdadd1b352`
   on `workflow/scripting-4b-2` (GLM APPROVE, `t_3c03a44a`; published by
   `t_271332b8`; on DEV as release merge `e3d9ab14` by `t_52e0c377`). Round 6
