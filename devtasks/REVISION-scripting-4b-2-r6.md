@@ -1,9 +1,9 @@
 # Revision — scripting-4b-2 round 6 (the browser checks of round 5's published tip)
 
-**Status:** DRAFT **Rev 0.1** (2026-10-25), for the operator's approval. Not
-in force. Rev 0 (W1–W6) was approved at 13:07 PT but never started: the front
-door was holding it for the outside review of round 5 and the security hotfix
-that review led to. Rev 0.1 adds:
+**Status:** approved by the operator (2026-10-25 19:03 PT), **Rev 0.1** as
+drafted: W0–W9 in one round. Rev 0 (W1–W6) was approved at 13:07 PT but never
+started: the front door was holding it for the outside review of round 5 and
+the security hotfix that review led to. Rev 0.1 adds:
 - **W0:** merge `main` (the hotfix, now on PROD) before anything else;
 - **N1 into W5;**
 - **W7 (N2)** and **W8 (the nits)**.
