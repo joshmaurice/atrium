@@ -176,17 +176,17 @@ class BehaviorDecorator extends ADecorator {
 
   /** A node-field write: authority first, then the world; a failure is a log line. */
   write(i, field, value) {
-    if (!this.mayWrite(i)) { this.logOnce(i, field, 'refused'); return }
+    if (!this.mayWrite(i)) { this.logOnce(i, field); return }
     let ok = false
     try { ok = this.world.set(i, field, value) === true } catch { ok = false }
-    if (!ok) this.logOnce(i, field, 'refused')
+    if (!ok) this.logOnce(i, field)
   }
 
   writeLight(i, value) {
-    if (!this.mayWrite(i)) { this.logOnce(i, 'intensity', 'refused'); return }
+    if (!this.mayWrite(i)) { this.logOnce(i, 'intensity'); return }
     let ok = false
     try { ok = this.world.setLightIntensity(i, value) === true } catch { ok = false }
-    if (!ok) this.logOnce(i, 'intensity', 'refused')
+    if (!ok) this.logOnce(i, 'intensity')
   }
 
   /**
@@ -200,7 +200,7 @@ class BehaviorDecorator extends ADecorator {
     const object = entry.object
     const mapIndex = this.nodeMap.indexOf(object)
     if (mapIndex === -1 || !this.mayWrite(mapIndex)) {
-      this.logOnce(mapIndex === -1 ? index : mapIndex, 'animation', 'refused')
+      this.logOnce(mapIndex === -1 ? index : mapIndex, 'animation')
       return
     }
     let status = { status: 'none' }
@@ -315,11 +315,14 @@ export function createBehaviorEngine({
   let intervalTimer = null
 
   const refusedOnce = new Set()
-  const logOnce = (index, field, what) => {
+  // W8 (round 6) — the line is "refused write to …", not "refused refused
+  // write to …": every caller passed `'refused'` as the middle word and the
+  // message already started with it.
+  const logOnce = (index, field) => {
     const key = `${index}:${field}`
     if (refusedOnce.has(key)) return
     refusedOnce.add(key)
-    report(1, `refused ${what} write to ${nodeMap[index] ?? `index ${index}`}.${field}`)
+    report(1, `refused write to ${nodeMap[index] ?? `index ${index}`}.${field}`)
   }
   const mayWrite = (index) => {
     if (index < 0 || index >= nodeMap.length) return false

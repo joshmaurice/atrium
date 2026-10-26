@@ -66,6 +66,11 @@ describe('F4 — authority: own node, descendant, grant; everything else refused
     assert.deepEqual(world.state.setCalls, [], 'nothing was written')
     const refused = engine.seen.filter(([, m]) => m.includes('refused'))
     assert.equal(refused.length, 1, 'logged exactly once for (index, field)')
+    // W8 (round 6) — the line reads "refused write to …", not "refused refused
+    // write to …": every `logOnce` caller passed `'refused'` as the middle word
+    // and the message already started with it.
+    assert.match(refused[0][1], /^refused write to /)
+    assert.equal(refused[0][1].includes('refused refused'), false)
   })
 
   test('a renamed-away / ambiguous target (a resolve problem) is refused and logged', () => {

@@ -107,6 +107,11 @@ export function createBehaviorRunner({
     if (!record) return
     record.engine?.dispose?.()
     engines.delete(nodeName)
+    // W7 (round 6, N2) — the behaviour's seqs and its once-entries are
+    // forgotten here whether or not the record still holds an engine: a record
+    // V8 disabled keeps `{ engine: null, reason }`, and its bookkeeping must go
+    // with it exactly as an active one's does. (A `disableEngine` forgets the
+    // same way; this is the dispose path.)
     forgetBehaviour(record.behaviourId)
     // S3 — dropping one engine drops exactly its entries.
     for (const [key, entry] of [...queue]) if (entry.behaviourId === record.behaviourId) queue.delete(key)
@@ -146,6 +151,15 @@ export function createBehaviorRunner({
     }
     engines.clear()
     queue.clear()
+    // W7 (round 6, N2) — role loss, `connecting`, a world change: the whole
+    // per-behaviour bookkeeping goes with the engines. Without the seq map the
+    // record is unbounded (about 1,800 entries an hour for a 2 s interval
+    // behaviour), and without the once-sets a refusal that was logged before is
+    // never logged again — contrary to V3's "until that behaviour is reloaded".
+    sendSeqs.clear()
+    refusalLogged.clear()
+    droppedLogged.clear()
+    refusedOnce.clear()
   }
 
   const worldFor = (nodeMap, targets, behaviourId, generation) => ({
@@ -276,9 +290,13 @@ export function createBehaviorRunner({
     reason: null,
   }
 
-  /** V7 — one drop log line per (behaviour, key). */
-  const dropOnce = (entry, key, nodeName, message) => {
-    const seen = `${entry.behaviourId}|${key}`
+  /**
+   * V7 — one drop log line per (behaviour, key, REASON). W8 (round 6): keying
+   * on (behaviour, key) alone meant a key dropped once for a drag was never
+   * logged again when it was later dropped for authority (or another reason).
+   */
+  const dropOnce = (entry, key, reason, nodeName, message) => {
+    const seen = `${entry.behaviourId}|${key}|${reason}`
     if (refusedOnce.has(seen)) return
     refusedOnce.add(seen)
     write(now(), nodeName, message)
@@ -293,8 +311,27 @@ export function createBehaviorRunner({
     return false
   }
 
-  const enqueue = (objectId, kind, field, value, behaviourId, generation) => {
+  const enqueue = (objectId, kind, field, value, behaviourId, generation, { seam = false } = {}) => {
     if (disposed) return false
+    // W5 (round 6, N1) — FIRST, before the gesture check and the 100-key check:
+    // a producer that is no longer live queues NOTHING. A behaviour the send
+    // cap disposed in its own tick kept queueing for the rest of its flow — one
+    // entry per later `world.set`, each spending an opportunity before V7
+    // dropped it, each logging a line — so V8's "logs once" and "the queue
+    // stays at 100" did not hold on that path. The disposal already logged its
+    // one line; this returns quietly.
+    //
+    // `{ seam: true }` is the test seam only (see the returned `enqueue`): its
+    // documented job is to fabricate the entries product code cannot, including
+    // one whose producer is stale, so V7's independent re-check AT THE
+    // OPPORTUNITY stays testable. Nothing in product code passes it.
+    if (!seam) {
+      const producer = findRecord(behaviourId, generation)
+      if (!producer || !producer.engine || producer.engine.disposed) return false
+    }
+    // The producer, for the send cap's own disposal below (null for an entry
+    // the seam fabricated with no record behind it).
+    const producer = findRecord(behaviourId, generation)
     const node = nodeFor(objectId)
     if (node && isInGesture(node)) {
       if (!gestureLogged) {
@@ -309,10 +346,9 @@ export function createBehaviorRunner({
       // `enqueue` already receives (looking it up by `nodeByName(objectId)` was
       // the bug: objectId is a UUID, not a name). Disabling it drops exactly
       // its own entries; every other behaviour's entries are kept.
-      const record = findRecord(behaviourId, generation)
-      if (record?.engine) {
-        disableEngine(record.nodeName, 'over-send-cap')
-        write(now(), record.nodeName, 'behaviour disabled — too many pending sends')
+      if (producer?.engine) {
+        disableEngine(producer.nodeName, 'over-send-cap')
+        write(now(), producer.nodeName, 'behaviour disabled — too many pending sends')
       }
       return false
     }
@@ -337,7 +373,7 @@ export function createBehaviorRunner({
     // generation, and an engine that isn't disposed.
     const record = findRecord(entry.behaviourId, entry.generation)
     if (!record || !record.engine || record.engine.disposed) {
-      dropOnce(entry, key, entry.nodeName ?? entry.objectId,
+      dropOnce(entry, key, 'no-longer-running', entry.nodeName ?? entry.objectId,
         'a behaviour send was dropped: its behaviour is no longer running')
       return
     }
@@ -356,7 +392,7 @@ export function createBehaviorRunner({
     let allowed = false
     try { allowed = record.engine.mayWrite?.(entry.objectId) === true } catch { allowed = false }
     if (!allowed) {
-      dropOnce(entry, key, node.name,
+      dropOnce(entry, key, 'not-authorized', node.name,
         'a behaviour send was dropped: the target is no longer this behaviour\'s own node, a descendant of it, or a granted target')
       return
     }
@@ -365,7 +401,7 @@ export function createBehaviorRunner({
     // queued before the gesture started must not go out during it, and nothing
     // is replayed when the gesture ends.
     if (isInGesture(node)) {
-      dropOnce(entry, key, node.name, 'a behaviour send was dropped: the owner has an edit in progress')
+      dropOnce(entry, key, 'in-gesture', node.name, 'a behaviour send was dropped: the owner has an edit in progress')
       return
     }
 
@@ -399,6 +435,19 @@ export function createBehaviorRunner({
     write(now(), record?.nodeName ?? null, `a behaviour send was refused: ${message || code || 'the server refused it'}`)
   }
 
+  /**
+   * W7 (round 6, N2) — the seq record is BOUNDED: an accepted or an unknown
+   * answer forgets its seq. Only `edit:rejected` logs (V3), so an accepted send
+   * (about 1,800 an hour for a 2 s interval behaviour) used to stay in
+   * `sendSeqs` for ever, and an unknown one kept a seq the server never
+   * answered.
+   */
+  const onEditAnswered = ({ seq } = {}) => {
+    if (disposed) return
+    if (seq == null) return
+    sendSeqs.delete(seq)
+  }
+
   // -------------------------------------------------------------------------
   // The frame
   // -------------------------------------------------------------------------
@@ -422,14 +471,23 @@ export function createBehaviorRunner({
     }
     const time = now()
     for (const record of [...engines.values()]) {
-      if (!record.engine) continue
-      try { record.engine.tick?.() } catch { /* a disposed engine throws; skip it */ }
+      // W5 (round 6) — keep the engine in a LOCAL before calling it. Its own
+      // tick can dispose it (V8's send cap: the 101st key disposes its
+      // producer), so the record's `engine` is re-read after the call and the
+      // `disposed` flag is never read from `null` ("Cannot read properties of
+      // null (reading 'disposed')", §1.2 item 5). A record disposed in its own
+      // tick is skipped for the rest of this frame; the other engines still
+      // tick and the frame's opportunity still runs.
+      const engine = record.engine
+      if (!engine) continue
+      try { engine.tick?.() } catch { /* a disposed engine throws; skip it */ }
       // V8 (M4) — an engine the ADAPTER disposed (the step budget, an error) is
       // really gone: the record keeps its reason for the panel, its queued
       // entries and its seqs are dropped, the log says so ONCE, and that engine
       // is never called again.
-      if (record.engine.disposed) {
-        const reason = record.engine.reason ?? 'over-budget'
+      if (record.engine !== engine) continue
+      if (engine.disposed) {
+        const reason = engine.reason ?? 'over-budget'
         disableEngine(record.nodeName, reason)
         write(time, record.nodeName, `behaviour disabled — ${reason}`)
       }
@@ -484,6 +542,9 @@ export function createBehaviorRunner({
     ['som:rename', scan],
     // V3 — a refused behaviour send is reported in the log.
     ['edit:rejected', onEditRejected],
+    // W7 (round 6, N2) — and the seq record is bounded by these two.
+    ['edit:accepted', onEditAnswered],
+    ['edit:unknown', onEditAnswered],
   ]
   for (const [type, handler] of subscriptions) client.on?.(type, handler)
 
@@ -505,6 +566,11 @@ export function createBehaviorRunner({
     get queue() { return queue },
     get enabled() { return enabled() },
     /**
+     * @internal — for tests and diagnostics: how many send seqs the server
+     * still owes an answer for (W7 keeps this bounded).
+     */
+    get sendSeqCount() { return sendSeqs.size },
+    /**
      * @internal — the test seam for the send queue. F5's coalescing and rate
      * tests need many DISTINCT keys, which no single graph inside F-L4's op
      * allowlist can produce in one frame. Product code never calls this.
@@ -512,10 +578,12 @@ export function createBehaviorRunner({
      * V7 re-checks each entry's producer when it leaves, so the seam's entries
      * are produced by the seam's OWN always-live producer (`SEAM_PRODUCER_ID`):
      * a fabricated entry has no engine record of its own. Pass an explicit
-     * behaviour id and generation to fabricate a stale one.
+     * behaviour id and generation to fabricate a stale one. `options.enforce`
+     * runs the REAL producer check (W5's guard) instead of the seam's
+     * fabricating exemption, so the guard itself stays testable.
      */
-    enqueue: (objectId, kind, field, value, behaviourId = SEAM_PRODUCER_ID, generation = 1) =>
-      enqueue(objectId, kind, field, value, behaviourId, generation),
+    enqueue: (objectId, kind, field, value, behaviourId = SEAM_PRODUCER_ID, generation = 1, options = {}) =>
+      enqueue(objectId, kind, field, value, behaviourId, generation, { seam: options.enforce !== true }),
     addEventListener: (type, fn) => events.addEventListener(type, fn),
     removeEventListener: (type, fn) => events.removeEventListener(type, fn),
   }
