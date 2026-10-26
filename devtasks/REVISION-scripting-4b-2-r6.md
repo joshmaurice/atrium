@@ -1,7 +1,14 @@
 # Revision — scripting-4b-2 round 6 (the browser checks of round 5's published tip)
 
-**Status:** approved by the operator (2026-10-25 13:07 PT), Rev 0 as
-drafted: W1–W6 in one round, W3's "Changed in another tab" rule included.
+**Status:** DRAFT **Rev 0.1** (2026-10-25), for the operator's approval. Not
+in force. Rev 0 (W1–W6) was approved at 13:07 PT but never started: the front
+door was holding it for the outside review of round 5 and the security hotfix
+that review led to. Rev 0.1 adds:
+- **W0:** merge `main` (the hotfix, now on PROD) before anything else;
+- **N1 into W5;**
+- **W7 (N2)** and **W8 (the nits)**.
+
+It also renumbers "What doesn't change" to W9. W1–W4 are unchanged.
 - **Base:** round 5's published tip `c042ef5a581de161788d3f6132d9dacdadd1b352`
   on `workflow/scripting-4b-2` (GLM APPROVE, `t_3c03a44a`; published by
   `t_271332b8`; on DEV as release merge `e3d9ab14` by `t_52e0c377`). Round 6
@@ -20,7 +27,13 @@ drafted: W1–W6 in one round, W3's "Changed in another tab" rule included.
   3's (`f47cc3f7`, sha256 `4e49b1d45cc33185c7955f8b881a66b5b46c3e101ff0bbd53864cf64ade0e93f`),
   4's (`32c14a4f`, sha256 `aa28260f1454974ca97a745d846c93868911d1a9d7c2f5e0a01db046e8533ee6`)
   and 5's (`afabd79d`, sha256 `94a80bf42ce12630092769fc0dae6983b9ee2865532dd7e218845139c687a626`)
-  revisions. This file adds W1–W6 and changes nothing else.
+  revisions. **The message-depth-guard hotfix's contract binds the merge
+  (W0):** `devtasks/PREBRIEF-message-depth-guard.md`, FINAL Rev 0, at
+  `380a2db74e675a8c67c2314bff86ce2c863268c4` (sha256
+  `a079fe03fd016aafecb0b13e21d7c4d86f32ee5bd3fab9e99fa4ecc6184416c4`), as
+  released (reviewed `3e103d2751582d818ae7281834d3e5021f13fe63`, release merge
+  and `main` `4a1a01a568159fff2e1b2514c69cef5aea688b84`). This file adds W0–W9
+  and changes nothing else.
 
 ## 1. What the browser checks found
 
@@ -115,7 +128,88 @@ the harness doesn't serve the committed catalog's thumbnails.
 from `main` `afabd79d`) is on DEV, recorded and healthy. Its finalizer blocked
 on the known missing journal lines, as round 4's did.
 
+### 1.4 The outside review of round 5, and the hotfix it led to
+The operator's second outside review read `957140bd` → `c042ef5a` with a
+clone and the tests (3,060 green). It found **GO for round 5's fixes**: M1–M7,
+S1 and S2 are each fixed as V2–V13 say, and all six proofs it broke held. It
+also confirmed W1–W4's plan. Claude checked its three new findings against the
+code:
+- **N1 (should-fix, into W5): a behaviour disposed by the send cap keeps
+  queueing for the rest of its flow.**
+  - `BasicBehaveEngine.dispose()` clears its queues, but the flow in
+    progress continues, and every later `world.set` in that tick reaches
+    `enqueue`. `enqueue` checks whether the producer is still live only in
+    its 100-key branch (`runner.js` L307–318).
+  - So stale entries refill the queue, each spends a 50 ms opportunity before
+    V7 drops it, and each logs a line. V8's "logs once" and "the queue stays
+    at 100" don't hold on this path.
+  - W5's guard alone doesn't stop it.
+- **N2 (should-fix, W7): the seq record only shrinks on a rejection or a
+  dispose.**
+  - Nothing subscribes to `edit:accepted` or `edit:unknown`, so every accepted
+    send stays in `sendSeqs` (`runner.js` L380): about 1,800 entries an hour
+    for a 2 s interval behaviour, with no bound.
+  - `disposeAll` clears neither `sendSeqs` nor the once-sets, and
+    `disposeEngine` returns before forgetting when it has no record. So
+    across a reconnect, a refusal that was logged before isn't logged again,
+    contrary to V3's "until that behaviour is reloaded".
+- **N3 (must-fix, done): any client could crash the server process with one
+  deeply nested message.**
+  - Claude reproduced it on PROD's tree twice: an owner's `add`, and a
+    **visitor's** own avatar `add`.
+  - It was fixed as its own security round, message-depth-guard: a depth
+    bound of 64 on every inbound message before the schema check, and a
+    fail-closed message handler.
+  - The fix is on DEV, MAIN and PROD as `4a1a01a5` (2026-10-25, 18:55 PT).
+  - 4b-2 takes it in through W0.
+- **The nits (W8):**
+  - Save's stage 3 looks the target up again (`lightIntensity(targetNode())`,
+    `behavior-form.js` L316) instead of using the snapshot's object, and the
+    parameter fields stay editable while saving;
+  - the strict fake delivers `change` only to checkbox and radio inputs, so
+    the picker's and the parameter container's real listeners are never
+    driven by a test;
+  - `adapter.js` L322 logs "refused refused write";
+  - `refusedOnce` is keyed without the reason, so a key dropped once for a
+    drag is never logged again when it's later dropped for authority.
+
 ## 2. The contract (round 6)
+
+### W0. Merge `main` first
+- **Why:** the host's release merge refuses any change on `main` outside
+  `devtasks/` that the tip doesn't already contain
+  (`atrium-release-merge`, `ALLOWED_RE='^devtasks/'`). `main` now carries the
+  hotfix (`packages/server/src/session.js`, `message-depth.js`, its tests).
+  Without this step, round 6's DEV deploy is refused.
+- **Step 1, before W1:** `git -C /workspace/wt/scripting-4b-2 fetch origin main`,
+  then `git merge --no-ff origin/main` in the worktree, as one merge commit.
+  `origin/main` must be `4a1a01a568159fff2e1b2514c69cef5aea688b84` or a
+  descendant whose extra commits touch only `devtasks/`; otherwise block
+  `needs_input`.
+- **The expected conflict is `packages/server/src/session.js`'s message
+  listener.** The hotfix wraps the whole listener body in one `try/catch`
+  (G2), which re-indents it, and adds the depth guard (G1) right after
+  `JSON.parse`. 4b-2 changed the same body (the election rule, the `add`
+  checks, and round 5's V9 fail-closed boundaries).
+- **The rule for resolving it:** the result is **4b-2's listener body, with
+  the hotfix's changes applied on top, exactly**:
+  - G1's guard and its log line after `JSON.parse`, before `validate`;
+  - G2's outer `try/catch`, its log line and its reply.
+
+  The hotfix's own change is small without whitespace (`git diff -w
+  380a2db7 3e103d27 -- packages/server/src/session.js`, about 45 lines), so
+  re-apply it rather than hand-merging the re-indented hunks.
+- **Both sides' fail-closed paths stay:** round 5's V9 `try` around
+  `authorizeSend` and the `add` checks (its own reply, "the value could not be
+  checked") sits inside the hotfix's outer `try`. Neither replaces the other.
+- **Every other file merges as it is:** the hotfix's `message-depth.js` and its
+  tests, and 4b-2's files. No other conflict is expected; if one appears,
+  block `needs_input` with the conflicting hunks.
+- **The merge commit is runnable:** every suite green, including the hotfix's
+  `message-depth.test.js` and `message-depth-measure.test.js` (the deepest
+  legitimate message, **now over 4b-2's suites too**, must still be 32 or
+  less; the handoff reports the new number and its message type).
+
 
 ### W1. Visible redraws wherever the value changes
 - **The renderer follows the SOM node's `visible`, whatever changed it:** a
@@ -166,18 +260,51 @@ don't change; only the text the panel shows does:
 
 "the behaviour value is invalid" appears only for an F1 code that maps to it.
 
-### W5. A dispose during a tick doesn't throw
+### W5. A dispose during a tick doesn't throw, and a disposed producer queues nothing (N1)
 - `tick` keeps the engine in a local before calling it. After the call it
   checks whether the record is still the same, still has that engine, and
   whether that engine is disposed, and it never reads a property of `null`.
 - A record disposed in its own tick (V8's send cap) is skipped for the rest of
   that frame. The other engines still tick, and the frame's opportunity still
   runs.
+- **`enqueue` refuses an entry whose producer isn't live:** `findRecord(behaviourId,
+  generation)` has no record, or its `engine` is `null` or disposed. The check
+  comes first, before the gesture check and the 100-key check. It returns
+  `false`, queues nothing, and logs nothing more (the disposal already logged
+  its one line). So after the cap disposes a behaviour mid-flow, the queue
+  stays at 100 and the rest of that flow leaves no entries.
 
-### W6. What doesn't change
-Everything in F1–F12, C1–C3, the OPERATOR NOTE, and rounds 2–5's revisions.
-**No server file changes.** No change to the runner's queue, rate, checks at
-the opportunity or disposal rules beyond W5's guard.
+### W6. (renumbered: see W9)
+
+### W7. The seq record is bounded (N2)
+- **On `edit:accepted` and `edit:unknown`** for a seq in `sendSeqs`, the runner
+  deletes it. Only an `edit:rejected` logs, as V3 says.
+- **`disposeAll`** (role loss, `connecting`, a world change) clears
+  `sendSeqs`, `refusalLogged`, `droppedLogged` and `refusedOnce`.
+- **`disposeEngine`** forgets the behaviour's seqs and its once-entries even
+  when it has no engine record.
+- So a refusal is logged again after a reload, as V3 says ("until that
+  behaviour is reloaded").
+
+### W8. The small items (the nits)
+- **Save's stage 3** uses the snapshot's target object (`snapshot.target`) for
+  the light's intensity, and never looks it up again. **The parameter fields and
+  the template picker are disabled while a Save is in flight.**
+- **The strict fake delivers `change`** to `<select>` and to text and number
+  `<input>`s as well, as the DOM does. **At least one test per listener
+  drives it through the real element:** the template picker's `change`,
+  the parameter container's delegated `change` (one field of each kind), and
+  Enabled's `click`.
+- **`adapter.js`** logs "refused write to …" once, not "refused refused".
+- **`refusedOnce`** is keyed by (behaviour, key, reason), so each different
+  reason a key is dropped for is logged once.
+
+### W9. What doesn't change
+Everything in F1–F12, C1–C3, the OPERATOR NOTE, rounds 2–5's revisions, and
+the hotfix's G1/G2 as merged by W0.
+- **No server file changes beyond W0's merge.**
+- **No change to the runner's queue order, coalescing, rate, checks at the
+  opportunity or disposal rules beyond W5 and W7.**
 
 ## 3. Tests and proofs (round 6)
 
@@ -187,7 +314,10 @@ the opportunity or disposal rules beyond W5's guard.
 | W2 | `refreshBehaviorRow` with a fake form: select X (open), Edit off (close), Edit on, select X → `open` is called again and reads X's leaf; selecting X twice in a row with the form open calls `render` only |
 | W3 | With the strict fake: (a) Remove's echo → the picker shows None; (b) the form open on X with None, then a `som:set` of X's leaf with a select-visibility value → the picker shows select-visibility with its target, and Enabled and Remove are enabled; (c) the same with a Custom graph; (d) a Save in flight across its three stages, with each stage's echo arriving → no "Save cancelled", the final value is the template's (M4's test unchanged); (e) an unsaved picker change, then another tab's `som:set` → the stored value is shown with "Changed in another tab" |
 | W4 | `statusText` for each row of W4's table, with the exact texts; no reason but an F1 code gives "the behaviour value is invalid" |
-| W5 | A fake engine whose `tick` makes the 101st enqueue: `runner.tick()` doesn't throw; a second engine registered after it still ticks in that frame; the frame's opportunity sends |
+| W0 | The merge commit's full suites, the hotfix's two test files among them; `git diff -w c042ef5a <merge> -- packages/server/src/session.js` is the hotfix's G1 and G2 change and nothing else (quoted in the handoff); §6.2's measured maximum over all suites, ≤ 32 |
+| W5 | A fake engine whose `tick` makes the 101st enqueue: `runner.tick()` doesn't throw; a second engine registered after it still ticks in that frame; the frame's opportunity sends. **N1's case, from inside a real engine's tick** (not the test seam): a Custom graph in F-L4's allowlist that writes three fields on one select, with 99 keys already queued. Its second write is the 101st and disposes it; its third write queues nothing; the queue stays at 100; there is exactly one disable line and no "no longer running" lines |
+| W7 | 1,000 accepted runner sends leave `sendSeqs` empty; an `edit:unknown` removes its seq too; after `connecting` → `world:loaded`, a refusal of the same (behaviour, key, code) that was logged before is logged again; `disposeAll` empties the four maps and sets |
+| W8 | Stage 3's light value comes from the snapshot's object (the target renamed between stages still gets its intensity); while saving, the picker and every parameter field are `disabled`; with the strict fake, a `change` dispatched on the real picker element and on each kind of parameter field reaches `onTemplateChange` / `onParamChange`; the adapter's refusal line reads "refused write"; one key dropped for a drag and then for authority logs two lines |
 
 **Proofs** ("not reproducible" is not an acceptable result):
 - **(w1)** W1's hook removed, so only `som:set` is left: the before-echo test
@@ -198,7 +328,13 @@ the opportunity or disposal rules beyond W5's guard.
   **(w3b)** the in-flight exception removed: W3 (d) fails with "Save
   cancelled";
 - **(w4)** `statusText` back to `behaviorReasonText(reason)`: W4's test fails;
-- **(w5)** the guard removed: W5's test throws `TypeError`.
+- **(w5)** the guard removed: W5's test throws `TypeError`; **(w5b)** the
+  producer check in `enqueue` removed: N1's test fails (the third write is
+  queued);
+- **(w7)** the `edit:accepted` delete removed: W7's 1,000-send test fails;
+  **(w7b)** `disposeAll`'s clear removed: the after-reconnect test fails;
+- **(w8)** the strict fake's `change` back to checkbox and radio only: the
+  real-listener tests fail.
 
 **And the whole round still passes:** full suites with round 1's rules
 (server files one at a time under `timeout 180`, `packages/client` without
@@ -209,21 +345,23 @@ re-run for the ones in files this round touches (`behavior-form.js`,
 `app.js`, `runner.js`), and quoted.
 
 **Steps, one commit each:**
-1. W1 and W2: `app.js` (and the tracker if W1's hook lives there);
-2. W3 and W4: `behavior-form.js`;
-3. W5: `runner.js`;
-4. suites, proofs and the handoff.
+1. W0: the merge of `origin/main`, with the full suites green on it;
+2. W1 and W2: `app.js` (and the tracker if W1's hook lives there);
+3. W3, W4 and W8's form items: `behavior-form.js` and the strict fake;
+4. W5, W7 and W8's runner and adapter items: `runner.js`, `adapter.js`;
+5. suites, proofs and the handoff.
 
 **Before DEV acceptance**, after round 6's release chain publishes and
 deploys:
 - **Claude's §5.1 browser checks again through the form,** with §1.2's five
-  items checked in the page;
+  items checked in the page, and the hotfix's two crash reproductions (an
+  owner's and a visitor's deep `add`) against the merged server;
 - **after the DEV deploy,** `atrium-release-status`: DEV actual = recorded =
   `RELEASE_SHA`, healthy.
 
-The operator then runs the spec's §6 DEV acceptance. (The outside re-review
-of round 5's diff is the operator's call; this round's diff is small and in
-three client files.)
+The operator then runs the spec's §6 DEV acceptance. (Round 5's diff has had
+its outside review, §1.4. Round 6's own change is small; an outside look at
+it is the operator's call.)
 
 ## 4. Kickoff body for round 6 (post it verbatim as the revision kickoff card's text)
 
@@ -250,9 +388,11 @@ deploy anything yourself.
 `devtasks/REVISION-scripting-4b-2-r4.md` at `32c14a4f85e4127c1204fca5562edb319a67df9b`
 (sha256 `aa28260f1454974ca97a745d846c93868911d1a9d7c2f5e0a01db046e8533ee6`),
 `devtasks/REVISION-scripting-4b-2-r5.md` at `afabd79da8a4a76efd5bb7ccf4f80356e1178e40`
-(sha256 `94a80bf42ce12630092769fc0dae6983b9ee2865532dd7e218845139c687a626`)
-and the two operator texts on `t_6c3817b2` (the OPERATOR CORRECTION and the
-OPERATOR NOTE).
+(sha256 `94a80bf42ce12630092769fc0dae6983b9ee2865532dd7e218845139c687a626`),
+`devtasks/PREBRIEF-message-depth-guard.md` at `380a2db74e675a8c67c2314bff86ce2c863268c4`
+(sha256 `a079fe03fd016aafecb0b13e21d7c4d86f32ee5bd3fab9e99fa4ecc6184416c4`; it
+binds W0's merge) and the two operator texts on `t_6c3817b2` (the OPERATOR
+CORRECTION and the OPERATOR NOTE).
 - **The front door has already checked the round-6 revision** and posted
   its commit and sha256 on this card. **You have only `kanban_*` tools: do
   not try to fetch or hash anything, and do not block for lack of a shell.**
@@ -263,34 +403,47 @@ OPERATOR NOTE).
 
 #### Graph
 1. **`Implement r6 — scripting-4b-2`.** Assignee `atrium-deepseek`, parent:
-   this kickoff, `--max-runtime 2h` (7200 s).
+   this kickoff, `--max-runtime 3h` (10800 s).
    - **Body:**
      - the revision reference and hash check;
      - continue `workflow/scripting-4b-2` from
        `c042ef5a581de161788d3f6132d9dacdadd1b352` in the existing worktree
        `/workspace/wt/scripting-4b-2` (`git -C /workspace/wt/scripting-4b-2
        status` must be clean at that SHA, or block `needs_input`);
+     - **step 1 is W0's merge of `origin/main`**, resolved by W0's rule;
      - the revision's §2 contract and §3 steps, tests and proofs;
-     - the spec, the two operator texts on `t_6c3817b2`, and rounds 2–5's
-       revisions, still binding;
+     - the spec, the two operator texts on `t_6c3817b2`, rounds 2–5's
+       revisions and the hotfix's pre-brief, still binding;
      - the WORKER-CARD REQUIREMENTS comment (855 on `t_2d41531f`);
      - a progress comment on its own card after each step's commit.
-   - **The handoff** carries proofs (w1)–(w5) with (w3b), W1's choice of hook
-     and why it covers every path, `r1`'s output, the re-run round-5 proofs, and
-     per-file counts with exit codes and the one named skip.
+   - **The handoff** carries:
+     - W0's `git diff -w` quote and the new §6.2 number;
+     - proofs (w1)–(w8) with their (b) variants;
+     - W1's choice of hook and why it covers every path;
+     - `r1`'s output and the re-run round-5 proofs;
+     - per-file counts with exit codes, and the one named skip.
 2. **`GLM review r6 — scripting-4b-2`.** Assignee `atrium-glm`, parent:
    card 1.
    - Its body opens with
      `THIS RUN HAS TERMINAL, FILE AND GIT TOOLS. Use them for every step below.`
    - **The review covers round 6's change** (`c042ef5a` to the round-6 tip)
      against this revision. It reproduces **every proof** itself.
+   - **It checks W0's merge:**
+     - `git diff -w c042ef5a <merge> -- packages/server/src/session.js` is
+       exactly the hotfix's G1 and G2 change (compare with `git diff -w
+       380a2db7 3e103d27` on the same file);
+     - 4b-2's V9 boundaries are intact inside the outer `try`;
+     - the hotfix's tests pass on the merge, and §6.2's maximum is 32 or less;
+     - it sends a 6,500-deep owner `add` and a deep visitor avatar `add` to
+       a child server on the merge, and both are refused with the server
+       still serving.
    - **It traces W1's hook through every path** in W1's list (a local apply,
      an echo, a broadcast, a revert, Undo, Redo) and names the line that runs
      `setNodeVisible` for each.
    - **It reads W3's in-flight exception** against M4's sequence rules and
      confirms a Save's own echoes can't cancel it.
-   - **It confirms no server file changed** and the runner's only change is
-     W5's guard.
+   - **It confirms no server file changed beyond W0's merge,** and that the
+     runner's changes are only W5's, W7's and W8's.
    - **Progress comments on its own card** after each stage.
 3. **`Review gate r6 — scripting-4b-2`.** Assignee `atrium-orchestrator`,
    parent: card 2. It creates nothing.
@@ -312,7 +465,7 @@ OPERATOR NOTE).
 
 #### Report back
 - the three ids;
-- the implementation's parent and its 7200 s cap;
+- the implementation's parent and its 10800 s cap;
 - the hash line copied into cards 1 and 2;
 - the review's opening line;
 - the gate linked to round 6's sentinel.
