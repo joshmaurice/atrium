@@ -17,7 +17,7 @@ import { resolveSelectionRoot } from '@atrium/interaction'
 import { createEditModes } from './edit-modes.js'
 import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
-import { createBehaviorForm, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
+import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 import { clipsFor } from './behavior-clips.js'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
@@ -1568,7 +1568,19 @@ let pendingRename = null   // { seq, node } while a rename is unanswered
 const editTracker = createEditTracker({
   read: (node, field) => node[field],
   // Local only: DocumentView renders it, nothing is sent (G2).
-  writeLocal: (node, field, value) => client.applyLocally(() => { node[field] = value }),
+  //
+  // W1 (round 6) — the Visible checkbox's commit, Undo and Redo of it, and a
+  // rejection's revert all write the node locally through here, and NONE of
+  // them raises a `som:set` in this tab (the tracker's own echo only resolves
+  // the pending edit; there is no local apply to repeat). So the renderer is
+  // told here, from the SOM node's own value, for exactly those paths. Every
+  // change that arrives from the server — another session's broadcast, or an
+  // applied echo (the runner's `sendField`) — goes through the `som:set`
+  // handler instead. Together the two cover every path, once each.
+  writeLocal: (node, field, value) => {
+    client.applyLocally(() => { node[field] = value })
+    if (field === 'visible' && docView) setNodeVisible(docView, node, node.visible !== false)
+  },
   // Assigning outside applyLocally sends; lastSendSeq moves only if it did.
   writeSend: (node, field, value) => {
     // F-L5 — a form write in flight is a gesture too.
@@ -1718,6 +1730,10 @@ function setEditMode(on) {
     // cancellation on Edit off still holds: `close()` bumps the generation, so
     // a Save in flight stops and says "Save cancelled".
     behaviorForm?.close()
+    // W2 (round 6) — clear the cached node beside the close, so the two can't
+    // drift apart: the next `refreshBehaviorRow` re-opens and re-reads even if
+    // the same object is still selected.
+    lastBehaviorNode = null
     // Z2 — and Edit off discards the Model form's draft (`reset()` clears the
     // URL, the Check result and the pin, and forgets any wait). The destination
     // form starts empty on its next fresh opening, and the grid has no draft.
@@ -2672,10 +2688,13 @@ client.on('edit:unknown',  ({ seq }) => {
 client.on('som:set', () => { if (modes.edit) refreshEditActions(); refreshModelRow() })
 
 // F9 (scripting-4b-2) — the row re-renders on `som:set` of the leaf (its own
-// echo and a remote write alike). `refreshBehaviorRow` re-opens only when the
+// echo and a remote write alike). W3 (round 6): under the SAME selection it
+// re-reads the stored value; `refreshBehaviorRow` re-opens only when the
 // SELECTION changed, so a Save's echo never cancels the sequence it belongs to.
 client.on('som:set', ({ path } = {}) => {
-  if (path === 'extras.atrium.behavior' || path === 'extras' || path === 'name') refreshBehaviorRow()
+  if (path === 'extras.atrium.behavior' || path === 'extras' || path === 'name') {
+    refreshBehaviorRow({ reread: true })
+  }
 })
 
 // F6 (scripting-4b-2) — the renderer honours `visible` on the node's view
@@ -2964,19 +2983,34 @@ runner = createBehaviorRunner({
 })
 
 /** F9 — the row renders on selection, and again on `som:set` of the leaf. */
-function refreshBehaviorRow() {
+function refreshBehaviorRow({ reread = false } = {}) {
   if (!behaviorForm) return
   if (!selected) {
     lastBehaviorNode = null
     behaviorForm.close()
     return
   }
-  if (selected !== lastBehaviorNode) {
+  // W2 (round 6) — the decision itself lives in `behaviorRowAction` (tested):
+  // re-OPEN (and so re-read the stored leaf) whenever the selection changed OR
+  // the form is closed. Relying on the selection alone was the bug: Edit off →
+  // Edit on with the same object still selected left `lastBehaviorNode`
+  // matching, so only `render()` ran, on a closed form, and the section never
+  // came back until another object was selected first.
+  // W3 (round 6) — a `som:set` refresh passes `reread: true`, so the form
+  // re-reads the stored value rather than redrawing its own stale copy.
+  const action = behaviorRowAction({
+    open: behaviorForm.openState, lastNode: lastBehaviorNode, selected, reread,
+  })
+  if (action === 'open') {
     lastBehaviorNode = selected
     behaviorForm.open(selected)
-  } else {
-    behaviorForm.render()
+    return
   }
+  if (action === 'reread') {
+    behaviorForm.reread()
+    return
+  }
+  behaviorForm.render()
 }
 
 

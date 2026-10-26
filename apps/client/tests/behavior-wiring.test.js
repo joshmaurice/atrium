@@ -45,10 +45,26 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
     assert.ok(resets.length >= 3, `three resets: ${resets.length}`)
   })
 
-  test('refreshBehaviorRow renders on selection and on som:set of the leaf', () => {
-    assert.match(source, /function refreshBehaviorRow\(\)/)
+  test('W2/W3 — refreshBehaviorRow re-opens on a closed form and re-reads on som:set', () => {
+    assert.match(source, /function refreshBehaviorRow\(\{ reread = false \} = \{\}\)/)
     assert.match(source, /refreshEditPanel\(\)[\s\S]{0,400}?refreshBehaviorRow\(\)/)
-    assert.match(source, /path === 'extras\.atrium\.behavior'[\s\S]{0,120}?refreshBehaviorRow\(\)/)
+    assert.match(source, /path === 'extras\.atrium\.behavior'[\s\S]{0,200}?refreshBehaviorRow\(\{ reread: true \}\)/)
+    // W2 — the Edit-off path clears the cached node beside the close.
+    assert.match(source, /behaviorForm\?\.close\(\)[\s\S]{0,300}?lastBehaviorNode = null/)
+    // W2 — and the decision is the tested helper, never an inline condition.
+    assert.match(source, /behaviorRowAction\(\{[\s\S]{0,200}?open: behaviorForm\.openState/)
+  })
+
+  test('W1 — a LOCAL write of `visible` redraws in the owner\'s own tab', () => {
+    // The tracker's `writeLocal` is the ONE local-write seam: the Visible
+    // checkbox's commit, Undo and Redo of it, and a rejection's revert all go
+    // through it, and none of them raises a `som:set` in this tab (the own echo
+    // only resolves the pending edit). The hook therefore lives here, and it
+    // runs BEFORE any echo can arrive.
+    assert.match(source, /writeLocal: \(node, field, value\) => \{[\s\S]{0,700}?if \(field === 'visible' && docView\) setNodeVisible\(docView, node, node\.visible !== false\)/)
+    // The server-side paths (another session's broadcast, an applied echo) still
+    // run through the one `som:set` handler, unchanged: once per change.
+    assert.match(source, /client\.on\('som:set', \(\{ nodeName, path \} = \{\}\) => \{[\s\S]{0,200}?if \(path !== 'visible'\) return[\s\S]{0,200}?setNodeVisible\(docView, node, node\.visible !== false\)/)
   })
 
   test('select comes from the VIEWPORT click, never from a SOM click', () => {
