@@ -321,12 +321,14 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     const incoming = node.extras?.atrium?.behavior ?? null
     const mine = unsavedEdit()
     const changed = JSON.stringify(incoming) !== JSON.stringify(state.saved)
-    readStored(node)
+    // `open` re-reads the leaf AND bumps the generation, so a sequence in flight
+    // for the OLD stored value is cancelled (M4's rules) — which is why the
+    // in-flight exception above exists.
+    open(node)
     // W3 — a change from elsewhere while the owner has an unsaved edit: the
     // stored value is shown (an unsaved edit is never silently kept over it),
     // and the status line says so once.
-    if (changed && mine) state.status = BEHAVIOR_STATUS.changed
-    render()
+    if (changed && mine) { state.status = BEHAVIOR_STATUS.changed; render() }
   }
 
   function close() {
