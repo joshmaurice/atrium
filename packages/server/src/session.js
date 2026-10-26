@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws'
 import { randomUUID } from 'crypto'
 import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
+import { MAX_MESSAGE_DEPTH, messageDepth } from './message-depth.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeUserId } from './http-routes.js'
 import { parsePath } from '@atrium/som'
@@ -532,622 +533,666 @@ export function attachSessionHandlers({
     preHelloSockets.set(ws, upgradeUserId)
 
     ws.on('message', async (raw) => {
+      // Declared OUTSIDE the try below, so the catch can echo the message's
+      // `seq` when a handler failure is answered.
       let msg
       try {
-        msg = JSON.parse(raw)
-      } catch {
-        sendError(ws, null, 'UNKNOWN_MESSAGE', 'Invalid JSON')
-        return
-      }
+        try {
+          msg = JSON.parse(raw)
+        } catch {
+          sendError(ws, null, 'UNKNOWN_MESSAGE', 'Invalid JSON')
+          return
+        }
 
-      const { valid, errors } = validate('client', msg)
-      if (!valid) {
-        const detail = errors[0]?.message ?? 'Validation failed'
-        sendError(ws, msg.seq ?? null, 'UNKNOWN_MESSAGE', detail)
-        return
-      }
+        // ---------------------------------------------------------------------
+        // G1 — the depth guard. One gate on EVERY inbound message, of every type,
+        // for every field, including messages sent before `hello`: it runs right
+        // after JSON.parse and before the schema check, so the validator, the
+        // switch and every handler see only messages within the limit.
+        //
+        // A deeper message is refused and nothing else happens: no world change,
+        // no broadcast, no save, and the socket stays open. `seq` is echoed only
+        // when the top-level `seq` is a number.
+        // ---------------------------------------------------------------------
+        const depth = messageDepth(msg)
+        if (depth > MAX_MESSAGE_DEPTH) {
+          console.error(
+            `[session] depth guard: session=${session ? session.id : '-'} ` +
+            `type=${typeof msg?.type === 'string' ? msg.type : '-'} ` +
+            `depth=${Math.min(depth, MAX_MESSAGE_DEPTH)}`
+          )
+          sendError(ws, typeof msg?.seq === 'number' ? msg.seq : null,
+            'UNKNOWN_MESSAGE', 'message nested too deeply')
+          return
+        }
 
-      if (!session && msg.type !== 'hello') {
-        sendError(ws, msg.seq ?? null, 'AUTH_FAILED', 'Handshake required')
-        return
-      }
+        const { valid, errors } = validate('client', msg)
+        if (!valid) {
+          const detail = errors[0]?.message ?? 'Validation failed'
+          sendError(ws, msg.seq ?? null, 'UNKNOWN_MESSAGE', detail)
+          return
+        }
 
-      switch (msg.type) {
-        case 'hello': {
-          if (sessions.size >= maxUsers) {
-            sendError(ws, null, 'WORLD_FULL', 'Server is full')
-            ws.close()
-            return
-          }
+        if (!session && msg.type !== 'hello') {
+          sendError(ws, msg.seq ?? null, 'AUTH_FAILED', 'Handshake required')
+          return
+        }
 
-          const clientInterval = msg.capabilities?.tick?.interval ?? DEFAULT_TICK_INTERVAL
-          const negotiated = Math.max(clientInterval, MIN_TICK_INTERVAL)
-          const sessionId = msg.id ?? randomUUID()
-
-          // Reject duplicate live sessionId — two connections must not share one
-          if (sessions.has(sessionId)) {
-            sendError(ws, null, 'SESSION_CONFLICT', `Session ${sessionId} is already connected`)
-            ws.close()
-            return
-          }
-
-          let userDisplayName = `User-${sessionId.slice(0, 4)}`
-
-          // The server never adopts a client-sent displayName (pre-brief #9).
-          // The session name is always the DB display_name for an authenticated
-          // session, or User-xxxx for anonymous/cross-origin visitors.
-          // A client-displayed name is a request, never a claim.
-
-          // When the user is authenticated, use their real display_name
-          // (from the users table).
-          if (upgradeUserId && db) {
-            try {
-              const userRow = db.database.prepare(
-                'SELECT display_name FROM users WHERE id = ?'
-              ).get(upgradeUserId)
-              if (userRow && userRow.display_name) {
-                userDisplayName = userRow.display_name
-              }
-            } catch {
-              // If the lookup fails, stick with the client-supplied or anonymous fallback
+        switch (msg.type) {
+          case 'hello': {
+            if (sessions.size >= maxUsers) {
+              sendError(ws, null, 'WORLD_FULL', 'Server is full')
+              ws.close()
+              return
             }
-          }
 
-          session = {
-            ws,
-            id: sessionId,
-            userId: null,
-            capabilities: msg.capabilities ?? {},
-            seq: nextSeq(),
-            missedPings: 0,
-            tickStop: null,
-            // L11/K9 — the hello-allocated name; the avatar node itself is
-            // recorded in `avatarNode` only when the avatar `add` is accepted.
-            avatarNodeName: allocateAvatarName(sessionId),
-            avatarNode: null,
-            displayName: userDisplayName,
-            // 4b-1 E4 — eligibility, recorded at `hello`, so the handover never
-            // recomputes it.
-            canEdit: false,
-          }
-          // If the upgrade handler resolved a userId from the auth cookie,
-          // attach it now (before the connection is fully established,
-          // so auth state is available throughout the session lifecycle)
-          if (upgradeUserId) {
-            session.userId = upgradeUserId
-          }
-          sessions.set(session.id, session)
+            const clientInterval = msg.capabilities?.tick?.interval ?? DEFAULT_TICK_INTERVAL
+            const negotiated = Math.max(clientInterval, MIN_TICK_INTERVAL)
+            const sessionId = msg.id ?? randomUUID()
 
-          // Pre-hello tracking: hello is complete, clean up
-          preHelloSockets.delete(ws)
+            // Reject duplicate live sessionId — two connections must not share one
+            if (sessions.has(sessionId)) {
+              sendError(ws, null, 'SESSION_CONFLICT', `Session ${sessionId} is already connected`)
+              ws.close()
+              return
+            }
 
-          // Compute canPlaceTeleporters at hello time (T2). A1: `canEdit` is
-          // the same computation; the old name stays as an alias with the same
-          // value for one release.
-          const canEdit = session.userId !== null &&
-            session.userId === worldOwnerUserId &&
-            isMutator(session, false)
-          const canPlaceTeleporters = canEdit
-          // 4b-1 E4 — eligibility is recorded on the session.
-          session.canEdit = canEdit
+            let userDisplayName = `User-${sessionId.slice(0, 4)}`
 
-          // 4b-1 E4 (E-L4 (a)) — the earliest-connected session that passed
-          // `canEdit` at its hello takes the role. A reconnecting former host is
-          // a new session with a new hello; it does NOT take the role while
-          // another session holds it.
-          let isScriptHost = false
-          let hostGen
-          if (canEdit && session.capabilities?.scriptRunner === 1 && scriptHost.sessionId === null) {
-            scriptHost.hostGen += 1
-            scriptHost.sessionId = session.id
-            isScriptHost = true
-            hostGen = scriptHost.hostGen
-          }
+            // The server never adopts a client-sent displayName (pre-brief #9).
+            // The session name is always the DB display_name for an authenticated
+            // session, or User-xxxx for anonymous/cross-origin visitors.
+            // A client-displayed name is a request, never a claim.
 
-          ws.send(JSON.stringify({
-            type: 'hello',
-            id: session.id,
-            seq: session.seq,
-            serverTime: Date.now(),
-            avatarNodeName: session.avatarNodeName,
-            displayName: session.displayName,
-            canPlaceTeleporters,
-            canEdit,
-            // 4b-1 E5 — required in EVERY server hello; `hostGen` present exactly
-            // when `scriptHost` is true.
-            scriptHost: isScriptHost,
-            ...(isScriptHost ? { hostGen } : {}),
-            capabilities: {
-              tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
-            },
-          }))
+            // When the user is authenticated, use their real display_name
+            // (from the users table).
+            if (upgradeUserId && db) {
+              try {
+                const userRow = db.database.prepare(
+                  'SELECT display_name FROM users WHERE id = ?'
+                ).get(upgradeUserId)
+                if (userRow && userRow.display_name) {
+                  userDisplayName = userRow.display_name
+                }
+              } catch {
+                // If the lookup fails, stick with the client-supplied or anonymous fallback
+              }
+            }
 
-          session.tickStop = createTickLoop(session, negotiated).stop
+            session = {
+              ws,
+              id: sessionId,
+              userId: null,
+              capabilities: msg.capabilities ?? {},
+              seq: nextSeq(),
+              missedPings: 0,
+              tickStop: null,
+              // L11/K9 — the hello-allocated name; the avatar node itself is
+              // recorded in `avatarNode` only when the avatar `add` is accepted.
+              avatarNodeName: allocateAvatarName(sessionId),
+              avatarNode: null,
+              displayName: userDisplayName,
+              // 4b-1 E4 — eligibility, recorded at `hello`, so the handover never
+              // recomputes it.
+              canEdit: false,
+            }
+            // If the upgrade handler resolved a userId from the auth cookie,
+            // attach it now (before the connection is fully established,
+            // so auth state is available throughout the session lifecycle)
+            if (upgradeUserId) {
+              session.userId = upgradeUserId
+            }
+            sessions.set(session.id, session)
 
-          // Step 1: notify existing clients of the newcomer (default position)
-          const joinNewcomer = {
-            type: 'join',
-            seq: nextSeq(),
-            id: session.id,
-            position: [0, 0, 0],
-            avatar: {
-              nodeName: session.avatarNodeName,
+            // Pre-hello tracking: hello is complete, clean up
+            preHelloSockets.delete(ws)
+
+            // Compute canPlaceTeleporters at hello time (T2). A1: `canEdit` is
+            // the same computation; the old name stays as an alias with the same
+            // value for one release.
+            const canEdit = session.userId !== null &&
+              session.userId === worldOwnerUserId &&
+              isMutator(session, false)
+            const canPlaceTeleporters = canEdit
+            // 4b-1 E4 — eligibility is recorded on the session.
+            session.canEdit = canEdit
+
+            // 4b-1 E4 (E-L4 (a)) — the earliest-connected session that passed
+            // `canEdit` at its hello takes the role. A reconnecting former host is
+            // a new session with a new hello; it does NOT take the role while
+            // another session holds it.
+            let isScriptHost = false
+            let hostGen
+            if (canEdit && session.capabilities?.scriptRunner === 1 && scriptHost.sessionId === null) {
+              scriptHost.hostGen += 1
+              scriptHost.sessionId = session.id
+              isScriptHost = true
+              hostGen = scriptHost.hostGen
+            }
+
+            ws.send(JSON.stringify({
+              type: 'hello',
+              id: session.id,
+              seq: session.seq,
+              serverTime: Date.now(),
+              avatarNodeName: session.avatarNodeName,
               displayName: session.displayName,
-            },
-          }
-          const { valid: jv1 } = validate('server', joinNewcomer)
-          if (jv1) {
-            const rawJoin = JSON.stringify(joinNewcomer)
-            for (const [sid, s] of sessions) {
-              if (sid !== session.id && s.ws.readyState === 1 /* OPEN */) {
-                s.ws.send(rawJoin)
-              }
-            }
-          } else {
-            console.error('join validation failed for newcomer broadcast')
-          }
+              canPlaceTeleporters,
+              canEdit,
+              // 4b-1 E5 — required in EVERY server hello; `hostGen` present exactly
+              // when `scriptHost` is true.
+              scriptHost: isScriptHost,
+              ...(isScriptHost ? { hostGen } : {}),
+              capabilities: {
+                tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
+              },
+            }))
 
-          // Step 2: bootstrap the newcomer with each existing client's current position
-          for (const entry of presence.list()) {
-            const existingSession = sessions.get(entry.id)
-            const joinExisting = {
+            session.tickStop = createTickLoop(session, negotiated).stop
+
+            // Step 1: notify existing clients of the newcomer (default position)
+            const joinNewcomer = {
               type: 'join',
               seq: nextSeq(),
-              id: entry.id,
-              position: entry.position,
-              ...(existingSession ? {
-                avatar: {
-                  nodeName: existingSession.avatarNodeName,
-                  displayName: existingSession.displayName,
-                },
-              } : {}),
+              id: session.id,
+              position: [0, 0, 0],
+              avatar: {
+                nodeName: session.avatarNodeName,
+                displayName: session.displayName,
+              },
             }
-            const { valid: jv2 } = validate('server', joinExisting)
-            if (jv2) {
-              session.ws.send(JSON.stringify(joinExisting))
+            const { valid: jv1 } = validate('server', joinNewcomer)
+            if (jv1) {
+              const rawJoin = JSON.stringify(joinNewcomer)
+              for (const [sid, s] of sessions) {
+                if (sid !== session.id && s.ws.readyState === 1 /* OPEN */) {
+                  s.ws.send(rawJoin)
+                }
+              }
             } else {
-              console.error('join validation failed for bootstrap')
+              console.error('join validation failed for newcomer broadcast')
             }
-          }
 
-          // Step 3: add newcomer to presence
-          presence.add(session.id)
-
-          // Send full SOM dump to the joining client
-          // Placed at end so all synchronous bookkeeping (join broadcasts,
-          // presence registration) completes before the await — prevents a
-          // concurrent hello from observing this session as "half-registered"
-          // while serialize() is in flight.
-          if (world) {
-            try {
-              const gltf = await world.serialize()
-              if (session && session.ws.readyState === 1 /* OPEN */) {
-                session.ws.send(JSON.stringify({ type: 'som-dump', seq: nextSeq(), gltf }))
-                // Emit world-done after som-dump to signal load completion
-                // (pre-brief decision: loader tasks critical with world-done:som-dump)
-                session.ws.send(JSON.stringify({ type: 'world-done', seq: nextSeq() }))
+            // Step 2: bootstrap the newcomer with each existing client's current position
+            for (const entry of presence.list()) {
+              const existingSession = sessions.get(entry.id)
+              const joinExisting = {
+                type: 'join',
+                seq: nextSeq(),
+                id: entry.id,
+                position: entry.position,
+                ...(existingSession ? {
+                  avatar: {
+                    nodeName: existingSession.avatarNodeName,
+                    displayName: existingSession.displayName,
+                  },
+                } : {}),
               }
-            } catch (err) {
-              console.error('som-dump serialize failed:', err)
-            }
-          }
-          break
-        }
-
-        case 'ping': {
-          ws.send(JSON.stringify({
-            type: 'pong',
-            clientTime: msg.clientTime,
-            serverTime: Date.now(),
-          }))
-          break
-        }
-
-        case 'send': {
-          if (!world) {
-            sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
-            break
-          }
-
-          // --- AVATAR DISPLAYNAME GUARD (pre-brief #9) ---
-          // The server is authoritative over session display names.
-          // Reject set when the target node is a live avatar node and
-          // the field is extras.displayName or extras (replacing whole).
-          // This runs before the mutation gate and applies to everyone,
-          // including the world owner.
-          // L11 note: this guard protects the server-assigned NAME reserved by
-          // a live session (whether or not its avatar `add` has been accepted
-          // yet). Node-level protection of a live avatar uses the avatarNode
-          // identity, via liveAvatarNames() below.
-          const isAvatarNode = msg.node && Array.from(sessions.values()).some(
-            s => s.avatarNodeName === msg.node
-          )
-          if (isAvatarNode && msg.field) {
-            let segments
-            try {
-              segments = parsePath(msg.field)
-            } catch {
-              // Unparseable path — let the mutation gate decide
-            }
-            if (segments && segments.length > 0 &&
-                (segments[0] === 'extras') &&
-                (segments.length === 1 || (segments.length >= 2 && segments[1] === 'displayName'))) {
-              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Avatar display name is server-assigned and cannot be changed')
-              break
-            }
-          }
-
-          // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
-          // Runs after the avatar display-name guard and before the mutation
-          // gate, so it applies to the world owner too. Nothing is applied,
-          // broadcast or saved when it refuses.
-          if (sendSetsAtriumSource(msg.field, msg.value)) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
-            break
-          }
-
-          // --- MUTATION GATE: only world owner may set fields ---
-          if (!isMutator(session, false)) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate this message')
-            break
-          }
-
-          // --- SEND FIELD ALLOWLIST (Phase 3 step 0c) ---
-          // Default deny. Resolve the target the same way world.setField does,
-          // then classify the RESOLVED object by its class — never by its name
-          // — and allow only the exact operations that class permits
-          // (pre-brief §3 A1–A5).
-          //
-          // Order: this runs AFTER the mutation gate, so a forbidden edit is
-          // refused the same way for everyone; a non-mutator keeps the gate's
-          // PERMISSION_DENIED exactly as before, and an unknown target reached
-          // by a permitted session still gets NODE_NOT_FOUND. It runs BEFORE
-          // world.setField, so a refusal applies nothing, broadcasts nothing
-          // and triggers no save callback.
-          //
-          // The raw-string destination cap is gone: the 2048-character limit is
-          // the A4 value check on the teleporter destination leaf, and its code
-          // stays INVALID_VALUE.
-          const sendTarget = resolveSendTarget(world.som, msg.node)
-          // V9 — the check itself is fallible, and it FAILS CLOSED: any
-          // exception it throws (including from `behaviorCheck`) refuses THIS
-          // message with `INVALID_VALUE`, the session, the world and the process
-          // carry on, and the server logs one line naming the session and the
-          // field. Nothing is checked here that a failing check could leave
-          // half-applied: the refusal happens before `world.setField`.
-          let decision
-          try {
-            decision = authorizeSend({
-              target: sendTarget,
-              nodeName: msg.node,
-              field: msg.field,
-              value: msg.value,
-              avatarNames: liveAvatarNames(sessions.values()),
-              currentExtras: world.som.extras,
-              externalNames: world.externalNodeNames,
-              // 4b-1 E3 — the set-once objectId leaf's uniqueness needs the world,
-              // so the handler hands `authorizeSend` a callback (review N2).
-              objectIdInUse: (id) => world.som.objectIdInUse(id),
-              // scripting-4b-2 F2/S1 — the 64-behaviour cap needs the world too,
-              // and it counts OTHER nodes, so the node being written is excluded.
-              behaviorCount: (node) => behaviorCountIn(world.som, node),
-            })
-          } catch (error) {
-            logCheckFailure(session, msg.field, error)
-            sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
-            break
-          }
-          if (!decision.ok) {
-            sendError(ws, msg.seq, decision.code, decision.message)
-            break
-          }
-
-          // scripting-4a Z2 / L5(b) — the server stamps a Play. The stamp runs
-          // AFTER `authorizeSend` accepted (so a refused value is never stamped)
-          // and before the apply and the broadcast, and the SAME stamped object is
-          // both stored and broadcast. `add` is never stamped: a Duplicate or an
-          // Undo-restored node keeps its value and stays in step (P6).
-          let appliedValue = msg.value
-          if (msg.field === ANIMATION_LEAF && msg.value !== null &&
-              typeof msg.value === 'object' && msg.value.playing === true) {
-            appliedValue = { ...msg.value, startedAt: Date.now() }
-          }
-
-          const result = world.setField(msg.node, msg.field, appliedValue)
-          if (!result.ok) {
-            sendError(ws, msg.seq, result.code, result.message ?? `${result.code}: ${msg.node}`)
-            break
-          }
-          broadcast({
-            type: 'set',
-            seq: nextSeq(),
-            node: msg.node,
-            field: msg.field,
-            value: appliedValue,
-            serverTime: Date.now(),
-            session: session.id,
-            requestSeq: msg.seq,
-          })
-
-          // Notify autosave coordinator of a saveable mutation
-          if (typeof onSaveableMutation === 'function' && worldOwnerUserId !== null) {
-            onSaveableMutation()
-          }
-          break
-        }
-
-        case 'add': {
-          if (!world) {
-            sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
-            break
-          }
-
-          // If msg.id is provided, validate it matches the sender's session
-          // (prevents impersonation — another client cannot add an avatar
-          // claiming to be a different session)
-          if (msg.id && msg.id !== session.id) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', `msg.id "${msg.id}" does not match session "${session.id}"`)
-            break
-          }
-
-          // If this is an avatar add (has msg.id), validate the node name
-          // matches the server-assigned avatarNodeName
-          if (msg.id && msg.node.name !== session.avatarNodeName) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', `node.name "${msg.node.name}" does not match assigned avatarNodeName "${session.avatarNodeName}"`)
-            break
-          }
-
-          // --- A4: an avatar add may not carry a parent ---
-          // Avatar adds skip the mutation gate, so without this check any
-          // visitor could attach their avatar under a world node. Runs before
-          // the gate, with the other avatar-add checks. The first-party client
-          // never sends one (its avatar add has no parent).
-          if (msg.id && msg.parent != null) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'avatar nodes cannot have a parent')
-            break
-          }
-
-          // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
-          // Runs before the mutation gate so it covers avatar adds (which
-          // bypass the gate) and the world owner alike.
-          if (addSetsAtriumSource(msg.node)) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
-            break
-          }
-
-          // --- K4/L5: an avatar add may not carry its own extras.atrium ---
-          // Runs after S2 (which keeps its own message for `source`) and
-          // before the gate, with the other avatar-add checks. Refuses any
-          // own extras.atrium, including `{}`.
-          if (msg.id && addCarriesAtriumExtras(msg.node)) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'avatar nodes cannot carry extras.atrium')
-            break
-          }
-
-          // --- MUTATION GATE: avatar adds (has msg.id) are always allowed;
-          // non-avatar adds require owner permission ---
-          const isAvatar = !!msg.id
-          if (!isMutator(session, isAvatar)) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may add nodes to this world')
-            break
-          }
-
-          // --- A4/A5 (non-avatar adds only) ---
-          // The parent must not be, or descend from, a live avatar or an
-          // externally loaded node, and the new name must pass the D3 rules.
-          // Runs after the gate, as 0c ended up (its §3.1).
-          if (!isAvatar) {
-            const liveAvatars = liveAvatarNames(sessions.values())
-            if (msg.parent != null && isBlockedParent(msg.parent, world, liveAvatars)) {
-              sendError(ws, msg.seq, 'PERMISSION_DENIED',
-                'a node may not be added under a live avatar or an externally loaded node')
-              break
-            }
-            const nameCheck = world.som.checkNewName(msg.node.name)
-            if (!nameCheck.ok) {
-              sendError(ws, msg.seq, nameCheck.code, nameCheck.message)
-              break
-            }
-            // 4b-1 E3 — the objectId UNIQUENESS check, which needs the world and
-            // therefore lives here, AFTER the name rules and BEFORE any change
-            // to the world. The value's FORM is `checkAtriumExtras`'s (below).
-            // The refusal message is never "already in use": the palette retries
-            // any message matching /already in use/ (review S-B).
-            const idValue = msg.node.extras?.atrium?.objectId
-            if (idValue !== undefined && world.som.objectIdInUse(idValue)) {
-              sendError(ws, msg.seq, 'INVALID_VALUE', OBJECT_ID_TAKEN)
-              break
-            }
-          }
-
-          // --- K6/L7: transform values on `add` (avatar adds included) ---
-          // A non-unit (or zero) rotation and a zero scale component are
-          // refused, never corrected. Runs after the gate, before the first
-          // world change.
-          const transformCheck = checkTransformValues(msg.node)
-          if (!transformCheck.ok) {
-            sendError(ws, msg.seq, transformCheck.code, transformCheck.message)
-            break
-          }
-
-          // --- L5/K4: the non-avatar extras.atrium checks ---
-          // After the gate and the A4/A5 checks, where the length cap was.
-          // One shared checker with `send`, so add and send can't drift.
-          // Every refusal here comes before the first world change (the
-          // displayName overwrite below and addNode).
-          if (!isAvatar) {
-            // V9 — the `add` checks fail closed too: an exception from any of
-            // them refuses the whole `add` with `INVALID_VALUE`, before the
-            // first world change.
-            let checks
-            try {
-              checks = {
-                extras: checkAtriumExtras(msg.node.extras),
-                model: checkModelHost(msg.node),
+              const { valid: jv2 } = validate('server', joinExisting)
+              if (jv2) {
+                session.ws.send(JSON.stringify(joinExisting))
+              } else {
+                console.error('join validation failed for bootstrap')
               }
+            }
+
+            // Step 3: add newcomer to presence
+            presence.add(session.id)
+
+            // Send full SOM dump to the joining client
+            // Placed at end so all synchronous bookkeeping (join broadcasts,
+            // presence registration) completes before the await — prevents a
+            // concurrent hello from observing this session as "half-registered"
+            // while serialize() is in flight.
+            if (world) {
+              try {
+                const gltf = await world.serialize()
+                if (session && session.ws.readyState === 1 /* OPEN */) {
+                  session.ws.send(JSON.stringify({ type: 'som-dump', seq: nextSeq(), gltf }))
+                  // Emit world-done after som-dump to signal load completion
+                  // (pre-brief decision: loader tasks critical with world-done:som-dump)
+                  session.ws.send(JSON.stringify({ type: 'world-done', seq: nextSeq() }))
+                }
+              } catch (err) {
+                console.error('som-dump serialize failed:', err)
+              }
+            }
+            break
+          }
+
+          case 'ping': {
+            ws.send(JSON.stringify({
+              type: 'pong',
+              clientTime: msg.clientTime,
+              serverTime: Date.now(),
+            }))
+            break
+          }
+
+          case 'send': {
+            if (!world) {
+              sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
+              break
+            }
+
+            // --- AVATAR DISPLAYNAME GUARD (pre-brief #9) ---
+            // The server is authoritative over session display names.
+            // Reject set when the target node is a live avatar node and
+            // the field is extras.displayName or extras (replacing whole).
+            // This runs before the mutation gate and applies to everyone,
+            // including the world owner.
+            // L11 note: this guard protects the server-assigned NAME reserved by
+            // a live session (whether or not its avatar `add` has been accepted
+            // yet). Node-level protection of a live avatar uses the avatarNode
+            // identity, via liveAvatarNames() below.
+            const isAvatarNode = msg.node && Array.from(sessions.values()).some(
+              s => s.avatarNodeName === msg.node
+            )
+            if (isAvatarNode && msg.field) {
+              let segments
+              try {
+                segments = parsePath(msg.field)
+              } catch {
+                // Unparseable path — let the mutation gate decide
+              }
+              if (segments && segments.length > 0 &&
+                  (segments[0] === 'extras') &&
+                  (segments.length === 1 || (segments.length >= 2 && segments[1] === 'displayName'))) {
+                sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Avatar display name is server-assigned and cannot be changed')
+                break
+              }
+            }
+
+            // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
+            // Runs after the avatar display-name guard and before the mutation
+            // gate, so it applies to the world owner too. Nothing is applied,
+            // broadcast or saved when it refuses.
+            if (sendSetsAtriumSource(msg.field, msg.value)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
+              break
+            }
+
+            // --- MUTATION GATE: only world owner may set fields ---
+            if (!isMutator(session, false)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate this message')
+              break
+            }
+
+            // --- SEND FIELD ALLOWLIST (Phase 3 step 0c) ---
+            // Default deny. Resolve the target the same way world.setField does,
+            // then classify the RESOLVED object by its class — never by its name
+            // — and allow only the exact operations that class permits
+            // (pre-brief §3 A1–A5).
+            //
+            // Order: this runs AFTER the mutation gate, so a forbidden edit is
+            // refused the same way for everyone; a non-mutator keeps the gate's
+            // PERMISSION_DENIED exactly as before, and an unknown target reached
+            // by a permitted session still gets NODE_NOT_FOUND. It runs BEFORE
+            // world.setField, so a refusal applies nothing, broadcasts nothing
+            // and triggers no save callback.
+            //
+            // The raw-string destination cap is gone: the 2048-character limit is
+            // the A4 value check on the teleporter destination leaf, and its code
+            // stays INVALID_VALUE.
+            const sendTarget = resolveSendTarget(world.som, msg.node)
+            // V9 — the check itself is fallible, and it FAILS CLOSED: any
+            // exception it throws (including from `behaviorCheck`) refuses THIS
+            // message with `INVALID_VALUE`, the session, the world and the process
+            // carry on, and the server logs one line naming the session and the
+            // field. Nothing is checked here that a failing check could leave
+            // half-applied: the refusal happens before `world.setField`.
+            let decision
+            try {
+              decision = authorizeSend({
+                target: sendTarget,
+                nodeName: msg.node,
+                field: msg.field,
+                value: msg.value,
+                avatarNames: liveAvatarNames(sessions.values()),
+                currentExtras: world.som.extras,
+                externalNames: world.externalNodeNames,
+                // 4b-1 E3 — the set-once objectId leaf's uniqueness needs the world,
+                // so the handler hands `authorizeSend` a callback (review N2).
+                objectIdInUse: (id) => world.som.objectIdInUse(id),
+                // scripting-4b-2 F2/S1 — the 64-behaviour cap needs the world too,
+                // and it counts OTHER nodes, so the node being written is excluded.
+                behaviorCount: (node) => behaviorCountIn(world.som, node),
+              })
             } catch (error) {
-              logCheckFailure(session, 'add', error)
+              logCheckFailure(session, msg.field, error)
               sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
               break
             }
-            const extrasCheck = checks.extras
-            if (!extrasCheck.ok) {
-              sendError(ws, msg.seq, extrasCheck.code, extrasCheck.message)
+            if (!decision.ok) {
+              sendError(ws, msg.seq, decision.code, decision.message)
               break
             }
-            // models-by-url (Z1/A6): the node-level half of the model rules —
-            // a node carrying extras.atrium.model may not carry a mesh. Runs
-            // with the value check, before the first world change.
-            const modelCheck = checks.model
-            if (!modelCheck.ok) {
-              sendError(ws, msg.seq, modelCheck.code, modelCheck.message)
-              break
-            }
-            // scripting-4b-2 F2 — the 64-behaviour cap on the `add` path, where
-            // E3 placed the object-id uniqueness check: after the name rules,
-            // before `world.addNode`, so a refusal changes nothing.
-            const addedBehavior = msg.node.extras?.atrium?.behavior
-            if (addedBehavior !== undefined && addedBehavior !== null &&
-                behaviorCountIn(world.som, null) >= BEHAVIOR_NODES_PER_WORLD) {
-              sendError(ws, msg.seq, 'INVALID_VALUE',
-                `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
-              break
-            }
-          }
 
-          // Overwrite avatar extras.displayName with the server-assigned
-          // displayName (pre-brief #9).
-          if (isAvatar && session.displayName) {
-            if (!msg.node.extras) msg.node.extras = {}
-            msg.node.extras.displayName = session.displayName
-          }
+            // scripting-4a Z2 / L5(b) — the server stamps a Play. The stamp runs
+            // AFTER `authorizeSend` accepted (so a refused value is never stamped)
+            // and before the apply and the broadcast, and the SAME stamped object is
+            // both stored and broadcast. `add` is never stamped: a Duplicate or an
+            // Undo-restored node keeps its value and stays in step (P6).
+            let appliedValue = msg.value
+            if (msg.field === ANIMATION_LEAF && msg.value !== null &&
+                typeof msg.value === 'object' && msg.value.playing === true) {
+              appliedValue = { ...msg.value, startedAt: Date.now() }
+            }
 
-          const result = world.addNode(msg.node, msg.parent)
-          if (!result.ok) {
-            const detail = result.code === 'INVALID_VALUE'
-              ? `${result.code}: node name already exists`
-              : `${result.code}: ${msg.parent}`
-            sendError(ws, msg.seq, result.code, detail)
+            const result = world.setField(msg.node, msg.field, appliedValue)
+            if (!result.ok) {
+              sendError(ws, msg.seq, result.code, result.message ?? `${result.code}: ${msg.node}`)
+              break
+            }
+            broadcast({
+              type: 'set',
+              seq: nextSeq(),
+              node: msg.node,
+              field: msg.field,
+              value: appliedValue,
+              serverTime: Date.now(),
+              session: session.id,
+              requestSeq: msg.seq,
+            })
+
+            // Notify autosave coordinator of a saveable mutation
+            if (typeof onSaveableMutation === 'function' && worldOwnerUserId !== null) {
+              onSaveableMutation()
+            }
             break
           }
-          // L11/K9 — ownership is recorded only by an accepted avatar `add`.
-          if (isAvatar) session.avatarNode = result.node
-          // T3: non-avatar adds echo to sender too; avatar adds keep broadcastExcept
-          if (isAvatar) {
-            broadcastExcept(session, {
-              type: 'add',
-              seq: nextSeq(),
-              format: msg.format ?? 'gltf',
-              ...(msg.id ? { id: session.id } : {}),
-              ...(msg.parent != null ? { parent: msg.parent } : {}),
-              node: msg.node,
-            })
-          } else {
+
+          case 'add': {
+            if (!world) {
+              sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
+              break
+            }
+
+            // If msg.id is provided, validate it matches the sender's session
+            // (prevents impersonation — another client cannot add an avatar
+            // claiming to be a different session)
+            if (msg.id && msg.id !== session.id) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', `msg.id "${msg.id}" does not match session "${session.id}"`)
+              break
+            }
+
+            // If this is an avatar add (has msg.id), validate the node name
+            // matches the server-assigned avatarNodeName
+            if (msg.id && msg.node.name !== session.avatarNodeName) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', `node.name "${msg.node.name}" does not match assigned avatarNodeName "${session.avatarNodeName}"`)
+              break
+            }
+
+            // --- A4: an avatar add may not carry a parent ---
+            // Avatar adds skip the mutation gate, so without this check any
+            // visitor could attach their avatar under a world node. Runs before
+            // the gate, with the other avatar-add checks. The first-party client
+            // never sends one (its avatar add has no parent).
+            if (msg.id && msg.parent != null) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'avatar nodes cannot have a parent')
+              break
+            }
+
+            // --- SOURCE GUARD (S2): no client may set extras.atrium.source ---
+            // Runs before the mutation gate so it covers avatar adds (which
+            // bypass the gate) and the world owner alike.
+            if (addSetsAtriumSource(msg.node)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
+              break
+            }
+
+            // --- K4/L5: an avatar add may not carry its own extras.atrium ---
+            // Runs after S2 (which keeps its own message for `source`) and
+            // before the gate, with the other avatar-add checks. Refuses any
+            // own extras.atrium, including `{}`.
+            if (msg.id && addCarriesAtriumExtras(msg.node)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'avatar nodes cannot carry extras.atrium')
+              break
+            }
+
+            // --- MUTATION GATE: avatar adds (has msg.id) are always allowed;
+            // non-avatar adds require owner permission ---
+            const isAvatar = !!msg.id
+            if (!isMutator(session, isAvatar)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may add nodes to this world')
+              break
+            }
+
+            // --- A4/A5 (non-avatar adds only) ---
+            // The parent must not be, or descend from, a live avatar or an
+            // externally loaded node, and the new name must pass the D3 rules.
+            // Runs after the gate, as 0c ended up (its §3.1).
+            if (!isAvatar) {
+              const liveAvatars = liveAvatarNames(sessions.values())
+              if (msg.parent != null && isBlockedParent(msg.parent, world, liveAvatars)) {
+                sendError(ws, msg.seq, 'PERMISSION_DENIED',
+                  'a node may not be added under a live avatar or an externally loaded node')
+                break
+              }
+              const nameCheck = world.som.checkNewName(msg.node.name)
+              if (!nameCheck.ok) {
+                sendError(ws, msg.seq, nameCheck.code, nameCheck.message)
+                break
+              }
+              // 4b-1 E3 — the objectId UNIQUENESS check, which needs the world and
+              // therefore lives here, AFTER the name rules and BEFORE any change
+              // to the world. The value's FORM is `checkAtriumExtras`'s (below).
+              // The refusal message is never "already in use": the palette retries
+              // any message matching /already in use/ (review S-B).
+              const idValue = msg.node.extras?.atrium?.objectId
+              if (idValue !== undefined && world.som.objectIdInUse(idValue)) {
+                sendError(ws, msg.seq, 'INVALID_VALUE', OBJECT_ID_TAKEN)
+                break
+              }
+            }
+
+            // --- K6/L7: transform values on `add` (avatar adds included) ---
+            // A non-unit (or zero) rotation and a zero scale component are
+            // refused, never corrected. Runs after the gate, before the first
+            // world change.
+            const transformCheck = checkTransformValues(msg.node)
+            if (!transformCheck.ok) {
+              sendError(ws, msg.seq, transformCheck.code, transformCheck.message)
+              break
+            }
+
+            // --- L5/K4: the non-avatar extras.atrium checks ---
+            // After the gate and the A4/A5 checks, where the length cap was.
+            // One shared checker with `send`, so add and send can't drift.
+            // Every refusal here comes before the first world change (the
+            // displayName overwrite below and addNode).
+            if (!isAvatar) {
+              // V9 — the `add` checks fail closed too: an exception from any of
+              // them refuses the whole `add` with `INVALID_VALUE`, before the
+              // first world change.
+              let checks
+              try {
+                checks = {
+                  extras: checkAtriumExtras(msg.node.extras),
+                  model: checkModelHost(msg.node),
+                }
+              } catch (error) {
+                logCheckFailure(session, 'add', error)
+                sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+                break
+              }
+              const extrasCheck = checks.extras
+              if (!extrasCheck.ok) {
+                sendError(ws, msg.seq, extrasCheck.code, extrasCheck.message)
+                break
+              }
+              // models-by-url (Z1/A6): the node-level half of the model rules —
+              // a node carrying extras.atrium.model may not carry a mesh. Runs
+              // with the value check, before the first world change.
+              const modelCheck = checks.model
+              if (!modelCheck.ok) {
+                sendError(ws, msg.seq, modelCheck.code, modelCheck.message)
+                break
+              }
+              // scripting-4b-2 F2 — the 64-behaviour cap on the `add` path, where
+              // E3 placed the object-id uniqueness check: after the name rules,
+              // before `world.addNode`, so a refusal changes nothing.
+              const addedBehavior = msg.node.extras?.atrium?.behavior
+              if (addedBehavior !== undefined && addedBehavior !== null &&
+                  behaviorCountIn(world.som, null) >= BEHAVIOR_NODES_PER_WORLD) {
+                sendError(ws, msg.seq, 'INVALID_VALUE',
+                  `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
+                break
+              }
+            }
+
+            // Overwrite avatar extras.displayName with the server-assigned
+            // displayName (pre-brief #9).
+            if (isAvatar && session.displayName) {
+              if (!msg.node.extras) msg.node.extras = {}
+              msg.node.extras.displayName = session.displayName
+            }
+
+            const result = world.addNode(msg.node, msg.parent)
+            if (!result.ok) {
+              const detail = result.code === 'INVALID_VALUE'
+                ? `${result.code}: node name already exists`
+                : `${result.code}: ${msg.parent}`
+              sendError(ws, msg.seq, result.code, detail)
+              break
+            }
+            // L11/K9 — ownership is recorded only by an accepted avatar `add`.
+            if (isAvatar) session.avatarNode = result.node
+            // T3: non-avatar adds echo to sender too; avatar adds keep broadcastExcept
+            if (isAvatar) {
+              broadcastExcept(session, {
+                type: 'add',
+                seq: nextSeq(),
+                format: msg.format ?? 'gltf',
+                ...(msg.id ? { id: session.id } : {}),
+                ...(msg.parent != null ? { parent: msg.parent } : {}),
+                node: msg.node,
+              })
+            } else {
+              broadcast({
+                type: 'add',
+                seq: nextSeq(),
+                format: msg.format ?? 'gltf',
+                ...(msg.parent != null ? { parent: msg.parent } : {}),
+                node: msg.node,
+                requestSeq: msg.seq,
+                session: session.id,
+              })
+            }
+
+            // Notify autosave coordinator for non-avatar adds (saveable mutations)
+            if (typeof onSaveableMutation === 'function' && !isAvatar && worldOwnerUserId !== null) {
+              onSaveableMutation()
+            }
+            break
+          }
+
+          case 'view': {
+            presence.setPosition(session.id, msg.position)
+
+            // L11/K9 — move only the node this session owns, by IDENTITY. A
+            // session whose avatar `add` was refused owns nothing: its `view`
+            // moves nothing (and never another visitor's avatar).
+            if (world && session.avatarNode) {
+              session.avatarNode.translation = msg.position
+              if (msg.look) session.avatarNode.rotation = lookToQuaternion(msg.look)
+            }
+
+            const outbound = {
+              type: 'view',
+              id: session.id,
+              position: msg.position,
+              ...(msg.look               && { look: msg.look }),
+              ...(msg.move               && { move: msg.move }),
+              ...(msg.velocity !== undefined && { velocity: msg.velocity }),
+              ...(msg.up                 && { up: msg.up }),
+            }
+            const { valid: vv } = validate('server', outbound)
+            if (vv) {
+              broadcastExcept(session, outbound)
+            } else {
+              console.error('view validation failed')
+            }
+            break
+          }
+
+          case 'remove': {
+            if (!world) {
+              sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
+              break
+            }
+            // --- MUTATION GATE: only owner may remove nodes ---
+            if (!isMutator(session, false)) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate nodes in this world')
+              break
+            }
+
+            // --- A4: avatar and external-node protection (after the gate) ---
+            // A live avatar, an externally loaded node, or a subtree holding a
+            // live avatar is never removable — for everyone, the owner included.
+            // An unknown node falls through to world.removeNode's NODE_NOT_FOUND.
+            {
+              const liveAvatars = liveAvatarNames(sessions.values())
+              const targetNode = world.som.getNodeByName(msg.node)
+              if (targetNode) {
+                const resolvedName = targetNode.name
+                if (liveAvatars.has(resolvedName)) {
+                  sendError(ws, msg.seq, 'PERMISSION_DENIED', 'live avatar nodes cannot be removed')
+                  break
+                }
+                if (world.externalNodeNames.has(resolvedName)) {
+                  sendError(ws, msg.seq, 'PERMISSION_DENIED', 'externally loaded nodes cannot be removed')
+                  break
+                }
+                if (subtreeHasLiveAvatar(targetNode, liveAvatars)) {
+                  sendError(ws, msg.seq, 'PERMISSION_DENIED',
+                    'a subtree containing a live avatar cannot be removed')
+                  break
+                }
+              }
+            }
+
+            const result = world.removeNode(msg.node)
+            if (!result.ok) {
+              sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
+              break
+            }
             broadcast({
-              type: 'add',
+              type: 'remove',
               seq: nextSeq(),
-              format: msg.format ?? 'gltf',
-              ...(msg.parent != null ? { parent: msg.parent } : {}),
               node: msg.node,
               requestSeq: msg.seq,
               session: session.id,
             })
-          }
 
-          // Notify autosave coordinator for non-avatar adds (saveable mutations)
-          if (typeof onSaveableMutation === 'function' && !isAvatar && worldOwnerUserId !== null) {
-            onSaveableMutation()
-          }
-          break
-        }
-
-        case 'view': {
-          presence.setPosition(session.id, msg.position)
-
-          // L11/K9 — move only the node this session owns, by IDENTITY. A
-          // session whose avatar `add` was refused owns nothing: its `view`
-          // moves nothing (and never another visitor's avatar).
-          if (world && session.avatarNode) {
-            session.avatarNode.translation = msg.position
-            if (msg.look) session.avatarNode.rotation = lookToQuaternion(msg.look)
-          }
-
-          const outbound = {
-            type: 'view',
-            id: session.id,
-            position: msg.position,
-            ...(msg.look               && { look: msg.look }),
-            ...(msg.move               && { move: msg.move }),
-            ...(msg.velocity !== undefined && { velocity: msg.velocity }),
-            ...(msg.up                 && { up: msg.up }),
-          }
-          const { valid: vv } = validate('server', outbound)
-          if (vv) {
-            broadcastExcept(session, outbound)
-          } else {
-            console.error('view validation failed')
-          }
-          break
-        }
-
-        case 'remove': {
-          if (!world) {
-            sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
-            break
-          }
-          // --- MUTATION GATE: only owner may remove nodes ---
-          if (!isMutator(session, false)) {
-            sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate nodes in this world')
-            break
-          }
-
-          // --- A4: avatar and external-node protection (after the gate) ---
-          // A live avatar, an externally loaded node, or a subtree holding a
-          // live avatar is never removable — for everyone, the owner included.
-          // An unknown node falls through to world.removeNode's NODE_NOT_FOUND.
-          {
-            const liveAvatars = liveAvatarNames(sessions.values())
-            const targetNode = world.som.getNodeByName(msg.node)
-            if (targetNode) {
-              const resolvedName = targetNode.name
-              if (liveAvatars.has(resolvedName)) {
-                sendError(ws, msg.seq, 'PERMISSION_DENIED', 'live avatar nodes cannot be removed')
-                break
-              }
-              if (world.externalNodeNames.has(resolvedName)) {
-                sendError(ws, msg.seq, 'PERMISSION_DENIED', 'externally loaded nodes cannot be removed')
-                break
-              }
-              if (subtreeHasLiveAvatar(targetNode, liveAvatars)) {
-                sendError(ws, msg.seq, 'PERMISSION_DENIED',
-                  'a subtree containing a live avatar cannot be removed')
-                break
-              }
+            // Notify autosave coordinator of a saveable mutation
+            if (typeof onSaveableMutation === 'function' && worldOwnerUserId !== null) {
+              onSaveableMutation()
             }
-          }
-
-          const result = world.removeNode(msg.node)
-          if (!result.ok) {
-            sendError(ws, msg.seq, result.code, `${result.code}: ${msg.node}`)
             break
           }
-          broadcast({
-            type: 'remove',
-            seq: nextSeq(),
-            node: msg.node,
-            requestSeq: msg.seq,
-            session: session.id,
-          })
 
-          // Notify autosave coordinator of a saveable mutation
-          if (typeof onSaveableMutation === 'function' && worldOwnerUserId !== null) {
-            onSaveableMutation()
-          }
-          break
+          default:
+            sendError(ws, msg.seq ?? null, 'UNKNOWN_MESSAGE', `Unhandled message type: ${msg.type}`)
         }
-
-        default:
-          sendError(ws, msg.seq ?? null, 'UNKNOWN_MESSAGE', `Unhandled message type: ${msg.type}`)
+      } catch (err) {
+        // -----------------------------------------------------------------
+        // G2 — the fail-closed boundary. Any exception from anywhere in the
+        // body above (JSON.parse to the end of the switch) is logged as one
+        // line and answered, and the session, the world and the process
+        // carry on. It does NOT roll back a change a handler already applied:
+        // a throw after a world change leaves world and clients disagreeing
+        // until they reload (accepted — G1 removes the known case, this is the
+        // last line, not a substitute). No process-level handler: outside this
+        // listener an unknown failure still exits and systemd restarts.
+        // -----------------------------------------------------------------
+        console.error(
+          `[session] message handler error: ` +
+          `type=${typeof msg?.type === 'string' ? msg.type : '-'} ` +
+          `${err?.name ?? 'Error'}: ${err?.message ?? ''}`
+        )
+        sendError(ws, typeof msg?.seq === 'number' ? msg.seq : null,
+          'UNKNOWN_MESSAGE', 'the message could not be processed')
       }
     })
 

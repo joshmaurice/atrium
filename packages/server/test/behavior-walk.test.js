@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { Document } from '@gltf-transform/core'
 import WebSocket from 'ws'
 
-import { behaviorCheck, behaviorReasonText, authorizeSend, BEHAVIOR_LEAF } from '../src/send-policy.js'
+import { behaviorCheck, authorizeSend, BEHAVIOR_LEAF } from '../src/send-policy.js'
 import { behaviorCheck as clientBehaviorCheck } from '../../behaviors/src/behavior-spec.js'
 import { healDocumentBehaviors, createWorld } from '../src/world.js'
 import { templateGraph } from '../../behaviors/src/templates.js'
@@ -198,12 +198,18 @@ test('V9 — a 6,500-deep behaviour send is refused, and the server keeps servin
     ws.send('{"type":"send","seq":' + seq + ',"node":"crate-01","field":"' + BEHAVIOR_LEAF + '",'
       + '"value":{"kind":"graph","origin":"local","enabled":true,"nodeMap":["' + id + '"],'
       + '"graph":' + '['.repeat(depth) + ']'.repeat(depth) + '}}')
+    // Round 6, W0: the message-depth-guard hotfix (G1) runs right after
+    // JSON.parse and before the schema check, so a message nested this deep is
+    // refused by the guard (UNKNOWN_MESSAGE, "message nested too deeply") and
+    // never reaches `authorizeSend`. The walk below still returns
+    // `behavior-type` for the SAME value reached by any other path (a value
+    // built in-process, a loaded document), so V9's rule is unchanged — only
+    // which layer refuses a deep OVER-THE-WIRE send has.
     const refused = await waitFor(messages, (m) => answers(m, seq))
     assert.ok(refused, 'the server answered, and is still up')
     assert.equal(refused.type, 'error')
-    assert.equal(refused.code, 'INVALID_VALUE')
-    assert.equal(refused.message, behaviorReasonText('behavior-type'),
-      'F1\'s own text for the code the walk returned')
+    assert.equal(refused.code, 'UNKNOWN_MESSAGE')
+    assert.equal(refused.message, 'message nested too deeply')
 
     // The same value, as an object, is refused by the walk with that code.
     let deep = []
