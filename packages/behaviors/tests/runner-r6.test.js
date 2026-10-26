@@ -110,23 +110,29 @@ describe('W5 (round 6, N1) — a disposed producer queues nothing', () => {
     assert.equal(runner.log.filter((l) => l.message.includes('too many pending sends')).length, 1, 'one disable line')
 
     // W5's guard, first — before the gesture check and the 100-key check: the
-    // disposed producer queues NOTHING and logs nothing more.
-    const before = runner.queue.size
+    // disposed producer queues NOTHING and logs nothing more. Drain the queue
+    // first, so the guard — not the cap — is what refuses.
+    for (let i = 0; i < SEND_KEYS_MAX + 1; i++) {
+      state.clock += SEND_FRAME_MS
+      runner.tick()
+    }
+    assert.equal(runner.queue.size, 0, 'the queue drained')
+    const sent = client.sent.length
     for (let i = 0; i < 5; i++) {
       assert.equal(runner.enqueue(TGT, 'node', `later-${i}`, i, rec.behaviourId, rec.generation, { enforce: true }), false,
         'a later write from the disposed behaviour is refused')
     }
-    assert.equal(runner.queue.size, before, 'the queue did not grow')
+    assert.equal(runner.queue.size, 0, 'the queue did not grow')
     assert.equal(runner.log.filter((l) => l.message.includes('too many pending sends')).length, 1, 'no second disable line')
     assert.equal(runner.log.filter((l) => l.message.includes('no longer running')).length, 0, 'and no drop lines')
 
     // A stale generation is refused the same way.
     assert.equal(runner.enqueue(TGT, 'node', 'stale', false, rec.behaviourId, rec.generation + 1, { enforce: true }), false)
 
-    // Nothing threw, and the frame still runs.
+    // Nothing threw, and the frame still runs after it.
     state.clock += SEND_FRAME_MS
     assert.doesNotThrow(() => runner.tick())
-    assert.equal(client.sent.length, 1, 'its one opportunity still sent')
+    assert.equal(client.sent.length, sent, 'and the disposed behaviour sent nothing more')
   })
 })
 
