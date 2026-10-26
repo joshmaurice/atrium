@@ -25,10 +25,21 @@
 //    `click` (and nothing else).
 
 const CHECKABLE = new Set(['checkbox', 'radio'])
+// W8 (round 6) — the DOM fires `change` on a `<select>` and on a text or number
+// `<input>` too, not only on a checkbox or radio. The old rule delivered it to
+// the checkable ones only, so the template picker's and the parameter
+// container's real listeners were never driven by a test.
+const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'text', 'number', ''])
 
 /** True for an `<input type="checkbox">` / `<input type="radio">`. */
 export function isCheckable(node) {
   return node?.tagName === 'input' && CHECKABLE.has(node.type)
+}
+
+/** True when a real element of this kind fires `change` (W8). */
+export function firesChange(node) {
+  if (node?.tagName === 'select') return true
+  return node?.tagName === 'input' && CHANGE_INPUT_TYPES.has(node.type ?? '')
 }
 
 function getterOnly(node, name, value) {
@@ -60,27 +71,37 @@ export function el(tag = 'div') {
     title: '',
     _text: '',
     _checked: false,
+    // W8 — the listener map, so a bubbling dispatch can read an ancestor's.
+    _listeners: listeners,
     appendChild(child) {
       node.children.push(child)
+      // W8 (round 6) — a real `change` bubbles, so the child needs its parent.
+      child.parentNode = node
       node.firstChild = node.children[0] ?? null
       return child
     },
     removeChild(child) {
       node.children = node.children.filter((c) => c !== child)
+      if (child.parentNode === node) child.parentNode = null
       node.firstChild = node.children[0] ?? null
       return child
     },
     addEventListener(type, fn) { (listeners[type] ??= []).push(fn) },
     removeEventListener(type, fn) { listeners[type] = (listeners[type] ?? []).filter((f) => f !== fn) },
     /**
-     * V12 — `change` reaches a listener only on a checkbox or radio input; a
-     * `<button>` dispatches `click` only. A disabled control fires nothing, as
-     * in the browser. Everything else passes through, as the old fake did.
+     * W8 (round 6) — `change` reaches a listener on a checkbox or radio input,
+     * a text or number input, and a `<select>`, as the DOM's does; a `<button>`
+     * dispatches `click` only. A disabled control fires nothing. The event then
+     * BUBBLES to the ancestors, so the parameter container's DELEGATED
+     * `change` listener is reached by dispatching on the field itself.
      */
     dispatch(type, event) {
       if (node.disabled) return
-      if (type === 'change' && !isCheckable(node)) return
-      for (const fn of listeners[type] ?? []) fn(event ?? { target: node })
+      if (type === 'change' && !firesChange(node)) return
+      const e = event ?? { target: node }
+      for (let target = node; target; target = target.parentNode ?? null) {
+        for (const fn of target._listeners?.[type] ?? []) fn(e)
+      }
     },
     /** How many listeners of a type are registered (the guards read this). */
     listenerCount(type) { return (listeners[type] ?? []).length },

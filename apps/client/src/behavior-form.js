@@ -60,13 +60,50 @@ export const BEHAVIOR_STATUS = Object.freeze({
   otherTab: 'Behaviours run in another tab; clicks here don’t trigger them',
   saving: 'Saving…',
   cancelled: 'Save cancelled',
+  // W3 (round 6) — the stored value changed under an unsaved edit.
+  changed: 'Changed in another tab',
 })
+
+/**
+ * W4 (round 6) — the panel's text for each of the runner's disable reasons.
+ * The runner's codes don't change; only what the panel shows does.
+ */
+export function disabledReasonText(reason) {
+  if (!reason) return ''
+  const text = String(reason)
+  if (text === 'disabled') return 'turned off'
+  if (text.startsWith('invalid:')) return behaviorReasonText(text.slice('invalid:'.length).trim())
+  if (text === 'not-found') return 'its object can\'t be found'
+  if (text.startsWith('target-not-found:')) {
+    return `target ${text.slice('target-not-found:'.length).trim()} can't be found`
+  }
+  if (text.startsWith('rejected:')) {
+    return `the graph was refused: ${text.slice('rejected:'.length).trim()}`
+  }
+  if (text === 'over-budget') return 'it did too much work in one frame'
+  if (text === 'over-send-cap') return 'too many changes were waiting to be sent'
+  return text
+}
 
 /** Which targets a template's picker offers (F8). */
 export function targetKindFor(templateId) {
   if (templateId === 'select-animation' || templateId === 'proximity-animation' || templateId === 'interval-animation') return 'model'
   if (templateId === 'select-light') return 'light'
   return 'any'
+}
+
+/**
+ * W2 (round 6) — what the Behaviour row does when the Edit panel refreshes.
+ * Exported so the DECISION is testable without app.js: `open` (which re-reads
+ * the leaf) whenever the selection changed or the form is closed — the bug was
+ * relying on the selection alone, so Edit off → Edit on with the same object
+ * still selected left the section closed; `reread` when a `som:set` says the
+ * stored leaf may have moved under the same selection; `render` otherwise.
+ */
+export function behaviorRowAction({ open, lastNode = null, selected, reread = false } = {}) {
+  if (!open) return 'open'
+  if (selected !== lastNode) return 'open'
+  return reread ? 'reread' : 'render'
 }
 
 /** F9 — a saved value is the template's own output, or it is "Custom graph". */
@@ -119,6 +156,8 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     generation: 0,
     sequence: null,       // the snapshot Save is bound to
     pending: null,        // { seq, stage, generation }
+    // W3 — the picker/params the form last READ, so an unsaved edit is visible.
+    baseline: { template: NONE_LABEL, custom: false, params: {} },
   }
 
   const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
@@ -215,7 +254,23 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     // the pending answer so a late one can still be recognised as stale.
     bump()
     if (!node) { render(); return }
-    const saved = node.extras?.atrium?.behavior ?? null
+    readStored(node)
+    // V13 — the Behaviour section is NOT one of the gate's mutually exclusive
+    // forms: it is part of the Edit panel and is shown with every selection, so
+    // opening it must never close the library grid, the Model form or the
+    // destination form. `gate.claim(name)` used to run on every refresh (which
+    // closed the grid after a library placement — library-sky's c23/c4), and
+    // `close()` no longer releases, because nothing was ever claimed.
+    // `setEditMode(false)` closes the section explicitly instead.
+    render()
+  }
+
+  /**
+   * Read the node's stored leaf into the form's state. `open` calls it, and so
+   * does W3's re-read: template or Custom graph, params, target, Enabled.
+   */
+  function readStored(node) {
+    const saved = node?.extras?.atrium?.behavior ?? null
     state.saved = saved
     state.enabled = saved ? saved.enabled !== false : true
     if (!saved) {
@@ -236,13 +291,41 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       state.params = {}
       state.targetId = null
     }
-    // V13 — the Behaviour section is NOT one of the gate's mutually exclusive
-    // forms: it is part of the Edit panel and is shown with every selection, so
-    // opening it must never close the library grid, the Model form or the
-    // destination form. `gate.claim(name)` used to run on every refresh (which
-    // closed the grid after a library placement — library-sky's c23/c4), and
-    // `close()` no longer releases, because nothing was ever claimed.
-    // `setEditMode(false)` closes the section explicitly instead.
+    // W3 — what the form last READ. An unsaved edit is the current selection
+    // and params differing from this.
+    state.baseline = { template: state.template, custom: state.custom, params: { ...state.params } }
+  }
+
+  /** W3 — has the owner changed the picker or a parameter without saving? */
+  const unsavedEdit = () => state.template !== state.baseline.template
+    || state.custom !== state.baseline.custom
+    || JSON.stringify(state.params) !== JSON.stringify(state.baseline.params)
+
+  /**
+   * W3 (round 6) — a `som:set` of the selected node's leaf (or `extras`, or
+   * `name`): re-read the STORED value, exactly as `open` does, so the form is
+   * never left showing a value the world no longer has. Calling `render()`
+   * alone redrew the form's own stale copy — the picker still showed a Removed
+   * template, a behaviour written under an already-selected object opened as
+   * "None", and another tab's change was invisible (§1.2 item 3).
+   *
+   * EXCEPT while this form's OWN write is in flight — a Save's stages,
+   * Enabled, Remove: those writes' echoes arrive here first, and they must not
+   * bump the generation or cancel the sequence (M4's rules). The sequence's own
+   * answer re-reads once when it ends (see `onAnswer`).
+   */
+  function reread() {
+    if (!state.open || !state.node) return
+    if (state.saving || state.pending) { render(); return }
+    const node = state.node
+    const incoming = node.extras?.atrium?.behavior ?? null
+    const mine = unsavedEdit()
+    const changed = JSON.stringify(incoming) !== JSON.stringify(state.saved)
+    readStored(node)
+    // W3 — a change from elsewhere while the owner has an unsaved edit: the
+    // stored value is shown (an unsaved edit is never silently kept over it),
+    // and the status line says so once.
+    if (changed && mine) state.status = BEHAVIOR_STATUS.changed
     render()
   }
 
@@ -313,7 +396,10 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     // The target's id, as it will be AFTER this sequence's own id stages.
     if (params.target) params.target = snapshot ? (snapshot.targetOwnId ?? snapshot.targetId) : state.targetId
     // C2 — `intensity` is read from the light at SAVE time, never shown.
-    if (template === 'select-light') params.intensity = lightIntensity(targetNode())
+    // W8 (round 6) — from the SNAPSHOT's own target object (`snapshot.target`),
+    // never looked up again: stage 3 must use the light the sequence was bound
+    // to, not whatever the id resolves to now.
+    if (template === 'select-light') params.intensity = lightIntensity(snapshot ? snapshot.target : targetNode())
     return templateGraph(template, params, { ownId: ownIdValue })
   }
 
@@ -502,9 +588,11 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       render()
       return true
     }
-    if (pending.stage === 3) { state.saved = pending.value; state.saving = false; render(); return true }
-    if (pending.stage === 'remove') { state.saved = null; state.saving = false; render(); return true }
-    if (pending.stage === 'enabled') { state.saving = false; render(); return true }
+    // W3 (round 6) — when the sequence ENDS, the form re-reads the stored value
+    // once, so nothing it holds can be stale next to the world.
+    if (pending.stage === 3) { state.saved = pending.value; state.saving = false; readStored(state.node); render(); return true }
+    if (pending.stage === 'remove') { state.saved = null; state.saving = false; readStored(state.node); render(); return true }
+    if (pending.stage === 'enabled') { state.saving = false; readStored(state.node); render(); return true }
     // Stages 1 and 2 continue the sequence.
     const snapshot = state.sequence
     if (snapshot && snapshot.generation === pending.generation) dispatchStage(snapshot)
@@ -521,7 +609,12 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     if (reported.state === 'saving' || state.saving) return BEHAVIOR_STATUS.saving
     if (reported.state === 'running') return BEHAVIOR_STATUS.running
     if (reported.state === 'other-tab') return BEHAVIOR_STATUS.otherTab
-    if (reported.state === 'disabled') return `Disabled: ${reported.reason ? behaviorReasonText(reported.reason) : reported.reasonText ?? ''}`.trim()
+    // W4 (round 6) — each runner reason gets its OWN text. Passing the reason
+    // to `behaviorReasonText`, which knows only F1's codes, made every
+    // "Disabled" line read "the behaviour value is invalid" (§1.2 item 4).
+    if (reported.state === 'disabled') {
+      return `Disabled: ${disabledReasonText(reported.reason ?? reported.reasonText ?? '')}`.trim()
+    }
     if (reported.state === 'idle') return BEHAVIOR_STATUS.idle
     return ''
   }
@@ -593,6 +686,10 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
         setDataField(field, key)
       }
       if (field) {
+        // W8 (round 6) — the parameter fields are disabled while a Save is in
+        // flight, exactly as the template picker is: nothing may change under
+        // the value the sequence is building.
+        if (state.saving) field.disabled = true
         row.appendChild(field)
         container.appendChild(row)
       }
@@ -713,7 +810,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   }
 
   return {
-    wire, open, close, render, reset, save, remove, setEnabled, onAnswer,
+    wire, open, close, render, reset, save, remove, setEnabled, onAnswer, reread,
     onTemplateChange, onParamChange,
     get state() { return state },
     get openState() { return state.open },

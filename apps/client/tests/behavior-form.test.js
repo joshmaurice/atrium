@@ -248,10 +248,36 @@ test('F9 — the status texts for each runner state', () => {
     form.open(node)
     assert.equal(elements.status.textContent, expected)
   }
-  const { form: disabled, elements: de } = setup({ nodes: [node], selected: node, status: { state: 'disabled', reason: 'behavior-kind' } })
+  // W4 (round 6) — a disabled state whose reason is an F1 code shows that
+  // code's own text. (The reason the runner reports is `invalid: <code>`; a
+  // bare code is neither one of the runner's forms.)
+  const { form: disabled, elements: de } = setup({ nodes: [node], selected: node, status: { state: 'disabled', reason: 'invalid: behavior-kind' } })
   disabled.open(node)
   assert.match(de.status.textContent, /^Disabled: /)
   assert.match(de.status.textContent, /kind must be "graph"/)
+})
+
+test('W4 — each disable reason has its own text', () => {
+  const node = makeNode({ name: 'crate', id: OWN })
+  const rows = [
+    ['disabled', 'turned off'],
+    ['invalid: behavior-kind', 'kind must be "graph"'],
+    ['not-found', "its object can't be found"],
+    ['target-not-found: 3', "target 3 can't be found"],
+    ['rejected: the engine refused the graph: nope', 'the graph was refused: the engine refused the graph: nope'],
+    ['over-budget', 'it did too much work in one frame'],
+    ['over-send-cap', 'too many changes were waiting to be sent'],
+    ['something else entirely', 'something else entirely'],
+  ]
+  for (const [reason, text] of rows) {
+    const { form, elements } = setup({ nodes: [node], selected: node, status: { state: 'disabled', reason } })
+    form.open(node)
+    assert.equal(elements.status.textContent, `Disabled: ${text}`, `the text for "${reason}"`)
+  }
+  // Only an F1 code that maps to it gives the old generic line.
+  const { form: fallback, elements: fe } = setup({ nodes: [node], selected: node, status: { state: 'disabled', reason: 'invalid: behavior-nonsense' } })
+  fallback.open(node)
+  assert.equal(fe.status.textContent, 'Disabled: the behaviour value is invalid')
 })
 
 test('F9 — the picker filters per template', () => {
@@ -527,6 +553,9 @@ test('V2 — a click on Enabled rewrites the value with the flag flipped; a chan
   assert.equal(elements.enabled.textContent, 'Disabled')
   assert.equal(elements.enabled.disabled, true, 'disabled while the write is in flight')
 
+  // W3 (round 6) — the form re-reads the STORED value when a sequence ends, so
+  // the write's own echo is applied here first, exactly as `sendField` does.
+  node.extras.atrium.behavior = calls.sendField[0][2]
   form.onAnswer('edit:accepted', { seq: 1 })
   assert.equal(elements.enabled.disabled, false, 'and enabled again once it is settled')
   elements.enabled.dispatch('click')
