@@ -144,6 +144,14 @@ world saved before ids existed, and a short window.** `r7.py` now does.
   pins it: Claude once told the operator to leave the hotfix's first review
   gate (`t_0b091c38`, CHANGES_REQUIRED) blocked for good, and the operator had to complete it after all. Check a
   card's children before leaving it blocked. §7 archives the leftovers.
+- **Archiving a card promotes its children.** §7's first version archived
+  round 3's gate before its never-run chain, so round 3's Publish and DEV
+  deploy of `c0e563f0` went to `ready` for a moment (2026-10-29 20:07 UTC)
+  before the same loop archived them. Neither was claimed and DEV stayed on
+  `0c31ddc0`, but a dispatcher tick in between would have run an old deploy.
+  The round's sentinels did run, harmlessly, with their old end states.
+  **Archive leaf-first:** a chain's last card before its first, and a gate
+  after everything under it.
 - **Kickoffs:** round 6's implementation card got a 90-minute cap instead of
   180; round 7's kickoff created its cards with empty bodies and posted the
   bodies as comments (workers read them, but tell the next kickoff to fill
@@ -240,9 +248,11 @@ the background or loaded before the last deploy.
 
 ## 7. Cleanup (operator, host)
 ```bash
-# the superseded cards, never completed by design
-for t in t_3e676fd9 t_b3b26724 t_916959c5 t_03ede0fb t_82c17ea9 t_4642b86e t_c2d75b59 \
-         t_6717fe9c t_26410540 t_78ba2e7f t_fbb089d1 t_89fe6413; do
+# the superseded cards, never completed by design — done 2026-10-29. Leaf-first
+# (§4.5): archiving a parent promotes its children, so each chain goes last card first.
+for t in t_c2d75b59 t_4642b86e t_82c17ea9 t_03ede0fb t_916959c5 \
+         t_26410540 t_6717fe9c t_fbb089d1 t_78ba2e7f t_89fe6413 \
+         t_b3b26724 t_3e676fd9; do
   hermes kanban --board atrium archive $t
 done
 # the round's branches
