@@ -325,6 +325,185 @@ test('X4 — a normalisation is undone by the next read of the stored value', ()
 // The X4 tests below belong to the `noid` sequence and X6; they are pinned in
 // the X6 section, where the id switch they exercise lives.
 
+// ══════════════════════════════════════════════════════════════════════════
+// X3 — the form checks before it sends, in plain words
+// ══════════════════════════════════════════════════════════════════════════
+
+const statusOf = (elements) => elements.status.textContent
+
+/** A cube, a model with clips, and a light: every field has a good value. */
+function x3World() {
+  return [
+    makeNode({ name: 'crate', id: OWN }),
+    makeNode({ name: 'fox', id: TGT, model: { url: 'a.glb' } }),
+    makeNode({ name: 'Sun', id: OTHER, light: { intensity: 2 } }),
+  ]
+}
+
+test('X3 — select-light with no light to offer says so', () => {
+  const nodes = [makeNode({ name: 'crate', id: OWN }), makeNode({ name: 'plain', id: TGT })]
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0] })
+  form.open(nodes[0])
+  form.onTemplateChange('select-light')
+  form.render()
+  assert.equal(statusOf(elements), FIELD_TEXTS.noLights)
+  assert.equal(elements.save.disabled, true)
+  assert.equal(form.save(), null)
+  assert.deepEqual(calls.setObjectId, [])
+  assert.deepEqual(calls.sendField, [])
+})
+
+test('X3 — no target held says "Choose a target"', () => {
+  const cube = makeNode({ name: 'crate', id: OWN, behavior: templateGraph('select-visibility', { target: TGT, action: 'hide' }, { ownId: OWN }) })
+  const { form, elements, calls } = setup({ nodes: [cube], selected: cube })   // the target is gone
+  form.open(cube)
+  form.render()
+  assert.equal(statusOf(elements), FIELD_TEXTS.noTarget)
+  assert.equal(elements.save.disabled, true)
+  assert.equal(form.save(), null, 'Save cannot be forced past the check')
+  assert.deepEqual(calls.setObjectId, [])
+  assert.deepEqual(calls.sendField, [])
+})
+
+test('X3 — a loaded model with no clips says "This model has no animations"', () => {
+  const nodes = x3World()
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: [] } })
+  form.open(nodes[0])
+  form.onTemplateChange('select-animation')
+  form.onParamChange('target', TGT)
+  form.render()
+  assert.equal(statusOf(elements), FIELD_TEXTS.noAnimations)
+  assert.equal(elements.save.disabled, true)
+  assert.equal(form.save(), null)
+  assert.deepEqual(calls.sendField, [])
+})
+
+test('X3 — a clip select with nothing held says "Choose a clip"', () => {
+  const nodes = x3World()
+  nodes[0] = makeNode({
+    name: 'crate', id: OWN,
+    behavior: templateGraph('interval-animation', { target: TGT, clip: 'Survey', loop: true, seconds: 5 }, { ownId: OWN }),
+  })
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle', 'Walk'] } })
+  form.open(nodes[0])
+  form.render()
+  assert.equal(statusOf(elements), FIELD_TEXTS.noClip)
+  assert.equal(elements.save.disabled, true)
+  assert.equal(form.save(), null)
+  assert.deepEqual(calls.sendField, [])
+})
+
+test('X3 — an empty clip text box says "Type a clip name"', () => {
+  const nodes = x3World()
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0] })   // clips unknown: a text box
+  form.open(nodes[0])
+  form.onTemplateChange('select-animation')
+  form.onParamChange('target', TGT)
+  form.render()
+  assert.equal(statusOf(elements), FIELD_TEXTS.emptyClip)
+  assert.equal(elements.save.disabled, true)
+  assert.equal(form.save(), null)
+  assert.deepEqual(calls.sendField, [])
+})
+
+test('X3 — a radius outside 0.5 to 50 m, or not a number, says so', () => {
+  for (const radius of [0.4, 50.5, 0, -1, NaN, Number('')]) {
+    const nodes = x3World()
+    const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    form.open(nodes[0])
+    form.onTemplateChange('proximity-animation')
+    form.onParamChange('target', TGT)
+    form.onParamChange('radius', radius)
+    form.render()
+    assert.equal(statusOf(elements), FIELD_TEXTS.radius, `radius ${radius}`)
+    assert.equal(elements.save.disabled, true, `radius ${radius}: Save is disabled`)
+    assert.equal(form.save(), null, `radius ${radius}: nothing goes out`)
+    assert.deepEqual(calls.sendField, [])
+    // X4 — a held value that isn't a number leaves the box empty.
+    const box = controlFor(elements, 'radius')
+    assert.equal(box.value, Number.isFinite(radius) ? String(radius) : '')
+  }
+  // The bounds themselves pass, through the imported limits.
+  for (const radius of [0.5, 50]) {
+    const nodes = x3World()
+    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    form.open(nodes[0])
+    form.onTemplateChange('proximity-animation')
+    form.onParamChange('target', TGT)
+    form.onParamChange('radius', radius)
+    form.render()
+    assert.equal(statusOf(elements), '', `radius ${radius} is inside the bounds`)
+    assert.equal(elements.save.disabled, false)
+  }
+})
+
+test('X3 — an interval outside 1 to 3600 seconds, or not a whole number, says so', () => {
+  for (const seconds of [0, 3601, 1.5, NaN, Number('')]) {
+    const nodes = x3World()
+    const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    form.open(nodes[0])
+    form.onTemplateChange('interval-animation')
+    form.onParamChange('target', TGT)
+    form.onParamChange('seconds', seconds)
+    form.render()
+    assert.equal(statusOf(elements), FIELD_TEXTS.seconds, `seconds ${seconds}`)
+    assert.equal(elements.save.disabled, true)
+    assert.equal(form.save(), null)
+    assert.deepEqual(calls.sendField, [])
+  }
+  for (const seconds of [1, 3600]) {
+    const nodes = x3World()
+    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    form.open(nodes[0])
+    form.onTemplateChange('interval-animation')
+    form.onParamChange('target', TGT)
+    form.onParamChange('seconds', seconds)
+    form.render()
+    assert.equal(statusOf(elements), '', `seconds ${seconds} is inside the bounds`)
+  }
+})
+
+test('X3 — a value that passes the fields but fails behaviorCheck says "Can\'t save: …"', () => {
+  const nodes = x3World()
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0] })   // clips unknown: a text box
+  form.open(nodes[0])
+  form.onTemplateChange('select-animation')
+  form.onParamChange('target', TGT)
+  // 400 characters: the field check only asks for a name, F1 caps the clip at
+  // 300 (BEHAVIOR_CLIP_MAX), so the whole-value check is what refuses it.
+  form.onParamChange('clip', 'x'.repeat(400))
+  form.render()
+  assert.equal(elements.save.disabled, false, 'the fields alone are happy')
+
+  assert.equal(form.save(), null)
+  assert.equal(statusOf(elements), "Can't save: animations is malformed")
+  assert.deepEqual(calls.setObjectId, [], 'no setObjectId')
+  assert.deepEqual(calls.sendField, [], 'no leaf')
+})
+
+test('X3 — a valid value still saves in its usual stages, and no stand-in reaches a send', () => {
+  const crate = makeNode({ name: 'crate' })               // no id: stage 1 gives it one
+  const fox = makeNode({ name: 'fox', id: TGT, model: { url: 'a.glb' } })
+  const { form, calls, accept } = setup({ nodes: [crate, fox], selected: crate, clips: { [TGT]: ['Idle'] } })
+  form.open(crate)
+  form.onTemplateChange('interval-animation')
+  form.onParamChange('target', TGT)
+  form.onParamChange('clip', 'Idle')
+  const generation = form.save()
+  assert.equal(typeof generation, 'number')
+
+  assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate'], 'stage 1')
+  assert.equal(calls.sendField.length, 0)
+  accept(1)
+
+  assert.equal(calls.sendField.length, 1, 'stage 3')
+  const value = calls.sendField[0][2]
+  assert.equal(value.template.id, 'interval-animation')
+  assert.equal(value.nodeMap[0], calls.setObjectId[0][1], 'the real id, never a stand-in')
+  const serialized = JSON.stringify(calls.sendField)
+  assert.equal(serialized.includes('00000000-0000-4000-8000-'), false, 'no stand-in was ever sent')
+})
+
 // A small guard on the stand-ins X3 builds (round 7, step 2): they are in the
 // rule's own id form, so the pre-stage check can never be refused for them.
 test('X3 — the check\'s stand-in ids are in OBJECT_ID_RE\'s form', () => {
