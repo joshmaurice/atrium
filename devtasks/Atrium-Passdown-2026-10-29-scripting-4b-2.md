@@ -242,8 +242,24 @@ the background or loaded before the last deploy.
    stage-answer id switch is removed.
 3. **4a's item 4** (selection bounds from one pose): deferred to 4d or a
    polish round (pre-brief F-L12).
-4. **4b-1 passdown §6.2** (signed in on the page, anonymous on the server)
-   and **§6.3** (`KHR_animation_pointer` models): unchanged.
+4. **4b-1 passdown §6.3** (`KHR_animation_pointer` models): unchanged.
+
+### 6.7 Open, and wider than recorded: the top bar and the viewport disagree about who you are
+4b-1 passdown §6.2 (signed in on the page, anonymous on the server) is **not
+fixed**. The operator has since seen a second form of it: **signed in as one
+user in the viewport and as another in the top bar.**
+- **A likely cause, from the code (not confirmed):** the session cookie is
+  shared by every tab, but each page reads `/api/auth/me` once, at load, and
+  never again. If another tab signs out and signs in as someone else, this
+  tab's top bar keeps the old name, and its next connect or teleport is
+  admitted with the new cookie as the new user. The anonymous case is the
+  same mechanism with an expired or cleared session.
+- **The fix proposed there covers both:** re-check `/api/auth/me` before each
+  connect or teleport and when the tab becomes visible; and have `hello`
+  say who the server admitted (authenticated or not, and as whom), so the
+  page can compare it with the top bar and re-check or say so on a
+  mismatch. Worth its own small round before 4c, since 4c is where visitors'
+  and owners' identities start to matter for behaviours.
 5. The edit-polish-3 passdown §6.3, items 1–6 and 8: unchanged.
 
 ## 7. Cleanup (operator, host)
