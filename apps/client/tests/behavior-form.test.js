@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 
 import {
   createBehaviorForm, NONE_LABEL, CUSTOM_LABEL, BEHAVIOR_STATUS, matchesTemplate, targetKindFor,
-  HINT_TEXT, HINT_LIGHT_ON, HINT_ONE_CLICK, HINT_CLIP_END, NO_LIGHTS, UNDO_NOTE,
+  HINT_TEXT, HINT_LIGHT_ON, HINT_ONE_CLICK, HINT_CLIP_END, NO_LIGHTS, UNDO_NOTE, CHOOSE_TARGET,
 } from '../src/behavior-form.js'
 import { createFormGate } from '../src/model-form.js'
 import { templateGraph, TEMPLATE_IDS } from '@atrium/behaviors/templates'
@@ -107,7 +107,9 @@ test('F9 — Save on a node with no id sends setObjectId FIRST, then the leaf af
 })
 
 test('F9 — all three stages complete in order, and the final value is the template\'s', () => {
-  const target = makeNode({ name: 'target' })
+  // X4 (round 7) — the target of an animation template must be a model the
+  // picker can offer: a held value that isn't among the options becomes ''.
+  const target = makeNode({ name: 'target', model: { url: 'a.glb' } })
   const node = makeNode({ name: 'crate' })
   const { form, calls, accept } = setup({ nodes: [node, target], selected: node })
   form.open(node)
@@ -142,7 +144,8 @@ test('F9 — a refused id stops the sequence, with the server\'s text', () => {
 })
 
 test('F9 — a selection change after the first acknowledgement stops the sequence (M4)', () => {
-  const target = makeNode({ name: 'target' })
+  // X4 — a model target, as the animation templates' picker requires.
+  const target = makeNode({ name: 'target', model: { url: 'a.glb' } })
   const node = makeNode({ name: 'crate' })
   const other = makeNode({ name: 'other', id: OTHER })
   const { form, calls, setSelected } = setup({ nodes: [node, target, other], selected: node })
@@ -293,7 +296,7 @@ test('F9 — the picker filters per template', () => {
   form.open(node)
   form.onTemplateChange('select-animation')
   form.render()
-  const listed = elements.params.children.map((row) => row.children[0])
+  const listed = elements.params.children.map((row) => row.children[1])
   const targetField = listed[0]
   assert.deepEqual(targetField.children.map((o) => o.textContent), ['foz'], 'models only')
 })
@@ -305,7 +308,9 @@ test('F9 — the light template with no lights says so', () => {
   form.open(node)
   form.onTemplateChange('select-light')
   assert.equal(form.state.template, 'select-light')
-  assert.deepEqual(elements.params.children.map((row) => row.children[0]).map((f) => f.children.length), [0], 'no target offered')
+  const target = elements.params.children.map((row) => row.children[1])[0]
+  assert.deepEqual(target.children.map((o) => o.value), [''], 'X4 — only the placeholder is offered')
+  assert.equal(target.children[0].textContent, CHOOSE_TARGET)
 })
 
 // ── R1 (C2, completed): the light template's on-value and its help text ────
@@ -354,9 +359,11 @@ test('R1 — a light whose intensity is non-finite or missing writes on = 1', ()
     ['NaN', { intensity: NaN }],
     ['Infinity', { intensity: Infinity }],
     ['-Infinity', { intensity: -Infinity }],
+    // X4 (round 7) — the picker only offers a node that CARRIES a light, so the
+    // old `null` case (no light object at all) is now unreachable through the
+    // form; a light node whose `light` is an empty object stands in for it.
     ['a missing intensity', {}],
     ['a non-numeric intensity', { intensity: '2' }],
-    ['no light object at all', null],
   ]
   for (const [what, light] of cases) {
     const { calls } = saveLightOn(light)
@@ -589,7 +596,8 @@ test("V2 — a Custom graph's Enabled works, and touches nothing but `enabled`",
 // ── V10 — Save follows the target it recorded (M7) ────────────────────────
 
 test('V10 — a target removed and replaced by the same name cancels the Save (M7)', () => {
-  const lamp = makeNode({ name: 'Lamp' })          // no id at Save
+  // X4 — an animation template's target must be a model on offer.
+  const lamp = makeNode({ name: 'Lamp', model: { url: 'a.glb' } })   // no id at Save
   const crate = makeNode({ name: 'crate' })        // the behaviour node, no id either
   const { form, calls, accept, setNodes } = setup({ nodes: [crate, lamp], selected: crate })
   form.open(crate)
@@ -600,7 +608,7 @@ test('V10 — a target removed and replaced by the same name cancels the Save (M
   assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate'], 'stage 1 went out')
 
   // The review's scenario: Lamp is removed and a NEW node named Lamp is added.
-  const replacement = makeNode({ name: 'Lamp' })
+  const replacement = makeNode({ name: 'Lamp', model: { url: 'a.glb' } })
   setNodes([crate, replacement])
   accept(1)
   assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate'], 'no further stage went out')
@@ -609,7 +617,7 @@ test('V10 — a target removed and replaced by the same name cancels the Save (M
 })
 
 test("V10 — a target whose id changes between stages cancels the Save", () => {
-  const lamp = makeNode({ name: 'Lamp' })
+  const lamp = makeNode({ name: 'Lamp', model: { url: 'a.glb' } })
   const crate = makeNode({ name: 'crate' })        // no id: stage 1 gives it one
   const { form, calls, accept } = setup({ nodes: [crate, lamp], selected: crate })
   form.open(crate)
@@ -658,7 +666,7 @@ test('V11 — the light template with no lights has no target and cannot be save
   const { form, elements, calls } = setup({ nodes: [node, plain], selected: node })
   form.open(node)
   form.onTemplateChange('select-light')
-  assert.equal(form.state.targetId, null, 'nothing of the wrong kind is picked')
+  assert.equal(form.state.targetId, '', 'X4 — nothing of the wrong kind is picked, so nothing is held')
   assert.equal(elements.save.disabled, true, 'and Save is disabled')
   assert.equal(form.save(), null, 'nothing goes out')
   assert.equal(calls.sendField.length, 0)
@@ -727,7 +735,7 @@ test('V13 — opening the Behaviour section never closes the gate\'s current for
 })
 
 test('V13 — Edit off closes the section and cancels a Save in flight (M4)', () => {
-  const lamp = makeNode({ name: 'Lamp' })            // no id: stage 2 is the pending one
+  const lamp = makeNode({ name: 'Lamp', model: { url: 'a.glb' } })  // no id: stage 2 is the pending one
   const crate = makeNode({ name: 'crate', id: OWN })
   const { form, calls, accept } = setup({ nodes: [crate, lamp], selected: crate })
   form.open(crate)
@@ -754,7 +762,7 @@ test('V5 — a loaded model shows its clips as a `<select>`', () => {
   form.onParamChange('target', TGT)
   form.render()
 
-  const fields = elements.params.children.map((row) => row.children[0])
+  const fields = elements.params.children.map((row) => row.children[1])
   const clipField = fields.find((f) => f.dataset.field === 'clip')
   assert.ok(clipField, 'the clip field is rendered')
   assert.equal(clipField.tagName, 'select', 'a loaded model gives a select, not a text box')
@@ -767,6 +775,6 @@ test('V5 — a loaded model shows its clips as a `<select>`', () => {
   f2.onTemplateChange('select-animation')
   f2.onParamChange('target', TGT)
   f2.render()
-  const clip2 = e2.params.children.map((row) => row.children[0]).find((f) => f.dataset.field === 'clip')
+  const clip2 = e2.params.children.map((row) => row.children[1]).find((f) => f.dataset.field === 'clip')
   assert.equal(clip2.tagName, 'input', 'no ids, no select')
 })

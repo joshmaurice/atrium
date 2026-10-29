@@ -24,6 +24,8 @@
 //  - `change` dispatches only on those inputs, and a `<button>` dispatches
 //    `click` (and nothing else).
 
+import assert from 'node:assert/strict'
+
 const CHECKABLE = new Set(['checkbox', 'radio'])
 // W8 (round 6) — the DOM fires `change` on a `<select>` and on a text or number
 // `<input>` too, not only on a checkbox or radio. The old rule delivered it to
@@ -61,6 +63,10 @@ export function el(tag = 'div') {
   const style = {}
   const dataset = {}
   const classes = new Set()
+  // X1 (round 7) — `aria-label` is a real ATTRIBUTE of a real page's control,
+  // and the form writes it with `setAttribute`. The old fake had no attribute
+  // map at all, so a control's label could not be checked.
+  const attributes = new Map()
   const node = {
     tagName: tag,
     children: [],
@@ -69,8 +75,12 @@ export function el(tag = 'div') {
     selected: false,
     type: '',
     title: '',
+    placeholder: '',
     _text: '',
     _checked: false,
+    setAttribute(name, value) { attributes.set(String(name), String(value)) },
+    getAttribute(name) { return attributes.has(String(name)) ? attributes.get(String(name)) : null },
+    hasAttribute(name) { return attributes.has(String(name)) },
     // W8 — the listener map, so a bubbling dispatch can read an ancestor's.
     _listeners: listeners,
     appendChild(child) {
@@ -143,5 +153,44 @@ export function elementsFor() {
     row: el(), select: el('select'), params: el(), actions: el(),
     enabled: el('button'), save: el('button'), remove: el('button'),
     status: el(), note: el(), hint: el(), logLines: el(), log: el(),
+  }
+}
+
+/**
+ * X4 (round 7) — THE invariant, asserted after every render: each field shows
+ * exactly what the form will send. One helper for every test that renders the
+ * section, so a field that displays one value while the form holds another
+ * (§1.2 item 4: the picker showed ToyCar and Survey, the form held `name:Fox`
+ * and `''`) cannot pass anywhere.
+ *
+ * Rows are `div.ep-row`s: `children[0]` is the label `span`, `children[1]` the
+ * control. A row with no control (X2's "This model has no animations") has no
+ * `data-field` to read and is skipped.
+ *
+ * @param {{state: object}} form
+ * @param {object} elements
+ */
+export function shownEqualsHeld(form, elements = {}) {
+  const held = form.state
+  for (const row of elements.params?.children ?? []) {
+    const control = row.children[1] ?? null
+    const key = control?.dataset?.field
+    if (!control || !key) continue
+    const value = key === 'target' ? held.targetId : held.params[key]
+    if (control.tagName === 'select') {
+      const selected = control.children.find((option) => option.selected) ?? null
+      const values = control.children.map((option) => option.value)
+      assert.equal(values.includes(value), true,
+        `${key}: the held value "${value}" is among the select's options`)
+      assert.ok(selected, `${key}: an option is selected`)
+      assert.equal(selected.value, value, `${key}: the selected option is the held value`)
+    } else if (control.type === 'checkbox') {
+      assert.equal(control.checked, value === true, `${key}: checked is the held boolean`)
+    } else if (control.type === 'number') {
+      const shown = typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+      assert.equal(control.value, shown, `${key}: the number box shows the held number, or is empty`)
+    } else {
+      assert.equal(control.value, value ?? '', `${key}: the text box shows the held string`)
+    }
   }
 }

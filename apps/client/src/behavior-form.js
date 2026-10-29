@@ -19,10 +19,41 @@
 import {
   templateGraph, TEMPLATE_IDS, TEMPLATE_LABELS, TEMPLATE_FIELDS, TEMPLATE_ACTIONS, TEMPLATE_DEFAULTS,
 } from '@atrium/behaviors/templates'
-import { behaviorReasonText } from '@atrium/behaviors/behavior-spec'
+import {
+  behaviorReasonText, behaviorCheck,
+  BEHAVIOR_PROX_MIN, BEHAVIOR_PROX_MAX, BEHAVIOR_INTERVAL_MIN, BEHAVIOR_INTERVAL_MAX,
+} from '@atrium/behaviors/behavior-spec'
 
 export const NONE_LABEL = 'None'
 export const CUSTOM_LABEL = 'Custom graph'
+
+/**
+ * X1 (round 7) — each parameter's label. The section shows WORDS, never the raw
+ * key: in the 250 px panel `target `, `clip ` and the rest read as one run of
+ * text, and the operator took the target `<select>` for the clip list (§1.2
+ * item 1).
+ */
+export const FIELD_LABELS = Object.freeze({
+  target: 'Target',
+  clip: 'Clip',
+  action: 'Action',
+  loop: 'Loop',
+  radius: 'Radius (m)',
+  seconds: 'Every (s)',
+})
+
+/** X2 (round 7) — a loaded model with no clips has nothing to offer. */
+export const NO_ANIMATIONS = 'This model has no animations'
+
+/** X2 — the clip text box's placeholder, for clips the host doesn't know yet. */
+export const CLIP_PLACEHOLDER = 'clip name'
+
+/** X4 (round 7) — the placeholder option a select gets when nothing is held. */
+export const CHOOSE_TARGET = 'Choose a target…'
+export const CHOOSE_CLIP = 'Choose a clip…'
+
+/** A form error the pre-stage check raises: F1's own plain text, prefixed. */
+export const CANT_SAVE = "Can't save: "
 
 /** D4 — the one line under the status, shown once. */
 export const UNDO_NOTE = 'Behaviour changes are saved with the world and aren’t undone by Undo.'
@@ -52,6 +83,23 @@ export const HINT_CLIP_END = 'A clip\'s end doesn\'t trigger anything.'
  * lines (`elements.noLights` was a second, unwired path and stays a no-op).
  */
 export const NO_LIGHTS = 'This world has no lights'
+
+/**
+ * X3 (round 7) — the field check's texts, in the order the check gives them.
+ * The two bounds are the imported limits, never retyped (§1.2 item 3: the
+ * owner read F1's code-level ``animations is malformed`` instead of a plain
+ * sentence about the field).
+ */
+export const FIELD_TEXTS = Object.freeze({
+  noLights: NO_LIGHTS,
+  noTarget: 'Choose a target',
+  noAnimations: NO_ANIMATIONS,
+  noClip: 'Choose a clip',
+  emptyClip: 'Type a clip name',
+  radius: `Radius must be from ${BEHAVIOR_PROX_MIN} to ${BEHAVIOR_PROX_MAX} m`,
+  seconds: `The interval must be from ${BEHAVIOR_INTERVAL_MIN} to ${BEHAVIOR_INTERVAL_MAX} seconds`,
+})
+
 
 /** F9 — the status texts. */
 export const BEHAVIOR_STATUS = Object.freeze({
@@ -129,6 +177,7 @@ const isAvatar = (node) => node?.extras?.atrium?.ephemeral === true
  * @param {() => Array<object>} args.deps.nodes        every saved node
  * @param {({from, to}) => boolean} [args.deps.moveNode]  n/a — ids never change
  * @param {() => {state: string, reason?: string}} [args.deps.status]  the runner's view
+ * @param {(objectId: string) => Array<string>|undefined} [args.deps.clipIds]  the host's clips
  * @param {object} args.deps.write                    `{ setObjectId, sendField }`
  * @param {() => string} [args.deps.newObjectId]
  * @param {(element: object) => void} [args.deps.focus]
@@ -153,6 +202,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     status: '',
     error: null,
     saving: false,
+    // X2/X4 (round 7) — the target's clips as this render sees them:
+    // `{ known, clipIds }`. `known` is false until the host says.
+    clip: { known: false, clipIds: [] },
     generation: 0,
     sequence: null,       // the snapshot Save is bound to
     pending: null,        // { seq, stage, generation }
@@ -202,10 +254,17 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     })
   }
 
-  /** The target's clip ids, when the host knows them (`deps.clipIds`). */
-  function clipIdsFor(node) {
-    const id = node?.extras?.atrium?.objectId
-    return (id ? deps.clipIds?.(id) : null) ?? []
+  /**
+   * X2 (round 7) — the target's clips, as `{ known, clipIds }`. `known` is
+   * FALSE while the host hasn't answered (the load is still running, or there
+   * is no record yet): that is the text box's case. `known` with an EMPTY list
+   * is a loaded model with no animations at all (a library model), which is
+   * §1.2 item 2 — it used to fall back to the text box and Save sent `''`.
+   */
+  function clipInfoFor(node) {
+    const id = node?.extras?.atrium?.objectId ?? null
+    const ids = id ? deps.clipIds?.(id) : undefined
+    return Array.isArray(ids) ? { known: true, clipIds: ids } : { known: false, clipIds: [] }
   }
 
   /**
@@ -228,7 +287,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       else if (key === 'loop') params.loop = TEMPLATE_DEFAULTS.loop
       else if (key === 'radius') params.radius = TEMPLATE_DEFAULTS.radius
       else if (key === 'seconds') params.seconds = TEMPLATE_DEFAULTS.seconds
-      else if (key === 'clip') params.clip = clipIdsFor(target)[0] ?? ''
+      else if (key === 'clip') params.clip = clipInfoFor(target).clipIds[0] ?? ''
       else if (key === 'intensity') params.intensity = lightIntensity(target)
     }
     return params
@@ -495,9 +554,34 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     render()
   }
 
+  /**
+   * X3 (round 7) — the stand-in ids the pre-stage check builds its value with,
+   * for every id the sequence has not given yet. They are in `OBJECT_ID_RE`'s
+   * form, they are distinct (the rule requires a unique `nodeMap`), and they
+   * NEVER reach a send: the check builds a COPY of the snapshot.
+   */
+  const STAND_IN = Object.freeze({
+    own: '00000000-0000-4000-8000-000000000001',
+    target: '00000000-0000-4000-8000-000000000002',
+  })
+
+  /** X3 — the value the pre-stage check runs, and the `ownId` it runs with. */
+  function valueForCheck(snapshot) {
+    const own = snapshot.nodeId ?? STAND_IN.own
+    let target = null
+    if (snapshot.target === snapshot.node) target = own
+    else if (snapshot.target) target = snapshot.targetOwnId ?? STAND_IN.target
+    const probe = { ...snapshot, nodeId: own, targetOwnId: target }
+    return { value: valueForSave(probe), ownId: own }
+  }
+
   function save() {
     if (!state.open || !state.node || state.saving) return null
     if (!state.custom && state.template === NONE_LABEL) return null
+    // X3 — the FIELD check runs again before anything is built or sent.
+    state.clip = clipInfoFor(targetNode())
+    state.error = null
+    if (fieldProblem()) { render(); return null }
     const target = targetNode()
     // V11 — a template is never saved without a usable target: an empty picker
     // (the light template in a world with no lights) leaves Save disabled.
@@ -520,6 +604,15 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       custom: state.custom,
       savedValue: state.saved,
       value: null,
+    }
+    // X3 — the whole-value check, exactly as stage 3 will build it, before a
+    // single byte goes out: on a refusal there is NO `setObjectId` and NO leaf.
+    const { value, ownId: checkedOwnId } = valueForCheck(snapshot)
+    const verdict = behaviorCheck(value, { ownId: checkedOwnId })
+    if (verdict.problem) {
+      state.error = `${CANT_SAVE}${behaviorReasonText(verdict.problem)}`
+      render()
+      return null
     }
     state.sequence = snapshot
     state.saving = true
@@ -621,7 +714,100 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     return ''
   }
 
-  /** One field per template parameter, created through `deps.createElement`. */
+  // -------------------------------------------------------------------------
+  // X3/X4 (round 7) — the field check, and what the fields show
+  // -------------------------------------------------------------------------
+
+  /** The clips a clip `select` may offer: a LOADED list, and nothing else. */
+  const clipOptions = (info) => (info?.known ? info.clipIds : [])
+
+  /**
+   * X4 — every field must show exactly what the form will send. Runs before
+   * every render, and moves only the HELD values: a target that is no longer
+   * offered, a stored clip the loaded model doesn't have, an empty picker
+   * (§1.2 item 4: the picker showed ToyCar and Survey while the form held
+   * `name:Fox` and `''`).
+   */
+  function normalise() {
+    if (!state.open || state.custom || state.template === NONE_LABEL) return
+    const wasEdited = unsavedEdit()
+    // X6 — a held `name:<name>` whose node has an `objectId` now becomes that
+    // id, so the picker's option and the held value stay the same string.
+    const target = targetNode()
+    if (target && state.targetId === `name:${target.name}`) {
+      const id = target.extras?.atrium?.objectId ?? null
+      if (id) state.targetId = id
+    }
+    // X4 — the target's held value must be one of the picker's options.
+    if (!pickable().some((node) => pickerValue(node) === state.targetId)) state.targetId = ''
+    state.params = { ...state.params, target: state.targetId }
+    // X4 — and the clip's, when the clip is a select.
+    if (TEMPLATE_FIELDS[state.template].includes('clip')) {
+      const clips = clipOptions(state.clip)
+      if (clips.length > 0 && !clips.includes(state.params.clip)) {
+        state.params = { ...state.params, clip: '' }
+      }
+    }
+    // X4 — a normalisation isn't an edit: with no unsaved edit before it, W3's
+    // baseline follows the value it moved, so nothing says "Changed in another
+    // tab" about the form's own correction.
+    if (!wasEdited) {
+      state.baseline = { template: state.template, custom: state.custom, params: { ...state.params } }
+    }
+  }
+
+  /**
+   * X3 — the FIRST field problem, in the contract's order, or null. Save is
+   * disabled while there is one and the status line shows its text (§1.2 item
+   * 3: F1's code-level ``animations is malformed`` was what the owner read).
+   */
+  function fieldProblem() {
+    if (state.custom || state.template === NONE_LABEL) return null
+    const fields = TEMPLATE_FIELDS[state.template]
+    if (state.template === 'select-light' && pickable().length === 0) return FIELD_TEXTS.noLights
+    if (!state.targetId) return FIELD_TEXTS.noTarget
+    if (fields.includes('clip')) {
+      const clips = clipOptions(state.clip)
+      if (state.clip.known && clips.length === 0) return FIELD_TEXTS.noAnimations
+      if (clips.length > 0) {
+        if (!clips.includes(state.params.clip)) return FIELD_TEXTS.noClip
+      } else if (!String(state.params.clip ?? '').length) return FIELD_TEXTS.emptyClip
+    }
+    if (fields.includes('radius')) {
+      const radius = state.params.radius
+      const ok = typeof radius === 'number' && Number.isFinite(radius)
+        && radius >= BEHAVIOR_PROX_MIN && radius <= BEHAVIOR_PROX_MAX
+      if (!ok) return FIELD_TEXTS.radius
+    }
+    if (fields.includes('seconds')) {
+      const seconds = state.params.seconds
+      const ok = Number.isInteger(seconds)
+        && seconds >= BEHAVIOR_INTERVAL_MIN && seconds <= BEHAVIOR_INTERVAL_MAX
+      if (!ok) return FIELD_TEXTS.seconds
+    }
+    return null
+  }
+
+  /**
+   * X3 — the status line's ONE writer. A Save's own error comes first, then
+   * "Saving…", then the field check's text, then the form's own note and the
+   * runner's status.
+   */
+  function statusLine() {
+    const reported = deps.status?.() ?? {}
+    if (state.error) return state.error
+    if (state.saving || reported.state === 'saving') return BEHAVIOR_STATUS.saving
+    const problem = fieldProblem()
+    if (problem) return problem
+    return state.status || statusText()
+  }
+
+  /**
+   * X1 (round 7) — one field per row, each with its OWN `span` label: the
+   * `div.ep-row` the panel's other fields use (a 58 px label `span`, then the
+   * control), the label a word from `FIELD_LABELS`, and the control's
+   * `aria-label` the same. No `<label>` wraps a control.
+   */
   function renderParams() {
     const container = elements.params
     if (!container) return
@@ -635,16 +821,29 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
     for (const key of TEMPLATE_FIELDS[state.template]) {
       if (key === 'intensity') continue               // C2 — read at save time
-      const row = create('label'); if (!row) continue
-      row.textContent = `${key} `
+      const row = create('div')
+      if (!row) continue
+      row.classList.add('ep-row')
+      const label = create('span')
+      label.textContent = FIELD_LABELS[key] ?? key
+      row.appendChild(label)
       let field = null
       if (key === 'target') {
         field = create('select')
-        for (const node of pickable()) {
+        const nodes = pickable()
+        // X4 — a held value that isn't among the options gets a placeholder
+        // first option, and the form holds `''`.
+        if (!nodes.some((node) => pickerValue(node) === state.targetId)) {
+          const placeholder = create('option')
+          placeholder.value = ''
+          placeholder.textContent = CHOOSE_TARGET
+          placeholder.selected = true
+          field.appendChild(placeholder)
+        }
+        for (const node of nodes) {
           const option = create('option')
-          const id = node.extras?.atrium?.objectId ?? null
           // A node without an id is listed too: Save gives it one first (F9).
-          option.value = id ?? `name:${node.name}`
+          option.value = pickerValue(node)
           option.textContent = node.name
           if (option.value === state.targetId) option.selected = true
           field.appendChild(option)
@@ -661,9 +860,26 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
         }
         setDataField(field, 'action')
       } else if (key === 'clip') {
-        const clips = clipIdsFor(targetNode())
+        const clips = clipOptions(state.clip)
+        if (state.clip.known && clips.length === 0) {
+          // X2 — a loaded model with no animations says so, in place of a
+          // control. The empty text box this replaces let Save send `''`, which
+          // the server refused with F1's "animations is malformed" (§1.2 item 2).
+          const none = create('span')
+          none.textContent = NO_ANIMATIONS
+          row.appendChild(none)
+          container.appendChild(row)
+          continue
+        }
         if (clips.length > 0) {
           field = create('select')
+          if (!clips.includes(state.params.clip)) {
+            const placeholder = create('option')
+            placeholder.value = ''
+            placeholder.textContent = CHOOSE_CLIP
+            placeholder.selected = true
+            field.appendChild(placeholder)
+          }
           for (const clip of clips) {
             const option = create('option')
             option.value = clip
@@ -672,22 +888,28 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
             field.appendChild(option)
           }
         } else {
+          // X2 — the clips aren't known yet (loading, or no record): the text
+          // box keeps its place, now with a placeholder.
           field = create('input')
           field.value = state.params.clip ?? ''
+          field.placeholder = CLIP_PLACEHOLDER
         }
         setDataField(field, 'clip')
       } else if (key === 'loop') {
         field = create('input')
         field.type = 'checkbox'
-        field.checked = state.params.loop !== false
+        field.checked = state.params.loop === true
         setDataField(field, 'loop')
       } else if (key === 'radius' || key === 'seconds') {
+        // X4 — the held number, or EMPTY when the held value isn't a number.
+        const held = state.params[key]
         field = create('input')
         field.type = 'number'
-        field.value = String(state.params[key] ?? '')
+        field.value = typeof held === 'number' && Number.isFinite(held) ? String(held) : ''
         setDataField(field, key)
       }
       if (field) {
+        field.setAttribute('aria-label', FIELD_LABELS[key] ?? key)
         // W8 (round 6) — the parameter fields are disabled while a Save is in
         // flight, exactly as the template picker is: nothing may change under
         // the value the sequence is building.
@@ -746,6 +968,12 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     }
     show(elements.actions, true)
 
+    // X2/X4 — the clip status this render draws from, then the held values'
+    // normalisation (which may move the target), then the status again.
+    state.clip = clipInfoFor(targetNode())
+    normalise()
+    state.clip = clipInfoFor(targetNode())
+
     if (elements.select) {
       elements.select.value = state.custom ? CUSTOM_LABEL : state.template
       elements.select.disabled = Boolean(state.saving)
@@ -765,14 +993,17 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       elements.enabled.textContent = state.enabled ? 'Enabled' : 'Disabled'
     }
     if (elements.save) {
-      // V11 — a template with no usable target can't be saved either.
-      elements.save.disabled = state.custom || isNone || !state.targetId || Boolean(state.saving)
+      // V11 — a template with no usable target can't be saved either. X3 —
+      // and neither can one with a field the check refuses.
+      elements.save.disabled = state.custom || isNone || !state.targetId
+        || Boolean(fieldProblem()) || Boolean(state.saving)
       elements.save.textContent = state.saving ? 'Saving…' : 'Save'
     }
     // "Custom graph" shows Enabled and Remove only.
     if (elements.remove) elements.remove.disabled = isNone || Boolean(state.saving)
 
-    text(elements.status, state.error ?? (state.status || statusText()))
+    // X3 — the status line's precedence lives in `statusLine`.
+    text(elements.status, statusLine())
     text(elements.note, UNDO_NOTE)
     if (elements.logLines) {
       const lines = deps.logLines?.(state.node?.name) ?? []

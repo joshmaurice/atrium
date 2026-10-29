@@ -25,7 +25,7 @@ import {
   createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL, BEHAVIOR_STATUS,
 } from '../src/behavior-form.js'
 import { templateGraph } from '@atrium/behaviors/templates'
-import { el, elementsFor, firesChange } from './strict-element.mjs'
+import { el, elementsFor, firesChange, shownEqualsHeld } from './strict-element.mjs'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const TGT = '22222222-2222-4222-8222-222222222222'
@@ -201,7 +201,10 @@ test('W3 (d) — a Save in flight: its own three stages\' echoes cannot cancel i
 
 test('W3 (e) — another tab changes the leaf under an unsaved edit', () => {
   const X = makeNode({ name: 'crate', id: OWN, behavior: visibilityValue('hide') })
-  const { form, elements, echoLeaf } = setup({ nodes: [X], selected: X })
+  // X4 (round 7) — the world carries the node the other tab's value targets,
+  // so the stored value has no field problem of its own to report.
+  const Y = makeNode({ name: 'other', id: TGT })
+  const { form, elements, echoLeaf } = setup({ nodes: [X, Y], selected: X })
   form.open(X)
   form.onTemplateChange('select-visibility')              // an UNSAVED picker change
   form.onParamChange('action', 'show')
@@ -209,8 +212,8 @@ test('W3 (e) — another tab changes the leaf under an unsaved edit', () => {
   assert.equal(elements.status.textContent, '', 'nothing said yet')
 
   // Another tab writes a DIFFERENT stored value.
-  echoLeaf(X, templateGraph('select-light', { target: TGT, action: 'on', intensity: 2 }, { ownId: OWN }))
-  assert.equal(form.state.template, 'select-light', 'the stored value is shown, not the unsaved edit')
+  echoLeaf(X, templateGraph('select-visibility', { target: TGT, action: 'toggle' }, { ownId: OWN }))
+  assert.equal(form.state.template, 'select-visibility', 'the stored value is shown, not the unsaved edit')
   assert.equal(elements.status.textContent, BEHAVIOR_STATUS.changed, 'and the line says so')
 })
 
@@ -244,7 +247,7 @@ test('W8 — the picker and every parameter field are disabled while a Save is i
   form.onTemplateChange('select-animation')
   form.onParamChange('target', TGT)
   form.render()
-  const fields = () => elements.params.children.map((row) => row.children[0])
+  const fields = () => elements.params.children.map((row) => row.children[1])
   assert.ok(fields().length >= 2, 'the parameter fields are rendered')
   assert.equal(fields().every((f) => f.disabled === false), true, 'editable before the Save')
 
@@ -253,6 +256,8 @@ test('W8 — the picker and every parameter field are disabled while a Save is i
   form.render()
   assert.equal(elements.select.disabled, true, 'the picker is disabled')
   assert.equal(fields().every((f) => f.disabled === true), true, 'and every parameter field')
+  // X4 — and every field still shows what the form will send.
+  shownEqualsHeld(form, elements)
 })
 
 test('W8 — the strict fake drives the REAL picker and parameter listeners', () => {
@@ -269,7 +274,7 @@ test('W8 — the strict fake drives the REAL picker and parameter listeners', ()
   assert.equal(form.state.template, 'select-animation', 'the picker\'s own listener ran')
 
   form.render()
-  const fields = elements.params.children.map((row) => row.children[0])
+  const fields = elements.params.children.map((row) => row.children[1])
   const byField = (name) => fields.find((f) => f.dataset.field === name)
 
   // The parameter container's DELEGATED `change` (its listener is on the
@@ -283,7 +288,7 @@ test('W8 — the strict fake drives the REAL picker and parameter listeners', ()
   assert.equal(form.state.params.clip, 'Walk', 'the clip reached onParamChange')
 
   form.render()
-  const loop = elements.params.children.map((row) => row.children[0]).find((f) => f.dataset.field === 'loop')
+  const loop = elements.params.children.map((row) => row.children[1]).find((f) => f.dataset.field === 'loop')
   assert.equal(loop.type, 'checkbox')
   loop.checked = false
   loop.dispatch('change')
@@ -294,7 +299,7 @@ test('W8 — the strict fake drives the REAL picker and parameter listeners', ()
   form.onTemplateChange('interval-animation')
   form.onParamChange('target', model)
   form.render()
-  const seconds = elements.params.children.map((row) => row.children[0]).find((f) => f.dataset.field === 'seconds')
+  const seconds = elements.params.children.map((row) => row.children[1]).find((f) => f.dataset.field === 'seconds')
   assert.ok(seconds, 'the number field is rendered')
   assert.equal(seconds.type, 'number')
   seconds.value = '7'
