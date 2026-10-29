@@ -1,8 +1,8 @@
 # Revision — scripting-4b-2 round 7 (what DEV acceptance of round 6 found)
 
-**Status:** DRAFT **Rev 0**, for the operator's approval. Nothing here is in
-force until it is approved. Six items, all in the Behaviour form and the Edit
-panel: X1–X6, plus X7 (what doesn't change).
+**Status:** approved by the operator (2026-10-28 23:52 PT), **Rev 0** as
+drafted. Six items, all in the Behaviour form and the Edit panel: X1–X6, plus
+X7 (what doesn't change).
 - **Base:** round 6's published tip `45241157d451f35664261d967218df75b3a08f6d`
   on `workflow/scripting-4b-2`:
   - GLM APPROVE on `t_a25224fc`;
