@@ -21,6 +21,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   createBehaviorForm, FIELD_LABELS, FIELD_TEXTS, NO_ANIMATIONS, CLIP_PLACEHOLDER,
@@ -703,4 +704,50 @@ test('X3 — a valid value still saves in its usual stages, and no stand-in reac
 test('X3 — the check\'s stand-in ids are in OBJECT_ID_RE\'s form', () => {
   assert.equal(OBJECT_ID_RE.test('00000000-0000-4000-8000-000000000001'), true)
   assert.equal(OBJECT_ID_RE.test('00000000-0000-4000-8000-000000000002'), true)
+})
+
+// ══════════════════════════════════════════════════════════════════════════
+// X5 — the Edit panel scrolls
+// ══════════════════════════════════════════════════════════════════════════
+
+const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf-8')
+const APP_SOURCE = readFileSync(new URL('../src/app.js', import.meta.url), 'utf-8')
+
+test('X5 — index.html\'s #edit-panel rule carries the three declarations', () => {
+  const rule = HTML.match(/#edit-panel \{([\s\S]*?)\n  \}/)
+  assert.ok(rule, '#edit-panel has a rule of its own')
+  assert.match(rule[1], /max-height:\s*calc\(100% - 20px\)/, 'max-height: calc(100% - 20px)')
+  assert.match(rule[1], /overflow-y:\s*auto/, 'overflow-y: auto')
+  assert.match(rule[1], /overscroll-behavior:\s*contain/, 'overscroll-behavior: contain')
+})
+
+/**
+ * The wheel listener app.js registers on the viewport, lifted by its TEXT so
+ * the page's own code is what runs — there is no way to import app.js in Node
+ * (`app-wiring.test.js` reads it as text for the same reason), and X5 changes
+ * nothing in it: the guard it has today is the subject.
+ */
+function wheelHandlerFromApp(nav, canvas) {
+  const match = APP_SOURCE.match(
+    /viewportEl\.addEventListener\('wheel',\s*\(e\)\s*=>\s*\{([\s\S]*?)\n\}, \{ passive: false \}\)/)
+  assert.ok(match, 'app.js registers the viewport wheel listener')
+  // eslint-disable-next-line no-new-func
+  return new Function('nav', 'canvas', `return (e) => {${match[1]}\n}`)(nav, canvas)
+}
+
+test('X5 — a wheel over the panel leaves the camera where it was', () => {
+  const zoomed = []
+  const nav = { onWheel: (deltaY) => zoomed.push(deltaY) }
+  const canvas = el('canvas')
+  const panel = el('div')                       // the Edit panel's stand-in
+  let prevented = 0
+  const wheel = wheelHandlerFromApp(nav, canvas)
+
+  wheel({ target: panel, deltaY: 5, preventDefault: () => { prevented += 1 } })
+  assert.deepEqual(zoomed, [], 'the panel scrolls itself; the camera does not move')
+  assert.equal(prevented, 0, 'and nothing is prevented on the panel\'s behalf')
+
+  wheel({ target: canvas, deltaY: 7, preventDefault: () => { prevented += 1 } })
+  assert.deepEqual(zoomed, [7], 'the canvas still zooms')
+  assert.equal(prevented, 1, 'and its default scroll is prevented')
 })

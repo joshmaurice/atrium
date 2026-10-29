@@ -407,6 +407,15 @@
     padding: 10px;
     font-size: 12px;
     z-index: 10;
+    /* X5 (scripting-4b-2 round 7) — the panel scrolls. With the Behaviour
+       section open it ran past the bottom of the window and its last controls
+       could not be reached (§1.2 item 5). Its containing block is #viewport
+       (position: relative), so 10 px top and bottom leave the full panel
+       reachable; the wheel is contained, so scrolling to an end doesn't move
+       the camera. */
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   #edit-panel .ep-title { color: #a78bfa; font-weight: 600; margin-bottom: 8px; }
   #edit-panel .ep-buttons { display: flex; gap: 4px; margin-bottom: 6px; }
