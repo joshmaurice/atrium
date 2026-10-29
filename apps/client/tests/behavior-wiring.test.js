@@ -168,11 +168,22 @@ describe('scripting-4b-2 r5 (V1, V2, V12) — the page obeys the DOM\'s own rule
 describe('scripting-4b-2 r5 (V5, V6) — the clip ids and the own capsule', () => {
   test('V5 — app.js feeds the form the SAME clip ids the adapter checks', () => {
     const code = source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
-    assert.match(code, /import \{ clipsFor \} from '\.\/behavior-clips\.js'/)
-    assert.match(code, /clipIds: \(objectId\) => clipStatusFor\(objectId\)\.clipIds/,
-      'the form\'s picker reads the one source')
-    assert.match(code, /clips: clipStatusFor/, 'and so does the runner (the adapter\'s clip check)')
+    // X6 (round 7) — one source, reached by NODE for the form and by id for the
+    // adapter's S7 check.
+    assert.match(code, /import \{ clipsFor, clipsForNode \} from '\.\/behavior-clips\.js'/)
+    assert.match(code, /clipStatus: \(node\) => clipStatusForNode\(node\)/,
+      'the form\'s picker reads the one source, by NODE')
+    assert.match(code, /function clipStatusForNode\(node\) \{\s*return clipsForNode\(node, \{ modelAnimations \}\)/,
+      'and that IS clipsForNode')
+    assert.match(code, /clips: clipStatusFor/, 'the runner (the adapter\'s clip check) still reads by id')
+    assert.doesNotMatch(code, /clipIds: \(objectId\)/, 'the id-only form dep is gone')
     assert.doesNotMatch(code, /clip ids are not exposed/, 'round 4\'s excuse is gone')
+  })
+
+  test('X2 (r7) — modelAnimations\' onChange tells the form, and only the form decides', () => {
+    const code = source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+    assert.match(code, /onChange: \(name\) => \{[\s\S]{0,400}?behaviorForm\?\.onClipStatusChange\(name\)/,
+      'the clip status change reaches the form')
   })
 
   test('V6 — the V key and the disconnect reset both show/hide the capsule through `setNodeVisible`', () => {

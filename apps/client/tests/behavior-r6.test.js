@@ -26,6 +26,7 @@ import {
 } from '../src/behavior-form.js'
 import { templateGraph } from '@atrium/behaviors/templates'
 import { el, elementsFor, firesChange, shownEqualsHeld } from './strict-element.mjs'
+import { clipsForNode } from '../src/behavior-clips.js'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const TGT = '22222222-2222-4222-8222-222222222222'
@@ -45,6 +46,18 @@ function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
   const applied = new Map()
   let seq = 0
   let clock = 0
+  /**
+   * The host's record for a name, exactly as 4a's `modelAnimations.status`
+   * answers: an ARRAY in `clips` is a loaded list (rendered as `state:
+   * 'stopped'`), an object is used as it is so a test can drive `loading`, and
+   * an absent name is no record yet.
+   */
+  const clipRecord = (name) => {
+    const entry = clips[name]
+    if (entry === undefined) return undefined
+    return Array.isArray(entry) ? { clips: entry, state: 'stopped' } : entry
+  }
+
   const deps = {
     selected: () => selected,
     nodes: () => nodes,
@@ -54,7 +67,10 @@ function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
       sendField: (name, field, value) => { calls.sendField.push([name, field, value]); return ++seq },
     },
     newObjectId: () => `9999${String(++clock).padStart(4, '0')}-9999-4999-8999-999999999999`,
-    clipIds: (objectId) => clips[objectId],
+    // X6 (round 7) — the form's dep is F4's clip status by NODE, from the
+    // host's record keyed by name, exactly as 4a answers `status(name)`, so a
+    // model with no `objectId` has a clip list too.
+    clipStatus: (node) => clipsForNode(node, { modelAnimations: { status: clipRecord } }),
     createElement: (tag) => el(tag),
     showError: () => {},
     clearError: () => {},
@@ -242,7 +258,7 @@ test('W8 — stage 3\'s light value comes from the snapshot\'s own target', () =
 test('W8 — the picker and every parameter field are disabled while a Save is in flight', () => {
   const model = makeNode({ name: 'foz', id: TGT, model: { url: 'a.glb' } })
   const X = makeNode({ name: 'crate', id: OWN, behavior: undefined })
-  const { form, elements } = setup({ nodes: [X, model], selected: X, clips: { [TGT]: ['Idle'] } })
+  const { form, elements } = setup({ nodes: [X, model], selected: X, clips: { foz: ['Idle'] } })
   form.open(X)
   form.onTemplateChange('select-animation')
   form.onParamChange('target', TGT)
@@ -263,7 +279,7 @@ test('W8 — the picker and every parameter field are disabled while a Save is i
 test('W8 — the strict fake drives the REAL picker and parameter listeners', () => {
   const model = makeNode({ name: 'foz', id: TGT, model: { url: 'a.glb' } })
   const X = makeNode({ name: 'crate', id: OWN, behavior: undefined })
-  const { form, elements } = setup({ nodes: [X, model], selected: X, clips: { [TGT]: ['Idle', 'Walk'] } })
+  const { form, elements } = setup({ nodes: [X, model], selected: X, clips: { foz: ['Idle', 'Walk'] } })
   form.wire()
   form.open(X)
 

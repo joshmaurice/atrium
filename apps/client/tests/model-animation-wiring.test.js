@@ -217,10 +217,13 @@ describe('Z7 — the panel wiring', () => {
   })
 
   test('V1: the controls are refreshed from the layer’s onChange, for the selected node', () => {
+    // X2 (round 7) — the same handler now also tells the Behaviour form that a
+    // clip status moved; the comment above it breaks the one-liner, so the
+    // pattern tolerates the extra lines rather than pinning one formatting.
     assert.match(source,
-      /onChange:\s*\(name\)\s*=>\s*\{\s*if\s*\(selected\?\.name\s*===\s*name\)\s*refreshModelRow\(\)\s*\}/,
+      /onChange:\s*\(name\)\s*=>\s*\{[\s\S]{0,400}?if\s*\(selected\?\.name\s*===\s*name\)\s*refreshModelRow\(\)/,
       'the row follows the LAYER, and only when the changed name is the selection')
-    assert.match(source, /createModelAnimations\(\{[\s\S]{0,600}?onChange:/,
+    assert.match(source, /createModelAnimations\(\{[\s\S]{0,900}?onChange:/,
       'and the layer is the thing given it')
   })
 

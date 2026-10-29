@@ -15,7 +15,8 @@ import { createFormGate } from '../src/model-form.js'
 import { templateGraph, TEMPLATE_IDS } from '@atrium/behaviors/templates'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
 // V12 — ONE strict element fake, shared by the form and panel tests.
-import { el, elementsFor, isCheckable } from './strict-element.mjs'
+import { el, elementsFor, isCheckable, shownEqualsHeld } from './strict-element.mjs'
+import { clipsForNode } from '../src/behavior-clips.js'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const TGT = '22222222-2222-4222-8222-222222222222'
@@ -42,6 +43,18 @@ function setup({ nodes = [], selected = null, status = {}, clips = {}, gate = nu
   const applied = new Map()          // seq → { name, id } a setObjectId asked for
   let seq = 0
   let clock = 0
+  /**
+   * The host's record for a name, exactly as 4a's `modelAnimations.status`
+   * answers: an ARRAY in `clips` is a loaded list (rendered as `state:
+   * 'stopped'`), an object is used as it is so a test can drive `loading`, and
+   * an absent name is no record yet.
+   */
+  const clipRecord = (name) => {
+    const entry = clips[name]
+    if (entry === undefined) return undefined
+    return Array.isArray(entry) ? { clips: entry, state: 'stopped' } : entry
+  }
+
   const deps = {
     selected: () => selected,
     nodes: () => nodes,
@@ -52,7 +65,10 @@ function setup({ nodes = [], selected = null, status = {}, clips = {}, gate = nu
     },
     newObjectId: () => `9999${String(++clock).padStart(4, '0')}-9999-4999-8999-999999999999`,
     // V5 — the form's clip picker, from the same source the adapter checks.
-    clipIds: (objectId) => clips[objectId],
+    // X6 (round 7) — the form's dep is F4's clip status by NODE, from the
+    // host's record keyed by name, exactly as 4a answers `status(name)`, so a
+    // model with no `objectId` has a clip list too.
+    clipStatus: (node) => clipsForNode(node, { modelAnimations: { status: clipRecord } }),
     createElement: (tag) => el(tag),
     showError: () => {},
     clearError: () => {},
@@ -756,7 +772,7 @@ test('V13 — Edit off closes the section and cancels a Save in flight (M4)', ()
 test('V5 — a loaded model shows its clips as a `<select>`', () => {
   const model = makeNode({ name: 'foz', id: TGT, model: { url: 'a.glb' } })
   const cube = makeNode({ name: 'crate', id: OWN })
-  const { form, elements } = setup({ nodes: [cube, model], selected: model, clips: { [TGT]: ['Idle', 'Walk'] } })
+  const { form, elements } = setup({ nodes: [cube, model], selected: model, clips: { foz: ['Idle', 'Walk'] } })
   form.open(model)
   form.onTemplateChange('select-animation')
   form.onParamChange('target', TGT)

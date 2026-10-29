@@ -18,7 +18,7 @@ import { createEditModes } from './edit-modes.js'
 import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
-import { clipsFor } from './behavior-clips.js'
+import { clipsFor, clipsForNode } from './behavior-clips.js'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
 import { worldPosition, subtreeSome } from './world-position.js'
@@ -2937,6 +2937,16 @@ function clipStatusFor(objectId) {
   })
 }
 
+/**
+ * X6 (round 7) — F4's clip status by NODE, for the form's picker. `clipsFor`
+ * resolves an id to its node and calls this, so the picker and the adapter's
+ * S7 check still read one source; the id-only lookup simply found no clips for
+ * a world's models saved before ids existed (§1.2 item 6).
+ */
+function clipStatusForNode(node) {
+  return clipsForNode(node, { modelAnimations })
+}
+
 behaviorForm = createBehaviorForm({
   elements: {
     row: epBehaviorRow, select: epBehaviorTemplate, params: epBehaviorParams,
@@ -2958,9 +2968,11 @@ behaviorForm = createBehaviorForm({
       sendField: (name, field, value) => client.sendField(name, field, value),
     },
     newObjectId,
-    // V5 — the form's clip picker reads the SAME source the adapter's clip
-    // check does: a loaded model shows its clips as a `<select>`.
-    clipIds: (objectId) => clipStatusFor(objectId).clipIds,
+    // V5/X6 — the form's clip picker reads the SAME source the adapter's clip
+    // check does, by NODE: a loaded model shows its clips as a `<select>`, a
+    // model with no animations says so (X2), and a model saved before ids
+    // existed is found too.
+    clipStatus: (node) => clipStatusForNode(node),
     showError: (text) => showEditError(text),
     clearError: () => clearEditError(),
     document,
@@ -3141,7 +3153,14 @@ modelAnimations = createModelAnimations({
   // `status(name)` reports could have changed (a load that finished, a clip that
   // ended, a Stop), never per frame. The bridge's own `onStatus` above still
   // carries its loading/ready/failed line.
-  onChange: (name) => { if (selected?.name === name) refreshModelRow() },
+  onChange: (name) => {
+    if (selected?.name === name) refreshModelRow()
+    // X2 (round 7) — a change of the OPEN form's target's clip status or clip
+    // list redraws the section (a load that finished, a different list); a clip
+    // starting or stopping alone does not, so typing in a field isn't
+    // interrupted. The decision is the form's own `onClipStatusChange`.
+    behaviorForm?.onClipStatusChange(name)
+  },
 })
 
 /**

@@ -170,6 +170,21 @@ export function matchesTemplate(value, ownId) {
 const isAvatar = (node) => node?.extras?.atrium?.ephemeral === true
 
 /**
+ * X2 (round 7) — the IDENTITY of the clip status the form DRAWS with: whether
+ * the clips are known, and the list itself. A clip starting or stopping alone
+ * changes neither, so two 4a states that differ only in `playing`/`stopped` —
+ * or a jump from the no-record state to `loading` — share one key and do not
+ * redraw the open form under the owner's typing.
+ *
+ * @param {{known?: boolean, clipIds?: string[]}|null} info
+ * @returns {string}
+ */
+export function clipStatusKey(info) {
+  const record = info ?? {}
+  return `${record.known === true ? 'known' : 'unknown'}|${JSON.stringify(record.clipIds ?? [])}`
+}
+
+/**
  * @param {object} args
  * @param {object} args.elements   the section's elements (see render())
  * @param {object} args.deps
@@ -177,7 +192,8 @@ const isAvatar = (node) => node?.extras?.atrium?.ephemeral === true
  * @param {() => Array<object>} args.deps.nodes        every saved node
  * @param {({from, to}) => boolean} [args.deps.moveNode]  n/a — ids never change
  * @param {() => {state: string, reason?: string}} [args.deps.status]  the runner's view
- * @param {(objectId: string) => Array<string>|undefined} [args.deps.clipIds]  the host's clips
+ * @param {(node: object|null) => {status: string, clipIds?: string[]}} [args.deps.clipStatus]
+ *                                                    F4's clip status, by NODE (X6)
  * @param {object} args.deps.write                    `{ setObjectId, sendField }`
  * @param {() => string} [args.deps.newObjectId]
  * @param {(element: object) => void} [args.deps.focus]
@@ -255,16 +271,24 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   }
 
   /**
-   * X2 (round 7) — the target's clips, as `{ known, clipIds }`. `known` is
-   * FALSE while the host hasn't answered (the load is still running, or there
-   * is no record yet): that is the text box's case. `known` with an EMPTY list
-   * is a loaded model with no animations at all (a library model), which is
-   * §1.2 item 2 — it used to fall back to the text box and Save sent `''`.
+   * X2/X6 (round 7) — the target's clips, as `{ status, known, clipIds }`,
+   * from `deps.clipStatus(node)`. `known` is FALSE while the host hasn't
+   * answered (the load is still running, or there is no record yet): that is
+   * the text box's case. `known` with an EMPTY list is a loaded model with no
+   * animations at all (a library model), which is §1.2 item 2 — it used to fall
+   * back to the text box and Save sent `''`.
+   *
+   * The lookup is by NODE (X6), so a model saved before ids existed has its
+   * clips found too (§1.2 item 6).
    */
   function clipInfoFor(node) {
-    const id = node?.extras?.atrium?.objectId ?? null
-    const ids = id ? deps.clipIds?.(id) : undefined
-    return Array.isArray(ids) ? { known: true, clipIds: ids } : { known: false, clipIds: [] }
+    const status = deps.clipStatus?.(node) ?? { status: 'none' }
+    const loaded = status.status === 'loaded'
+    return {
+      status: status.status ?? 'none',
+      known: loaded,
+      clipIds: loaded ? (status.clipIds ?? []) : [],
+    }
   }
 
   /**
@@ -396,6 +420,28 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     // M4 — closing ends any Save sequence in flight.
     bump()
     render()
+  }
+
+  /**
+   * X2 (round 7) — `modelAnimations`' `onChange` reaches this for the name
+   * that moved. Only a change of the FORM'S TARGET's `status` or clip list
+   * redraws the section (app.js's filter, which lives here because it is a
+   * decision, as W2's `behaviorRowAction` does): a clip starting or stopping
+   * alone would otherwise rebuild the fields under the owner's typing.
+   *
+   * @param {string} name
+   * @returns {boolean} true when the form rendered again
+   */
+  function onClipStatusChange(name) {
+    if (!state.open || !state.node) return false
+    const node = targetNode()
+    if (!node || !name || node.name !== name) return false
+    const next = clipInfoFor(node)
+    if (clipStatusKey(next) === clipStatusKey(state.clip)) return false
+    // `state.clip` is left as it was: render() uses it as the PREVIOUS status,
+    // so an arriving list can still be told from a redraw (X2).
+    render()
+    return true
   }
 
   function bump() {
@@ -690,8 +736,19 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     if (pending.stage === 'enabled') { state.saving = false; readStored(state.node); render(); return true }
     // Stages 1 and 2 continue the sequence.
     const snapshot = state.sequence
-    if (snapshot && snapshot.generation === pending.generation) dispatchStage(snapshot)
-    else cancelSequence()
+    if (!snapshot || snapshot.generation !== pending.generation) { cancelSequence(); return true }
+    // X6 (round 7) — the target keeps its place when Save gives it an id: the
+    // id the stage answered with becomes the held value, so the picker's option
+    // and the held value stay the same string (§1.2 item 6: `state.targetId`
+    // stayed `name:Fox` while the rebuilt picker's options carried the new id,
+    // and the select then showed its first option instead).
+    if (pending.stage === 1 && snapshot.target === snapshot.node && snapshot.nodeId) {
+      state.targetId = snapshot.nodeId
+    } else if (pending.stage === 2 && snapshot.targetOwnId) {
+      state.targetId = snapshot.targetOwnId
+    }
+    state.params = { ...state.params, target: state.targetId }
+    dispatchStage(snapshot)
     return true
   }
 
@@ -728,7 +785,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
    * (§1.2 item 4: the picker showed ToyCar and Survey while the form held
    * `name:Fox` and `''`).
    */
-  function normalise() {
+  function normalise(previousClip = null) {
     if (!state.open || state.custom || state.template === NONE_LABEL) return
     const wasEdited = unsavedEdit()
     // X6 — a held `name:<name>` whose node has an `objectId` now becomes that
@@ -745,7 +802,14 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     if (TEMPLATE_FIELDS[state.template].includes('clip')) {
       const clips = clipOptions(state.clip)
       if (clips.length > 0 && !clips.includes(state.params.clip)) {
-        state.params = { ...state.params, clip: '' }
+        // X2 — the list ARRIVING (the host hadn't answered when the held clip
+        // was set): an empty held clip adopts the first clip, exactly as
+        // choosing the template does. X4 — any other held clip that isn't on
+        // the loaded model becomes '', and the select gets its placeholder.
+        // Keyed on the transition so a second render changes nothing.
+        const arrived = previousClip?.known !== true && state.clip.known === true
+        const held = String(state.params.clip ?? '')
+        state.params = { ...state.params, clip: (held === '' && arrived) ? clips[0] : '' }
       }
     }
     // X4 — a normalisation isn't an edit: with no unsaved edit before it, W3's
@@ -970,8 +1034,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
     // X2/X4 — the clip status this render draws from, then the held values'
     // normalisation (which may move the target), then the status again.
+    const previousClip = state.clip
     state.clip = clipInfoFor(targetNode())
-    normalise()
+    normalise(previousClip)
     state.clip = clipInfoFor(targetNode())
 
     if (elements.select) {
@@ -1044,7 +1109,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
   return {
     wire, open, close, render, reset, save, remove, setEnabled, onAnswer, reread,
-    onTemplateChange, onParamChange,
+    onTemplateChange, onParamChange, onClipStatusChange,
     get state() { return state },
     get openState() { return state.open },
     values: { NONE_LABEL, CUSTOM_LABEL, UNDO_NOTE },

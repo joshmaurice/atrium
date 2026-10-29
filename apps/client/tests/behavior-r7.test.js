@@ -29,6 +29,7 @@ import {
 import { templateGraph, TEMPLATE_IDS, TEMPLATE_FIELDS } from '@atrium/behaviors/templates'
 import { OBJECT_ID_RE } from '@atrium/behaviors/behavior-spec'
 import { el, elementsFor, shownEqualsHeld } from './strict-element.mjs'
+import { clipsForNode } from '../src/behavior-clips.js'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
 const TGT = '22222222-2222-4222-8222-222222222222'
@@ -54,6 +55,18 @@ function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
   const applied = new Map()
   let seq = 0
   let clock = 0
+  /**
+   * The host's record for a name, exactly as 4a's `modelAnimations.status`
+   * answers: an ARRAY in `clips` is a loaded list (rendered as `state:
+   * 'stopped'`), an object is used as it is so a test can drive `loading`, and
+   * an absent name is no record yet.
+   */
+  const clipRecord = (name) => {
+    const entry = clips[name]
+    if (entry === undefined) return undefined
+    return Array.isArray(entry) ? { clips: entry, state: 'stopped' } : entry
+  }
+
   const deps = {
     selected: () => selected,
     nodes: () => nodes,
@@ -65,7 +78,10 @@ function setup({ nodes = [], selected = null, status = {}, clips = {} } = {}) {
     newObjectId: () => `9999${String(++clock).padStart(4, '0')}-9999-4999-8999-999999999999`,
     // X2 — the host's clips for a node's own id: an ARRAY is a loaded list
     // (possibly empty), `undefined` means the host hasn't answered yet.
-    clipIds: (objectId) => clips[objectId],
+    // X6 (round 7) — the form's dep is F4's clip status by NODE, from the
+    // host's record keyed by name, exactly as 4a answers `status(name)`, so a
+    // model with no `objectId` has a clip list too.
+    clipStatus: (node) => clipsForNode(node, { modelAnimations: { status: clipRecord } }),
     createElement: (tag) => el(tag),
     showError: () => {},
     clearError: () => {},
@@ -113,7 +129,7 @@ const targetFor = (id) => (id === 'select-light' ? OTHER : TGT)
 test('X1 — one `div.ep-row` per field, with a WORD label and the same `aria-label`', () => {
   for (const id of TEMPLATE_IDS) {
     const nodes = worldOf()
-    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle', 'Walk'] } })
+    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle', 'Walk'] } })
     form.open(nodes[0])
     form.onTemplateChange(id)
     form.onParamChange('target', targetFor(id))
@@ -141,7 +157,7 @@ test('X1 — one `div.ep-row` per field, with a WORD label and the same `aria-la
 
 test('X1 — the field order is TEMPLATE_FIELDS', () => {
   const nodes = worldOf()
-  const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle', 'Walk'] } })
+  const { form, elements } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle', 'Walk'] } })
   form.open(nodes[0])
   form.onTemplateChange('select-animation')
   form.onParamChange('target', TGT)
@@ -156,7 +172,7 @@ test('X1 — the field order is TEMPLATE_FIELDS', () => {
 test('X2 — a loaded model with no clips says so, and Save is disabled', () => {
   const cube = makeNode({ name: 'crate', id: OWN })
   const fox = makeNode({ name: 'fox', id: TGT, model: { url: 'a.glb' } })
-  const { form, elements, calls } = setup({ nodes: [cube, fox], selected: cube, clips: { [TGT]: [] } })
+  const { form, elements, calls } = setup({ nodes: [cube, fox], selected: cube, clips: { fox: [] } })
   form.open(cube)
   form.onTemplateChange('interval-animation')
   form.onParamChange('target', TGT)
@@ -205,7 +221,7 @@ test('X4 — shownEqualsHeld holds after opening, a template change and every pa
   const nodes = worldOf()
   const value = templateGraph('select-animation', { target: TGT, clip: 'Idle', action: 'play', loop: true }, { ownId: OWN })
   nodes[0] = makeNode({ name: 'crate', id: OWN, behavior: value })
-  const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle', 'Walk'] } })
+  const { form, elements } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle', 'Walk'] } })
   form.open(nodes[0])
   shownEqualsHeld(form, elements)
 
@@ -260,7 +276,7 @@ test("X4 — a stored clip that isn't on the loaded model shows the placeholder"
   const fox = makeNode({ name: 'fox', id: TGT, model: { url: 'a.glb' } })
   const value = templateGraph('interval-animation', { target: TGT, clip: 'Survey', loop: true, seconds: 5 }, { ownId: OWN })
   cube.extras.atrium.behavior = value
-  const { form, elements } = setup({ nodes: [cube, fox], selected: cube, clips: { [TGT]: ['Idle', 'Walk'] } })
+  const { form, elements } = setup({ nodes: [cube, fox], selected: cube, clips: { fox: ['Idle', 'Walk'] } })
   form.open(cube)
   form.render()
 
@@ -322,8 +338,186 @@ test('X4 — a normalisation is undone by the next read of the stored value', ()
   assert.equal(form.state.targetId, TGT, 'the stored target is shown again')
 })
 
-// The X4 tests below belong to the `noid` sequence and X6; they are pinned in
-// the X6 section, where the id switch they exercise lives.
+// ══════════════════════════════════════════════════════════════════════════
+// X2 (continued) — the re-render filter
+// ══════════════════════════════════════════════════════════════════════════
+
+test('X2 — a clip status change re-renders the open form; a play or stop alone does not', () => {
+  const clips = {}                                   // mutable: the host's record, by name
+  const cube = makeNode({ name: 'crate', id: OWN })
+  const fox = makeNode({ name: 'fox', id: TGT, model: { url: 'a.glb' } })
+  const { form, elements } = setup({ nodes: [cube, fox], selected: cube, clips })
+  form.open(cube)
+  form.onTemplateChange('select-animation')
+  form.onParamChange('target', TGT)
+  form.render()
+  assert.equal(controlFor(elements, 'clip').tagName, 'input', 'no record yet: a text box')
+
+  // A load that has STARTED changes nothing the form draws.
+  clips.fox = { clips: ['A', 'B'], state: 'loading' }
+  assert.equal(form.onClipStatusChange('fox'), false, 'loading draws the same text box')
+  assert.equal(controlFor(elements, 'clip').tagName, 'input')
+
+  // The list arrives: the row becomes a select, with the first clip chosen.
+  clips.fox = { clips: ['A', 'B'], state: 'stopped' }
+  assert.equal(form.onClipStatusChange('fox'), true, 'loaded re-renders')
+  const clip = controlFor(elements, 'clip')
+  assert.equal(clip.tagName, 'select')
+  assert.deepEqual(clip.children.map((o) => o.value), ['A', 'B'])
+  assert.equal(clip.children[0].selected, true)
+  shownEqualsHeld(form, elements)
+
+  // A clip starting or stopping alone is not a change: the fields are left
+  // exactly as they were, so typing in one isn't interrupted.
+  const row = rowFor(elements, 'clip')
+  clips.fox = { clips: ['A', 'B'], state: 'playing' }
+  assert.equal(form.onClipStatusChange('fox'), false, 'a play alone does not re-render')
+  assert.equal(rowFor(elements, 'clip'), row, 'the row is the very same element')
+  clips.fox = { clips: ['A', 'B'], state: 'ended' }
+  assert.equal(form.onClipStatusChange('fox'), false, 'nor a stop')
+
+  // A DIFFERENT list is a change.
+  clips.fox = { clips: ['A', 'B', 'C'], state: 'ended' }
+  assert.equal(form.onClipStatusChange('fox'), true, 'a different list re-renders')
+  assert.deepEqual(controlFor(elements, 'clip').children.map((o) => o.value), ['A', 'B', 'C'])
+
+  // And a status change for anything that isn't the form's own target is not
+  // the form's business.
+  assert.equal(form.onClipStatusChange('crate'), false)
+  assert.equal(form.onClipStatusChange('nobody'), false)
+})
+
+// ══════════════════════════════════════════════════════════════════════════
+// X6 — models without an `objectId`
+// ══════════════════════════════════════════════════════════════════════════
+
+test('X6 — an id-less model as the target shows its clips as a `<select>`', () => {
+  const cube = makeNode({ name: 'crate', id: OWN })
+  const fox = makeNode({ name: 'Fox', model: { url: 'a.glb' } })          // no objectId
+  const clips = { Fox: ['Survey', 'Walk', 'Run'] }
+  const { form, elements } = setup({ nodes: [cube, fox], selected: cube, clips })
+  form.open(cube)
+  form.onTemplateChange('select-animation')
+  form.render()
+
+  assert.equal(form.state.targetId, 'name:Fox', 'the id-less node is held by name')
+  const target = controlFor(elements, 'target')
+  assert.deepEqual(target.children.map((o) => o.value), ['name:Fox'])
+  assert.deepEqual(target.children.map((o) => o.textContent), ['Fox'])
+
+  const clip = controlFor(elements, 'clip')
+  assert.equal(clip.tagName, 'select', 'the clip list is found (§1.2 item 6)')
+  assert.deepEqual(clip.children.map((o) => o.value), ['Survey', 'Walk', 'Run'])
+  assert.equal(clip.children[0].selected, true)
+  shownEqualsHeld(form, elements)
+})
+
+test('X6 — when stage 2 is accepted, the held target is the id the node got', () => {
+  const cube = makeNode({ name: 'crate', id: OWN })
+  const fox = makeNode({ name: 'Fox', model: { url: 'a.glb' } })
+  const { form, elements, calls, accept } = setup({ nodes: [cube, fox], selected: cube, clips: { Fox: ['Survey'] } })
+  form.open(cube)
+  form.onTemplateChange('select-animation')
+  form.onParamChange('clip', 'Survey')
+  assert.equal(form.state.targetId, 'name:Fox')
+  form.save()
+
+  assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['Fox'], 'stage 2 asks for the target\'s id')
+  accept(1)
+  const id = calls.setObjectId[0][1]
+  assert.equal(form.state.targetId, id, 'the held target is the id the stage gave')
+  assert.equal(form.state.params.target, id)
+  assert.equal(calls.sendField.length, 1, 'and stage 3 followed')
+
+  const target = controlFor(elements, 'target')
+  assert.deepEqual(target.children.map((o) => o.value), [id], 'the picker offers the new id')
+  assert.deepEqual(target.children.map((o) => o.textContent), ['Fox'])
+  assert.equal(target.children[0].selected, true, 'and it is the selected option')
+  shownEqualsHeld(form, elements)
+})
+
+test('X6 — when stage 1 is accepted with the target the behaviour node itself, likewise', () => {
+  const cube = makeNode({ name: 'crate' })                               // no id either
+  const { form, elements, calls, accept } = setup({ nodes: [cube], selected: cube })
+  form.open(cube)
+  form.onTemplateChange('select-visibility')
+  assert.equal(form.state.targetId, 'name:crate', 'the default target IS the cube')
+  form.save()
+
+  assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate'], 'stage 1 only (M4: no second id)')
+  accept(1)
+  const id = calls.setObjectId[0][1]
+  assert.equal(form.state.targetId, id)
+  assert.equal(form.state.params.target, id)
+  assert.equal(calls.sendField.length, 1, 'stage 3 went out')
+  assert.equal(calls.sendField[0][2].template.params.target, id)
+  assert.equal(calls.sendField[0][2].nodeMap[0], id, 'the target IS the behaviour node')
+
+  const target = controlFor(elements, 'target')
+  assert.deepEqual(target.children.map((o) => o.value), [id])
+  assert.equal(target.children[0].selected, true)
+  shownEqualsHeld(form, elements)
+})
+
+test('X6 — a held `name:X` whose node gains an id elsewhere becomes that id', () => {
+  const cube = makeNode({ name: 'crate', id: OWN })
+  const fox = makeNode({ name: 'Fox', model: { url: 'a.glb' } })
+  const { form, elements } = setup({ nodes: [cube, fox], selected: cube, clips: { Fox: ['Survey'] } })
+  form.open(cube)
+  form.onTemplateChange('select-animation')
+  assert.equal(form.state.targetId, 'name:Fox')
+
+  fox.extras.atrium.objectId = TGT                    // another tab's setObjectId
+  form.render()
+  assert.equal(form.state.targetId, TGT, 'the held value follows the id')
+  assert.equal(form.state.params.target, TGT)
+  const target = controlFor(elements, 'target')
+  assert.deepEqual(target.children.map((o) => o.value), [TGT])
+  assert.equal(target.children[0].selected, true, 'the picker still shows Fox')
+  assert.equal(target.children[0].textContent, 'Fox')
+  shownEqualsHeld(form, elements)
+})
+
+test("X6 — `noid`'s sequence: stages 1 and 2 accepted, stage 3 refused, the target keeps its place", () => {
+  // §1.2 item 6's world: crate and Fox have no `objectId`, and the owner picks
+  // Fox. Its clips are not known yet, so the clip is the text box.
+  const cube = makeNode({ name: 'crate' })
+  const fox = makeNode({ name: 'Fox', model: { url: 'a.glb' } })
+  const { form, elements, calls, accept } = setup({ nodes: [cube, fox], selected: cube })
+  form.open(cube)
+  form.onTemplateChange('select-animation')
+  form.onParamChange('clip', 'Survey')
+  form.save()
+
+  assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate'], 'stage 1: the behaviour node')
+  accept(1)
+  assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate', 'Fox'], 'stage 2: the target')
+  accept(2)
+
+  assert.equal(calls.sendField.length, 1, 'stage 3 went out')
+  form.onAnswer('edit:rejected', { seq: 3, message: 'animations is malformed' })
+  assert.match(form.state.error, /animations is malformed/)
+
+  // Afterwards: the target shows Fox by its NEW id, and the clip shows what the
+  // form holds — never CesiumMan-by-first-option.
+  const foxId = calls.setObjectId[1][1]
+  assert.equal(form.state.targetId, foxId, 'the ids stages 1 and 2 gave stay (M4)')
+  const target = controlFor(elements, 'target')
+  assert.deepEqual(target.children.map((o) => o.value), [foxId])
+  assert.equal(target.children[0].textContent, 'Fox')
+  assert.equal(target.children[0].selected, true)
+  assert.equal(controlFor(elements, 'clip').value, 'Survey', 'the clip shows what is held')
+  shownEqualsHeld(form, elements)
+
+  // And the next Save sends exactly what is shown: no id stage is left to run.
+  calls.sendField.length = 0
+  form.save()
+  assert.deepEqual(calls.setObjectId.map((c) => c[0]), ['crate', 'Fox'], 'no further id stage')
+  assert.equal(calls.sendField.length, 1)
+  const sent = calls.sendField[0][2]
+  assert.equal(sent.template.params.target, target.children[0].value, 'the shown target')
+  assert.equal(sent.animations[0].clip, controlFor(elements, 'clip').value, 'the shown clip')
+})
 
 // ══════════════════════════════════════════════════════════════════════════
 // X3 — the form checks before it sends, in plain words
@@ -367,7 +561,7 @@ test('X3 — no target held says "Choose a target"', () => {
 
 test('X3 — a loaded model with no clips says "This model has no animations"', () => {
   const nodes = x3World()
-  const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: [] } })
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { fox: [] } })
   form.open(nodes[0])
   form.onTemplateChange('select-animation')
   form.onParamChange('target', TGT)
@@ -384,7 +578,7 @@ test('X3 — a clip select with nothing held says "Choose a clip"', () => {
     name: 'crate', id: OWN,
     behavior: templateGraph('interval-animation', { target: TGT, clip: 'Survey', loop: true, seconds: 5 }, { ownId: OWN }),
   })
-  const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle', 'Walk'] } })
+  const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle', 'Walk'] } })
   form.open(nodes[0])
   form.render()
   assert.equal(statusOf(elements), FIELD_TEXTS.noClip)
@@ -409,7 +603,7 @@ test('X3 — an empty clip text box says "Type a clip name"', () => {
 test('X3 — a radius outside 0.5 to 50 m, or not a number, says so', () => {
   for (const radius of [0.4, 50.5, 0, -1, NaN, Number('')]) {
     const nodes = x3World()
-    const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle'] } })
     form.open(nodes[0])
     form.onTemplateChange('proximity-animation')
     form.onParamChange('target', TGT)
@@ -426,7 +620,7 @@ test('X3 — a radius outside 0.5 to 50 m, or not a number, says so', () => {
   // The bounds themselves pass, through the imported limits.
   for (const radius of [0.5, 50]) {
     const nodes = x3World()
-    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle'] } })
     form.open(nodes[0])
     form.onTemplateChange('proximity-animation')
     form.onParamChange('target', TGT)
@@ -440,7 +634,7 @@ test('X3 — a radius outside 0.5 to 50 m, or not a number, says so', () => {
 test('X3 — an interval outside 1 to 3600 seconds, or not a whole number, says so', () => {
   for (const seconds of [0, 3601, 1.5, NaN, Number('')]) {
     const nodes = x3World()
-    const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    const { form, elements, calls } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle'] } })
     form.open(nodes[0])
     form.onTemplateChange('interval-animation')
     form.onParamChange('target', TGT)
@@ -453,7 +647,7 @@ test('X3 — an interval outside 1 to 3600 seconds, or not a whole number, says 
   }
   for (const seconds of [1, 3600]) {
     const nodes = x3World()
-    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { [TGT]: ['Idle'] } })
+    const { form, elements } = setup({ nodes, selected: nodes[0], clips: { fox: ['Idle'] } })
     form.open(nodes[0])
     form.onTemplateChange('interval-animation')
     form.onParamChange('target', TGT)
@@ -484,7 +678,7 @@ test('X3 — a value that passes the fields but fails behaviorCheck says "Can\'t
 test('X3 — a valid value still saves in its usual stages, and no stand-in reaches a send', () => {
   const crate = makeNode({ name: 'crate' })               // no id: stage 1 gives it one
   const fox = makeNode({ name: 'fox', id: TGT, model: { url: 'a.glb' } })
-  const { form, calls, accept } = setup({ nodes: [crate, fox], selected: crate, clips: { [TGT]: ['Idle'] } })
+  const { form, calls, accept } = setup({ nodes: [crate, fox], selected: crate, clips: { fox: ['Idle'] } })
   form.open(crate)
   form.onTemplateChange('interval-animation')
   form.onParamChange('target', TGT)

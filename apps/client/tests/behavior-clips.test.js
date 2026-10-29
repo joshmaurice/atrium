@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { clipsFor, CLIP_STATUS } from '../src/behavior-clips.js'
+import { clipsFor, clipsForNode, CLIP_STATUS } from '../src/behavior-clips.js'
 
 const modelNode = (name, { model = { url: 'a.glb' } } = {}) => ({
   name,
@@ -57,4 +57,44 @@ test('V5 — a missing modelAnimations, or an unknown name, falls back to `none`
     { status: CLIP_STATUS.none })
   const w = world([modelNode('foz')], {})
   assert.deepEqual(clipsFor('foz', w), { status: CLIP_STATUS.none })
+})
+
+// ── X6 (round 7): clips are looked up by NODE ─────────────────────────────
+// §1.2 item 6: a world saved before ids existed has models with no
+// `objectId`, and the id-only lookup found no clips for them at all.
+
+const idlessNode = (name, statuses) => {
+  const node = { name, extras: { atrium: { model: { url: 'a.glb' } } } }   // no objectId
+  return { node, modelAnimations: { status: (n) => statuses[n] } }
+}
+
+test('X6 — clipsForNode finds an id-less model node\'s loaded clips', () => {
+  const statuses = { Fox: { clips: ['Survey', 'Walk', 'Run'], state: 'stopped' } }
+  const { node, modelAnimations } = idlessNode('Fox', statuses)
+  assert.deepEqual(clipsForNode(node, { modelAnimations }),
+    { status: CLIP_STATUS.loaded, clipIds: ['Survey', 'Walk', 'Run'] })
+  // And the states map through exactly as `clipsFor` does.
+  assert.deepEqual(clipsForNode(node, { modelAnimations: { status: () => ({ clips: [], state: 'loading' }) } }),
+    { status: CLIP_STATUS.loading })
+  assert.deepEqual(clipsForNode(node, { modelAnimations: { status: () => ({ clips: [], state: 'no-clips' }) } }),
+    { status: CLIP_STATUS.loaded, clipIds: [] })
+})
+
+test('X6 — clipsFor(id) is clipsForNode of the node the id resolves to', () => {
+  const statuses = { Fox: { clips: ['Survey', 'Walk', 'Run'], state: 'stopped' } }
+  const node = modelNode('Fox')
+  const w = {
+    resolveObjectId: (id) => (id === 'ID' ? { node } : { problem: 'not-found' }),
+    modelAnimations: { status: (name) => statuses[name] },
+  }
+  assert.deepEqual(clipsFor('ID', w), clipsForNode(node, { modelAnimations: w.modelAnimations }),
+    'one source, so the picker and the adapter\'s check can never disagree')
+  assert.deepEqual(clipsFor('ID', w), { status: CLIP_STATUS.loaded, clipIds: ['Survey', 'Walk', 'Run'] })
+})
+
+test('X6 — clipsForNode answers `none` for no node, a node with no model, and an unknown name', () => {
+  assert.deepEqual(clipsForNode(null, {}), { status: CLIP_STATUS.none })
+  assert.deepEqual(clipsForNode({ name: 'crate', extras: { atrium: {} } }, {}), { status: CLIP_STATUS.none })
+  const { node, modelAnimations } = idlessNode('Fox', {})
+  assert.deepEqual(clipsForNode(node, { modelAnimations }), { status: CLIP_STATUS.none })
 })
