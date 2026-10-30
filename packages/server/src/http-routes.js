@@ -194,6 +194,16 @@ export function createRequestHandler(opts = {}) {
         return
       }
 
+      // -----------------------------------------------------------------------
+      // signin-sync I6 — renewal at half-life.
+      //
+      // A session with less than half its life left is renewed: expires_at
+      // becomes now + 7 days and the cookie is re-set with the same attributes
+      // and Max-Age. A session with more than half its life left is untouched
+      // and gets no Set-Cookie. The lifetime stays 7 days.
+      // -----------------------------------------------------------------------
+      renewSessionIfBelowHalfLife(res, db, sessionInfo, user.username)
+
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         id: user.id,
@@ -911,6 +921,58 @@ function parseJSONBody(req) {
     })
     req.on('error', reject)
   })
+}
+
+/** The sign-in lifetime: 7 days, and the cookie's Max-Age. */
+const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * signin-sync I6 — renew an active sign-in when the page checks it.
+ *
+ * A session with less than half its life left gets `expires_at = now + 7 days`
+ * and the cookie is re-set with the same attributes and Max-Age. A session
+ * with more than half its life left is left alone (no `Set-Cookie`, no write).
+ * An expired session never reaches here: the resolver returns null first and
+ * the caller answers 401.
+ *
+ * Exported for the tests.
+ *
+ * @param {import('node:http').ServerResponse} res
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @param {{ authSessionId: string }} sessionInfo
+ * @param {string} username — for the I7 line only
+ * @returns {boolean} true when the session was renewed
+ */
+export function renewSessionIfBelowHalfLife(res, db, sessionInfo, username) {
+  const row = db.database.prepare(
+    'SELECT created_at, expires_at FROM auth_sessions WHERE id = ?'
+  ).get(sessionInfo.authSessionId)
+
+  if (!row || !row.expires_at) return false
+
+  const expiresMs = new Date(row.expires_at).getTime()
+  if (!Number.isFinite(expiresMs)) return false
+
+  // The life of this session. When created_at is missing or nonsense, assume
+  // the standard lifetime, which is what a fresh session has.
+  const createdMs = row.created_at ? new Date(row.created_at).getTime() : NaN
+  let lifeMs = Number.isFinite(createdMs) ? expiresMs - createdMs : SESSION_LIFETIME_MS
+  if (!Number.isFinite(lifeMs) || lifeMs <= 0) lifeMs = SESSION_LIFETIME_MS
+
+  const remainingMs = expiresMs - Date.now()
+  if (remainingMs >= lifeMs / 2) return false
+
+  const newExpiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString()
+  db.database.prepare('UPDATE auth_sessions SET expires_at = ? WHERE id = ?')
+    .run(newExpiresAt, sessionInfo.authSessionId)
+
+  // Same attributes and Max-Age as the original sign-in cookie.
+  setAuthCookie(res, sessionInfo.authSessionId)
+
+  // signin-sync I7 — no cookie value and no auth session id in the line.
+  console.log(`[auth] renewed ${username}`)
+
+  return true
 }
 
 /**

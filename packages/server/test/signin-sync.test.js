@@ -416,6 +416,48 @@ describe('6.2(c) logout closes only that auth session’s sockets', () => {
 })
 
 // ---------------------------------------------------------------------------
+// (d) renewal at half-life
+// ---------------------------------------------------------------------------
+
+describe('6.2(d) renewal at half-life', () => {
+  test('two days left renews and sets the cookie', async () => {
+    const u = await registerUser('RenewRita')
+    setSessionWindow(u.authSessionId, { createdAgoDays: 5, expiresInDays: 2 })
+
+    const res = await meUser(u.cookie)
+    assert.equal(res.statusCode, 200)
+    assert.ok(res.setCookie, 'the response sets the cookie')
+    assert.match(res.setCookie, /atrium_auth_session=/)
+    assert.match(res.setCookie, /Max-Age=604800/)
+
+    const row = sessionRow(u.authSessionId)
+    const remainingDays = (new Date(row.expires_at).getTime() - Date.now()) / DAY_MS
+    assert.ok(remainingDays > 6.9 && remainingDays < 7.1, `expires_at ≈ 7 days ahead (got ${remainingDays})`)
+  })
+
+  test('five days left is untouched and gets no Set-Cookie', async () => {
+    const u = await registerUser('SteadySam')
+    setSessionWindow(u.authSessionId, { createdAgoDays: 2, expiresInDays: 5 })
+    const before = sessionRow(u.authSessionId).expires_at
+
+    const res = await meUser(u.cookie)
+    assert.equal(res.statusCode, 200)
+    assert.equal(res.setCookie, null, 'no Set-Cookie')
+    assert.equal(sessionRow(u.authSessionId).expires_at, before, 'expires_at unchanged')
+  })
+
+  test('an expired session gets 401 and is not renewed', async () => {
+    const u = await registerUser('GoneGreta')
+    setSessionWindow(u.authSessionId, { createdAgoDays: 9, expiresInDays: -1 })
+
+    const res = await meUser(u.cookie)
+    assert.equal(res.statusCode, 401)
+    assert.equal(res.setCookie, null, 'no renewal cookie')
+    assert.equal(sessionRow(u.authSessionId), undefined, 'the expired row is gone')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // (e) I7's log lines
 // ---------------------------------------------------------------------------
 
@@ -441,6 +483,8 @@ describe('6.2(e) I7 log lines', () => {
       anon.ws.close()
 
       await loginUser('LogLena')
+      setSessionWindow(u.authSessionId, { createdAgoDays: 5.0, expiresInDays: 2 })
+      await meUser(u.cookie)
       await logoutUser(u.cookie)
     } finally {
       console.log = realLog
@@ -450,6 +494,7 @@ describe('6.2(e) I7 log lines', () => {
     const joined = lines.join('\n')
     assert.ok(lines.some(l => l === '[auth] register LogLena'), 'register line')
     assert.ok(lines.some(l => l === '[auth] login LogLena'), 'login line')
+    assert.ok(lines.some(l => /^\[auth\] renewed LogLena$/.test(l)), 'renewed line')
     assert.ok(lines.some(l => /^\[auth\] logout LogLena closed \d+ sockets$/.test(l)), 'logout line')
     assert.ok(lines.some(l => /^\[session\] hello \S+ as LogLena world \S+$/.test(l)),
       'hello line names the user and the world')
