@@ -141,9 +141,9 @@ and does not work from a different text.
   - `packages/server` (`http-routes.js`, `session.js`, `world-registry.js`,
     `world-host.js`, tests);
   - `packages/client` (`AtriumClient.js`, tests);
-  - `apps/client` (`auth.js`, `app.js`, `teleport-failure.js`, `index.html`
-    and `style.css` for the notice's element only, **one new module** for
-    `syncAuth` and the change handling, and tests);
+  - `apps/client` (`auth.js`, `app.js`, `teleport-failure.js`; `index.html`
+    for the notice's element and its style only; **one new module** for
+    `syncAuth` and the change handling; tests under `apps/client/tests/`);
   - `docs/DESIGN-user-accounts.md` (the one "Session continuity" line).
 
   **No other file.** If the brief or the implementation finds that another
