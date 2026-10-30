@@ -1,10 +1,16 @@
 # Pre-brief: the page and the server agree about who you are (sign-in sync)
 
-Status: **FINAL, Revision 0 (2026-10-29).** The operator approved decisions
-I1–I8 (§3) as recommended on 2026-10-29 at 19:02 PT. That includes I4's
-"what a reload would do" (not alternative (b)) and I6's renewal (not a longer
-fixed lifetime). §5's open questions are for the brief author. **Priority: before Phase 3 step 4c.** 4c (visitors' `activate`) is
-where visitor and owner identity starts to matter for behaviours.
+Status: **FINAL, Revision 1 (2026-10-29).**
+- The operator approved decisions I1–I8 (§3) as recommended on 2026-10-29 at
+  19:02 PT. That includes I4's "what a reload would do" (not alternative (b))
+  and I6's renewal (not a longer fixed lifetime).
+- Revision 1 takes in the outside review of the kickoff (received 19:26 PT),
+  which the operator sent for correction before dispatch. §0 lists what
+  changed.
+- §5's open questions are for the brief author.
+
+**Priority: before Phase 3 step 4c.** 4c (visitors' `activate`) is where
+visitor and owner identity starts to matter for behaviours.
 
 **Inputs:**
 - `devtasks/Atrium-Passdown-2026-10-24-scripting-4b-1.md` §6.2 (signed in on
@@ -23,6 +29,29 @@ This is input for the brief-writing step. It is not the brief itself.
 - **Line numbers** are at that commit, and approximate.
 - **Implementation base:** a freshly fetched `origin/main` at kickoff, never a
   SHA quoted here.
+
+## 0. Changes in Revision 1
+Revision 0: 21,432 bytes, sha256 `8f68b2e7…a070`, at `1837436`. The outside
+review's findings are M1–M4 (must fix), S1–S4 (should fix) and two minor
+points. S4 and the first minor point concern the kickoff only.
+- **I5, final admission (M1):** a socket admitted after a world load must be
+  checked against the sign-in as it is then, not as it was before the load.
+- **I5, the failure contract (M4):** a logout whose session row can't be
+  deleted no longer reports success.
+- **I2, other 401s and late responses (M2):** every 401 goes through
+  `syncAuth()`, and a response from an earlier sign-in is dropped.
+- **I4, the same account (S1):** after `SIGNED_OUT`, a tab whose user is
+  unchanged still reconnects. **Also new (Claude):** the tab that signs itself
+  out ignores its own `SIGNED_OUT`.
+- **§6.3, one client, two servers (S3):** a second connection doesn't keep the
+  first one's identity.
+- **The repro script (S2):** it waits for close events, reports the identity
+  fields it actually sees, uses a free port, and with `--expect-fixed` checks
+  the fixed behaviour.
+- **I6's heading (minor):** renewal happens when the page checks, not on an
+  open socket alone.
+- **§6:** new tests 6.2(f)–(g), additions to 6.3 and 6.4, proofs
+  (p7)–(p10), and browser check 8.
 
 ## 1. The problem
 
@@ -144,6 +173,20 @@ load.
 - **Ordering:** two connects started back-to-back await the same `me()` and
   then connect in call order, so `trackConnect`'s supersession is unchanged.
   The brief requires a test for it.
+- **Every other 401 goes through `syncAuth()` too (Rev 1, M2).**
+  - Today `refreshWorldList` (`app.js` L191) and the visibility toggle's `PUT`
+    (L261) call `setAuthState(null)` on a 401. Both run `syncAuth()` instead.
+    So a 401 anywhere leads to I4, with its disconnect and notice, and never
+    to a quiet sign-out.
+  - After load, `setAuthState` is called only by `syncAuth()`'s change
+    handling, the login and register submit, and the logout button.
+- **Responses from an earlier sign-in are dropped (Rev 1, M2).**
+  - An auth generation counter goes up on every `setAuthState`.
+  - `refreshWorldList` and the toggle's `PUT` note it when they start. If it
+    has changed when the response arrives, the response is ignored, a 401
+    included; the toggle is restored to its state before the click.
+  - So an old list never replaces the new user's, and a late 401 never signs
+    out the new user.
 
 **I3. The backstop: compare `hello` with the page.**
 - On `session:ready` for a **same-origin** connection whose `hello` carried
@@ -178,6 +221,20 @@ recommendation is **"what a reload would do"**:
      another tab."
    - signed out otherwise: "Your sign-in expired. Sign in again to edit your
      worlds."
+- **`SIGNED_OUT` always counts as a change for the connection (Rev 1, S1).**
+  - Even when `syncAuth()` finds the **same** user (another tab signed out
+    and back in as the same account), the socket is already closed. The tab
+    does step 4 (autoconnect to the user's home), as a reload would.
+  - The notice: "You were signed out in another tab, then signed in again."
+- **The tab that signs itself out (Rev 1):**
+  - It marks its own logout as in flight before the `POST`. While it is in
+    flight, a `SIGNED_OUT` on this tab's sockets is expected: no `syncAuth()`
+    and no notice.
+  - **On success:** it disconnects, calls `setAuthState(null)` and posts
+    `auth-changed`, with no notice.
+  - **On failure** (I5's failure contract): it shows "Couldn't sign out. Try
+    again." in the top bar and stays signed in and connected. Nothing is
+    posted.
 - **Alternative (b):** reconnect to the **same** world as the new user (as
   `som:desync` does), and fall back to the new user's home if it refuses. It
   keeps the user in place, but the tab can land in a world it never chose to
@@ -199,6 +256,37 @@ recommendation is **"what a reload would do"**:
     assume signed-out.
 - **Only that auth session.** The same user signed in on another browser keeps
   their sockets. The tests pin that.
+- **Final admission checks the sign-in again (Rev 1, M1).**
+  - **The gap:** the home and public routes can wait for a world to load
+    (`pendingCreations`, `world-registry.js` L326–347 and L450–470). They
+    then admit the socket with the identity resolved **before** the wait. A
+    logout in that window doesn't find the socket, which is admitted with the
+    old rights.
+  - **The rule:** every path that awaits before `host.handleUpgrade` resolves
+    the cookie again at the moment of admission. It uses that result both
+    for the route's admission check (the owner match for a home world;
+    ownership for a private world) and for the identity it admits.
+  - **The outcome:**
+    - for a home or private world, a session that is gone by then is
+      refused, as today;
+    - for a public world, the socket is admitted as the identity resolved at
+      that moment (anonymous, if the session is gone). Its `hello` then says
+      `signedIn: false`, and I3 handles the page.
+  - **No gap between the check and the registration:** from the final
+    resolution to the moment the socket is findable by the logout sweep,
+    with its auth session id recorded, there is no `await` and no callback
+    boundary. A logout therefore comes either before the check (refused, or
+    admitted anonymous) or after the registration (the sweep finds it).
+  - The synchronous routes (default, `/ws/<id>`) already resolve and admit in
+    one turn. They are held to the same no-gap rule.
+- **The logout failure contract (Rev 1, M4).** Today a failed `DELETE FROM
+  auth_sessions` is swallowed (L476–482) and the reply is 200. Instead:
+  - **if the deletion throws,** the reply is 500 `{ "error": "Sign-out
+    failed" }`, the cookie **is not** cleared, no socket is closed, and one
+    log line is written, `[auth] logout failed <username>`, with no ids;
+  - **deleting zero rows** (the session already expired or gone) is a
+    success;
+  - **a logout with no cookie** is a success, as today.
 - **A session that expires while a socket is open** doesn't close the socket.
   A socket admitted while its session was valid stays until it closes.
   Recorded, not changed: I6 makes expiry rare for anyone active, and I2's
@@ -207,7 +295,10 @@ recommendation is **"what a reload would do"**:
   laptop, a throttled background tab) would otherwise keep owner rights after
   the owner signed out.
 
-**I6. Active sign-ins don't expire.**
+**I6. An active sign-in is renewed whenever the page checks it.** Renewal
+happens when `me()` runs, not because a socket is open. A tab never made
+visible for 7 days, with no connects in that time, is signed out on its
+first check, and I4 handles it.
 - `GET /api/auth/me` renews a session with **less than half its life left**:
   - `expires_at` becomes now + 7 days, and the cookie is re-set with the same
     attributes and `Max-Age`;
@@ -221,7 +312,8 @@ recommendation is **"what a reload would do"**:
 **I7. The server logs sign-ins and admissions.** The 4b-1 passdown noted it
 logs neither, which left the first form unconfirmable on DEV. One line each:
 - `[auth] login <username>`, `[auth] register <username>`,
-  `[auth] logout <username> closed <n> sockets`, `[auth] renewed <username>`;
+  `[auth] logout <username> closed <n> sockets`, `[auth] logout failed
+  <username>` (Rev 1), `[auth] renewed <username>`;
 - at `hello`: `[session] hello <first 8 of sessionId> as
   <username|anonymous> world <world id>`.
 - **No cookie or auth session id in any line.**
@@ -309,10 +401,32 @@ logs neither, which left the first form unconfirmable on DEV. One line each:
   - an expired session gets 401 and is not renewed.
 - **(e) The log lines** of I7 appear, and none of them contains the cookie
   value.
+- **(f) A held world load (Rev 1, M1).** The test makes the world's load wait
+  until it releases it, for example by stubbing `registerWorldFromDocument`
+  or the document read to resolve on demand.
+  - alice upgrades to her **unloaded home**, and the upgrade waits;
+  - she logs out (the sweep runs), then the load is released;
+  - **the upgrade is refused**, and no session for alice exists on that host.
+  - The same for a **public** world: the socket is admitted with
+    `signedIn: false`, and it has no `userId` and no `canEdit`.
+  - A **private** world owned by alice: refused.
+- **(g) Logout when the deletion fails (Rev 1, M4).** The test makes
+  `DELETE FROM auth_sessions` throw:
+  - the reply is 500 `Sign-out failed`, with no `Set-Cookie` clearing the
+    cookie;
+  - alice's open socket stays open, and `me` still answers 200;
+  - the log line is `[auth] logout failed alice`, with no cookie or session
+    id.
+  - Zero rows deleted, and no cookie at all: both 200.
 
 ### 6.3 Client package (`packages/client/test`)
 - `hello` with `signedIn`/`userId`: both are readable and in `session:ready`.
 - `hello` without them: reported as unknown (`undefined`), not `false`.
+- **One `AtriumClient`, two servers (Rev 1, S3):** a connect to a server that
+  sends `signedIn: true` and a `userId`, then a connect to one that sends
+  neither. The second `session:ready` reports both as unknown, never the
+  first connection's values. The same the other way round, and for
+  `signedIn: false` followed by an older server.
 
 ### 6.4 App (`apps/client/test`, with the strict DOM fake)
 - **`syncAuth()`:**
@@ -344,7 +458,24 @@ logs neither, which left the first form unconfirmable on DEV. One line each:
 - **`SIGNED_OUT`** after `session:ready` runs `syncAuth()`:
   - `me()` → 401: the signed-out handling, with "You were signed out in
     another tab";
-  - `me()` → another user: the other-user handling.
+  - `me()` → another user: the other-user handling;
+  - `me()` → **the same user** (Rev 1, S1): it autoconnects to the home
+    world, with that notice.
+- **Other 401s (Rev 1, M2):** a 401 from `refreshWorldList` and from the
+  toggle's `PUT` each run `syncAuth()`, and neither calls `setAuthState`
+  itself.
+- **Late responses (Rev 1, M2):**
+  - a world-list response started as alice, arriving after the switch to bob,
+    is ignored, and bob's list stays;
+  - a 401 started as alice, arriving after the switch to bob, is ignored, and
+    bob stays signed in;
+  - the toggle is restored in both cases.
+- **This tab's own logout (Rev 1):**
+  - a `SIGNED_OUT` while it is in flight runs no `syncAuth()` and shows no
+    notice;
+  - on success: signed out, disconnected, exactly one `auth-changed`;
+  - on a 500: "Couldn't sign out. Try again.", still signed in and
+    connected, and no `auth-changed`.
 
 ### 6.5 Existing suites
 All green, with the usual rules: server files one at a time under
@@ -361,6 +492,14 @@ Run each. Each must fail the named tests and exit on its own.
   that site's 6.4 test.
 - **(p5)** I3's same-origin guard removed: the cross-origin I3 test.
 - **(p6)** the renewal threshold inverted: 6.2(d).
+- **(p7)** (Rev 1) final admission uses the identity captured before the
+  wait: 6.2(f).
+- **(p8)** (Rev 1) the deletion error swallowed again, with a 200 reply:
+  6.2(g).
+- **(p9)** (Rev 1) the auth generation check removed: 6.4's late-response
+  tests.
+- **(p10)** (Rev 1) `SIGNED_OUT` with the same user treated as no change:
+  6.4's same-user test.
 
 ### 6.7 Claude's browser checks
 These run on the published tip, before DEV acceptance, with the real server.
@@ -391,6 +530,11 @@ Two tabs share one browser context, as a browser's tabs do.
 6. **Cross-origin:** a visit to the second origin while signed in at home:
    no notice, no disconnect, and `hello` is anonymous as before.
 7. **The regression set** from the 4b-2 passdown §4.6.
+8. **The same account (Rev 1):** tab A is signed in as alice, in her home.
+   Tab B signs out and back in as alice. Tab A ends connected to alice's
+   home, with alice in the top bar and the "then signed in again" notice.
+9. **The repro script** with `--expect-fixed`, on the published SHA: every
+   check passes.
 
 ### 6.8 DEV acceptance (operator)
 - Two tabs on DEV, as 6.7 steps 1 and 2: sign out in one, then sign in as a
