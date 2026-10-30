@@ -114,6 +114,18 @@ test('W5: NaN and +-Infinity in EITHER point are false — tested as numbers', (
     assert.equal(withinActivateDistance([0, 0, bad], [0, 0, 0]), false, `${bad} in a[2]`)
     assert.equal(withinActivateDistance([bad, 0, 0], [bad, 0, 0]), false, `${bad} in both`)
   }
+
+  // The stage the finiteness guard ALONE covers, and the reason proof (w5) is
+  // reproducible: with a wider `max`, arithmetic would put an infinite point
+  // "within Infinity metres" (`Infinity <= Infinity` is true), so only
+  // `Number.isFinite` in `isPoint3` refuses it. Without these two assertions
+  // removing `Number.isFinite` changes nothing this test can see.
+  assert.equal(withinActivateDistance([0, 0, 0], [Infinity, 0, 0], Infinity), false,
+    'an infinite point is not a point, even at an infinite max')
+  assert.equal(withinActivateDistance([-Infinity, 0, 0], [0, 0, 0], Infinity), false,
+    '-Infinity is not a point either')
+  assert.equal(withinActivateDistance([0, 0, 0], [NaN, 0, 0], Infinity), false,
+    'and neither is NaN')
 })
 
 test('F1: an out-of-range declaration index is refused by the VALIDATOR, not by an F1 rule', () => {
