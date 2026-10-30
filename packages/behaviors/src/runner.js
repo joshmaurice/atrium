@@ -31,6 +31,8 @@
 
 import { createBehaviorEngine, loadBehavior } from './adapter.js'
 import { selectTargetFor, listensForSelect, withinActivateDistance } from './behavior-spec.js'
+// scripting-4c Rev 2 W3 — ONE way to put a `from` into a log line.
+import { logId } from './log-id.js'
 
 /** F7 — sends per world: one opportunity every 50 ms. */
 export const SEND_FRAME_MS = 50
@@ -556,7 +558,7 @@ export function createBehaviorRunner({
       dropForwarded(nodeName, 'no-behaviour', 'the behaviour no longer listens for clicks')
       return
     }
-    write(now(), nodeName, `select from ${String(from ?? '').slice(0, 8)}`)
+    write(now(), nodeName, `select from ${logId(from)}`)
     record.engine.select(0)
   }
 

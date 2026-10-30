@@ -9,6 +9,8 @@ import { MAX_MESSAGE_DEPTH, messageDepth } from './message-depth.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeAuth } from './http-routes.js'
 import { parsePath, worldPosition } from '@atrium/som'
+// scripting-4c Rev 2 W3 — ONE way to put a session id into a log line.
+import { logId } from './log-id.js'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost,
@@ -83,6 +85,16 @@ const ACTIVATE_OWNER_AWAY_MESSAGE = "nothing runs here while the world's owner i
 const ACTIVATE_OWNER_NOT_READY_MESSAGE = "the world's owner isn't ready yet"
 const ACTIVATE_NO_AVATAR_MESSAGE = 'you have no avatar in this world'
 const ACTIVATE_TOO_FAR_MESSAGE = 'you are too far away to use this'
+/** W2 (Rev 2) — the forward's own text when a session id is outside the bound. */
+const ACTIVATE_BAD_SENDER_MESSAGE = 'the sender is not a valid session'
+
+/**
+ * scripting-4c Rev 2 W2 — the bound `hello.client.json`'s `id` declares, kept
+ * here as the forward's own check (defence in depth). W1 is what makes it
+ * unreachable: a `hello` whose id is outside the bound is refused with
+ * `UNKNOWN_MESSAGE` and creates no session.
+ */
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 
 /**
  * V9 — one log line when a send or add check throws. The message is refused
@@ -683,7 +695,7 @@ export function attachSessionHandlers({
         const depth = messageDepth(msg)
         if (depth > MAX_MESSAGE_DEPTH) {
           console.error(
-            `[session] depth guard: session=${session ? session.id : '-'} ` +
+            `[session] depth guard: session=${session ? logId(session.id) : '-'} ` +
             `type=${typeof msg?.type === 'string' ? msg.type : '-'} ` +
             `depth=${Math.min(depth, MAX_MESSAGE_DEPTH)}`
           )
@@ -834,8 +846,10 @@ export function attachSessionHandlers({
 
             // signin-sync I7 — one line per admission. No cookie value, no auth
             // session id: the first 8 characters of the *world* session id only.
+            // scripting-4c Rev 2 W3 — through `logId`, so the line cannot carry
+            // a control character whatever the id holds.
             console.log(
-              `[session] hello ${session.id.slice(0, 8)} as ` +
+              `[session] hello ${logId(session.id)} as ` +
               `${helloUsername ?? 'anonymous'} world ${worldId}`
             )
 
@@ -974,7 +988,7 @@ export function attachSessionHandlers({
               const t = now()
               if (session.activateLogAt == null || t - session.activateLogAt >= ACTIVATE_LOG_WINDOW_MS) {
                 session.activateLogAt = t
-                console.log(`[activate] rate limited ${session.id.slice(0, 8)} world ${worldId}`)
+                console.log(`[activate] rate limited ${logId(session.id)} world ${worldId}`)
               }
               sendError(ws, msg.seq, 'RATE_LIMITED', ACTIVATE_RATE_MESSAGE)
               break
@@ -1036,6 +1050,17 @@ export function attachSessionHandlers({
             //     never used as identity or authority. No answer to the sender on
             //     success — and a successful forward is NOT a successful run
             //     (N3): the host can still drop it.
+            //
+            //     scripting-4c Rev 2 W2 — the forward's own check on `from`
+            //     (defence in depth; W1 makes this unreachable, because a
+            //     `hello` whose id is outside the bound never creates a
+            //     session). A session outside the bound is NOT forwarded: the
+            //     sender is answered INVALID_FIELD, the host sees nothing, and
+            //     the id itself is never written to a log line.
+            if (!SESSION_ID_RE.test(session.id)) {
+              sendError(ws, msg.seq, 'INVALID_FIELD', ACTIVATE_BAD_SENDER_MESSAGE)
+              break
+            }
             activateHost.ws.send(JSON.stringify({
               type: 'activate',
               seq: nextSeq(),

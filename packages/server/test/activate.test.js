@@ -825,6 +825,165 @@ test('AC3/S1: with no successor the answer is NO_SCRIPT_HOST, never silence', as
 })
 
 // ===========================================================================
+// scripting-4c revision round 2, W1 — a hello id outside the bound
+//
+// The outside review's M1/S1: `id` had no maximum and no character set, so a
+// visitor's 250,000-character id (with a newline and an ANSI escape in it) was
+// admitted, every one of its `activate`s carried a 250 KB `from`, and its first
+// 8 characters — control characters included — went into three log lines and
+// the avatar node's name. W1 bounds the id; the schema's refusal IS the
+// refusal (no server code is needed for it): `UNKNOWN_MESSAGE`, no session, and
+// the socket stays open.
+// ===========================================================================
+
+/** A hello id of 250,000 characters, sent as an anonymous visitor's `hello`. */
+const HUGE_ID = 'A'.repeat(250_000)
+/** The control characters S1 smuggled through: a newline and an ANSI colour. */
+const CONTROL_ID = 'x\n\u001b[31m'
+
+test('AC3/W1: a 250,000-character hello id is refused, creates no session and joins nobody', async () => {
+  const { world, port, sessions } = await startWorld()
+  addNodes(world, [behaviourNode('Switch')])
+  const watcher = await open(port, 'owner-1', { as: OWNER })
+  const raw = new WebSocket(`ws://127.0.0.1:${port}`)
+  const rawMessages = collect(raw)
+  await waitForOpen(raw)
+  try {
+    const before = sessions.size
+    watcher.forget()
+
+    raw.send(JSON.stringify({ type: 'hello', id: HUGE_ID }))
+    const err = await waitFor(rawMessages, (m) => m.type === 'error')
+    assert.ok(err, 'the hello is answered')
+    assert.equal(err.code, 'UNKNOWN_MESSAGE', 'the schema’s own refusal')
+    assert.equal(err.message, 'must NOT have more than 64 characters',
+      'the validator’s own detail, as every schema refusal carries it')
+
+    await delay(80)
+    assert.equal(sessions.size, before, 'no session was created')
+    assert.deepEqual(rawMessages.filter((m) => m.type === 'hello'), [],
+      'and no hello reply was sent')
+    assert.deepEqual(watcher.of('join'), [],
+      'and nobody else heard a `join` for it')
+    assert.equal(watcher.of('leave').length, 0, 'nor a `leave` afterwards')
+    assert.equal(raw.readyState, WebSocket.OPEN, 'the socket stays open')
+
+    // THE SAME SOCKET then says a valid hello and is admitted: the refusal cost
+    // the visitor nothing but that message.
+    raw.send(JSON.stringify({ type: 'hello', id: 'raw-admitted' }))
+    const reply = await waitFor(rawMessages, (m) => m.type === 'hello')
+    assert.ok(reply, 'the same socket is admitted with a valid id')
+    assert.equal(reply.id, 'raw-admitted')
+    assert.equal(sessions.size, before + 1)
+  } finally {
+    raw.close()
+    await watcher.close()
+  }
+})
+
+test('AC3/W1: a hello id carrying a newline and an ANSI escape is refused the same way', async () => {
+  const { world, port, sessions } = await startWorld()
+  addNodes(world, [behaviourNode('Switch')])
+  const watcher = await open(port, 'owner-1', { as: OWNER })
+  const raw = new WebSocket(`ws://127.0.0.1:${port}`)
+  const rawMessages = collect(raw)
+  await waitForOpen(raw)
+  try {
+    const before = sessions.size
+    watcher.forget()
+
+    raw.send(JSON.stringify({ type: 'hello', id: CONTROL_ID }))
+    const err = await waitFor(rawMessages, (m) => m.type === 'error')
+    assert.ok(err, 'the hello is answered')
+    assert.equal(err.code, 'UNKNOWN_MESSAGE')
+    assert.equal(err.message, 'must match pattern "^[A-Za-z0-9_-]+$"',
+      'the character-set rule refuses it, not a length rule')
+
+    await delay(80)
+    assert.equal(sessions.size, before, 'no session was created')
+    assert.deepEqual(rawMessages.filter((m) => m.type === 'hello'), [])
+    assert.deepEqual(watcher.of('join'), [], 'nobody heard a `join`')
+    assert.equal(raw.readyState, WebSocket.OPEN, 'the socket stays open')
+
+    raw.send(JSON.stringify({ type: 'hello', id: 'raw-admitted' }))
+    const reply = await waitFor(rawMessages, (m) => m.type === 'hello')
+    assert.ok(reply, 'and the same socket is still usable')
+    assert.equal(sessions.size, before + 1)
+  } finally {
+    raw.close()
+    await watcher.close()
+  }
+})
+
+// ===========================================================================
+// scripting-4c revision round 2, W2 — the forwarded `from` is bounded
+// ===========================================================================
+
+test('AC3/W2: a 64-character id produces a forwarded activate under 400 bytes, and it validates', async () => {
+  const { world, port, sessions } = await startWorld()
+  addNodes(world, [behaviourNode('Switch')])
+  const id64 = 'v'.repeat(64)
+  const host = await open(port, 'owner-1', { as: OWNER })
+  const visitor = await open(port, id64)
+  const rawFrames = []
+  host.ws.on('message', (raw) => rawFrames.push(raw.toString()))
+  try {
+    host.ready(); await host.barrier()
+    await placeAvatar(port, sessions, visitor, [0, 0, 3])
+    host.forget()
+    rawFrames.length = 0
+
+    visitor.activate('Switch')
+    const forwarded = await host.next(isActivateFor('Switch', id64, 1))
+    assert.ok(forwarded, 'the forward reaches the host')
+    assert.equal(forwarded.from, id64, '`from` is the sender’s id whole — the log line needs it')
+
+    // M1's measurement, inverted: the frame that used to be 250,108 bytes.
+    const frame = rawFrames.find((f) => f.includes('"activate"'))
+    assert.ok(frame, 'the raw frame was captured')
+    const bytes = Buffer.byteLength(frame)
+    assert.ok(bytes < 400, `the forwarded frame is ${bytes} bytes, and 400 is the ceiling`)
+    assert.equal(validate('server', forwarded).valid, true,
+      'and it validates against activate.server.json (round 1’s AC3 test, now meaningful)')
+  } finally {
+    await visitor.close()
+    await host.close()
+  }
+})
+
+test('AC3/W2: a session whose id is outside the bound is not forwarded, and its sender gets INVALID_FIELD', async () => {
+  const { world, port, sessions } = await startWorld()
+  addNodes(world, [behaviourNode('Switch')])
+  const host = await open(port, 'owner-1', { as: OWNER })
+  const visitor = await open(port, 'visitor-1')
+  const session = sessions.get('visitor-1')
+  try {
+    host.ready(); await host.barrier()
+    await placeAvatar(port, sessions, visitor, [0, 0, 1])
+    host.forget()
+
+    // A TEST-ONLY setup, as round 1's tests set state: the session map's entry
+    // is given an id the schema could never have admitted. W1 makes this
+    // unreachable; the forward's own check is the defence in depth.
+    assert.ok(session, 'the session is in the map')
+    session.id = 'outside\u001b'.repeat(9)          // 72 characters, with a control character
+
+    const answer = await answerTo(visitor, visitor.activate('Switch'))
+    assert.ok(answer, 'the sender is answered')
+    assert.equal(answer.code, 'INVALID_FIELD')
+    assert.equal(answer.message, 'the sender is not a valid session')
+    await delay(60)
+    assertNothingForwarded(host, 'nothing is forwarded from a session outside the bound')
+  } finally {
+    // Put the id back so the session's own cleanup (which is identity-safe by
+    // id) still finds it and stops its tick loop.
+    session.id = 'visitor-1'
+    await visitor.close()
+    await host.close()
+  }
+})
+
+// ===========================================================================
 // G2 — a throw inside the case is answered, and the session survives
 // ===========================================================================
 

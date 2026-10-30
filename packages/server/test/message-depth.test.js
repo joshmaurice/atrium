@@ -400,6 +400,33 @@ test('(f) an array nested 100,000 deep is refused with no RangeError anywhere', 
 })
 
 // ===========================================================================
+// scripting-4c revision round 2, W3 — the depth guard's line names the session
+// through logId, never the whole id
+// ===========================================================================
+
+test('W3: the depth guard logs logId()’s 8 characters, not the session id', async () => {
+  const state = await startChild({ DEPTH_SERVER_OWNER: 'user-a', DEPTH_SERVER_SOCKET_USER: 'user-a' })
+  const { ws, messages } = await connect(state.port)
+  const id = 'dddd4444-extra'          // 15 characters, so logId's 8 differ from the id
+  try {
+    await hello(ws, messages, id)
+
+    await expectDepthRefusal(ws, messages, sendJson(9301, nestedArrayJson(6500)), 9301)
+
+    const lines = state.stderr.split('\n').filter(l => l.includes('[session] depth guard:'))
+    assert.equal(lines.length, 1, `exactly one depth-guard line, got ${JSON.stringify(lines)}`)
+    assert.equal(lines[0],
+      '[session] depth guard: session=dddd4444 type=send depth=64',
+      'logId drops the "-extra" AND would drop any control character')
+    assert.equal(lines[0].includes(id), false, 'the whole id is never in the line')
+  } finally {
+    ws.close()
+    await waitForClose(ws)
+    await stopChild(state)
+  }
+})
+
+// ===========================================================================
 // §6.1 (g) — G2, the fail-closed handler
 // ===========================================================================
 

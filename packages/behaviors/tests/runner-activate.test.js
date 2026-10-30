@@ -126,6 +126,23 @@ describe('AC5 — the forwarded select', () => {
     }
   })
 
+  test('the logged `from` goes through logId: no control character reaches the line (W3)', () => {
+    const crate = makeNode({ name: 'crate', id: OWN, behavior: hide(OWN) })
+    const { client, runner } = setup({ nodes: [crate] })
+    try {
+      waitForWrite(client)
+      client.emit('activate', { node: 'crate', from: '\u001b[31mFAKE' })
+      runner.tick()
+      const line = runner.log.find((l) => l.message.startsWith('select from'))
+      assert.ok(line, 'the host’s log records where the click came from')
+      // NOT `String(from).slice(0, 8)`, which keeps the ESC and the '['.
+      assert.equal(line.message, 'select from 31mFAKE')
+      assert.equal(/[\u0000-\u001f\u007f]/.test(line.message), false, 'no control character')
+    } finally {
+      runner.dispose()
+    }
+  })
+
   test('it never re-checks distance: the server is the gate', () => {
     const crate = makeNode({ name: 'crate', id: OWN, behavior: hide(OWN) })
     crate.translation = [500, 0, 0]                       // far from the local avatar
