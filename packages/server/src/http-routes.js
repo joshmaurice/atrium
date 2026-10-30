@@ -327,6 +327,9 @@ export function createRequestHandler(opts = {}) {
       // -- Set cookie --
       setAuthCookie(res, authSessionId)
 
+      // signin-sync I7 — one line per new account. No cookie, no session id.
+      console.log(`[auth] register ${normalized}`)
+
       // -- Auto-create home world (idempotent; errors don't block auth) --
       let homeWorldWarning = null
       try {
@@ -432,6 +435,9 @@ export function createRequestHandler(opts = {}) {
       }
 
       setAuthCookie(res, authSessionId)
+
+      // signin-sync I7 — one line per sign-in. No cookie, no session id.
+      console.log(`[auth] login ${normalized}`)
 
       // -- Auto-create home world (idempotent; errors don't block auth) --
       let homeWorldWarning = null
@@ -914,47 +920,28 @@ export function parseAuthSessionCookie(req) {
 }
 
 /**
- * Resolve a userId from the request's auth session cookie.
- * Returns null if the cookie is missing, expired, or the session row
- * doesn't exist (anonymous / unauthenticated).
- * @param {import('node:http').IncomingMessage} req
- * @param {{ database: import('better-sqlite3').Database }} db
- * @returns {string|null}
- */
-/**
- * Resolve a userId from the request's auth session cookie at WebSocket upgrade
- * time. Semantically identical to resolveUserIdFromCookie but named for use in
- * WebSocket upgrade handlers. Shared across world-registry.js and session.js
- * to avoid code duplication.
+ * signin-sync I5 — the one resolver.
+ *
+ * Resolve the sign-in carried by the request's auth session cookie. Returns
+ * `{ userId, authSessionId }` or `null` when there is no usable session: no
+ * cookie, no row, or an expired row (which is deleted on the way out).
+ *
+ * `sameOriginOnly` applies the cross-origin rule: a cross-origin WebSocket
+ * upgrade is always anonymous, even when the cookie is valid (decision #2 in
+ * the cross-server connect brief), so it resolves to `null`.
+ *
+ * Both of the older resolvers below are thin wrappers around this one, so the
+ * userId and the auth session id can never come from different lookups.
  *
  * @param {import('node:http').IncomingMessage} req
  * @param {{ database: import('better-sqlite3').Database }} db
- * @returns {string|null}
+ * @param {{ sameOriginOnly?: boolean }} [opts]
+ * @returns {{ userId: string, authSessionId: string }|null}
  */
-export function resolveWsUserId(req, db) {
-  const authSessionId = parseAuthSessionCookie(req)
-  if (!authSessionId) return null
+export function resolveAuthSession(req, db, { sameOriginOnly = false } = {}) {
+  if (!db) return null
+  if (sameOriginOnly && !isSameOriginUpgrade(req)) return null
 
-  const row = db.database.prepare(
-    'SELECT user_id, expires_at FROM auth_sessions WHERE id = ?'
-  ).get(authSessionId)
-
-  if (!row) return null
-
-  // Check expiry
-  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
-    try {
-      db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
-    } catch {
-      // Swallow cleanup errors
-    }
-    return null
-  }
-
-  return row.user_id
-}
-
-export function resolveUserIdFromCookie(req, db) {
   const authSessionId = parseAuthSessionCookie(req)
   if (!authSessionId) return null
 
@@ -975,7 +962,33 @@ export function resolveUserIdFromCookie(req, db) {
     return null
   }
 
-  return row.user_id
+  return { userId: row.user_id, authSessionId }
+}
+
+/**
+ * Resolve a userId from the request's auth session cookie.
+ * Returns null if the cookie is missing, expired, or the session row
+ * doesn't exist (anonymous / unauthenticated).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {string|null}
+ */
+export function resolveUserIdFromCookie(req, db) {
+  return resolveAuthSession(req, db)?.userId ?? null
+}
+
+/**
+ * Resolve a userId from the request's auth session cookie at WebSocket upgrade
+ * time. Semantically identical to resolveUserIdFromCookie but named for use in
+ * WebSocket upgrade handlers. Shared across world-registry.js and session.js
+ * to avoid code duplication.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {string|null}
+ */
+export function resolveWsUserId(req, db) {
+  return resolveAuthSession(req, db)?.userId ?? null
 }
 
 /**
@@ -1034,6 +1047,22 @@ export function isSameOriginUpgrade(req) {
 }
 
 /**
+ * Resolve the full sign-in `{ userId, authSessionId }` for a WebSocket
+ * upgrade, applying the cross-origin rule: a cross-origin upgrade always
+ * resolves to null (anonymous), even with a valid cookie.
+ *
+ * This is what the upgrade path calls: one resolution gives the userId and the
+ * auth session id that the socket records, so they can never disagree.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ database: import('better-sqlite3').Database }} db
+ * @returns {{ userId: string, authSessionId: string }|null}
+ */
+export function resolveUpgradeAuth(req, db) {
+  return resolveAuthSession(req, db, { sameOriginOnly: true })
+}
+
+/**
  * Resolve userId from the request's auth session cookie, but only when
  * the WebSocket upgrade is same-origin. Cross-origin upgrades always
  * return null (anonymous), even when the cookie is valid.
@@ -1047,7 +1076,5 @@ export function isSameOriginUpgrade(req) {
  * @returns {string|null}
  */
 export function resolveUpgradeUserId(req, db) {
-  if (!isSameOriginUpgrade(req)) return null
-  // Same-origin: reuse resolveWsUserId for the cookie lookup
-  return resolveWsUserId(req, db)
+  return resolveUpgradeAuth(req, db)?.userId ?? null
 }

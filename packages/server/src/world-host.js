@@ -46,7 +46,7 @@ export function createWorldHost(opts = {}) {
   const wss = new WebSocketServer({ noServer: true })
 
   // Wire up the session handlers for this host's wss
-  const { closeKeepalive, evictNonOwners, getPreHelloSocketCount } = attachSessionHandlers({
+  const { closeKeepalive, evictNonOwners, getPreHelloSocketCount, closeAuthSessionSockets } = attachSessionHandlers({
     wss,
     world,
     db,
@@ -58,17 +58,21 @@ export function createWorldHost(opts = {}) {
     onSessionRemoved,
     onSaveableMutation,
     onPreHelloClosed,
+    worldId: id,
   })
 
   /**
    * Route an upgraded incoming request into this host's wss.
    * Called from the registry-upgrade handler after worldId resolution.
+   *
+   * `upgradeAuthSessionId` is the auth session the userId came from
+   * (signin-sync I5), recorded on the socket so a logout can find it.
    */
-  function handleUpgrade(request, socket, head, upgradeUserId) {
+  function handleUpgrade(request, socket, head, upgradeUserId, upgradeAuthSessionId = null) {
     wss.handleUpgrade(request, socket, head, (ws) => {
       // The wss.emit('connection', ...) call inside attachSessionHandlers
-      // expects (ws, req, upgradeUserId). We pass the saved upgradeUserId.
-      wss.emit('connection', ws, request, upgradeUserId)
+      // expects (ws, req, upgradeUserId, authSessionId).
+      wss.emit('connection', ws, request, upgradeUserId, upgradeAuthSessionId)
     })
   }
 
@@ -101,6 +105,7 @@ export function createWorldHost(opts = {}) {
     handleUpgrade,
     evictNonOwners,
     getPreHelloSocketCount,
+    closeAuthSessionSockets,
     close,
   }
 }

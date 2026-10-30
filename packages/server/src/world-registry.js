@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
-import { isOriginAllowed, resolveUpgradeUserId } from './http-routes.js'
+import { isOriginAllowed, resolveUpgradeAuth } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
 import { createWorld, createWorldFromDocument } from './world.js'
 import { createAutoSaveCoordinator } from './autosave.js'
@@ -214,12 +214,15 @@ export function createWorldRegistry(opts = {}) {
         sendHttpResponse(socket, 404, 'World Not Found')
         return
       }
-      // Resolve userId from cookie (for backward compat with existing hello auth)
-      let upgradeUserId = null
+      // Resolve the sign-in — userId AND auth session id from one lookup
+      // (signin-sync I5). The auth session id rides to the socket so a logout
+      // can find it later.
+      let upgradeAuth = null
       if (db) {
-        try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
+        try { upgradeAuth = resolveUpgradeAuth(request, db) } catch { upgradeAuth = null }
       }
-      host.handleUpgrade(request, socket, head, upgradeUserId)
+      const upgradeUserId = upgradeAuth?.userId ?? null
+      host.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
       return
     }
 
@@ -230,10 +233,11 @@ export function createWorldRegistry(opts = {}) {
         sendRefusal(request, socket, head)
         return
       }
-      let upgradeUserId = null
+      let upgradeAuth = null
       if (db) {
-        try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
+        try { upgradeAuth = resolveUpgradeAuth(request, db) } catch { upgradeAuth = null }
       }
+      const upgradeUserId = upgradeAuth?.userId ?? null
       // Admission: check DB visibility to allow public worlds for non-owners.
       // Public worlds reachable via /ws/<id> by anyone; private worlds require
       // ownership (prevents /ws/<homeWorldRowId> bypassing /home/<userId>/home auth).
@@ -256,17 +260,18 @@ export function createWorldRegistry(opts = {}) {
       }
       // Cancel any pending teardown — a new connection arrived
       cancelTeardown(descriptor.worldRowId)
-      host.handleUpgrade(request, socket, head, upgradeUserId)
+      host.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
       return
     }
 
     // ── Home world (/home/<userId>/home) ──
     if (descriptor.kind === 'home') {
       // 1. Resolve user identity from session cookie
-      let upgradeUserId = null
+      let upgradeAuth = null
       if (db) {
-        try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
+        try { upgradeAuth = resolveUpgradeAuth(request, db) } catch { upgradeAuth = null }
       }
+      const upgradeUserId = upgradeAuth?.userId ?? null
 
       // 2. Admission: anonymous → refusal
       if (!upgradeUserId) {
@@ -313,7 +318,7 @@ export function createWorldRegistry(opts = {}) {
           sendHttpResponse(socket, 404, 'World Not Found')
           return
         }
-        host.handleUpgrade(request, socket, head, upgradeUserId)
+        host.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
       }
 
       if (hosts.has(hostId)) {
@@ -383,8 +388,9 @@ export function createWorldRegistry(opts = {}) {
       }
 
       // 3. Admission: visibility + ownership check
-      let upgradeUserId = null
-      try { upgradeUserId = resolveUpgradeUserId(request, db) } catch { upgradeUserId = null }
+      let upgradeAuth = null
+      try { upgradeAuth = resolveUpgradeAuth(request, db) } catch { upgradeAuth = null }
+      const upgradeUserId = upgradeAuth?.userId ?? null
 
       if (row.visibility === 'private') {
         // Private world: only the owner may connect via /public/ or /worlds/ path
@@ -409,7 +415,7 @@ export function createWorldRegistry(opts = {}) {
         }
         // Owner matches operator — route to the degraded root host
         cancelTeardown(rootId)
-        rootHost.handleUpgrade(request, socket, head, upgradeUserId)
+        rootHost.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
         return
       }
 
@@ -437,7 +443,7 @@ export function createWorldRegistry(opts = {}) {
             }
           }
         }
-        host.handleUpgrade(request, socket, head, upgradeUserId)
+        host.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
       }
 
       if (hosts.has(hostId)) {

@@ -7,7 +7,7 @@ import { validate } from '@atrium/protocol'
 import { createTickLoop } from './tick.js'
 import { MAX_MESSAGE_DEPTH, messageDepth } from './message-depth.js'
 import { createPresence } from './presence.js'
-import { resolveUpgradeUserId } from './http-routes.js'
+import { resolveUpgradeAuth } from './http-routes.js'
 import { parsePath } from '@atrium/som'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
@@ -222,29 +222,29 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     }
 
     // Cross-origin WebSocket connections are admitted anonymously (pre-brief #2).
-    // resolveUpgradeUserId returns the cookie's user only when the upgrade
+    // resolveUpgradeAuth returns the cookie's sign-in only when the upgrade
     // is same-origin. Cross-origin upgrades always arrive anonymous.
     // CSRF protection for HTTP routes remains in http-routes.js.
     // See decision #2 in the cross-server connect brief.
 
-    // Resolve userId from auth session cookie before the WebSocket handshake.
-    let upgradeUserId = null
+    // Resolve the sign-in (userId AND auth session id) before the handshake.
+    let upgradeAuth = null
     if (db) {
       try {
-        upgradeUserId = resolveUpgradeUserId(request, db)
+        upgradeAuth = resolveUpgradeAuth(request, db)
       } catch {
         // If resolution fails for any reason, treat as anonymous
-        upgradeUserId = null
+        upgradeAuth = null
       }
     }
 
     wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request, upgradeUserId)
+      wss.emit('connection', ws, request, upgradeAuth?.userId ?? null, upgradeAuth?.authSessionId ?? null)
     })
   })
 
   // Wire up connection handlers
-  const { closeKeepalive, evictNonOwners } = attachSessionHandlers({
+  const { closeKeepalive, evictNonOwners, closeAuthSessionSockets } = attachSessionHandlers({
     wss,
     world,
     db,
@@ -253,6 +253,7 @@ export function createSessionServer({ httpServer, maxUsers = 100, world = null, 
     maxUsers,
     worldOwnerUserId: null,
     keepaliveInterval,
+    worldId: 'default',
   })
 
   function close() {
@@ -302,11 +303,14 @@ export function attachSessionHandlers({
   onSaveableMutation = null,
   keepaliveInterval = KEEPALIVE_INTERVAL,
   onPreHelloClosed = null,
+  worldId = 'default',
 } = {}) {
 
-  // Track pre-hello connections by WebSocket instance so eviction (V5)
-  // can disconnect sockets that haven't sent hello yet.
-  const preHelloSockets = new Map()  // ws -> upgradeUserId | null
+  // Track pre-hello connections by WebSocket instance so eviction (V5) and the
+  // logout sweep (signin-sync I5) can disconnect sockets that haven't sent
+  // hello yet. Each entry is `{ userId, authSessionId }`.
+  /** @type {Map<import('ws').WebSocket, { userId: string|null, authSessionId: string|null }>} */
+  const preHelloSockets = new Map()
 
   // ---------------------------------------------------------------------------
   // 4b-1 E4 — the script-host role, one per world host (P7: each world host
@@ -343,12 +347,55 @@ export function attachSessionHandlers({
     }
 
     // Evict pre-hello sockets
-    for (const [ws, uid] of preHelloSockets) {
-      if (ws.readyState === 1 /* OPEN */ && uid !== ownerUserId) {
+    for (const [ws, entry] of preHelloSockets) {
+      if (ws.readyState === 1 /* OPEN */ && entry.userId !== ownerUserId) {
         ws.send(evictMsg)
         ws.close(1008)
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // signin-sync I5 — closeAuthSessionSockets
+  //
+  // Close every socket this host admitted with `authSessionId`. Sends `error`
+  // code `SIGNED_OUT` ("You signed out") and then closes 1008, exactly as
+  // evictNonOwners does, and covers pre-hello sockets as well as full
+  // sessions. Only the sockets whose recorded auth session id matches are
+  // touched: the same user signed in elsewhere keeps their sockets.
+  // ---------------------------------------------------------------------------
+  const doCloseAuthSessionSockets = function closeAuthSessionSockets(authSessionId) {
+    if (!authSessionId) return 0
+
+    const signedOutMsg = JSON.stringify({
+      type: 'error',
+      code: 'SIGNED_OUT',
+      message: 'You signed out',
+    })
+
+    let closed = 0
+
+    // Full sessions admitted with this auth session
+    for (const [, s] of sessions) {
+      if (s.authSessionId !== authSessionId) continue
+      if (s.ws.readyState === 1 /* OPEN */) {
+        s.ws.send(signedOutMsg)
+        s.ws.close(1008)
+      }
+      closed += 1
+    }
+
+    // Pre-hello sockets: upgraded with this auth session but no hello yet
+    for (const [ws, entry] of preHelloSockets) {
+      if (entry.authSessionId !== authSessionId) continue
+      if (ws.readyState === 1 /* OPEN */) {
+        ws.send(signedOutMsg)
+        ws.close(1008)
+      }
+      closed += 1
+    }
+
+    return closed
   }
 
   // ---------------------------------------------------------------------------
@@ -520,7 +567,7 @@ export function attachSessionHandlers({
     return session.userId === worldOwnerUserId
   }
 
-  wss.on('connection', (ws, req, upgradeUserId = null) => {
+  wss.on('connection', (ws, req, upgradeUserId = null, upgradeAuthSessionId = null) => {
     let session = null
 
     // Log WS errors without rethrowing (pre-brief security: prevent
@@ -529,8 +576,8 @@ export function attachSessionHandlers({
       console.error(`[session] connection error: ${err.message}`)
     })
 
-    // Track pre-hello connection for eviction (V5)
-    preHelloSockets.set(ws, upgradeUserId)
+    // Track pre-hello connection for eviction (V5) and the logout sweep (I5)
+    preHelloSockets.set(ws, { userId: upgradeUserId, authSessionId: upgradeAuthSessionId })
 
     ws.on('message', async (raw) => {
       // Declared OUTSIDE the try below, so the catch can echo the message's
@@ -598,6 +645,7 @@ export function attachSessionHandlers({
             }
 
             let userDisplayName = `User-${sessionId.slice(0, 4)}`
+            let helloUsername = null
 
             // The server never adopts a client-sent displayName (pre-brief #9).
             // The session name is always the DB display_name for an authenticated
@@ -609,10 +657,13 @@ export function attachSessionHandlers({
             if (upgradeUserId && db) {
               try {
                 const userRow = db.database.prepare(
-                  'SELECT display_name FROM users WHERE id = ?'
+                  'SELECT display_name, username FROM users WHERE id = ?'
                 ).get(upgradeUserId)
                 if (userRow && userRow.display_name) {
                   userDisplayName = userRow.display_name
+                }
+                if (userRow && userRow.username) {
+                  helloUsername = userRow.username
                 }
               } catch {
                 // If the lookup fails, stick with the client-supplied or anonymous fallback
@@ -623,6 +674,9 @@ export function attachSessionHandlers({
               ws,
               id: sessionId,
               userId: null,
+              // signin-sync I5 — the auth session this socket was admitted
+              // with, recorded next to userId so a logout can find it.
+              authSessionId: upgradeAuthSessionId,
               capabilities: msg.capabilities ?? {},
               seq: nextSeq(),
               missedPings: 0,
@@ -679,6 +733,10 @@ export function attachSessionHandlers({
               displayName: session.displayName,
               canPlaceTeleporters,
               canEdit,
+              // signin-sync I1 — every hello this server sends states who it
+              // admitted. `userId` is present exactly when `signedIn` is true.
+              signedIn: session.userId !== null,
+              ...(session.userId !== null ? { userId: session.userId } : {}),
               // 4b-1 E5 — required in EVERY server hello; `hostGen` present exactly
               // when `scriptHost` is true.
               scriptHost: isScriptHost,
@@ -687,6 +745,13 @@ export function attachSessionHandlers({
                 tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
               },
             }))
+
+            // signin-sync I7 — one line per admission. No cookie value, no auth
+            // session id: the first 8 characters of the *world* session id only.
+            console.log(
+              `[session] hello ${session.id.slice(0, 8)} as ` +
+              `${helloUsername ?? 'anonymous'} world ${worldId}`
+            )
 
             session.tickStop = createTickLoop(session, negotiated).stop
 
@@ -1227,7 +1292,9 @@ export function attachSessionHandlers({
 
   return { closeKeepalive() {
     clearInterval(keepaliveTimer)
-  }, evictNonOwners: doEvictNonOwners, getPreHelloSocketCount: () => preHelloSockets.size }
+  }, evictNonOwners: doEvictNonOwners,
+     closeAuthSessionSockets: doCloseAuthSessionSockets,
+     getPreHelloSocketCount: () => preHelloSockets.size }
 }
 
 // ---------------------------------------------------------------------------
