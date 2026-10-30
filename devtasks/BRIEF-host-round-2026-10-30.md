@@ -8,13 +8,15 @@ in §6. **4c's kickoff waits until §7's "done" holds.**
   round goes first, all of it, because item 1 (cards created without a parent)
   is a risk to every release chain, 4c's included.
 - **Source of record:** `atrium-ops` branch `claude/host-round-2026-10-30`
-  (`4becf06`), from `claude/s22` (the installed S22 code). Its
+  (`61c1d01`), from `claude/s22` (the installed S22 code). Its
   `host/HOST-ROUND-2026-10-30.md` lists every target, mode and hash. The
   guard, which until now lived only on the host, is recorded there too:
-  v1.1.4 as read (`5648739`), then v1.2.0.
+  v1.1.4 as it is live (`2e162b1`, correcting `5648739`, see §2.5), then
+  v1.2.0.
 - **Delivery to the VPS:** the same files, byte for byte, in this public
-  repo under `devtasks/host-drafts/host-round-2026-10-30/`, where step B
-  fetches them through `/root/lib-install`. The steps are files there too
+  repo under `devtasks/host-drafts/host-round-2026-10-30/`. Step B
+  downloads them with `curl` from GitHub, pinned to commit `43a6ed34`, and
+  checks each sha256. (`/root/lib-install` has no `origin` remote, so it isn't used.) The steps are files there too
   (`step-A-read.sh`, `step-B-install.sh`, `step-C-check.sh`,
   `rollback.sh`), identical to the blocks in §6.
 - **Host facts** were read through the ops connector on 2026-10-30, 07:50–08:00
@@ -119,6 +121,16 @@ schema, and whether a `modify` that sets `initial_status` reaches the board.
 §6 step A reads the schema, step C runs the real guard file's decision, and the first held card proves the
 third.
 
+### 2.5 Correction: the first v1.1.4 copy was six bytes off
+Step A found all five live copies at `5a1ca40b…`, not the `e684c4e5…` the
+first draft expected. A diff on the VPS showed one line: line 67's regex
+class. The live file has the escape text `\u2014\u2013`, while Claude's copy
+had the two dash characters themselves, because the tool used to write the
+file decoded the escapes. It's the same regex, so the tests passed, but the
+bytes differed (12 against 6). The copy, v1.2.0 and the patch are rebuilt
+on the live bytes. The patch applied to an exact copy of the live file gives
+v1.2.0's `d14f7b85…`. The 12 tests and the seven breaks were re-run on it.
+
 ## 3. Item 2: the content check
 - **The change:** `service_health` gains a fourth check. It fetches the
   served `app.js` (with `Cache-Control: no-cache` and a cache-buster) and
@@ -186,7 +198,7 @@ Every block is self-contained, and each is also a file in the drafts folder.
 **Check what each step says to check before running the next.** Steps B, C
 and rollback were run end to end in a scratch root laid out like the VPS
 (two profiles' guard copies, `atrium-release-status` at `0700`,
-`buildrun.py` at `0644`, a `lib-install` clone): install, check, rollback;
+`buildrun.py` at `0644`, the downloads from a local copy): install, check, rollback;
 a non-baseline guard copy stops it with nothing changed; a held deploy lock
 stops it with nothing changed.
 
@@ -212,7 +224,8 @@ atrium-release-status | grep -E "STATE|DEPLOY LOCK"
 docker stats --no-stream hermes-c6b7f940
 ```
 Claude checks:
-- every guard copy is `e684c4e56b00415197e63447ca6e7594efa97fcd750bff564e406dc0044429c3` (v1.1.4);
+- every guard copy is `5a1ca40bdd12bb1448b846006e6f5526461f21cbe608478ed5c4ce72e35c3e01` (v1.1.4, live). Step A on
+  2026-10-30 found five copies (deepseek, deployer, glm, nemotron, orchestrator), all this;
 - `atrium-release-status` is `9d37c98b587d0c7ac426003bfee92227245360afb56fe112ba2a2d0f99367517`, `700 root:root`;
 - `buildrun.py` is `8af62e357df3b481ac95dca10275f0727c61f8ffe008f557aff351055cb9c3dc`, `644 root:root`;
 - the board's `tasks` has `body` and `status`;
@@ -235,16 +248,16 @@ check() { [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" ] || { echo "STOP: $1 is 
 B=/root/host-round-2026-10-30-backup
 S=/tmp/host-round-2026-10-30
 mkdir -p "$B" "$S"
-git -C /root/lib-install fetch -q origin main
+U=https://raw.githubusercontent.com/joshmaurice/atrium/43a6ed34a2f43f56c218c788c1411a52de59d3b1/devtasks/host-drafts/host-round-2026-10-30
 for f in kanban_guard.py atrium-release-status buildrun.py; do
-  git -C /root/lib-install show "origin/main:devtasks/host-drafts/host-round-2026-10-30/$f" > "$S/$f"
+  curl -fsS -o "$S/$f" "$U/$f"
 done
-check "$S/kanban_guard.py"        bee4eb60b1ed1f574d570c5b1345ee049e4cd316043a956c415d136535731746
+check "$S/kanban_guard.py"        d14f7b85f7eb4d23b2aaccecffc3a5c7a73297125139bdc51d13f3193d95bcfa
 check "$S/atrium-release-status"  18b36f195bab1e50de51865d6289d55c5f724bbefe4490e1e3077c05634e90ac
 check "$S/buildrun.py"            e03b832433372b6dc9a7f1c716b568574bcb5d18868b2868a8e053bd65574793
 GUARDS=(/root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py)
 [ -f "${GUARDS[0]}" ] || { echo "STOP: no guard copies found"; exit 1; }
-for g in "${GUARDS[@]}"; do check "$g" e684c4e56b00415197e63447ca6e7594efa97fcd750bff564e406dc0044429c3; done
+for g in "${GUARDS[@]}"; do check "$g" 5a1ca40bdd12bb1448b846006e6f5526461f21cbe608478ed5c4ce72e35c3e01; done
 check /usr/local/sbin/atrium-release-status                  9d37c98b587d0c7ac426003bfee92227245360afb56fe112ba2a2d0f99367517
 check /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py 8af62e357df3b481ac95dca10275f0727c61f8ffe008f557aff351055cb9c3dc
 echo "Every baseline matches (${#GUARDS[@]} guard copies). Installing; backups in $B."
@@ -261,7 +274,7 @@ cp -p /usr/local/sbin/atrium-release-status "$B/atrium-release-status"
 cp "$S/atrium-release-status" /usr/local/sbin/atrium-release-status
 cp -p /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py "$B/buildrun.py"
 cp "$S/buildrun.py" /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
-for g in "${GUARDS[@]}"; do check "$g" bee4eb60b1ed1f574d570c5b1345ee049e4cd316043a956c415d136535731746; done
+for g in "${GUARDS[@]}"; do check "$g" d14f7b85f7eb4d23b2aaccecffc3a5c7a73297125139bdc51d13f3193d95bcfa; done
 check /usr/local/sbin/atrium-release-status                  18b36f195bab1e50de51865d6289d55c5f724bbefe4490e1e3077c05634e90ac
 check /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py e03b832433372b6dc9a7f1c716b568574bcb5d18868b2868a8e053bd65574793
 stat -c '%a %U:%G %n' "${GUARDS[@]}" /usr/local/sbin/atrium-release-status /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
