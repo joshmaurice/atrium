@@ -8,9 +8,12 @@ otherwise.
 1. Clone the repo and read `devtasks/`, newest first (this file first).
 2. Use the `atrium-ops` connector for board, release, log and git state. It
    is read-only: it can't create cards, comment or push.
-3. **Next up is Phase 3 step 4c** (§6.1): visitors' `activate`. Its pre-brief
-   doesn't exist yet; `devtasks/PREBRIEF-scripting-4b-2.md` §9 is its sketch.
-   A small host round (§6.2) is worth doing first or alongside.
+3. **Next: the small host round (§6.2), then Phase 3 step 4c** (§6.1),
+   visitors' `activate`. The host round goes first, whole: its item 1 (cards
+   created without a parent) is a risk to every release chain, including
+   4c's. 4c's pre-brief can be written while it runs; it doesn't exist yet,
+   and `devtasks/PREBRIEF-scripting-4b-2.md` §9 is its sketch. Only 4c's
+   kickoff waits for the host round.
 4. **Never push to `main` between a DEV deploy's release merge and the MAIN
    push** of the release you mean to ship. A round that is on DEV and will be
    **replaced** (not accepted) doesn't count: its revision can go to `main`,
@@ -170,7 +173,7 @@ session, `hello` tells the page who it is, and the page and the server now
 agree. 4c's checks can trust `session.userId`, and a signed-out owner's tabs
 lose their sockets.
 
-### 6.2 Small host round (open)
+### 6.2 Small host round (next, before 4c's kickoff)
 1. §4.3: workflow cards created without a parent are refused or created
    `blocked`; find why the orchestrator's `kanban_create` and
    `kanban_complete` drop fields.
