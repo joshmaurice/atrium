@@ -7,11 +7,16 @@ in §6. **4c's kickoff waits until §7's "done" holds.**
 - **Why now:** the signin-sync passdown (first instruction 3, §6.2): the host
   round goes first, all of it, because item 1 (cards created without a parent)
   is a risk to every release chain, 4c's included.
-- **Drafts:** `devtasks/host-drafts/host-round-2026-10-30/`, beside the
-  earlier host drafts (`atrium-deploy-H3.patch`, …). Claude couldn't attach
-  the `atrium-ops` repo to this session, so nothing is on an `atrium-ops`
-  branch. **After rollout, the operator copies the two changed files into
-  `atrium-ops`** (or tells Claude to, in a session that has it).
+- **Source of record:** `atrium-ops` branch `claude/host-round-2026-10-30`
+  (`4becf06`), from `claude/s22` (the installed S22 code). Its
+  `host/HOST-ROUND-2026-10-30.md` lists every target, mode and hash. The
+  guard, which until now lived only on the host, is recorded there too:
+  v1.1.4 as read (`5648739`), then v1.2.0.
+- **Delivery to the VPS:** the same files, byte for byte, in this public
+  repo under `devtasks/host-drafts/host-round-2026-10-30/`, where step B
+  fetches them through `/root/lib-install`. The steps are files there too
+  (`step-A-read.sh`, `step-B-install.sh`, `step-C-check.sh`,
+  `rollback.sh`), identical to the blocks in §6.
 - **Host facts** were read through the ops connector on 2026-10-30, 07:50–08:00
   UTC: the guard and `atrium-release-status` sources (`read_file`), the
   board (`kanban_show`), the orchestrator's run statistics
@@ -23,7 +28,7 @@ in §6. **4c's kickoff waits until §7's "done" holds.**
 |---|---|---|
 | 1 | §4.3: workflow cards created without a parent; why the orchestrator's `kanban_create` and `kanban_complete` drop fields | **Guard v1.2.0** (§2): a parentless card is created `blocked`, and a link releases it. Plus a key-only log of every `kanban_create`/`kanban_complete`, which settles the dropped fields (§2.3) |
 | 2 | §4.5: `atrium-release-status` doesn't check content | **A content check** (§3): served `app.js` against its blob at the checkout's `HEAD` |
-| 3 | `@atrium/behaviors` in the host's test list | **Needs one paste** (§4): the list lives in `atrium-build-run`, which the connector can't read |
+| 3 | `@atrium/behaviors` in the host's test list | **One entry** in `buildrun.py`'s `TESTS` (§4) |
 | 4 | The 4 GB host's memory during proof runs | **A finding and a recommendation** (§5). Nothing is applied without the operator's choice |
 
 ## 2. Item 1: guard v1.2.0
@@ -111,7 +116,7 @@ breaks, each failing the test that pins it:
 
 **Not tested off-host:** the real Hermes `kanban_db`, the real `tasks`
 schema, and whether a `modify` that sets `initial_status` reaches the board.
-§6 step C checks the first two directly, and the first held card proves the
+§6 step A reads the schema, step C runs the real guard file's decision, and the first held card proves the
 third.
 
 ## 3. Item 2: the content check
@@ -120,6 +125,7 @@ third.
   compares its sha256 with the blob `HEAD:apps/client/src/app.js` in that
   environment's checkout, read through the script's own fixed git contract.
   - A match prints `healthy (app.js sha256 <12> served = checkout HEAD)`.
+  - The script keeps its mode, `0700` (S22's manifest).
   - A mismatch or a failed check is a health failure,
     `active / content: app.js served sha256 <12>, checkout HEAD <12> FAILED`.
 - **Why the blob and not the file on disk:** "actual" in this script means
@@ -133,15 +139,21 @@ third.
   bytes, an uncommitted edit, an unfetchable file, an unreadable checkout.
 
 ## 4. Item 3: `@atrium/behaviors` in the test list
-The deploy runs `"$BUILD" list-tests` and then `"$BUILD" test-<name>` for
-each (`atrium-deploy`). The last DEV deploy reported "All 7 test suites"
-(`t_1c3551ce`), with no names. The list is in `atrium-build-run`
-(`/usr/local/lib/atrium-host/sbin/`, from `atrium-ops`
-`host/lib/atrium_host/buildrun.py`), which the connector can't read. §6
-step A prints it. Claude then writes the one-line change, in the same shape
-as the existing entries, and the operator applies it in step B.
-`@atrium/behaviors` runs with `node --test tests/*.test.js` from
-`packages/behaviors` (132 tests, 1 named skip, at the base).
+- **Where the list is:** `TESTS` in `atrium_host/buildrun.py`
+  (`/usr/local/lib/atrium-host/lib/atrium_host/buildrun.py`, mode `0644`,
+  sha256 `8af62e35…`, which S22 byte-checked against `atrium-ops`). The
+  deploy runs `atrium-build-run list-tests`, then `test-<name>` for each
+  entry. The seven entries are protocol, som, server, client,
+  renderer-three, interaction and apps-client, the "7 test suites" DEV
+  deploy `t_1c3551ce` reported.
+- **The change:** one entry, `("behaviors", 300, [PNPM, "--filter",
+  "@atrium/behaviors", "test"])`, before `apps-client`. `list-tests` then
+  prints eight names.
+- **Checked:** `@atrium/behaviors` at `ab02239b`, in a network namespace
+  with no interface up (the deploy's tests run offline): 132 tests, 131
+  pass, 1 named skip (`KHRONOS_ASSETS`), 0 fail. `atrium-ops`'s
+  `host/tests/unit/test_host.py`: 26 pass.
+- **The next DEV deploy** (4c's first) is the first to run it.
 
 ## 5. Item 4: memory
 - **What the host showed:** 3,814 MB of RAM, 2,047 MB of swap (518 MB in
@@ -170,87 +182,142 @@ as the existing entries, and the operator applies it in step B.
      Recommended later, not in this round.
 
 ## 6. Operator steps
-Every block is self-contained. Check what each step says to check **before**
-running the next block.
+Every block is self-contained, and each is also a file in the drafts folder.
+**Check what each step says to check before running the next.** Steps B, C
+and rollback were run end to end in a scratch root laid out like the VPS
+(two profiles' guard copies, `atrium-release-status` at `0700`,
+`buildrun.py` at `0644`, a `lib-install` clone): install, check, rollback;
+a non-baseline guard copy stops it with nothing changed; a held deploy lock
+stops it with nothing changed.
 
-**A. Read-only: paste the whole output back to Claude.**
+**A. Read-only. Paste the whole output back to Claude.**
 ```bash
-C=hermes-c6b7f940
-echo "== guard copies (path, sha256) =="
-docker exec "$C" sh -c 'grep -rl --include=*.py "atrium-kanban-guard: mechanical checks" / 2>/dev/null | xargs -r sha256sum'
-echo "== release status =="
-RS="$(command -v atrium-release-status)"; echo "$RS"; sha256sum "$RS"
-echo "== test list =="
-/usr/local/lib/atrium-host/sbin/atrium-build-run list-tests
-grep -rn "list-tests\|interaction\|renderer-three" /usr/local/lib/atrium-host/ 2>/dev/null | head -40
-echo "== container memory =="
-docker stats --no-stream "$C"
+# A. Read-only. Paste the whole output back to Claude.
+echo "== guard copies (sha256, path) =="
+sha256sum /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py
+grep -H '^version:' /root/.hermes/profiles/*/plugins/atrium-kanban-guard/plugin.yaml
+echo "== release status and the test list (sha256, mode) =="
+sha256sum /usr/local/sbin/atrium-release-status /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
+stat -c '%a %U:%G %n' /usr/local/sbin/atrium-release-status /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
+echo "== the board's tasks columns (read-only) =="
+python3 -c 'import glob, sqlite3
+for p in sorted(glob.glob("/root/.hermes/kanban/**/*.db", recursive=True)):
+    try:
+        c = sqlite3.connect("file:" + p + "?mode=ro", uri=True)
+        print(p, [r[1] for r in c.execute("PRAGMA table_info(tasks)")])
+    except Exception as e:
+        print(p, "unreadable:", e)'
+echo "== deploy lock, container memory =="
+atrium-release-status | grep -E "STATE|DEPLOY LOCK"
+docker stats --no-stream hermes-c6b7f940
 ```
 Claude checks:
-- every guard copy's sha256 is `e684c4e56b00415197e63447ca6e7594efa97fcd750bff564e406dc0044429c3`
-  (v1.1.4 as the connector read it);
-- the release status script's is `9d37c98b587d0c7ac426003bfee92227245360afb56fe112ba2a2d0f99367517`.
+- every guard copy is `e684c4e56b00415197e63447ca6e7594efa97fcd750bff564e406dc0044429c3` (v1.1.4);
+- `atrium-release-status` is `9d37c98b587d0c7ac426003bfee92227245360afb56fe112ba2a2d0f99367517`, `700 root:root`;
+- `buildrun.py` is `8af62e357df3b481ac95dca10275f0727c61f8ffe008f557aff351055cb9c3dc`, `644 root:root`;
+- the board's `tasks` has `body` and `status`;
+- `STATE: COMPLETE` and the deploy lock is free;
+- the container's memory, for item 4.
 
-**If a hash differs, stop:** Claude rebases the patch (`*.patch` in the
-drafts) instead, and step B becomes `patch --dry-run` first. Claude also
-writes step B's item-3 line from the list.
+**If any hash differs, don't run step B.** It would stop anyway, with
+nothing changed. Claude rebases the change on the file that's actually
+there.
 
-**B. Install** (only after Claude confirms step A). This writes the paths
-Claude names from step A. Claude gives the block with those paths written
-in, no placeholders. Its shape:
+**B. Install** (as root, after Claude confirms step A):
 ```bash
+# B. Install. Run as root, only after Claude confirms step A. It stops before
+# changing anything unless every downloaded file and every live file has the
+# expected sha256, and it holds the deploy lock so no deploy starts meanwhile.
 set -euo pipefail
-B=/root/host-round-2026-10-30-backup; mkdir -p "$B"
+exec 9>>/run/lock/atrium-deploy.lock
+flock -n 9 || { echo "STOP: a deploy holds the lock; run this again when it's free"; exit 1; }
+check() { [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" ] || { echo "STOP: $1 is not $2; nothing was changed by this check"; exit 1; }; }
+B=/root/host-round-2026-10-30-backup
+S=/tmp/host-round-2026-10-30
+mkdir -p "$B" "$S"
 git -C /root/lib-install fetch -q origin main
-H=devtasks/host-drafts/host-round-2026-10-30
-git -C /root/lib-install show "origin/main:$H/kanban_guard.py" > /tmp/kanban_guard-v1.2.0.py
-git -C /root/lib-install show "origin/main:$H/atrium-release-status" > /tmp/atrium-release-status.new
-sha256sum /tmp/kanban_guard-v1.2.0.py /tmp/atrium-release-status.new
-# must print bee4eb60b1ed1f574d570c5b1345ee049e4cd316043a956c415d136535731746
-#        and 18b36f195bab1e50de51865d6289d55c5f724bbefe4490e1e3077c05634e90ac
-# then, per guard path from step A: docker cp the old file to "$B", docker cp the new one in
-# then: cp -p "$RS" "$B"/ && install -m 0755 -o root -g root /tmp/atrium-release-status.new "$RS"
+for f in kanban_guard.py atrium-release-status buildrun.py; do
+  git -C /root/lib-install show "origin/main:devtasks/host-drafts/host-round-2026-10-30/$f" > "$S/$f"
+done
+check "$S/kanban_guard.py"        bee4eb60b1ed1f574d570c5b1345ee049e4cd316043a956c415d136535731746
+check "$S/atrium-release-status"  18b36f195bab1e50de51865d6289d55c5f724bbefe4490e1e3077c05634e90ac
+check "$S/buildrun.py"            e03b832433372b6dc9a7f1c716b568574bcb5d18868b2868a8e053bd65574793
+GUARDS=(/root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py)
+[ -f "${GUARDS[0]}" ] || { echo "STOP: no guard copies found"; exit 1; }
+for g in "${GUARDS[@]}"; do check "$g" e684c4e56b00415197e63447ca6e7594efa97fcd750bff564e406dc0044429c3; done
+check /usr/local/sbin/atrium-release-status                  9d37c98b587d0c7ac426003bfee92227245360afb56fe112ba2a2d0f99367517
+check /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py 8af62e357df3b481ac95dca10275f0727c61f8ffe008f557aff351055cb9c3dc
+echo "Every baseline matches (${#GUARDS[@]} guard copies). Installing; backups in $B."
+for g in "${GUARDS[@]}"; do
+  p="$(basename "$(dirname "$(dirname "$(dirname "$g")")")")"
+  y="$(dirname "$g")/plugin.yaml"
+  mkdir -p "$B/$p"
+  cp -p "$g" "$B/$p/__init__.py"
+  if [ -f "$y" ]; then cp -p "$y" "$B/$p/plugin.yaml"; fi
+  cp "$S/kanban_guard.py" "$g"            # cp onto the existing file keeps its owner and mode
+  if [ -f "$y" ]; then sed -i 's/^version:.*/version: 1.2.0/' "$y"; fi
+done
+cp -p /usr/local/sbin/atrium-release-status "$B/atrium-release-status"
+cp "$S/atrium-release-status" /usr/local/sbin/atrium-release-status
+cp -p /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py "$B/buildrun.py"
+cp "$S/buildrun.py" /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
+for g in "${GUARDS[@]}"; do check "$g" bee4eb60b1ed1f574d570c5b1345ee049e4cd316043a956c415d136535731746; done
+check /usr/local/sbin/atrium-release-status                  18b36f195bab1e50de51865d6289d55c5f724bbefe4490e1e3077c05634e90ac
+check /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py e03b832433372b6dc9a7f1c716b568574bcb5d18868b2868a8e053bd65574793
+stat -c '%a %U:%G %n' "${GUARDS[@]}" /usr/local/sbin/atrium-release-status /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
+grep -H '^version:' /root/.hermes/profiles/*/plugins/atrium-kanban-guard/plugin.yaml || true
+echo "INSTALLED."
 ```
 Each kanban worker run starts a new process, so the next card picks up
 v1.2.0. **A long-running front-door session keeps the old plugin until
-`/new`.** Start a fresh one.
+`/new`:** start a fresh one. Nothing restarts: no service reads these files
+at start-up.
 
-**C. Check it** (read-only, then one log read):
+**C. Check** (read-only, except one line in a scratch guard log):
 ```bash
-atrium-release-status          # both health lines: "healthy (app.js sha256 … served = checkout HEAD)"
-C=hermes-c6b7f940
-# the board's tasks table has the columns the release reads
-docker exec "$C" sh -c 'find / -name "*.db" -path "*kanban*atrium*" 2>/dev/null | head -1 | xargs -r -I{} python3 -c "import sqlite3,sys; print([r[1] for r in sqlite3.connect(sys.argv[1]).execute(\"PRAGMA table_info(tasks)\")])" {}'
-# the decision, without creating a card (this writes one labelled line to the guard log)
-docker exec "$C" sh -c 'cd "$(dirname "$(grep -rl --include=*.py "atrium-kanban-guard: mechanical checks" / 2>/dev/null | head -1)")" && python3 -c "
-import importlib.util, glob, os
-p = [f for f in glob.glob(\"*.py\") if \"mechanical checks\" in open(f).read()][0]
-s = importlib.util.spec_from_file_location(\"g\", p); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
-r = g.pre_tool_call(\"kanban_create\", {\"board\": \"atrium\", \"title\": \"HOST ROUND CHECK — not a card\", \"assignee\": \"atrium-glm\", \"body\": \"x\"})
-print(r[\"action\"], r[\"args\"].get(\"initial_status\"), g.NO_PARENT_NOTE in r[\"args\"][\"body\"])"'
+# C. Check. Read-only, except one labelled line in a scratch guard log.
+atrium-release-status | grep -E "health"
+/usr/local/lib/atrium-host/sbin/atrium-build-run list-tests
+G="$(ls /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py | head -1)"
+HERMES_HOME="$(mktemp -d)" python3 -c 'import importlib.util, sys
+s = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
+r = g.pre_tool_call("kanban_create", {"board": "atrium", "title": "HOST ROUND CHECK, not a card", "assignee": "atrium-glm", "body": "x"})
+print(r["action"], r["args"].get("initial_status"), g.NO_PARENT_NOTE in r["args"]["body"])' "$G"
 ```
-Expect: the column list includes `body` and `status`; the decision prints
-`modify blocked True`. **If `body` is missing,** held cards can't be
-released by a link (they stay `blocked`, safe), and Claude changes the
-release's column before 4c's kickoff.
+Expect:
+- both health lines read `healthy (app.js sha256 … served = checkout HEAD)`;
+- `list-tests` prints eight names, `behaviors` before `apps-client`;
+- the last line is `modify blocked True`.
 
 **D. After the next orchestrator run** (any card it creates or completes),
 paste the `args` lines:
 ```bash
-docker exec hermes-c6b7f940 sh -c 'for f in $(find / -name atrium-kanban-guard.log 2>/dev/null); do echo "== $f"; grep "\"event\": \"args\"\|no_parent" "$f" | tail -20; done'
+for f in $(find /root/.hermes -name atrium-kanban-guard.log 2>/dev/null); do echo "== $f"; grep '"event": "args"\|no_parent' "$f" | tail -20; done
 ```
 
-**Rollback:** copy the files in `/root/host-round-2026-10-30-backup` back to
-the paths they came from (the guard with `docker cp`, the script with
-`install -m 0755`).
+**Rollback** (puts back every file step B replaced):
+```bash
+# Rollback: put back every file step B replaced, from its backup.
+set -euo pipefail
+B=/root/host-round-2026-10-30-backup
+for d in "$B"/*/; do
+  p="$(basename "$d")"; t="/root/.hermes/profiles/$p/plugins/atrium-kanban-guard"
+  cp "$d/__init__.py" "$t/__init__.py"
+  if [ -f "$d/plugin.yaml" ]; then cp "$d/plugin.yaml" "$t/plugin.yaml"; fi
+done
+cp "$B/atrium-release-status" /usr/local/sbin/atrium-release-status
+cp "$B/buildrun.py" /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
+sha256sum /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py /usr/local/sbin/atrium-release-status /usr/local/lib/atrium-host/lib/atrium_host/buildrun.py
+```
 
 ## 7. Done
-- [ ] Step A pasted. Hashes match, or the patches are rebased.
-- [ ] Guard v1.2.0 and the content check installed. Item 3's line added.
-  Item 4's limit decided (applied or declined).
-- [ ] Step C: both health lines show the content match; `tasks` has `body`;
-  the decision prints `modify blocked True`.
-- [ ] The two changed files committed to `atrium-ops`.
+- [ ] Step A pasted; every hash matches, or Claude has rebased the change.
+- [ ] Step B printed `INSTALLED.`
+- [ ] Step C: the content match on both health lines, eight test names,
+  `modify blocked True`.
+- [ ] Item 4's memory limit decided (applied or declined).
+- [ ] `atrium-ops`: `claude/host-round-2026-10-30` merged, or kept as the
+  record (it's already pushed).
 
 Then 4c's kickoff can be written from `53f68ba` (the FINAL pre-brief).
 **At 4c's kickoff,** the first held card (if any) and step D's `args` lines
