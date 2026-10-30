@@ -44,6 +44,23 @@ DEV acceptance.
     line in two owner tabs, supersession, a visitor); `c8.py` is 8 (load
     healing, for a saved and a file world; it reads `$HARNESS_ROOT/server.log`,
     so start the server with its output there).
+  - `checks/scripting-4b-2/`: see its README (it also lists the 28-script
+    regression set).
+  - `checks/signin-sync/`: **real sign-in**, unlike everything above.
+    - `authserver.mjs` runs the real server (`packages/server/src/index.js`,
+      with its own DB at `$HARNESS_ROOT/auth.db`, reset at each start) behind
+      the same two HTTPS origins. It forwards `/api/*` and WebSocket upgrades
+      with the browser's Host, Origin and Cookie. Start it instead of
+      `server.mjs`, not as well: both use 8443/8444.
+    - `c.py`: the round's §6.7 checks 1–6 and 8 (two tabs in one context);
+      `c4b.py`: a connected tab's disconnect on an expired sign-in.
+    - `repro.mjs <worktree> [--expect-fixed]`: the server-only reproduction.
+    - `reg_run.sh <harness root> <label>` runs the 28-script regression set
+      into `/tmp/reg/<label>/` (it starts `server.mjs` itself), and
+      `regdiff.py` compares `/tmp/reg/base` with `/tmp/reg/r2` with numbers,
+      ids and avatar names masked. With no saved baseline, run it on the base
+      commit too, in a second harness root that symlinks the first one's
+      `vendor`, `vsrc`, `khronos` and `lib-*`.
 
 ## Setup (about 2 minutes)
 ```bash
