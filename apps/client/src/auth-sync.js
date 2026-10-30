@@ -131,8 +131,12 @@ export function createAuthSync({
     //    cross-origin connection is anonymous anyway and is left alone.
     if (isConnected() && connectionIsSameOrigin()) disconnect()
 
-    // 4. a signed-in new state autoconnects, as a page load does
-    if (user) autoConnect(user)
+    // 4. a signed-in new state autoconnects, as a page load does. J1: the
+    //    answer that found this change IS this one connect's guard answer, so
+    //    it is passed EXPLICITLY, for this one connect only. Without it the
+    //    autoconnect calls syncAuth() while runSync()'s own request is still
+    //    in flight, joins `{ changed: true }`, and cancels itself.
+    if (user) autoConnect(user, { confirmedUser: user })
 
     // 5. the notice, in plain words, visible without opening anything
     if (user && same && (source === 'socket' || signedOutEvenIfSameUser)) {
@@ -203,12 +207,23 @@ export function createAuthSync({
   /**
    * The one wrapper every connect site goes through. Awaiting it means the
    * page has just confirmed who it is; a change found here CANCELS the connect
-   * (no client.connect call), and the caller clears any overlay it raised.
+   * (no transport call), and the connect path sets the connection state to
+   * what it actually is.
    *
-   * At page load the load-time `me()` counts as the guard's answer, so the
-   * autoconnect that follows does not make a second request.
+   * J1 — `loadAnswerPending` (the page-load case) and `confirmedUser` (the
+   * change handling's own autoconnect) are the two ways the guard's answer is
+   * already known. Both are EXPLICIT and one-shot: no module-level flag a
+   * later connect could consume. Every other connect, including a user's
+   * Connect right after a change, still runs syncAuth().
    */
-  async function guardConnect() {
+  async function guardConnect({ confirmedUser } = {}) {
+    // J1 — the answer that found the change counts as the guard's answer for
+    // the autoconnect that the change itself starts, exactly as the load-time
+    // me() counts for the page-load autoconnect. Only when it is the current
+    // user, so a stale value can never skip the check.
+    if (confirmedUser && sameUser(confirmedUser, getCurrentUser())) {
+      return { proceed: true, changed: false, user: getCurrentUser(), confirmed: true }
+    }
     if (loadAnswerPending) {
       loadAnswerPending = false
       return { proceed: true, changed: false, user: getCurrentUser() }
@@ -378,5 +393,59 @@ function defaultCreateChannel(name) {
     return new globalThis.BroadcastChannel(name)
   } catch {
     return null
+  }
+}
+
+/**
+ * signin-sync r2 J1/J2 — the ONE connect path.
+ *
+ * Every connect site in `app.js` goes through the function this returns, so a
+ * seventh site cannot miss the guard and a cancelled connect's state reset
+ * cannot be missed either. It lives here rather than in `app.js` so it can be
+ * driven in a test against a REAL `createAuthSync`: the guard is the module's
+ * own, and only the transport (`connect`) and the page's state setter are
+ * faked. Round 1 tested `applyChange` with a spy for `autoConnect`, and that
+ * is how the always-cancelled autoconnect got through.
+ *
+ * @param {object} deps
+ * @param {(opts?: object) => Promise<{proceed: boolean}>} deps.guardConnect
+ *   the real guard (`createAuthSync().guardConnect`); forwarded `confirmedUser`
+ * @param {(wsUrl: string, connectOpts: object, ui: object) => Promise<object>} deps.connect
+ *   the transport (`app.js`'s `connectNow`)
+ * @param {() => boolean} deps.isConnected — is a socket open right now?
+ * @param {(state: string) => void} deps.setConnectionState — the page's UI state
+ * @param {() => void} [deps.clearOverlays] — hide the overlay and failure panel
+ * @returns {(wsUrl: string, connectOpts: object, ui?: object) => Promise<{status: string}>}
+ */
+export function createConnectPath({
+  guardConnect,
+  connect,
+  isConnected,
+  setConnectionState,
+  clearOverlays = () => {},
+}) {
+  /**
+   * @param {string} wsUrl
+   * @param {object} connectOpts
+   * @param {{onError?: Function, onCancelled?: Function, confirmedUser?: object}} [ui]
+   *   `confirmedUser` (J1) is passed by the change handling's own autoconnect
+   *   only; it makes the guard skip exactly that one connect.
+   * @returns {Promise<{status: string, data?: object}>}
+   */
+  return async function trackConnect(wsUrl, connectOpts, { onError, onCancelled, confirmedUser } = {}) {
+    const guard = await guardConnect({ confirmedUser })
+    if (!guard.proceed) {
+      // A change found before the connect cancels it: no transport call, and
+      // any overlay the caller raised goes.
+      clearOverlays()
+      // J2 — the state is set to what it ACTUALLY is, in addition to the
+      // overlay clear. A cross-origin connection I4 left alone is still
+      // connected; anything else is disconnected. Without this the Connect
+      // button keeps reading "Connecting..." until a reload.
+      setConnectionState(isConnected() ? 'connected' : 'disconnected')
+      if (typeof onCancelled === 'function') onCancelled(guard)
+      return { status: 'auth-changed', data: guard }
+    }
+    return connect(wsUrl, connectOpts, { onError })
   }
 }

@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { createAuthSync, NOTICE, AUTH_CHANNEL, SYNC_TIMEOUT_MS } from '../src/auth-sync.js'
+import { createAuthSync, createConnectPath, NOTICE, AUTH_CHANNEL, SYNC_TIMEOUT_MS } from '../src/auth-sync.js'
 import { computeWsUrl, sameOriginAsAccount } from '../src/wsUrl.js'
 import { el } from './strict-element.mjs'
 import * as authJs from '../src/auth.js'
@@ -200,25 +200,202 @@ describe('§6.4 the six connect sites', () => {
     assert.equal(calls.states.length, 0, 'no change: trackConnect’s supersession is unchanged')
   })
 
-  test('app.js: every connect goes through the one wrapper', () => {
+  test('app.js: every connect goes through the one connect path', () => {
     const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 
     const rawConnects = (stripped.match(/client\.connect\(/g) ?? []).length
     assert.equal(rawConnects, 1, 'the only raw client.connect() is inside connectNow()')
 
     const wrappers = (stripped.match(/trackConnect\(/g) ?? []).length
-    assert.equal(wrappers, 7, 'six call sites plus the one definition')
+    assert.equal(wrappers, 6, 'the six call sites (the path itself is in auth-sync.js)')
 
-    assert.match(stripped, /return connectNow\(wsUrl, connectOpts, \{ onError \}\)/,
-      'the wrapper delegates to connectNow')
-    assert.match(stripped, /const guard = await authSync\.guardConnect\(\)/,
+    // r2 J1/J2 — the path itself moved into auth-sync.js so it can be driven
+    // in a test against the real guard; app.js binds its transport and page
+    // deps to it.
+    assert.match(stripped, /const trackConnect = createConnectPath\(\{/,
+      'the path comes from auth-sync.js')
+    assert.match(stripped, /connect: connectNow,/, 'and it delegates to connectNow')
+    assert.match(stripped, /guardConnect: \(opts\) => authSync\.guardConnect\(opts\)/,
       'and it awaits the guard first')
+    assert.match(stripped, /setConnectionState,/, 'and it restores the connection state (J2)')
 
     // autoConnectToHomeWorld is one of the six, not a bypass.
     const at = stripped.indexOf('function autoConnectToHomeWorld')
     assert.ok(at >= 0)
     const body = stripped.slice(at, stripped.indexOf('\n}\n', at))
-    assert.match(body, /return trackConnect\(/, 'autoconnect goes through the wrapper')
+    assert.match(body, /return trackConnect\(/, 'autoconnect goes through the path')
+  })
+
+  // r2 (p4) — one test per connect site, so a site that stops going through
+  // the path fails ITS OWN test. Each anchor is unique in app.js.
+  describe('each of the six connect sites goes through the connect path', () => {
+    const clean = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const near = (anchor, chars = 2500) => {
+      const at = clean.indexOf(anchor)
+      assert.ok(at >= 0, `anchor not found: ${anchor}`)
+      return clean.slice(at, at + chars)
+    }
+
+    test('1. the world-list Load', () => {
+      assert.match(near("itemLoadBtn.addEventListener('click'"), /const outcome = await trackConnect\(wsUrl/)
+    })
+    test('2. the teleport trigger', () => {
+      assert.match(near('onTrigger:'), /trackConnect\(worldUrl/)
+    })
+    test('3. its Go back', () => {
+      assert.match(near("panelGoBack.addEventListener('click'"), /trackConnect\(prevWorldUrl/)
+    })
+    test('4. autoConnectToHomeWorld', () => {
+      assert.match(near('function autoConnectToHomeWorld'), /return trackConnect\(homeWsUrl/)
+    })
+    test('5. the som:desync resync', () => {
+      assert.match(near("client.on('som:desync'"), /trackConnect\(url, connectOpts/)
+    })
+    test('6. the Connect button', () => {
+      assert.match(near('function handleConnect'), /trackConnect\(wsUrl, connectOpts/)
+    })
+  })
+})
+
+// ===========================================================================
+// §6.4 (r2 J1/J2) — the connect path, driven through the REAL guard
+// ===========================================================================
+
+const tick = () => new Promise((r) => setImmediate(r))
+
+const homeUrl = (user) => `wss://example.com/worlds/${user.username}/home`
+
+/**
+ * A REAL createAuthSync wired to the REAL connect path (auth-sync.js's
+ * createConnectPath). Only the transport (`connect`) and the page's state
+ * setter are faked. There is deliberately NO spy for `autoConnect`: applyChange
+ * calls the real path, which calls the real guard. That is what round 1's spy
+ * hid — the autoconnect joined the request still in flight and cancelled
+ * itself.
+ */
+function makeConnectRun(opts = {}) {
+  const connects = []
+  const states = []
+  const calls = { me: 0, disconnected: 0, cleared: 0 }
+  let user = opts.user ?? null
+  let me = opts.me ?? (() => null)
+
+  let trackConnect
+  const sync = createAuthSync({
+    me: async () => { calls.me += 1; return me() },
+    getCurrentUser: () => user,
+    setAuthState: (u) => { user = u },
+    showNotice: () => {},
+    clearNotice: () => {},
+    isConnected: () => opts.connected ?? false,
+    connectionIsSameOrigin: () => opts.sameOrigin ?? false,
+    disconnect: () => { calls.disconnected += 1 },
+    // the real autoconnect shape app.js uses: the home world, through the path,
+    // forwarding `confirmedUser`.
+    autoConnect: (u, o) => trackConnect(homeUrl(u), { avatar: {} }, o),
+    createChannel: () => null,
+    log: { warn: () => {} },
+  })
+
+  trackConnect = createConnectPath({
+    guardConnect: (o) => sync.guardConnect(o),
+    connect: async (url, connectOpts) => { connects.push({ url, connectOpts }); return { status: 'ready' } },
+    isConnected: () => opts.connected ?? false,
+    setConnectionState: (s) => states.push(s),
+    clearOverlays: () => { calls.cleared += 1 },
+  })
+
+  return {
+    sync, calls, connects, states, trackConnect,
+    getUser: () => user,
+    setMe: (fn) => { me = fn },
+  }
+}
+
+describe('§6.4 (r2 J1) — the autoconnect after a change goes ahead', () => {
+  test('(a) alice → bob on visibility: exactly one connect to bob’s home, no second me()', async () => {
+    const run = makeConnectRun({ user: alice, me: () => bob, connected: false })
+    await run.sync.handleVisible()
+    await tick()
+
+    assert.equal(run.connects.length, 1, 'exactly one client.connect')
+    assert.equal(run.connects[0].url, homeUrl(bob), "to bob's home world")
+    assert.equal(run.calls.me, 1, 'no second me() for the autoconnect')
+    assert.equal(run.getUser().id, bob.id, 'the page is bob now')
+  })
+
+  test('(b) signed out → alice: one connect to alice’s home', async () => {
+    const run = makeConnectRun({ user: null, me: () => alice })
+    await run.sync.handleVisible()
+    await tick()
+
+    assert.equal(run.connects.length, 1)
+    assert.equal(run.connects[0].url, homeUrl(alice))
+    assert.equal(run.calls.me, 1)
+  })
+
+  test('(c) SIGNED_OUT with the same user: one connect, and no second me()', async () => {
+    const run = makeConnectRun({ user: alice, me: () => alice, connected: true, sameOrigin: false })
+    await run.sync.handleSignedOut()
+    await tick()
+    await tick()
+
+    assert.equal(run.connects.length, 1, 'the tab reconnects as a reload would')
+    assert.equal(run.connects[0].url, homeUrl(alice))
+    assert.equal(run.calls.me, 1, 'the same-user path adds no second request')
+  })
+
+  test('(d) a user’s Connect right after the change runs a NEW me() first', async () => {
+    const run = makeConnectRun({ user: alice, me: () => bob })
+    await run.sync.handleVisible()
+    await tick()
+    assert.equal(run.calls.me, 1, 'the change handling used the one answer')
+
+    // A user's Connect: no `confirmedUser`, so the guard must run.
+    await run.trackConnect(homeUrl(bob), { avatar: {} }, {})
+
+    assert.equal(run.calls.me, 2, 'a new me() before it connects')
+    assert.equal(run.connects.length, 2)
+  })
+})
+
+describe('§6.4 (r2 J2) — a cancelled connect restores the connection state', () => {
+  test('an autoconnect whose guard found a change ends disconnected', async () => {
+    const run = makeConnectRun({ user: alice, me: () => null, connected: false })
+    // What the autoconnect site does first, then the path it goes through.
+    run.states.push('connecting')
+    await run.trackConnect(homeUrl(alice), { avatar: {} }, {})
+
+    assert.deepEqual(run.states, ['connecting', 'disconnected'],
+      'the Connect button must not be left reading "Connecting..."')
+    assert.equal(run.connects.length, 0, 'no connect was made')
+    assert.equal(run.calls.cleared, 1, 'the overlay goes too')
+  })
+
+  test('the Connect button’s connect, cancelled, ends disconnected', async () => {
+    const run = makeConnectRun({ user: alice, me: () => null, connected: false })
+    run.states.push('connecting')
+    await run.trackConnect('wss://example.com/worlds/bob/home', { avatar: {} }, {})
+
+    assert.deepEqual(run.states, ['connecting', 'disconnected'])
+  })
+
+  test('a cross-origin connection I4 left alone ends connected', async () => {
+    const run = makeConnectRun({ user: alice, me: () => null, connected: true, sameOrigin: false })
+    run.states.push('connecting')
+    await run.trackConnect('wss://other.example/worlds/x', { avatar: {} }, {})
+
+    assert.equal(run.calls.disconnected, 0, 'a cross-origin connection is left alone')
+    assert.deepEqual(run.states, ['connecting', 'connected'], 'and it is still connected')
+  })
+
+  test('app.js: the disconnected state reads Connect and is enabled', () => {
+    const clean = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const at = clean.indexOf('function setConnectionState')
+    assert.ok(at >= 0)
+    const body = clean.slice(at, clean.indexOf('\n}\n', at))
+    assert.match(body, /connectBtn\.textContent = 'Connect'/)
+    assert.match(body, /connectBtn\.disabled\s*=\s*false/)
   })
 })
 

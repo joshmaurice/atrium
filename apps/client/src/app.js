@@ -44,7 +44,7 @@ import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
 import { withNewObjectId } from './object-identity.js'   // scripting-4b-1 E7
 import { hostStatusText } from './host-status.js'        // scripting-4b-1 E8
-import { createAuthSync, NOTICE } from './auth-sync.js'   // signin-sync I2–I4
+import { createAuthSync, createConnectPath, NOTICE } from './auth-sync.js'   // signin-sync I2–I4, r2 J1/J2
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -148,7 +148,9 @@ const authSync = createAuthSync({
   isConnected: () => client.connected === true,
   connectionIsSameOrigin: () => sameOriginAsAccount(currentWorldUrl || '', accountWsBase),
   disconnect: () => client.disconnect(),
-  autoConnect: (user) => autoConnectToHomeWorld(user),
+  // J1 — the change handling's own autoconnect passes `confirmedUser` through
+  // to the connect path, which skips the guard for that one connect.
+  autoConnect: (user, opts) => autoConnectToHomeWorld(user, opts),
 })
 
 /**
@@ -685,7 +687,7 @@ function homeWorldWsUrl(username) {
   return buildWorldWsUrl(accountWsBase, username, 'home')
 }
 
-function autoConnectToHomeWorld(user) {
+function autoConnectToHomeWorld(user, { confirmedUser } = {}) {
   // Builds the canonical /worlds/<username>/home URL from accountWsBase
   // (pre-brief #2/#5), regardless of any pathname in the connection box.
   // Auto-connect always targets the home world via buildWorldWsUrl; manual
@@ -703,9 +705,13 @@ function autoConnectToHomeWorld(user) {
   const connectOpts = { avatar: avatarDesc }
   connectOpts.displayName = user.displayName || user.username
   // signin-sync I2 — this is a connect site like the other five: it goes
-  // through the one wrapper, so a change found first cancels it.
+  // through the one path, so a change found first cancels it. J1 — the change
+  // handling's own autoconnect passes `confirmedUser`, and the guard then
+  // skips exactly this one connect: its answer is already the one that found
+  // the change.
   return trackConnect(homeWsUrl, connectOpts, {
     onError: (msg) => { console.warn(`[app] home world connect failed: ${msg}`) },
+    confirmedUser,
   })
 }
 
@@ -1240,31 +1246,27 @@ function connectNow(wsUrl, connectOpts, { onError } = {}) {
 }
 
 /**
- * signin-sync I2 — the ONE connect wrapper. Every connect site goes through
- * this function (the world list's Load, the teleport trigger, its Go back,
- * autoConnectToHomeWorld, the som:desync resync and the Connect button), so a
- * seventh site cannot miss the re-check.
+ * signin-sync I2 (round 2: J1/J2) — the ONE connect path. It is built here
+ * from `auth-sync.js`'s `createConnectPath` so its rules can be driven in a
+ * test against the real guard. Every connect site in this file goes through
+ * it — the world list's Load, the teleport trigger, its Go back,
+ * `autoConnectToHomeWorld`, the `som:desync` resync and the Connect button —
+ * so a seventh site cannot miss the re-check.
  *
- * It awaits syncAuth() first. When that reports a change, the connect is
- * CANCELLED: no client.connect call is made and any overlay the caller raised
- * is cleared. The caller gets `{ status: 'auth-changed' }`.
+ * It awaits the guard first. When that reports a change the connect is
+ * CANCELLED: no `client.connect` call, the overlay and failure panel go, and
+ * (J2) the connection state is set to what it actually is. The caller gets
+ * `{ status: 'auth-changed' }`.
  *
- * @param {string} wsUrl
- * @param {object} connectOpts
- * @param {{onError?: Function, onCancelled?: Function}} [ui]
- * @returns {Promise<{status: string, data?: object}>}
+ * @type {ReturnType<typeof createConnectPath>}
  */
-async function trackConnect(wsUrl, connectOpts, { onError, onCancelled } = {}) {
-  const guard = await authSync.guardConnect()
-  if (!guard.proceed) {
-    // A change found before the connect cancels it, and the overlay goes.
-    showOverlay('')
-    hideTeleportFailurePanel()
-    if (typeof onCancelled === 'function') onCancelled(guard)
-    return { status: 'auth-changed', data: guard }
-  }
-  return connectNow(wsUrl, connectOpts, { onError })
-}
+const trackConnect = createConnectPath({
+  guardConnect: (opts) => authSync.guardConnect(opts),
+  connect: connectNow,
+  isConnected: () => client.connected === true,
+  setConnectionState,
+  clearOverlays: () => { showOverlay(''); hideTeleportFailurePanel() },
+})
 
 // ---------------------------------------------------------------------------
 // Overlay feedback
