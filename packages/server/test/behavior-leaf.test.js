@@ -101,6 +101,21 @@ test('AC2/P8: the distance rule is NOT a security boundary — it measures the c
   assert.equal(withinActivateDistance([5, 0, 0], [5, 0, 0]), true)
 })
 
+test('W5: NaN and +-Infinity in EITHER point are false — tested as numbers', () => {
+  // These used to be two fixture vectors, and JSON.stringify wrote both as
+  // `null`, so they proved nothing (outside review S3). `Number.isFinite` in
+  // this copy is what refuses them; the fixture no longer carries them.
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.equal(withinActivateDistance([0, 0, 0], [bad, 0, 0]), false, `${bad} in b[0]`)
+    assert.equal(withinActivateDistance([bad, 0, 0], [0, 0, 0]), false, `${bad} in a[0]`)
+    assert.equal(withinActivateDistance([0, 0, 0], [0, bad, 0]), false, `${bad} in b[1]`)
+    assert.equal(withinActivateDistance([0, bad, 0], [0, 0, 0]), false, `${bad} in a[1]`)
+    assert.equal(withinActivateDistance([0, 0, 0], [0, 0, bad]), false, `${bad} in b[2]`)
+    assert.equal(withinActivateDistance([0, 0, bad], [0, 0, 0]), false, `${bad} in a[2]`)
+    assert.equal(withinActivateDistance([bad, 0, 0], [bad, 0, 0]), false, `${bad} in both`)
+  }
+})
+
 test('F1: an out-of-range declaration index is refused by the VALIDATOR, not by an F1 rule', () => {
   const vector = VECTORS.refused.find((v) => v.name.includes('declaration index is out of range'))
   assert.ok(vector, 'the vector that pins "the validator is the gate" is present')

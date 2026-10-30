@@ -102,6 +102,22 @@ describe('AC2 — withinActivateDistance through the shared vectors (page copy)'
     assert.equal(withinActivateDistance([0, 0, 0], [50, 0, 0]), false)
     assert.equal(withinActivateDistance([0, 0, 0], [50, 0, 0], 100), true)
   })
+
+  test('W5: NaN and +-Infinity in EITHER point are false — tested as numbers', () => {
+    // These used to be two fixture vectors, and JSON.stringify wrote both as
+    // `null`, so they proved nothing (outside review S3). `Number.isFinite` in
+    // this copy is what refuses them; the fixture no longer carries them.
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      assert.equal(withinActivateDistance([0, 0, 0], [bad, 0, 0]), false, `${bad} in b[0]`)
+      assert.equal(withinActivateDistance([bad, 0, 0], [0, 0, 0]), false, `${bad} in a[0]`)
+      assert.equal(withinActivateDistance([0, 0, 0], [0, bad, 0]), false, `${bad} in b[1]`)
+      assert.equal(withinActivateDistance([0, bad, 0], [0, 0, 0]), false, `${bad} in a[1]`)
+      assert.equal(withinActivateDistance([0, 0, 0], [0, 0, bad]), false, `${bad} in b[2]`)
+      assert.equal(withinActivateDistance([0, 0, bad], [0, 0, 0]), false, `${bad} in a[2]`)
+      // Even when the OTHER point is the same value: not "0 m apart", false.
+      assert.equal(withinActivateDistance([bad, 0, 0], [bad, 0, 0]), false, `${bad} in both`)
+    }
+  })
 })
 
 describe('AC2 — selectTargetFor: the ONE rule every tab uses', () => {

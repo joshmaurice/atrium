@@ -1,6 +1,7 @@
 // Generator for tests/fixtures/behavior-vectors.json (scripting-4b-2 F1).
 // Run from packages/behaviors: node scripts/gen-vectors.mjs
 import { writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { templateGraph } from '../src/templates.js'
 import { behaviorCheck, listensForSelect, withinActivateDistance } from '../src/behavior-spec.js'
 import { validateInteractivityGraph } from '@khronosgroup/gltf-interactivity-engine'
@@ -434,7 +435,7 @@ addListen('an undefined value', undefined, false)
 // ---------------------------------------------------------------------------
 // scripting-4c AC2 — withinActivateDistance (AC-L2: one fixed 10 m, INCLUSIVE)
 // ---------------------------------------------------------------------------
-const distanceVectors = []
+export const distanceVectors = []
 const addDistance = (name, a, b, expected) => distanceVectors.push({ name, a, b, expected })
 
 addDistance('9.999 m apart', [0, 0, 0], [9.999, 0, 0], true)
@@ -445,11 +446,15 @@ addDistance('11 m apart', [0, 0, 0], [11, 0, 0], false)
 addDistance('the same point', [3, 1, -6], [3, 1, -6], true)
 addDistance('a missing first point', null, [0, 0, 0], false)
 addDistance('a missing second point', [0, 0, 0], undefined, false)
-addDistance('a NaN', [0, 0, 0], [NaN, 0, 0], false)
+// W5 (Rev 2) — the `NaN` and `Infinity` vectors USED to be here, built as
+// `[NaN, 0, 0]` and `[Infinity, 0, 0]`. `JSON.stringify` writes both as `null`,
+// so the fixture proved nothing about them. They are now DIRECT tests in both
+// packages (behavior-activate.test.js and behavior-leaf.test.js), and the
+// generator refuses to write any distance vector whose points do not survive the
+// round trip (`checkJsonRoundTrip` below).
 addDistance('a non-number', [0, 0, 0], ['10', 0, 0], false)
 addDistance('two numbers, not three', [0, 0], [0, 0, 0], false)
 addDistance('four numbers, not three', [0, 0, 0, 0], [0, 0, 0], false)
-addDistance('an Infinity', [0, 0, 0], [Infinity, 0, 0], false)
 addDistance('a vector of strings', ['0', '0', '0'], [0, 0, 0], false)
 
 const fixture = {
@@ -470,33 +475,110 @@ const fixture = {
   withinActivateDistance: distanceVectors,
 }
 
-// Self-check before writing: every accepted value must pass F1 and the validator,
-// every refused one must return exactly its named code.
-let bad = 0
-for (const { name, value } of accepted) {
-  const problem = behaviorCheck(value, { ownId: OWN }).problem
-  if (problem) { console.log(`ACCEPTED but refused (${problem}): ${name}`); bad++ }
-  try { validateInteractivityGraph(value.graph) } catch (e) {
-    console.log(`ACCEPTED but the validator refused it: ${name} — ${e.message}`); bad++
-  }
-}
-for (const { name, code, value } of refused) {
-  const problem = behaviorCheck(value, { ownId: OWN }).problem
-  if (problem !== code) { console.log(`REFUSED ${name}: expected ${code}, got ${problem}`); bad++ }
-}
-for (const { name, value, expected } of listenVectors) {
-  const got = listensForSelect(value)
-  if (got !== expected) { console.log(`listensForSelect ${name}: expected ${expected}, got ${got}`); bad++ }
-}
-for (const { name, a, b, expected } of distanceVectors) {
-  const got = withinActivateDistance(a, b)
-  if (got !== expected) { console.log(`withinActivateDistance ${name}: expected ${expected}, got ${got}`); bad++ }
-}
-if (bad > 0) { console.log(`${bad} PROBLEMS — fixture NOT written`); process.exit(1) }
+// ---------------------------------------------------------------------------
+// W5 (Rev 2) — a distance vector whose points do not survive JSON
+//
+// `JSON.stringify` turns `NaN` and `+/-Infinity` into `null`, so a vector built
+// from one is written as `null,null,null` and proves nothing about the rule.
+// Before writing, the generator checks every distance vector's points against
+// their JSON round trip, and REFUSES to write (exit 1) naming the first vector
+// that does not survive. The two vectors this exists for (`NaN`, `Infinity`) are
+// covered by direct tests in both packages instead.
+// ---------------------------------------------------------------------------
 
-// The __proto__ vector must survive the round trip: the written text carries the
-// key, and JSON.parse reads it back as an own property.
-const text = JSON.stringify(fixture, null, 2) + '\n'
-if (!text.includes('"__proto__"')) { console.log('the __proto__ vector did not serialize'); process.exit(1) }
-writeFileSync(new URL('../../../tests/fixtures/behavior-vectors.json', import.meta.url), text)
-console.log(`wrote tests/fixtures/behavior-vectors.json: ${accepted.length} accepted, ${refused.length} refused`)
+/** Structural equality for a point: arrays of primitives, or the same value. */
+function samePoint(a, b) {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
+}
+
+/**
+ * The name of the first distance vector whose `a` or `b` does not deep-equal its
+ * `JSON.parse(JSON.stringify(...))`, or `null` when every vector survives.
+ *
+ * @param {Array<{name: string, a: *, b: *}>} vectors
+ * @returns {string|null}
+ */
+export function checkJsonRoundTrip(vectors) {
+  const roundTrip = (value) => {
+    const text = JSON.stringify(value)
+    return text === undefined ? undefined : JSON.parse(text)
+  }
+  for (const vector of vectors) {
+    for (const key of ['a', 'b']) {
+      if (!samePoint(vector[key], roundTrip(vector[key]))) return vector.name
+    }
+  }
+  return null
+}
+
+/** The file the generator writes when it is run on its own. */
+export const FIXTURE_PATH = new URL('../../../tests/fixtures/behavior-vectors.json', import.meta.url)
+
+/** The fixture with `withinActivateDistance` replaced (the injected-vector run). */
+export function buildFixture({ distanceVectors: vectors = distanceVectors } = {}) {
+  return { ...fixture, withinActivateDistance: vectors }
+}
+
+/**
+ * Serialize and write. The `__proto__` vector must survive the round trip: the
+ * written text carries the key, and JSON.parse reads it back as an own property.
+ *
+ * @returns {{ok: boolean, reason?: string}}
+ */
+export function writeFixture(value, outPath = FIXTURE_PATH) {
+  const text = JSON.stringify(value, null, 2) + '\n'
+  if (!text.includes('"__proto__"')) return { ok: false, reason: 'the __proto__ vector did not serialize' }
+  writeFileSync(outPath, text)
+  return { ok: true }
+}
+
+/**
+ * The generator's whole run: self-check every vector, refuse a vector that does
+ * not survive JSON (W5), then write.
+ *
+ * @param {{distanceVectors?: Array<object>, outPath?: URL|string}} [options]
+ */
+export function main({ distanceVectors: vectors = distanceVectors, outPath = FIXTURE_PATH } = {}) {
+  // Self-check: every accepted value must pass F1 and the validator, every
+  // refused one must return exactly its named code.
+  let bad = 0
+  for (const { name, value } of accepted) {
+    const problem = behaviorCheck(value, { ownId: OWN }).problem
+    if (problem) { console.log(`ACCEPTED but refused (${problem}): ${name}`); bad++ }
+    try { validateInteractivityGraph(value.graph) } catch (e) {
+      console.log(`ACCEPTED but the validator refused it: ${name} — ${e.message}`); bad++
+    }
+  }
+  for (const { name, code, value } of refused) {
+    const problem = behaviorCheck(value, { ownId: OWN }).problem
+    if (problem !== code) { console.log(`REFUSED ${name}: expected ${code}, got ${problem}`); bad++ }
+  }
+  for (const { name, value, expected } of listenVectors) {
+    const got = listensForSelect(value)
+    if (got !== expected) { console.log(`listensForSelect ${name}: expected ${expected}, got ${got}`); bad++ }
+  }
+  for (const { name, a, b, expected } of vectors) {
+    const got = withinActivateDistance(a, b)
+    if (got !== expected) { console.log(`withinActivateDistance ${name}: expected ${expected}, got ${got}`); bad++ }
+  }
+  if (bad > 0) { console.log(`${bad} PROBLEMS — fixture NOT written`); process.exit(1) }
+
+  // W5 — nothing is written while a vector's points do not survive JSON.
+  const offender = checkJsonRoundTrip(vectors)
+  if (offender) {
+    console.log(`REFUSED: the distance vector "${offender}" does not survive JSON ` +
+      `(its NaN/Infinity points would be written as null) — fixture NOT written`)
+    process.exit(1)
+  }
+
+  const written = writeFixture(buildFixture({ distanceVectors: vectors }), outPath)
+  if (!written.ok) { console.log(written.reason); process.exit(1) }
+  const where = outPath === FIXTURE_PATH ? 'tests/fixtures/behavior-vectors.json' : outPath
+  console.log(`wrote ${where}: ${accepted.length} accepted, ${refused.length} refused`)
+}
+
+// Only when run as a script: importing this module (the injected-vector test and
+// its proof) must not write the fixture.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main()

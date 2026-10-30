@@ -31,17 +31,24 @@ const ORIGIN = [0, 0, 0]
 /**
  * A runner over a fresh clock. The role, `canEdit` and the world are applied in
  * the order the app applies them, and every port the runner needs is the real
- * value production passes (`position` is `worldPosition` over the fake node's
- * `translation`, `localAvatar` is the tab's own node).
+ * value production passes (`position` is the runner's world-position port — the
+ * app passes `worldPosition`; here it is a fixture map of world positions, or
+ * the fake node's `translation`, which is the world position of a ROOT-level
+ * fake node because `@atrium/behaviors` does not depend on `@atrium/som`.
+ * W4 (Rev 2) — `worldPositions` is what lets a test give the callback a value
+ * that DIFFERS from `node.translation`.)
+ *
+ * @param {{nodes?: object[], grant?: boolean, loadWorld?: boolean,
+ *          avatar?: number[]|null, worldPositions?: Record<string, number[]>|null}} options
  */
-function setup({ nodes = [], grant = true, loadWorld = true, avatar = ORIGIN } = {}) {
+function setup({ nodes = [], grant = true, loadWorld = true, avatar = ORIGIN, worldPositions = null } = {}) {
   if (!nodes.some((n) => n.extras?.atrium?.objectId === TGT)) nodes = [...nodes, makeNode({ name: 'target', id: TGT })]
   const client = makeFakeClient({ nodes })
   const state = { clock: 0 }
   const runner = createBehaviorRunner({
     client,
     now: () => state.clock,
-    position: (node) => (node ? node.translation : undefined),
+    position: (node) => (node ? (worldPositions?.[node.name] ?? node.translation) : undefined),
     localAvatar: () => (avatar ? { name: 'avatar', translation: avatar } : null),
   })
   if (grant) client.scriptHost = { active: true, hostGen: 1 }
@@ -293,6 +300,54 @@ describe('AC5/AC-L3 — the host’s own click obeys the same 10 m rule', () => 
       assert.equal(client.sent.length, 0, 'as on the server: a session with no avatar gets PERMISSION_DENIED')
     } finally {
       runner.dispose()
+    }
+  })
+
+  // ---- W4 (Rev 2): the decision follows the position callback, not `translation`
+  //
+  // The outside review's S2. In production the callback IS `worldPosition`
+  // (`app.js` L3203); `@atrium/behaviors` does not depend on `@atrium/som`, so
+  // this test gives the callback a fixture map of world positions instead. Each
+  // pair disagrees by 16 m with the node's own `translation`.
+  // ---------------------------------------------------------------------------
+
+  test('W4: the callback says 18 m while `translation` says 2 m — too-far', () => {
+    const crate = makeNode({ name: 'crate', id: OWN, behavior: hide(OWN) })
+    crate.translation = [0, 0, 2]                        // what the OLD test measured
+    const { client, runner } = setup({ nodes: [crate], avatar: ORIGIN, worldPositions: { crate: [0, 0, 18] } })
+    try {
+      assert.equal(runner.select(crate), 'too-far',
+        'the decision follows the position callback; the local translation would have allowed it')
+      runner.tick()
+      assert.equal(client.sent.length, 0, 'and nothing ran')
+    } finally {
+      runner.dispose()
+    }
+  })
+
+  test('W4: the callback says 2 m while `translation` says 18 m — ran, with no `translation` at all', () => {
+    const crate = makeNode({ name: 'crate', id: OWN, behavior: hide(OWN) })
+    crate.translation = [0, 0, 18]                       // far, by the node's own translation
+    const { client, runner } = setup({ nodes: [crate], avatar: ORIGIN, worldPositions: { crate: [0, 0, 2] } })
+    try {
+      assert.equal(runner.select(crate), 'ran',
+        'the callback decides, both ways; the local translation would have refused it')
+      runner.tick()
+      assert.equal(client.sent.length, 1)
+    } finally {
+      runner.dispose()
+    }
+
+    // The stronger half: a node with NO `translation` property at all. Nothing in
+    // the runner reads it — the port is the only source of a position.
+    const flat = makeNode({ name: 'flat', id: OWN, behavior: hide(OWN) })
+    delete flat.translation
+    const second = setup({ nodes: [flat], avatar: ORIGIN, worldPositions: { flat: [0, 0, 1] } })
+    try {
+      assert.equal(second.runner.select(flat), 'ran',
+        'a node with no translation still works: the runner never reads `translation`')
+    } finally {
+      second.runner.dispose()
     }
   })
 

@@ -12067,20 +12067,6 @@
       "expected": false
     },
     {
-      "name": "a NaN",
-      "a": [
-        0,
-        0,
-        0
-      ],
-      "b": [
-        null,
-        0,
-        0
-      ],
-      "expected": false
-    },
-    {
       "name": "a non-number",
       "a": [
         0,
@@ -12117,20 +12103,6 @@
       ],
       "b": [
         0,
-        0,
-        0
-      ],
-      "expected": false
-    },
-    {
-      "name": "an Infinity",
-      "a": [
-        0,
-        0,
-        0
-      ],
-      "b": [
-        null,
         0,
         0
       ],

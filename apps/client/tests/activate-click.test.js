@@ -23,12 +23,14 @@ import assert from 'node:assert/strict'
 import { AtriumClient } from '@atrium/client'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { templateGraph } from '@atrium/behaviors/templates'
+import { withinActivateDistance } from '@atrium/behaviors/behavior-spec'
 
 import {
   behaviorAim, activateNoticeText, activateClickNotice, activateClickTarget,
   performActivateClick, createActivateNotice, ACTIVATE_NOTICE_MS,
   ACTIVATE_PAGE_NOTICE, ACTIVATE_SERVER_NOTICE,
 } from '../src/activate-click.js'
+import { worldPosition } from '../src/world-position.js'
 import { el } from './strict-element.mjs'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
@@ -204,8 +206,17 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 /**
  * A page-shaped harness: a real client on a mock socket, a real runner, and a
  * real SOM built from a real som-dump. Only the socket is faked.
+ *
+ * W4 (Rev 2): `position`, `avatarPosition` and `targetPosition` are the REAL
+ * `worldPosition` — the one `app.js` imports (`app.js` L2153–2154, L3203) — not
+ * `node.translation`, which is the LOCAL translation and agrees with the world
+ * position only for root-level nodes. `nested` puts the behaviour node under a
+ * translated group, which is where the two disagree.
+ *
+ * @param {{scriptHost?: boolean, canEdit?: boolean, avatar?: object|null,
+ *          avatarAt?: number[], nested?: {group: number[], crate: number[]}|null}} options
  */
-async function makePage({ scriptHost = false, canEdit = false, avatar = null, avatarAt = [0, 0, 0] } = {}) {
+async function makePage({ scriptHost = false, canEdit = false, avatar = null, avatarAt = [0, 0, 0], nested = null } = {}) {
   const mocks = []
   const client = new AtriumClient({
     WebSocket: class { constructor() { const m = new MockWebSocket(); mocks.push(m); return m } },
@@ -228,14 +239,14 @@ async function makePage({ scriptHost = false, canEdit = false, avatar = null, av
   const runner = createBehaviorRunner({
     client,
     now: () => Date.now(),
-    position: (node) => (node ? [...(node.translation ?? [0, 0, 0])] : undefined),
+    position: (node) => (node ? worldPosition(node) : undefined),
     localAvatar: () => client.som?.getNodeByName(client._avatarNodeName) ?? null,
   })
 
   // A real som-dump, built by hand: `apps/client` does not depend on
   // @gltf-transform/core, and the dump is plain glTF JSON.
   const nodes = [
-    { name: 'crate', extras: { atrium: { objectId: OWN, behavior: hide(OWN) } } },
+    { name: 'crate', extras: { atrium: { objectId: OWN, behavior: hide(OWN) } }, ...(nested ? { translation: nested.crate } : {}) },
     { name: 'target', extras: { atrium: { objectId: TGT } } },
     { name: 'scenery' },
   ]
@@ -244,10 +255,18 @@ async function makePage({ scriptHost = false, canEdit = false, avatar = null, av
     // sends (ephemeral, at `avatarAt`).
     nodes.push({ name: 'avatar-aabbccdd', translation: avatarAt, extras: { atrium: { ephemeral: true } } })
   }
+  let roots = nodes.map((_, i) => i)
+  if (nested) {
+    // `crate` (index 0) becomes the child of a translated group. The group is a
+    // scene root; the crate is no longer one.
+    const groupIndex = nodes.length
+    nodes.push({ name: 'group', translation: nested.group, children: [0] })
+    roots = roots.filter((i) => i !== 0).concat(groupIndex)
+  }
   const gltf = {
     asset: { version: '2.0' },
     scene: 0,
-    scenes: [{ nodes: nodes.map((_, i) => i) }],
+    scenes: [{ nodes: roots }],
     nodes,
   }
   socket.simulateMessage({ type: 'som-dump', seq: 2, gltf })
@@ -272,8 +291,8 @@ async function makePage({ scriptHost = false, canEdit = false, avatar = null, av
       runner,
       client,
       avatarNode,
-      avatarPosition: avatarNode ? [...(avatarNode.translation ?? [0, 0, 0])] : undefined,
-      targetPosition: [...(target.translation ?? [0, 0, 0])],
+      avatarPosition: avatarNode ? worldPosition(avatarNode) : undefined,
+      targetPosition: worldPosition(target),
       notice,
     })
   }
@@ -420,6 +439,119 @@ describe('AC6 — the click branch, through the real runner and the real client.
       page.socket.simulateMessage({ type: 'error', code: 'RATE_LIMITED', message: 'x', seq: seq2 })
       await delay(5)
       assert.equal(page.noticeEl.textContent, '', 'RATE_LIMITED is console-only (AC-L6)')
+    } finally {
+      page.runner.dispose()
+      page.client.disconnect()
+    }
+  })
+})
+
+// ===========================================================================
+// W4 (Rev 2) — the click measures WORLD positions, not local translations
+//
+// The outside review's S2: this test passed `node.translation` where production
+// passes `worldPosition` (`app.js` L2153–2154, L3203). The two agree only for a
+// root-level node, so the test could not see a nested switch. Each case below
+// uses a switch that IS nested, and a geometry where the local translation and
+// the world position disagree by 16 m — one of them says "in reach" and the
+// other says "too far", so the answer says which one the code used.
+// ===========================================================================
+
+describe('AC6/W4 — a nested target is measured at its WORLD position, both ways', () => {
+  // The switch is the child of a group translated by [0, 0, -20]; its own
+  // translation is [0, 0, 2]. LOCAL says 2 m; WORLD says 18 m.
+  const LOCAL_NEAR_WORLD_FAR = { group: [0, 0, -20], crate: [0, 0, 2] }
+  // The other direction: a far LOCAL translation, a near WORLD position.
+  const LOCAL_FAR_WORLD_NEAR = { group: [0, 0, 20], crate: [0, 0, -18] }
+
+  const parts = (page) => {
+    const crate = page.client.som.getNodeByName('crate')
+    const avatar = page.client.som.getNodeByName(page.client._avatarNodeName)
+    return { crate, local: crate.translation, world: worldPosition(crate), avatarWorld: worldPosition(avatar) }
+  }
+
+  test('the fixture really tells the two apart: LOCAL 2 m, WORLD 18 m', async () => {
+    const page = await makePage({ avatar: { name: 'me' }, avatarAt: [0, 0, 0], nested: LOCAL_NEAR_WORLD_FAR })
+    try {
+      const { crate, local, world, avatarWorld } = parts(page)
+      assert.equal(crate.parent?.name, 'group', 'the switch really is nested (not a root node)')
+      assert.deepEqual(local, [0, 0, 2], 'its own translation')
+      assert.deepEqual(world, [0, 0, -18], 'and its position in the world')
+      assert.equal(withinActivateDistance(avatarWorld, local), true, 'the LOCAL translation says 2 m — in reach')
+      assert.equal(withinActivateDistance(avatarWorld, world), false, 'the WORLD position says 18 m — too far')
+    } finally {
+      page.runner.dispose()
+      page.client.disconnect()
+    }
+  })
+
+  test('a VISITOR: refused on the world position, and nothing reaches the wire', async () => {
+    const page = await makePage({ avatar: { name: 'me' }, avatarAt: [0, 0, 0], nested: LOCAL_NEAR_WORLD_FAR })
+    try {
+      page.socket.sent.length = 0
+      const result = page.click(page.client.som.getNodeByName('crate'))
+      assert.equal(result.action, 'notice')
+      assert.equal(page.noticeEl.textContent, ACTIVATE_PAGE_NOTICE['too-far'])
+      assert.equal(page.socket.of('activate').length, 0,
+        'a click the LOCAL translation would have allowed never reaches the wire')
+    } finally {
+      page.runner.dispose()
+      page.client.disconnect()
+    }
+  })
+
+  test('the HOST: the same geometry returns too-far, and the behaviour does not run', async () => {
+    const page = await makePage({
+      scriptHost: true, canEdit: true, avatar: { name: 'me' }, avatarAt: [0, 0, 0], nested: LOCAL_NEAR_WORLD_FAR,
+    })
+    try {
+      page.socket.sent.length = 0
+      const result = page.click(page.client.som.getNodeByName('crate'))
+      assert.equal(result.action, 'select')
+      assert.equal(result.outcome, 'too-far', 'the runner measures the world position too')
+      assert.equal(page.noticeEl.textContent, ACTIVATE_PAGE_NOTICE['too-far'])
+      await delay(60)
+      page.runner.tick()
+      assert.equal(page.socket.of('send').length, 0, 'and nothing ran')
+    } finally {
+      page.runner.dispose()
+      page.client.disconnect()
+    }
+  })
+
+  test('the other way (LOCAL 18 m, WORLD 2 m): the VISITOR is allowed to send', async () => {
+    const page = await makePage({ avatar: { name: 'me' }, avatarAt: [0, 0, 0], nested: LOCAL_FAR_WORLD_NEAR })
+    try {
+      const { local, world, avatarWorld } = parts(page)
+      assert.equal(withinActivateDistance(avatarWorld, local), false, 'the LOCAL translation says 18 m')
+      assert.deepEqual(world, [0, 0, 2], 'the WORLD position says 2 m')
+
+      page.socket.sent.length = 0
+      const result = page.click(page.client.som.getNodeByName('crate'))
+      assert.equal(result.action, 'activate', 'so the click is sent')
+      assert.equal(page.socket.of('activate').length, 1)
+      assert.equal(page.noticeEl.textContent, '')
+    } finally {
+      page.runner.dispose()
+      page.client.disconnect()
+    }
+  })
+
+  test('the other way (LOCAL 18 m, WORLD 2 m): the HOST runs it', async () => {
+    const page = await makePage({
+      scriptHost: true, canEdit: true, avatar: { name: 'me' }, avatarAt: [0, 0, 0], nested: LOCAL_FAR_WORLD_NEAR,
+    })
+    try {
+      page.socket.sent.length = 0
+      const result = page.click(page.client.som.getNodeByName('crate'))
+      assert.equal(result.action, 'select')
+      assert.equal(result.outcome, 'ran')
+      await delay(60)
+      page.runner.tick()
+      const sent = page.socket.of('send')
+      assert.equal(sent.length, 1, 'the select-visibility hide reached the wire')
+      assert.equal(sent[0].node, 'target')
+      assert.equal(sent[0].value, false)
     } finally {
       page.runner.dispose()
       page.client.disconnect()
