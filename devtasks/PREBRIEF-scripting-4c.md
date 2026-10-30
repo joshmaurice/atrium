@@ -1,7 +1,16 @@
 # Pre-brief: Phase 3 step 4c — visitors' `activate`: a click in any tab reaches the script host
 
-Status: **DRAFT, Revision 1 (2026-10-30). Decisions AC-L1–AC-L8 are open
-(§3), each with a recommendation.** Nothing here is approved yet.
+Status: **DRAFT, Revision 1.1 (2026-10-30). Decisions AC-L1–AC-L8
+approved by the operator (2026-10-30 00:32 PT), all as recommended:**
+AC-L1 (a) one round, six steps; AC-L2 (a) a fixed 10 m from the object's
+origin; AC-L3 (a) the same rule for the host's own clicks; AC-L4 (a) the
+session bucket charged for every attempt, the world bucket only for
+forwards; AC-L5 (a) existing codes plus `NO_SCRIPT_HOST`; AC-L6 (a)
+transient notices, with Rev 1's N1 texts; AC-L7 (a) by node name; AC-L8 (a)
+no carried items. **Not FINAL yet:** Rev 1 goes back to the outside
+reviewer first, since it adds a message (`script-ready`) and a capability
+change (`scriptRunner: 2`) that Rev 0's review didn't see.
+- **Rev 1.1 changes only this status line and §11.**
 - **Rev 1 applies the outside review of Rev 0**
   (`devtasks/REVIEW-scripting-4c-rev0.md`, CHANGES REQUESTED: 2 must-fix,
   4 should-fix, 3 nits; read-only against `ec9ebc1f` through GitHub).
@@ -834,4 +843,6 @@ As scripting-4b-2 and signin-sync, with this round's specifics:
 | N1 | One notice for "no avatar" and "too far" | Nit | AC-L6's table: the page's texts differ, the server's `PERMISSION_DENIED` has a neutral one |
 | N2 | Keep "not a security boundary" prominent | Nit | §8, a worker rule |
 | N3 | A forward isn't a run | Nit | AC3, AC5, §9 |
-
+- **Rev 1.1** (2026-10-30 00:32 PT): the operator approved AC-L1–AC-L8 as
+  recommended. Only the status line and this entry changed. Next: the
+  outside reviewer re-reviews Rev 1.1, then FINAL.
