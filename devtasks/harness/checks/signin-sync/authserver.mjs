@@ -28,6 +28,7 @@ import { readFileSync, existsSync, statSync, createReadStream, rmSync } from 'no
 import { join, normalize, extname } from 'node:path'
 
 const ROOT = process.env.HARNESS_ROOT ?? '/tmp/atrium-harness'
+const ROOT_ = ROOT
 const WT = ROOT + '/wt'
 const DB = process.env.AUTH_DB ?? ROOT + '/auth.db'
 const PORT_A = Number(process.env.PORT_A ?? 8443)
@@ -92,10 +93,32 @@ function proxyHttp(req, res) {
 function handler(req, res) {
   const u = new URL(req.url, 'https://x')
   const p = decodeURIComponent(u.pathname)
+  // scripting-4c check 10: a tab that sends `x-harness-tree: stale` gets its page files from STALE_ROOT
+  // (an older checkout's harness root): a tab loaded before a deploy, on the SAME origin. /api and the
+  // world socket are the current server's, as on a real host. HOOKS=1 only; the stale page gets no hooks.
+  const stale = process.env.HOOKS === '1' && process.env.STALE_ROOT && req.headers['x-harness-tree'] === 'stale'
+  const ROOT = stale ? process.env.STALE_ROOT : ROOT_
+  const WT = ROOT + '/wt'
   if (p === '/__log') return send(res, 200, log)
   if (p.startsWith('/api/')) return proxyHttp(req, res)
   if (p === '/apps/client/local.html') {
     return send(res, 200, rewriteImportMap(readFileSync(WT + '/apps/client/index.html', 'utf8')), 'text/html')
+  }
+  // scripting-4c: with HOOKS=1, the same page hooks as harness/server.mjs (window.__beh, __ep, ...)
+  // and the Khronos sample models at /khronos/. Off by default, so signin-sync's own checks see the plain page.
+  if (process.env.HOOKS === '1' && !stale) {
+    if (p.startsWith('/khronos/')) return serveFile(res, join(ROOT, 'khronos', normalize(p.slice('/khronos/'.length))))
+    if (p === '/apps/client/src/app.js') {
+      let s = readFileSync(WT + p, 'utf8')
+      const n0 = s.length
+      s = s.replace('const modelBridge = createModelBridge(', 'const modelBridge = window.__mb = createModelBridge(')
+      s = s.replace('const sky = createSkyLoader({ scene: threeScene, fetchImage })', 'const sky = window.__sky = createSkyLoader({ scene: threeScene, fetchImage })')
+      s += '\nwindow.__lib = () => ({ libraryGrid, skyPicker, libraryCatalog, undo })\n'
+      s += '\nwindow.__anim = () => ({ modelAnimations, animationControls, get selected() { return selected } })\n'
+      s += '\nwindow.__beh = () => ({ get runner() { return runner }, get behaviorForm() { return typeof behaviorForm === "undefined" ? null : behaviorForm }, pick: (x, y) => { const h = pickBehaviorTarget({ clientX: x, clientY: y }); return h ? { hit: h.name, target: activateClickTarget(h)?.name ?? null } : null }, get avatarPos() { const n = avatar?.localNode; return n ? worldPosition(n) : null } })\n'
+      s += '\nwindow.__ep = () => ({ modelForm, teleporterForm, modelGate, get selected() { return selected }, get selectedObj() { return selectedObj }, get gizmo() { return gizmo }, selectForEdit, modes })\n'
+      return send(res, 200, s, 'text/javascript')
+    }
   }
   if (p.startsWith('/vendor/three/')) return serveFile(res, join(ROOT, 'vsrc/node_modules/three', normalize(p.slice('/vendor/three/'.length))))
   if (p.startsWith('/vendor/')) return serveFile(res, join(ROOT, 'vendor', normalize(p.slice('/vendor/'.length))))
