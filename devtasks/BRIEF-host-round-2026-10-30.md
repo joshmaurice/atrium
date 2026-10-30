@@ -367,8 +367,11 @@ sha256sum /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py /usr/
 - [ ] Step D: the first orchestrator run's `args` lines pasted, and the
   dropped-fields diagnosis written from them.
 - [x] A fresh front-door session (`/new`), so it loads v1.2.0.
-- [ ] `atrium-ops`: `claude/host-round-2026-10-30` merged, or kept as the
-  record (it's pushed, at `61c1d01` or later).
+- [x] `atrium-ops`: `main` fast-forwarded to `claude/host-round-2026-10-30`
+  (`cf84e1b` → `0557880`, 2026-10-30). It now carries pass-a, least-privilege,
+  S22 and this round, which is what the VPS runs. `claude/prebrief-s22-pass-b`
+  isn't in it: its only extra lines are pre-S22 versions of code S22
+  replaced.
 
 Then 4c's kickoff can be written from `53f68ba` (the FINAL pre-brief).
 **At 4c's kickoff,** the first held card (if any) and step D's `args` lines
