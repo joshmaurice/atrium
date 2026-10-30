@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Activate (Client)",
+  "description": "scripting-4c AC1 — a click on an object with an enabled select behaviour. The page resolves the click to the behaviour node before sending; the server checks exactly this node and never walks ancestors.",
+  "type": "object",
+  "required": ["type", "seq", "node", "event"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "activate" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "node": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "event": { "const": "select" }
+  }
+}

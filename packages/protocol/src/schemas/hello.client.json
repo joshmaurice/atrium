@@ -26,7 +26,7 @@
         },
         "physics": { "type": "boolean" },
         "chat": { "type": "boolean" },
-        "scriptRunner": { "type": "integer", "const": 1, "description": "scripting-4b-2 F-L6: 1 declares this tab can run behaviour graphs." }
+        "scriptRunner": { "type": "integer", "enum": [1, 2], "description": "scripting-4b-2 F-L6 / scripting-4c S2: 1 declares this tab runs behaviour graphs (4b-2); 2 also handles forwarded `activate` (4c). Election and handover require 2." }
       },
       "additionalProperties": false
     }

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Activate (Server)",
+  "description": "scripting-4c AC1/AC3 — a forwarded activate, sent to the current ready script host ONLY. `from` is the sender's session id, for the host's log line: it is never identity or authority. `hostGen` is the generation the forward belongs to.",
+  "type": "object",
+  "required": ["type", "seq", "node", "event", "from", "hostGen"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "activate" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "node": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "event": { "const": "select" },
+    "from": { "type": "string", "minLength": 1 },
+    "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+  }
+}

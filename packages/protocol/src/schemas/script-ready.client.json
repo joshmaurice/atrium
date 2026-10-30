@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "script-ready (Client)",
+  "description": "scripting-4c AC1 (Rev 1 M1) — the client's runner says this tab's engines exist for the named host generation. Client to server only, and DIRECTIONAL (Rev 1.2 N1): it is compiled as `script-ready:client` only, so `validate('server', …)` finds no schema and refuses it. The server never answers it.",
+  "type": "object",
+  "required": ["type", "hostGen"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "script-ready" },
+    "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+  }
+}

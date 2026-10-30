@@ -16,6 +16,7 @@
         "WORLD_FULL",
         "AUTH_FAILED",
         "RATE_LIMITED",
+        "NO_SCRIPT_HOST",
         "UNKNOWN_MESSAGE",
         "WORLD_UNAVAILABLE",
         "WORLD_NOW_PRIVATE",

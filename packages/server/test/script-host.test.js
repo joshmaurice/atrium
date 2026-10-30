@@ -487,11 +487,11 @@ test('F-L6: an owner hello without scriptRunner never holds the role, and is nev
   }
 })
 
-test('F-L6: a hello whose scriptRunner is not 1 is refused by the schema', async () => {
+test('F-L6/S2: a hello whose scriptRunner is 3 is refused by the schema', async () => {
   const { port } = await startHostWorld()
   const a = await connect(port, 'user-a')
   try {
-    a.ws.send(JSON.stringify({ type: 'hello', id: 'bad-cap', capabilities: { scriptRunner: 2 } }))
+    a.ws.send(JSON.stringify({ type: 'hello', id: 'bad-cap', capabilities: { scriptRunner: 3 } }))
     const err = await waitFor(a.messages, (m) => m.type === 'error')
     assert.ok(err, 'the message is refused')
     assert.equal(err.code, 'UNKNOWN_MESSAGE')

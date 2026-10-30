@@ -21,6 +21,9 @@ import viewClient from './schemas/view-client.json' with { type: 'json' }
 import viewServer from './schemas/view-server.json' with { type: 'json' }
 import somDump from './schemas/som-dump.server.json' with { type: 'json' }
 import scriptHost from './schemas/script-host.server.json' with { type: 'json' }
+import activateClient from './schemas/activate.client.json' with { type: 'json' }
+import activateServer from './schemas/activate.server.json' with { type: 'json' }
+import scriptReadyClient from './schemas/script-ready.client.json' with { type: 'json' }
 
 const ajv = new Ajv({ strict: false })
 
@@ -43,6 +46,11 @@ const validators = {
   'view:server':  ajv.compile(viewServer),
   'som-dump':     ajv.compile(somDump),
   'script-host':  ajv.compile(scriptHost),
+  // scripting-4c AC1 — `activate` has BOTH forms; `script-ready` is compiled
+  // `:client` ONLY (Rev 1.2 N1), so the server direction finds no schema.
+  'activate:client':      ajv.compile(activateClient),
+  'activate:server':      ajv.compile(activateServer),
+  'script-ready:client':  ajv.compile(scriptReadyClient),
 }
 
 /**
@@ -56,8 +64,12 @@ export function validate(direction, message) {
     return { valid: false, errors: [{ message: 'Message must have a type field' }] }
   }
 
+  // scripting-4c AC1 — `activate` and `script-ready` are DIRECTIONAL and join
+  // this hard-coded list (protocol P2), or `validate` looks up the plain key
+  // `activate` / `script-ready` and refuses every message.
   const directional = message.type === 'hello' || message.type === 'view' ||
-    message.type === 'add' || message.type === 'remove'
+    message.type === 'add' || message.type === 'remove' ||
+    message.type === 'activate' || message.type === 'script-ready'
   const key = directional ? `${message.type}:${direction}` : message.type
 
   const validator = validators[key]
@@ -72,7 +84,8 @@ export function validate(direction, message) {
 
 export const messageTypes = [
   'hello', 'ping', 'pong', 'tick', 'error',
-  'send', 'set', 'add', 'remove', 'join', 'leave', 'view', 'script-host'
+  'send', 'set', 'add', 'remove', 'join', 'leave', 'view', 'script-host',
+  'activate', 'script-ready'
 ]
 
 export { validators }

@@ -13,8 +13,10 @@ import { validate } from '../src/index.js'
 
 const hello = (capabilities) => ({ type: 'hello', id: 'h1', ...(capabilities === undefined ? {} : { capabilities }) })
 
-test('F-L6: scriptRunner: 1 is accepted', () => {
+test('F-L6: scriptRunner: 1 and 2 are accepted', () => {
   assert.equal(validate('client', hello({ scriptRunner: 1 })).valid, true)
+  // scripting-4c S2 — 2 declares a tab that also handles forwarded `activate`.
+  assert.equal(validate('client', hello({ scriptRunner: 2 })).valid, true)
 })
 
 test('F-L6: scriptRunner is optional', () => {
@@ -22,8 +24,8 @@ test('F-L6: scriptRunner is optional', () => {
   assert.equal(validate('client', hello(undefined)).valid, true)
 })
 
-test('F-L6: scriptRunner: 2, 0, true or "1" is refused', () => {
-  for (const bad of [2, 0, true, '1', null]) {
+test('F-L6/S2: scriptRunner: 3, 0, true or "1" is refused', () => {
+  for (const bad of [3, 0, true, '1', null]) {
     const result = validate('client', hello({ scriptRunner: bad }))
     assert.equal(result.valid, false, `scriptRunner ${JSON.stringify(bad)} must be refused`)
   }
