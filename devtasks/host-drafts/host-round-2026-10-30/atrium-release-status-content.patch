@@ -1,0 +1,114 @@
+--- atrium-release-status.orig
++++ atrium-release-status
+@@ -1,9 +1,11 @@
+ #!/usr/bin/env python3
+ 
+ import fcntl
++import hashlib
+ import os
+ import json
+ import subprocess
++import time
+ from pathlib import Path
+ 
+ STATE_FILE = Path("/var/lib/atrium-release/state.json")
+@@ -28,6 +30,11 @@
+     "LabelOverlay.js",
+ )
+ 
++# Host round 2026-10-30 (signin-sync passdown §4.5): health also checks CONTENT.
++# The served file must be byte-identical to the file committed at the checkout's
++# HEAD, so "healthy" can't hide a server serving another release's client.
++CONTENT_ASSET = "apps/client/src/app.js"
++
+ 
+ def run(*args):
+     p = subprocess.run(
+@@ -69,12 +76,46 @@
+     return p.returncode, p.stdout.strip(), p.stderr.strip()
+ 
+ 
++def git_blob_bytes(repo, ref, path):
++    """The bytes of `path` at `ref` in `repo`, through the same fixed git contract, or None."""
++    p = subprocess.run(
++        ("/usr/bin/git", "-C", repo) + GIT_OVERRIDES + ("show", f"{ref}:{path}"),
++        capture_output=True,
++        check=False,
++        env=dict(GIT_ENV),
++        stdin=subprocess.DEVNULL,
++    )
++    return p.stdout if p.returncode == 0 else None
++
++
++def served_content(repo, client_base):
++    """(ok, detail): does the served CONTENT_ASSET equal its blob at the checkout's HEAD?
++    ok is True, False (they differ), or None (the check couldn't run)."""
++    want = git_blob_bytes(repo, "HEAD", CONTENT_ASSET)
++    if want is None:
++        return None, "the checkout's app.js can't be read"
++    name = CONTENT_ASSET.rsplit("/", 1)[-1]
++    p = subprocess.run(
++        ("curl", "-fsS", "--max-time", "5", "-H", "Cache-Control: no-cache",
++         f"{client_base}/{name}?cb={int(time.time())}"),
++        capture_output=True,
++        check=False,
++    )
++    if p.returncode != 0:
++        return None, "the served app.js can't be fetched"
++    got_h = hashlib.sha256(p.stdout).hexdigest()
++    want_h = hashlib.sha256(want).hexdigest()
++    if got_h == want_h:
++        return True, f"app.js sha256 {want_h[:12]} served = checkout HEAD"
++    return False, f"app.js served sha256 {got_h[:12]}, checkout HEAD {want_h[:12]}"
++
++
+ def git_sha(repo, ref="HEAD"):
+     rc, out, _ = rgit(repo, "rev-parse", ref)
+     return out if rc == 0 else "UNAVAILABLE"
+ 
+ 
+-def service_health(service, url, client_base):
++def service_health(service, url, client_base, repo):
+     active_rc, _, _ = run("systemctl", "is-active", "--quiet", service)
+     curl_rc, out, _ = run("curl", "-fsS", "--max-time", "5", url)
+ 
+@@ -96,8 +137,10 @@
+         if asset_rc != 0:
+             failed_assets.append(asset)
+ 
+-    if active and api_healthy and not failed_assets:
+-        return "healthy"
++    content_ok, content_detail = served_content(repo, client_base)
++
++    if active and api_healthy and not failed_assets and content_ok is True:
++        return f"healthy ({content_detail})"
+ 
+     if not active:
+         return "inactive"
+@@ -110,6 +153,9 @@
+     if failed_assets:
+         failures.append("client assets: " + ", ".join(failed_assets))
+ 
++    if content_ok is not True:
++        failures.append("content: " + content_detail)
++
+     return "active / " + " + ".join(failures) + " FAILED"
+ 
+ 
+@@ -169,14 +215,14 @@
+ print()
+ print(f"DEV actual:     {actual_dev}")
+ print(f"DEV recorded:   {recorded_dev or '-'}")
+-print(f"DEV health:     {service_health(DEV_SERVICE, DEV_HEALTH, DEV_CLIENT_BASE)}")
++print(f"DEV health:     {service_health(DEV_SERVICE, DEV_HEALTH, DEV_CLIENT_BASE, DEV_DIR)}")
+ print()
+ print(f"MAIN actual:    {actual_main}")
+ print(f"MAIN recorded:  {recorded_main or '-'}")
+ print()
+ print(f"PROD actual:    {actual_prod}")
+ print(f"PROD recorded:  {recorded_prod or '-'}")
+-print(f"PROD health:    {service_health(PROD_SERVICE, PROD_HEALTH, PROD_CLIENT_BASE)}")
++print(f"PROD health:    {service_health(PROD_SERVICE, PROD_HEALTH, PROD_CLIENT_BASE, PROD_DIR)}")
+ print()
+ print(f"DEPLOY LOCK:    {deploy_lock_status()}")
+ print(f"NEXT ACTION:    {next_action(release_state)}")

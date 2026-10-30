@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+
+import fcntl
+import hashlib
+import os
+import json
+import subprocess
+import time
+from pathlib import Path
+
+STATE_FILE = Path("/var/lib/atrium-release/state.json")
+DEPLOY_LOCK = Path("/run/lock/atrium-deploy.lock")
+
+DEV_DIR = "/srv/atrium-dev"
+PROD_DIR = "/srv/atrium"
+
+DEV_SERVICE = "atrium-dev.service"
+PROD_SERVICE = "atrium.service"
+
+DEV_HEALTH = "http://127.0.0.1:3100/api/health"
+PROD_HEALTH = "http://127.0.0.1:3000/api/health"
+
+DEV_CLIENT_BASE = "https://dev.5-78-232-73.sslip.io/apps/client/src"
+PROD_CLIENT_BASE = "https://5.78.232.73.sslip.io/apps/client/src"
+
+CLIENT_ASSETS = (
+    "app.js",
+    "wsUrl.js",
+    "auth.js",
+    "LabelOverlay.js",
+)
+
+# Host round 2026-10-30 (signin-sync passdown §4.5): health also checks CONTENT.
+# The served file must be byte-identical to the file committed at the checkout's
+# HEAD, so "healthy" can't hide a server serving another release's client.
+CONTENT_ASSET = "apps/client/src/app.js"
+
+
+def run(*args):
+    p = subprocess.run(
+        args,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+# S22 (D7): every root git runs with a fixed environment and fixed overrides,
+# the same contract as the Bash rgit() in the other release scripts.
+GIT_ENV = {
+    "HOME": "/root",
+    "PATH": "/usr/bin:/bin",
+    "LANG": "C.UTF-8",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_NO_LAZY_FETCH": "1",
+}
+GIT_OVERRIDES = (
+    "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+    "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+    "-c", "credential.helper=", "-c", "credential.helper=store",
+    "-c", "core.askPass=", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+    "--no-pager",
+)
+
+
+def rgit(repo, *args):
+    p = subprocess.run(
+        ("/usr/bin/git", "-C", repo) + GIT_OVERRIDES + args,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=dict(GIT_ENV),
+        stdin=subprocess.DEVNULL,
+    )
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def git_blob_bytes(repo, ref, path):
+    """The bytes of `path` at `ref` in `repo`, through the same fixed git contract, or None."""
+    p = subprocess.run(
+        ("/usr/bin/git", "-C", repo) + GIT_OVERRIDES + ("show", f"{ref}:{path}"),
+        capture_output=True,
+        check=False,
+        env=dict(GIT_ENV),
+        stdin=subprocess.DEVNULL,
+    )
+    return p.stdout if p.returncode == 0 else None
+
+
+def served_content(repo, client_base):
+    """(ok, detail): does the served CONTENT_ASSET equal its blob at the checkout's HEAD?
+    ok is True, False (they differ), or None (the check couldn't run)."""
+    want = git_blob_bytes(repo, "HEAD", CONTENT_ASSET)
+    if want is None:
+        return None, "the checkout's app.js can't be read"
+    name = CONTENT_ASSET.rsplit("/", 1)[-1]
+    p = subprocess.run(
+        ("curl", "-fsS", "--max-time", "5", "-H", "Cache-Control: no-cache",
+         f"{client_base}/{name}?cb={int(time.time())}"),
+        capture_output=True,
+        check=False,
+    )
+    if p.returncode != 0:
+        return None, "the served app.js can't be fetched"
+    got_h = hashlib.sha256(p.stdout).hexdigest()
+    want_h = hashlib.sha256(want).hexdigest()
+    if got_h == want_h:
+        return True, f"app.js sha256 {want_h[:12]} served = checkout HEAD"
+    return False, f"app.js served sha256 {got_h[:12]}, checkout HEAD {want_h[:12]}"
+
+
+def git_sha(repo, ref="HEAD"):
+    rc, out, _ = rgit(repo, "rev-parse", ref)
+    return out if rc == 0 else "UNAVAILABLE"
+
+
+def service_health(service, url, client_base, repo):
+    active_rc, _, _ = run("systemctl", "is-active", "--quiet", service)
+    curl_rc, out, _ = run("curl", "-fsS", "--max-time", "5", url)
+
+    active = active_rc == 0
+    api_healthy = curl_rc == 0 and '"status"' in out and '"ok"' in out
+
+    failed_assets = []
+
+    for asset in CLIENT_ASSETS:
+        asset_rc, _, _ = run(
+            "curl",
+            "-fsS",
+            "--max-time",
+            "5",
+            "-o",
+            "/dev/null",
+            f"{client_base}/{asset}",
+        )
+        if asset_rc != 0:
+            failed_assets.append(asset)
+
+    content_ok, content_detail = served_content(repo, client_base)
+
+    if active and api_healthy and not failed_assets and content_ok is True:
+        return f"healthy ({content_detail})"
+
+    if not active:
+        return "inactive"
+
+    failures = []
+
+    if not api_healthy:
+        failures.append("API health")
+
+    if failed_assets:
+        failures.append("client assets: " + ", ".join(failed_assets))
+
+    if content_ok is not True:
+        failures.append("content: " + content_detail)
+
+    return "active / " + " + ".join(failures) + " FAILED"
+
+
+def deploy_lock_status():
+    DEPLOY_LOCK.parent.mkdir(parents=True, exist_ok=True)
+
+    # S22, code review 1 (finding 7): created root 0600, never followed through
+    # a link, and reported (not used) if anyone else could open it.
+    fd = os.open(DEPLOY_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    with os.fdopen(fd, "r+") as f:
+        st = os.fstat(fd)
+        if st.st_uid != 0 or st.st_mode & 0o077:
+            return "UNSAFE (the lock file is not root-only; deploys refuse until it is)"
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            return "free"
+        except BlockingIOError:
+            return "HELD"
+
+
+def next_action(state):
+    return {
+        "UNINITIALIZED":
+            "Initialize release state after an exact reviewed SHA reaches DEV.",
+        "WAITING_FOR_HUMAN_DEV_ACCEPTANCE":
+            "Human DEV testing. Do not merge main until explicitly accepted.",
+        "WAITING_FOR_PROD_APPROVAL":
+            "Await exact-SHA human PROD approval; do not begin the next step.",
+        "COMPLETE":
+            "Release complete; next feature/step may become eligible.",
+    }.get(state, f"UNKNOWN STATE: {state}")
+
+
+if STATE_FILE.exists():
+    with STATE_FILE.open() as f:
+        state = json.load(f)
+else:
+    state = {"state": "UNINITIALIZED"}
+
+# Refresh only the remote-tracking main ref. This does not modify a checkout.
+rgit(PROD_DIR, "fetch", "origin", "main", "--quiet")
+
+actual_dev = git_sha(DEV_DIR)
+actual_prod = git_sha(PROD_DIR)
+actual_main = git_sha(PROD_DIR, "origin/main")
+
+release_state = state.get("state", "UNINITIALIZED")
+reviewed = state.get("reviewed_sha")
+recorded_dev = state.get("dev_sha")
+recorded_main = state.get("main_sha")
+recorded_prod = state.get("prod_sha")
+
+print("=== ATRIUM RELEASE STATUS ===")
+print(f"STATE:          {release_state}")
+print(f"REVIEWED:       {reviewed or '-'}")
+print()
+print(f"DEV actual:     {actual_dev}")
+print(f"DEV recorded:   {recorded_dev or '-'}")
+print(f"DEV health:     {service_health(DEV_SERVICE, DEV_HEALTH, DEV_CLIENT_BASE, DEV_DIR)}")
+print()
+print(f"MAIN actual:    {actual_main}")
+print(f"MAIN recorded:  {recorded_main or '-'}")
+print()
+print(f"PROD actual:    {actual_prod}")
+print(f"PROD recorded:  {recorded_prod or '-'}")
+print(f"PROD health:    {service_health(PROD_SERVICE, PROD_HEALTH, PROD_CLIENT_BASE, PROD_DIR)}")
+print()
+print(f"DEPLOY LOCK:    {deploy_lock_status()}")
+print(f"NEXT ACTION:    {next_action(release_state)}")
+
+warnings = []
+
+if recorded_dev and recorded_dev != actual_dev:
+    warnings.append("release-state DEV SHA differs from actual DEV checkout")
+
+if recorded_main and recorded_main != actual_main:
+    warnings.append("release-state MAIN SHA differs from origin/main")
+
+if recorded_prod and recorded_prod != actual_prod:
+    warnings.append("release-state PROD SHA differs from actual PROD checkout")
+
+if warnings:
+    print()
+    print("WARNINGS:")
+    for w in warnings:
+        print(f"- {w}")
