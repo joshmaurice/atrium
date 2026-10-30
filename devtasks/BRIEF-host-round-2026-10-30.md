@@ -1,9 +1,21 @@
 # Host round 2026-10-30: the small host round before 4c's kickoff
 
-Status: **DRAFT (2026-10-30), for the operator.** A short brief, not a
-pipeline round: no kickoff, no cards, no GLM. Claude drafted the changes and
-tested them off-host. The operator applies them on the VPS with the commands
-in §6. **4c's kickoff waits until §7's "done" holds.**
+Status: **INSTALLED on the VPS (2026-10-30, about 08:23 UTC)** by the
+operator, with steps A–C below. Open: item 4's memory limit (the operator's
+choice) and step D (the first orchestrator run's `args` lines). Neither
+holds up 4c's kickoff. A short brief, not a pipeline round: no kickoff, no
+cards, no GLM.
+- **The result:** step B printed `INSTALLED.`, with every baseline matched
+  first. Five guard copies are at v1.2.0 (`644`, `plugin.yaml` 1.2.0),
+  `atrium-release-status` at `700` and `buildrun.py` at `644`. Step C:
+  - DEV and PROD both read `healthy (app.js sha256 2b2b411175a2 served =
+    checkout HEAD)`, which is the `app.js` blob at the released `ab02239b`
+    (checked separately from git), and the connector's `release_status`
+    shows the same;
+  - `list-tests` prints the eight names, `behaviors` before `apps-client`;
+  - the guard's decision is `modify blocked True`.
+- **Backups** are in `/root/host-round-2026-10-30-backup`. `rollback.sh`
+  (§6) puts them back.
 - **Why now:** the signin-sync passdown (first instruction 3, §6.2): the host
   round goes first, all of it, because item 1 (cards created without a parent)
   is a risk to every release chain, 4c's included.
@@ -324,13 +336,17 @@ sha256sum /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py /usr/
 ```
 
 ## 7. Done
-- [ ] Step A pasted; every hash matches, or Claude has rebased the change.
-- [ ] Step B printed `INSTALLED.`
-- [ ] Step C: the content match on both health lines, eight test names,
+- [x] Step A pasted. The first run found the guard copy six bytes off
+  (§2.5). After the rebuild, every hash matched.
+- [x] Step B printed `INSTALLED.` (2026-10-30).
+- [x] Step C: the content match on both health lines, eight test names,
   `modify blocked True`.
 - [ ] Item 4's memory limit decided (applied or declined).
+- [ ] Step D: the first orchestrator run's `args` lines pasted, and the
+  dropped-fields diagnosis written from them.
+- [ ] A fresh front-door session (`/new`), so it loads v1.2.0.
 - [ ] `atrium-ops`: `claude/host-round-2026-10-30` merged, or kept as the
-  record (it's already pushed).
+  record (it's pushed, at `61c1d01` or later).
 
 Then 4c's kickoff can be written from `53f68ba` (the FINAL pre-brief).
 **At 4c's kickoff,** the first held card (if any) and step D's `args` lines
