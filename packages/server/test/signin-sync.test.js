@@ -179,6 +179,15 @@ function makeMessageQueue(ws) {
   return { queue, waitForType }
 }
 
+/**
+ * A BOUNDED wait for a socket's close. A proof of failure removes the close
+ * (p2), and an unbounded await would hang the whole file instead of failing the
+ * named test — the file must still exit on its own.
+ */
+function raceClose(closedPromise, timeoutMs = 4000) {
+  return Promise.race([closedPromise, sleep(timeoutMs).then(() => null)])
+}
+
 let sessionCounter = 0
 
 function rawWs(path, { cookie = null, origin = null } = {}) {
@@ -342,11 +351,11 @@ describe('6.2(b) the two-user sequence with one cookie jar', () => {
     assert.equal(out.statusCode, 200)
 
     const signedOut = await a.q.waitForType('error', 4000)
-    const closeInfo = await a.closed
+    const closeInfo = await raceClose(a.closed)
     assert.ok(signedOut, 'the old socket received an error')
     assert.equal(signedOut.code, 'SIGNED_OUT')
     assert.equal(signedOut.message, 'You signed out')
-    assert.equal(closeInfo.code, 1008)
+    assert.equal(closeInfo?.code, 1008, 'the old socket was closed with 1008')
 
     const bob = await registerUser('SeqBob')
     const b = await connectHello('/', { cookie: bob.cookie })
@@ -388,15 +397,15 @@ describe('6.2(c) logout closes only that auth session’s sockets', () => {
 
     const e1 = await s1Commons.q.waitForType('error', 4000)
     const e1h = await s1Home.q.waitForType('error', 4000)
-    const c1 = await s1Commons.closed
-    const c1h = await s1Home.closed
-    const cPh = await preHello.closed
+    const c1 = await raceClose(s1Commons.closed)
+    const c1h = await raceClose(s1Home.closed)
+    const cPh = await raceClose(preHello.closed)
 
     assert.equal(e1?.code, 'SIGNED_OUT')
     assert.equal(e1h?.code, 'SIGNED_OUT')
-    assert.equal(c1.code, 1008)
-    assert.equal(c1h.code, 1008)
-    assert.equal(cPh.code, 1008, 'the pre-hello socket was closed too')
+    assert.equal(c1?.code, 1008)
+    assert.equal(c1h?.code, 1008)
+    assert.equal(cPh?.code, 1008, 'the pre-hello socket was closed too')
 
     // Session 2's socket is untouched, still open, still able to edit.
     await sleep(80)
@@ -530,10 +539,10 @@ describe('6.2(f) a held world load', () => {
 
     await conn.opened
     const err = await conn.q.waitForType('error', 4000)
-    const closed = await conn.closed
+    const closed = await raceClose(conn.closed)
     assert.ok(err, 'the upgrade was refused')
     assert.equal(err.code, 'WORLD_UNAVAILABLE')
-    assert.equal(closed.code, 1008)
+    assert.equal(closed?.code, 1008)
 
     const host = registry.getWorldHost(homeId)
     assert.equal(host?.sessions?.size ?? 0, 0, 'no session for the signed-out user')
@@ -597,10 +606,10 @@ describe('6.2(f) a held world load', () => {
     loadHold.release()
     await conn.opened
     const err = await conn.q.waitForType('error', 4000)
-    const closed = await conn.closed
+    const closed = await raceClose(conn.closed)
     assert.ok(err, 'refused')
     assert.equal(err.code, 'WORLD_UNAVAILABLE')
-    assert.equal(closed.code, 1008)
+    assert.equal(closed?.code, 1008)
   })
 })
 
