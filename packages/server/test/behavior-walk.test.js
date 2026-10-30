@@ -171,7 +171,9 @@ async function send(ws, messages, node, field, value) {
 }
 
 async function hello(ws, messages, id) {
-  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 1 } }))
+  // scripting-4c S2 — the role needs `scriptRunner: 2`. This test only sends
+  // edits, so the value is incidental; it is 2 to match a 4c page.
+  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'the hello reply arrives')
   return reply

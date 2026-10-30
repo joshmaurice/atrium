@@ -82,7 +82,7 @@ async function connect(port, as = null) {
   return { ws, messages }
 }
 
-async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 1 }) {
+async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 2 }) {
   ws.send(JSON.stringify({ type: 'hello', id, capabilities }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
@@ -291,7 +291,7 @@ class FakeSocket {
   close(code) { this.closed = true; this.readyState = 3; this._fire('close', code) }
   _fire(event, ...args) { for (const fn of this._handlers[event] ?? []) fn(...args) }
   ofType(type) { return this.sent.filter((m) => m.type === type) }
-  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 1 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
+  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 2 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
 }
 
 class FakeWss {
@@ -449,7 +449,8 @@ test('E4/N7: the handover skips a candidate the same sweep is about to terminate
 })
 
 // ===========================================================================
-// scripting-4b-2 F-L6 — the election needs canEdit AND scriptRunner: 1
+// scripting-4b-2 F-L6 / scripting-4c S2 — the election needs canEdit AND
+// scriptRunner: 2
 // ===========================================================================
 
 test('F-L6: an owner hello without scriptRunner never holds the role, and is never handed one', async () => {

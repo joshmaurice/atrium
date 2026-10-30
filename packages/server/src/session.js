@@ -8,11 +8,13 @@ import { createTickLoop } from './tick.js'
 import { MAX_MESSAGE_DEPTH, messageDepth } from './message-depth.js'
 import { createPresence } from './presence.js'
 import { resolveUpgradeAuth } from './http-routes.js'
-import { parsePath } from '@atrium/som'
+import { parsePath, worldPosition } from '@atrium/som'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost,
   ANIMATION_LEAF, OBJECT_ID_TAKEN, BEHAVIOR_LEAF, BEHAVIOR_NODES_PER_WORLD, behaviorCountIn,
+  // scripting-4c AC3 — the server's copies of the shared click rule.
+  listensForSelect, withinActivateDistance,
 } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
@@ -33,6 +35,54 @@ function nextSeq() {
 function sendError(ws, seq, code, message) {
   ws.send(JSON.stringify({ type: 'error', code, message, ...(seq != null ? { seq } : {}) }))
 }
+
+// ---------------------------------------------------------------------------
+// scripting-4c AC-L4 — a token bucket on the injected clock
+//
+// `capacity` tokens to start, refilled at `refillPerSecond`, never above the
+// capacity. `take()` spends one and answers whether there was one. Both of 4c's
+// limits are the same mechanism with different numbers: 5 a second per session,
+// 20 a second per world.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {number} capacity
+ * @param {number} refillPerSecond
+ * @param {() => number} now
+ */
+export function createTokenBucket(capacity, refillPerSecond, now) {
+  let tokens = capacity
+  let last = now()
+  return {
+    /** @returns {boolean} true when a token was available and has been spent */
+    take() {
+      const t = now()
+      const elapsed = Math.max(0, t - last)
+      last = t
+      tokens = Math.min(capacity, tokens + (elapsed / 1000) * refillPerSecond)
+      if (tokens < 1) return false
+      tokens -= 1
+      return true
+    },
+  }
+}
+
+/** AC-L4 — the per-session limit: 5 activations a second, burst 5. */
+export const ACTIVATE_SESSION_TOKENS = 5
+export const ACTIVATE_SESSION_REFILL = 5
+/** AC-L4 — the per-world limit: 20 activations a second, burst 20. */
+export const ACTIVATE_WORLD_TOKENS = 20
+export const ACTIVATE_WORLD_REFILL = 20
+/** AC3 — the rate-limit log line: one per session per this window. */
+export const ACTIVATE_LOG_WINDOW_MS = 60_000
+
+/** AC-L5 — every refusal's exact text. */
+const ACTIVATE_RATE_MESSAGE = 'too many activations; try again in a moment'
+const ACTIVATE_NO_BEHAVIOUR_MESSAGE = "this object doesn't respond to clicks"
+const ACTIVATE_OWNER_AWAY_MESSAGE = "nothing runs here while the world's owner is away"
+const ACTIVATE_OWNER_NOT_READY_MESSAGE = "the world's owner isn't ready yet"
+const ACTIVATE_NO_AVATAR_MESSAGE = 'you have no avatar in this world'
+const ACTIVATE_TOO_FAR_MESSAGE = 'you are too far away to use this'
 
 /**
  * V9 — one log line when a send or add check throws. The message is refused
@@ -304,6 +354,9 @@ export function attachSessionHandlers({
   keepaliveInterval = KEEPALIVE_INTERVAL,
   onPreHelloClosed = null,
   worldId = 'default',
+  // scripting-4c AC3 — the clock both rate-limit buckets read. A parameter, so
+  // the tests drive it and no test waits a real second.
+  now = () => Date.now(),
 } = {}) {
 
   // Track pre-hello connections by WebSocket instance so eviction (V5) and the
@@ -320,8 +373,19 @@ export function attachSessionHandlers({
   // `hostGen` starts at 1 and is NOT saved: a server restart starts again at 1,
   // because every session reconnects. It ONLY EVER INCREASES — a role is never
   // reactivated under an old generation (review S2).
+  //
+  // scripting-4c (Rev 1 M1) — `ready` is the DELIVERY CONTRACT. The role alone
+  // is not enough: the new host's world may still be loading, and an `activate`
+  // forwarded in that window would be dropped in silence (4b-2 P19). Every GRANT
+  // clears `ready`, and only the host session's own `script-ready` for the
+  // current generation sets it again. Never weaken this to "the host's socket is
+  // open" — that is exactly the gap this closes.
   // ---------------------------------------------------------------------------
-  const scriptHost = { sessionId: null, hostGen: 0 }
+  const scriptHost = { sessionId: null, hostGen: 0, ready: false }
+
+  // AC-L4 — the per-WORLD bucket, one per world host, beside `scriptHost`. The
+  // per-session bucket lives on the session object (it dies with the session).
+  const activateWorldBucket = createTokenBucket(ACTIVATE_WORLD_TOKENS, ACTIVATE_WORLD_REFILL, now)
 
   /** The keepalive sweep terminates a session at this many missed pings. */
   const MISSED_PING_LIMIT = 2
@@ -451,20 +515,32 @@ export function attachSessionHandlers({
   /**
    * 4b-1 E4 — send the role to a session: set it, bump the generation, and
    * tell the session with `{ type: 'script-host', active: true, hostGen }`.
+   *
+   * scripting-4c (Rev 1 M1) — a GRANT always clears readiness: the new host has
+   * not said its engines exist yet, whatever the previous holder said.
    */
   function grantScriptHost(session) {
     scriptHost.hostGen += 1
     scriptHost.sessionId = session.id
+    scriptHost.ready = false
     session.ws.send(JSON.stringify({ type: 'script-host', active: true, hostGen: scriptHost.hostGen }))
   }
 
   /**
-   * scripting-4b-2 F-L6 — a session may hold the role only when it passed
-   * `canEdit` at its hello AND declared `capabilities.scriptRunner === 1`. A
-   * 4b-1 tab keeps `canEdit` and its panel but never becomes the script host.
+   * scripting-4b-2 F-L6 / scripting-4c S2 — a session may hold the role only
+   * when it passed `canEdit` at its hello AND declared
+   * `capabilities.scriptRunner === 2`.
+   *
+   * 2 means "runs behaviours AND handles a forwarded `activate`". A 4b-2 page
+   * sends 1: it still connects, still owns the world, keeps every edit right and
+   * its Edit panel — and is NEVER the host. Its client would drop a forwarded
+   * `activate` without a word (4b-2 P4).
+   *
+   * P22: this is ONE of the two places the role is decided. The other is the
+   * inline election in the `hello` case, and both must say `=== 2`.
    */
   function canRunBehaviors(session) {
-    return session?.canEdit === true && session?.capabilities?.scriptRunner === 1
+    return session?.canEdit === true && session?.capabilities?.scriptRunner === 2
   }
 
   /**
@@ -480,6 +556,9 @@ export function attachSessionHandlers({
    */
   function handOverScriptHost() {
     scriptHost.sessionId = null
+    // scripting-4c (Rev 1 M1) — with no successor the world has NO ready host:
+    // a stale `ready` from the departed session must not survive.
+    scriptHost.ready = false
     for (const s of sessions.values()) {
       if (!canRunBehaviors(s)) continue
       if (s.ws?.readyState !== 1 /* OPEN */) continue
@@ -715,11 +794,18 @@ export function attachSessionHandlers({
             // `canEdit` at its hello takes the role. A reconnecting former host is
             // a new session with a new hello; it does NOT take the role while
             // another session holds it.
+            //
+            // scripting-4c S2 — the capability is `=== 2` HERE TOO (P22). This is
+            // the second of the two places the role is decided; `canRunBehaviors`
+            // is the first. A `scriptRunner: 1` page (4b-2) is never the host.
             let isScriptHost = false
             let hostGen
-            if (canEdit && session.capabilities?.scriptRunner === 1 && scriptHost.sessionId === null) {
+            if (canEdit && session.capabilities?.scriptRunner === 2 && scriptHost.sessionId === null) {
               scriptHost.hostGen += 1
               scriptHost.sessionId = session.id
+              // Rev 1 M1 — the grant clears readiness: the page must say
+              // `script-ready` before anything is forwarded to it.
+              scriptHost.ready = false
               isScriptHost = true
               hostGen = scriptHost.hostGen
             }
@@ -830,6 +916,133 @@ export function attachSessionHandlers({
               type: 'pong',
               clientTime: msg.clientTime,
               serverTime: Date.now(),
+            }))
+            break
+          }
+
+          case 'script-ready': {
+            // ---------------------------------------------------------------------
+            // scripting-4c AC3 (Rev 1 M1) — the OWNER's page says its runner is
+            // enabled, so the world has a host that can actually RUN something.
+            //
+            // COOPERATIVE, like revocation: the server cannot verify the page's
+            // state, only that the RIGHT session said so for the RIGHT
+            // generation. Accepted only from `scriptHost.sessionId` with
+            // `hostGen === scriptHost.hostGen`; anything else (a non-host, an
+            // old generation) is ignored, with no answer and no log line. The
+            // server never answers this message.
+            // ---------------------------------------------------------------------
+            if (scriptHost.sessionId !== null &&
+                session.id === scriptHost.sessionId &&
+                msg.hostGen === scriptHost.hostGen) {
+              scriptHost.ready = true
+            }
+            break
+          }
+
+          case 'activate': {
+            // ---------------------------------------------------------------------
+            // scripting-4c AC3 — a click in any tab, forwarded to the host.
+            //
+            // THE TEN CHECKS RUN IN THIS ORDER. Each refusal answers `error`
+            // with the request's `seq`, and nothing else happens: no broadcast,
+            // no change, no save. The order is the contract (spec §9): the cheap
+            // checks run before the walks, so a refusal's code is deterministic.
+            //
+            // The distance check below is NOT a security boundary: it measures
+            // the position the sender's own `view` last claimed (4b-2 P8). It
+            // stops ordinary far-away clicks and makes activation local; any
+            // client can send a `view` next to an object first.
+            // ---------------------------------------------------------------------
+
+            // 2. No world: as `send`.
+            if (!world) {
+              sendError(ws, msg.seq, 'UNKNOWN_MESSAGE', 'World not loaded')
+              break
+            }
+
+            // 3. THE SESSION'S BUCKET (AC-L4) — charged for EVERY schema-valid
+            //    `activate` from a handshaken session, BEFORE the node lookup, so
+            //    a flood costs no lookups. 5 a second, burst 5.
+            const sessionBucket = session.activateBucket ??
+              (session.activateBucket = createTokenBucket(ACTIVATE_SESSION_TOKENS, ACTIVATE_SESSION_REFILL, now))
+            if (!sessionBucket.take()) {
+              // AC3's log line: one per session per 60 s, and only when its
+              // bucket refuses. Never a line per accepted activate, and no node
+              // name, user name or cookie: the first 8 characters of the SESSION
+              // id and the world id, nothing else.
+              const t = now()
+              if (session.activateLogAt == null || t - session.activateLogAt >= ACTIVATE_LOG_WINDOW_MS) {
+                session.activateLogAt = t
+                console.log(`[activate] rate limited ${session.id.slice(0, 8)} world ${worldId}`)
+              }
+              sendError(ws, msg.seq, 'RATE_LIMITED', ACTIVATE_RATE_MESSAGE)
+              break
+            }
+
+            // 4. THE NODE — exactly the named one. The server NEVER walks
+            //    ancestors (AC-L7): the page resolved the click to the behaviour
+            //    node before sending, and a placed model's inner nodes are the
+            //    page's own, so a server-side walk could not work for them.
+            const activateNode = world.som.getNodeByName(msg.node)
+            if (!activateNode) {
+              sendError(ws, msg.seq, 'NODE_NOT_FOUND', `NODE_NOT_FOUND: ${msg.node}`)
+              break
+            }
+
+            // 5. THE BEHAVIOUR — a pure read of the STORED leaf (4b-2 P10).
+            if (!listensForSelect(activateNode.extras?.atrium?.behavior)) {
+              sendError(ws, msg.seq, 'INVALID_FIELD', ACTIVATE_NO_BEHAVIOUR_MESSAGE)
+              break
+            }
+
+            // 6. A READY HOST (Rev 1 M1) — forward only to the session that sent
+            //    `script-ready` for the CURRENT generation. A host that exists
+            //    but is still loading is a different answer from no host at all.
+            const activateHost = scriptHost.sessionId === null ? null : sessions.get(scriptHost.sessionId)
+            const hostOpen = Boolean(activateHost) && activateHost.ws?.readyState === 1 /* OPEN */
+            if (!hostOpen || !scriptHost.ready) {
+              sendError(ws, msg.seq, 'NO_SCRIPT_HOST',
+                hostOpen ? ACTIVATE_OWNER_NOT_READY_MESSAGE : ACTIVATE_OWNER_AWAY_MESSAGE)
+              break
+            }
+
+            // 7. AN AVATAR — a session whose avatar `add` was refused has none.
+            if (!session.avatarNode) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', ACTIVATE_NO_AVATAR_MESSAGE)
+              break
+            }
+
+            // 8. THE DISTANCE — the sender's OWN avatar node (always at the
+            //    root, so its translation IS its world position) to the behaviour
+            //    node's WORLD position. NEVER `getNodeTranslation`: that is the
+            //    local translation and is wrong inside a group (4b-2 P7).
+            if (!withinActivateDistance(session.avatarNode.translation, worldPosition(activateNode))) {
+              sendError(ws, msg.seq, 'PERMISSION_DENIED', ACTIVATE_TOO_FAR_MESSAGE)
+              break
+            }
+
+            // 9. THE WORLD'S BUCKET (AC-L4) — charged ONLY here, at the moment of
+            //    forwarding, for an activate that passed every other check. 20 a
+            //    second, burst 20. This is the budget that bounds the host's own
+            //    per-frame work, so refusals never spend it.
+            if (!activateWorldBucket.take()) {
+              sendError(ws, msg.seq, 'RATE_LIMITED', ACTIVATE_RATE_MESSAGE)
+              break
+            }
+
+            // 10. FORWARD to the host session ONLY, with the generation the
+            //     forward belongs to. `from` is for the host's log line: it is
+            //     never used as identity or authority. No answer to the sender on
+            //     success — and a successful forward is NOT a successful run
+            //     (N3): the host can still drop it.
+            activateHost.ws.send(JSON.stringify({
+              type: 'activate',
+              seq: nextSeq(),
+              node: msg.node,
+              event: 'select',
+              from: session.id,
+              hostGen: scriptHost.hostGen,
             }))
             break
           }

@@ -248,7 +248,9 @@ async function connect(port) {
 }
 
 async function hello(ws, messages, id) {
-  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 1 } }))
+  // scripting-4c S2 — the role needs `scriptRunner: 2`; this world owner tab
+  // declares it (the value a 4c page sends).
+  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
   return reply
