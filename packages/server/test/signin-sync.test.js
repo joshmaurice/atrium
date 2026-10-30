@@ -464,6 +464,46 @@ describe('6.2(d) renewal at half-life', () => {
     assert.equal(res.setCookie, null, 'no renewal cookie')
     assert.equal(sessionRow(u.authSessionId), undefined, 'the expired row is gone')
   })
+
+  // signin-sync r2 J4 — renewal measures half of the FIXED 7-day lifetime.
+  // Round 1 measured `expires_at - created_at`, which a renewal lengthens, so
+  // a sign-in about a week old renewed on EVERY check.
+  test('J4: created 30 days ago with 6.9 days left is NOT renewed', async () => {
+    const u = await registerUser('StaleStella')
+    setSessionWindow(u.authSessionId, { createdAgoDays: 30, expiresInDays: 6.9 })
+    const before = sessionRow(u.authSessionId).expires_at
+
+    const res = await meUser(u.cookie)
+    assert.equal(res.statusCode, 200)
+    assert.equal(res.setCookie, null, 'no Set-Cookie')
+    assert.equal(sessionRow(u.authSessionId).expires_at, before, 'no write: expires_at unchanged')
+  })
+
+  test('J4: created 30 days ago with 3 days left IS renewed to about 7 days', async () => {
+    const u = await registerUser('StaleSam')
+    setSessionWindow(u.authSessionId, { createdAgoDays: 30, expiresInDays: 3 })
+
+    const res = await meUser(u.cookie)
+    assert.equal(res.statusCode, 200)
+    assert.ok(res.setCookie, 'the response sets the cookie')
+
+    const remainingDays = (new Date(sessionRow(u.authSessionId).expires_at).getTime() - Date.now()) / DAY_MS
+    assert.ok(remainingDays > 6.9 && remainingDays < 7.1, `expires_at ≈ 7 days ahead (got ${remainingDays})`)
+  })
+
+  test('J4: a session renewed just now is not renewed again by the next check', async () => {
+    const u = await registerUser('FreshFiona')
+    setSessionWindow(u.authSessionId, { createdAgoDays: 30, expiresInDays: 3 })
+
+    const first = await meUser(u.cookie)
+    assert.ok(first.setCookie, 'the first check renews it')
+    const afterFirst = sessionRow(u.authSessionId).expires_at
+
+    const second = await meUser(u.cookie)
+    assert.equal(second.statusCode, 200)
+    assert.equal(second.setCookie, null, 'the next check does not renew it')
+    assert.equal(sessionRow(u.authSessionId).expires_at, afterFirst, 'and writes nothing')
+  })
 })
 
 // ---------------------------------------------------------------------------

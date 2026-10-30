@@ -929,11 +929,11 @@ const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000
 /**
  * signin-sync I6 — renew an active sign-in when the page checks it.
  *
- * A session with less than half its life left gets `expires_at = now + 7 days`
- * and the cookie is re-set with the same attributes and Max-Age. A session
- * with more than half its life left is left alone (no `Set-Cookie`, no write).
- * An expired session never reaches here: the resolver returns null first and
- * the caller answers 401.
+ * A session with less than half the FIXED 7-day lifetime left (r2 J4: below
+ * 3.5 days remaining) gets `expires_at = now + 7 days` and the cookie is
+ * re-set with the same attributes and Max-Age. A session with more left is
+ * left alone (no `Set-Cookie`, no write). An expired session never reaches
+ * here: the resolver returns null first and the caller answers 401.
  *
  * Exported for the tests.
  *
@@ -945,7 +945,7 @@ const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000
  */
 export function renewSessionIfBelowHalfLife(res, db, sessionInfo, username) {
   const row = db.database.prepare(
-    'SELECT created_at, expires_at FROM auth_sessions WHERE id = ?'
+    'SELECT expires_at FROM auth_sessions WHERE id = ?'
   ).get(sessionInfo.authSessionId)
 
   if (!row || !row.expires_at) return false
@@ -953,14 +953,14 @@ export function renewSessionIfBelowHalfLife(res, db, sessionInfo, username) {
   const expiresMs = new Date(row.expires_at).getTime()
   if (!Number.isFinite(expiresMs)) return false
 
-  // The life of this session. When created_at is missing or nonsense, assume
-  // the standard lifetime, which is what a fresh session has.
-  const createdMs = row.created_at ? new Date(row.created_at).getTime() : NaN
-  let lifeMs = Number.isFinite(createdMs) ? expiresMs - createdMs : SESSION_LIFETIME_MS
-  if (!Number.isFinite(lifeMs) || lifeMs <= 0) lifeMs = SESSION_LIFETIME_MS
-
+  // signin-sync r2 J4 — half of the FIXED lifetime, not half of
+  // `expires_at - created_at`. A renewal moves `expires_at` but never
+  // `created_at`, so the old measure grew with every renewal: once a sign-in
+  // was about 7 days old, EVERY check renewed it (a DB write, a Set-Cookie and
+  // an `[auth] renewed` line on every visible tab and every connect).
+  // `created_at` is no longer read here.
   const remainingMs = expiresMs - Date.now()
-  if (remainingMs >= lifeMs / 2) return false
+  if (remainingMs >= SESSION_LIFETIME_MS / 2) return false
 
   const newExpiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString()
   db.database.prepare('UPDATE auth_sessions SET expires_at = ? WHERE id = ?')
