@@ -50,6 +50,10 @@ export function makeFakeClient({ nodes = [] } = {}) {
     canEdit: false,
     sent,
     animations,
+    // scripting-4c AC4/AC5 — the runner's readiness call. A spy, so a test can
+    // assert exactly WHEN the runner says its engines exist.
+    readyCalls: 0,
+    scriptReady() { client.readyCalls += 1; return true },
     on(type, fn) { (listeners.get(type) ?? listeners.set(type, []).get(type)).push(fn) },
     off(type, fn) { const list = listeners.get(type) ?? []; const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1) },
     emit(type, payload) { for (const fn of [...(listeners.get(type) ?? [])]) fn(payload) },

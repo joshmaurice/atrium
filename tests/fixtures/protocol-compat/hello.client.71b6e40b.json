@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Hello (Client)",
+  "description": "Initial handshake message sent by client",
+  "type": "object",
+  "required": ["type", "id"],
+  "properties": {
+    "type": { "const": "hello" },
+    "id": { "type": "string", "minLength": 1 },
+    "ticket": { "type": "string" },
+    "displayName": { "type": "string", "description": "Optional display name sent by client (pre-brief #9)" },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "tick": {
+          "oneOf": [
+            { "type": "boolean", "const": false },
+            {
+              "type": "object",
+              "properties": {
+                "interval": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "physics": { "type": "boolean" },
+        "chat": { "type": "boolean" },
+        "scriptRunner": { "type": "integer", "const": 1, "description": "scripting-4b-2 F-L6: 1 declares this tab can run behaviour graphs." }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

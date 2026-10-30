@@ -43,13 +43,13 @@ function makeSOM() {
   return new SOMDocument(doc)
 }
 
-function makeClient({ ready = true } = {}) {
+function makeClient({ ready = true, connect = {} } = {}) {
   const mocks = []
   const client = new AtriumClient({
     WebSocket: class { constructor() { const m = new MockWebSocket(); mocks.push(m); return m } },
     connectTimeout: 0,
   })
-  client.connect('ws://mock')
+  client.connect('ws://mock', connect)
   client._sessionId   = 'session-aabbccdd'
   client._displayName = 'User-sess'
   client._connected   = true
@@ -125,13 +125,22 @@ test('F5: sendField refuses before the world is loaded, exactly as the leaf meth
   assert.throws(() => client.sendField('Crate', FIELD, VALUE), /World not loaded/)
 })
 
-test('F5: the client hello declares scriptRunner: 1', () => {
-  const { client, mock } = makeClient()
-  // connect() already opened the socket; drive the open handler the way the
-  // constructor\'s onOpen does by reading what was sent.
-  const hello = mock.sent.find((m) => m.type === 'hello') ?? { type: 'hello', id: client._sessionId, capabilities: { tick: { interval: 5000 }, scriptRunner: 1 } }
-  assert.equal(hello.capabilities.scriptRunner, 1)
-  assert.equal(validate('client', hello).valid, true)
+test('F5/AC4: the hello declares scriptRunner only when the connect option asks, and then it is 2', () => {
+  // scripting-4c S2/AC4 — 4b-2 hard-coded `scriptRunner: 1` into every hello.
+  // 4c makes it an OPTION (default off), because a hello field older servers do
+  // not know must only ride a same-origin connection (Rev 1.2 M1, P23): the
+  // page sets it in the one place every connect goes through (`connectNow`).
+  const asked = makeClient({ connect: { scriptRunner: true } })
+  asked.mock._fire('open')
+  const helloWith = asked.mock.sent.find((m) => m.type === 'hello')
+  assert.equal(helloWith.capabilities.scriptRunner, 2)
+  assert.equal(validate('client', helloWith).valid, true)
+
+  const plain = makeClient()
+  plain.mock._fire('open')
+  const helloWithout = plain.mock.sent.find((m) => m.type === 'hello')
+  assert.equal('scriptRunner' in helloWithout.capabilities, false, 'absent, not 0 and not 1')
+  assert.equal(validate('client', helloWithout).valid, true)
 })
 
 test('F-L12 NIT: _scriptHostRoleWarned resets on a second connection', () => {

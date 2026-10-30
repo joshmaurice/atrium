@@ -20,7 +20,16 @@ function setup({ nodes = [], grant = true, loadWorld = true, options = {} } = {}
   if (!nodes.some((n) => n.extras?.atrium?.objectId === TGT)) nodes = [...nodes, makeNode({ name: 'target', id: TGT })]
   const client = makeFakeClient({ nodes })
   const state = { clock: 0 }
-  const runner = createBehaviorRunner({ client, now: () => state.clock, ...options })
+  // scripting-4c AC-L3 (a) — the host's own click obeys the same 10 m rule, so
+  // the runner needs a local avatar and a position rule. Every fake node sits at
+  // the origin, so a select here is always in reach.
+  const runner = createBehaviorRunner({
+    client,
+    now: () => state.clock,
+    position: (node) => (node ? node.translation : undefined),
+    localAvatar: () => ({ name: 'avatar', translation: [0, 0, 0] }),
+    ...options,
+  })
   if (grant) client.scriptHost = { active: true, hostGen: 1 }
   client.canEdit = true
   if (loadWorld) { client.emit('world:loaded', { name: 'w' }) }

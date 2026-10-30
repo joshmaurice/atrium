@@ -30,6 +30,7 @@
 // ---------------------------------------------------------------------------
 
 import { createBehaviorEngine, loadBehavior } from './adapter.js'
+import { selectTargetFor, listensForSelect, withinActivateDistance } from './behavior-spec.js'
 
 /** F7 — sends per world: one opportunity every 50 ms. */
 export const SEND_FRAME_MS = 50
@@ -55,6 +56,10 @@ export function createBehaviorRunner({
   frame = SEND_FRAME_MS,
   clips = () => ({ status: 'none' }),
   position = () => undefined,
+  // scripting-4c AC5 / AC-L3 (a) — the LOCAL avatar node, so the host's own
+  // click obeys the same 10 m rule as every visitor's. The app passes
+  // `() => avatar.localNode`.
+  localAvatar = () => null,
   onEntry = null,
 } = {}) {
   const events = new EventTarget()
@@ -65,6 +70,7 @@ export function createBehaviorRunner({
   const droppedLogged = new Set()    // the target no longer resolves, keyed by the send key
   const refusedOnce = new Set()      // V7 — `${behaviourId}|${key}`, the checks at the opportunity
   const sendSeqs = new Map()         // V3 — the seq the server owes an answer for → its entry
+  const forwardedDropped = new Set() // scripting-4c AC5 — `${nodeName}|${generation}|${reason}`
 
   let worldReady = false
   let lastSend = -Infinity
@@ -160,6 +166,7 @@ export function createBehaviorRunner({
     refusalLogged.clear()
     droppedLogged.clear()
     refusedOnce.clear()
+    forwardedDropped.clear()
   }
 
   const worldFor = (nodeMap, targets, behaviourId, generation) => ({
@@ -502,23 +509,100 @@ export function createBehaviorRunner({
   // Selection, gestures, lifecycle
   // -------------------------------------------------------------------------
 
-  const select = (somNode) => {
-    if (!enabled() || !somNode) return
-    for (let node = somNode; node; node = node.parent) {
-      const record = engines.get(node.name)
-      if (record?.engine) { record.engine.select(0); return }
-    }
-  }
-
   const setGesture = (nodeName) => {
     gesture = nodeName ?? null
     if (gesture === null) { gestureLogged = false; return }
     gestureLogged = false
   }
 
+  /**
+   * scripting-4c AC5 — the forwarded select: the runner subscribes to the
+   * client's `activate`, which the client emits only while this tab holds the
+   * role, for the current generation.
+   *
+   * `from` is for the LOG LINE only: it is never identity or authority (spec
+   * §9). A forwarded select RUNS IN EDIT MODE too — Edit mode changes what the
+   * host's OWN clicks do, not what the world's behaviours do — and it NEVER
+   * re-checks distance: the server is the gate (it measured the sender's last
+   * `view`).
+   *
+   * A forward is not a run (N3): the behaviour may have been changed or disabled
+   * meanwhile, the runner may have been disabled, or the socket may have closed
+   * with the message in flight. Each of those drops the select and logs ONE line
+   * per node per engine generation.
+   */
+  const dropForwarded = (nodeName, reason, message) => {
+    const generation = engines.get(nodeName)?.generation ?? 0
+    const seen = `${nodeName}|${generation}|${reason}`
+    if (forwardedDropped.has(seen)) return
+    forwardedDropped.add(seen)
+    write(now(), nodeName, `select dropped — ${message}`)
+  }
+
+  const onActivate = ({ node: nodeName, from } = {}) => {
+    if (disposed) return
+    if (typeof nodeName !== 'string' || nodeName.length === 0) return
+    if (!enabled()) {
+      dropForwarded(nodeName, 'not-running', 'this tab is not running behaviours')
+      return
+    }
+    const node = nodeByName(nodeName)
+    const record = node ? engines.get(nodeName) : null
+    if (!record?.engine) {
+      dropForwarded(nodeName, 'not-running', 'the behaviour is no longer running')
+      return
+    }
+    if (!listensForSelect(behaviourOf(node))) {
+      dropForwarded(nodeName, 'no-behaviour', 'the behaviour no longer listens for clicks')
+      return
+    }
+    write(now(), nodeName, `select from ${String(from ?? '').slice(0, 8)}`)
+    record.engine.select(0)
+  }
+
+  /**
+   * scripting-4c AC5 — ONE select rule for every tab (AC2's `selectTargetFor`),
+   * the host's own click included.
+   *
+   * @param {object|null} somNode  the SOM node under the hit
+   * @param {{from?: string}} [options]  `from` marks a FORWARDED select, which
+   *   never re-checks distance
+   * @returns {'ran'|'too-far'|'no-avatar'|'no-behaviour'|'not-running'}
+   */
+  const select = (somNode, { from } = {}) => {
+    if (!enabled()) return 'not-running'
+    const target = selectTargetFor(somNode)
+    if (!target) return 'no-behaviour'
+
+    // AC-L3 (a) — the host's own clicks obey the SAME 10 m rule, so the same
+    // click works in every one of the owner's tabs. With no local avatar,
+    // nothing runs, exactly as on the server. A forwarded select is skipped:
+    // the server already gated it.
+    if (from === undefined) {
+      const avatar = localAvatar()
+      if (!avatar) return 'no-avatar'
+      if (!withinActivateDistance(position(avatar), position(target))) return 'too-far'
+    }
+
+    const record = engines.get(target.name)
+    if (!record?.engine) return 'not-running'
+    record.engine.select(0)
+    return 'ran'
+  }
+
   const evaluate = () => {
     if (disposed) return
-    if (enabled()) { scan(); return }
+    if (enabled()) {
+      scan()
+      // scripting-4c AC5 (Rev 1 M1) — the server forwards an `activate` only to
+      // a host that has SAID its engines exist. `evaluate()` is the one place
+      // that knows, and it runs on the grant, on `world:loaded` and on a
+      // re-evaluation; the client's once-per-generation rule makes the repeats
+      // harmless. NEVER while disabled: a tab that is not the host has nothing
+      // to run, and saying otherwise would make the server forward into a void.
+      client.scriptReady?.()
+      return
+    }
     disposeAll()
   }
 
@@ -540,6 +624,9 @@ export function createBehaviorRunner({
     ['som:add', scan],
     ['som:remove', scan],
     ['som:rename', scan],
+    // scripting-4c AC5 — a forwarded select: the server's `activate`, forwarded
+    // only while this tab holds the role for the current generation.
+    ['activate', onActivate],
     // V3 — a refused behaviour send is reported in the log.
     ['edit:rejected', onEditRejected],
     // W7 (round 6, N2) — and the seq record is bounded by these two.

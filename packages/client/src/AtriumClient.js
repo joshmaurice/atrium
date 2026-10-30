@@ -91,6 +91,8 @@ export const PING_STEADY_INTERVAL_MS = 30_000
 /** Z3 — the rolling window: the last 10 samples, none older than 5 minutes. */
 export const CLOCK_WINDOW_SIZE       = 10
 export const CLOCK_SAMPLE_MAX_AGE_MS = 5 * 60_000
+/** scripting-4c AC4 — pending activations kept per connection (oldest dropped). */
+export const ACTIVATIONS_MAX         = 16
 /** Z3 — a ping answered more than 60 s (by `monoNow()`) after it was sent is ignored. */
 export const CLOCK_PING_MAX_AGE_MS   = 60_000
 /** Z3 — below this the difference is a normal measurement, not a jump. */
@@ -590,7 +592,7 @@ export class AtriumClient extends EventEmitter {
    *   Pass null to leave _worldBaseUrl unchanged (dev flow compatibility).
    * @returns {string} sessionId
    */
-  connect(wsUrl, { avatar, displayName, worldBaseUrl: optWorldBaseUrl } = {}) {
+  connect(wsUrl, { avatar, displayName, worldBaseUrl: optWorldBaseUrl, scriptRunner = false } = {}) {
     // 4b-1 E6 (M4) — the role is released SYNCHRONOUSLY, first thing, before
     // this path does anything else — in particular before `connecting` is
     // emitted below. The invariant: once a connection is abandoned, nothing
@@ -684,6 +686,15 @@ export class AtriumClient extends EventEmitter {
       // one server session and a late answer from a superseded connection is
       // dropped by the existing `dispatch` guard.
       pendingEdits: new Map(),
+      // scripting-4c AC4 (Rev 1 S3, P21) — the activation refusals live here
+      // TOO, and in their OWN map: `_sendSeq` restarts at 0 on every connect,
+      // so a map that outlived a connection would name the wrong node (P21).
+      // Activation seqs never enter `pendingEdits`, so an `activate` refusal can
+      // never resolve an edit that happens to share its seq.
+      pendingActivations: new Map(),
+      // scripting-4c AC4 (Rev 1 M1) — the `hostGen` this connection has already
+      // sent `script-ready` for, or null. Once per hostGen per connection.
+      readySent: null,
       // E6 (review N4) — the per-connection high-water mark for `hostGen`,
       // beside `pendingEdits`, so a NEW connection starts from zero.
       hostGenSeen: 0,
@@ -735,12 +746,19 @@ export class AtriumClient extends EventEmitter {
       this._log('Connection open')
       if (record.closing) return
       // T7: omit displayName key entirely when no name was provided
+      //
+      // scripting-4c AC4 (Rev 1.2 M1, P23) — `scriptRunner` is present ONLY on a
+      // same-origin connection, and then it is 2. Its ABSENCE is the one shape
+      // every released server accepts: a pre-4b-2 server refuses any
+      // `scriptRunner` it does not know, and PROD runs one. Nothing is lost —
+      // a cross-origin connection is always anonymous (signin-sync I1), so it
+      // could never be the host anyway.
+      const capabilities = { tick: { interval: 5000 } }
+      if (scriptRunner) capabilities.scriptRunner = 2
       const helloMsg = {
         type: 'hello',
         id:   sessionId,
-        // scripting-4b-2 F-L6 — this build runs behaviour graphs, so the server
-        // may elect it the script host.
-        capabilities: { tick: { interval: 5000 }, scriptRunner: 1 },
+        capabilities,
       }
       if (this._transmitName != null) {
         helloMsg.displayName = this._transmitName
@@ -768,6 +786,7 @@ export class AtriumClient extends EventEmitter {
         case 'join':       this._onJoin(msg, record);              break
         case 'leave':      this._onLeave(msg, record);             break
         case 'script-host': this._onScriptHost(msg, record);        break
+        case 'activate':   this._onActivate(msg, record);           break
         case 'tick':       /* ignored */                            break
         case 'pong':       this._onPong(msg, record);               break
         case 'error': {
@@ -778,6 +797,10 @@ export class AtriumClient extends EventEmitter {
           err.seq = msg.seq
           // A3 — an error whose seq matches a pending edit resolves it.
           this._resolveRejected(msg, record)
+          // scripting-4c AC4 — and an error whose seq matches a pending
+          // ACTIVATION is reported as `activate:refused`. The two maps are
+          // separate, so neither can resolve the other's seq (P15).
+          this._resolveActivateRefused(msg, record)
           this.emit('error', err)
           break
         }
@@ -1068,6 +1091,25 @@ export class AtriumClient extends EventEmitter {
     this.emit('script-host:changed', { ...this.scriptHost })
   }
 
+  /**
+   * scripting-4c AC4 — an inbound `activate`, which the server forwards ONLY to
+   * the session that sent `script-ready` for the current generation.
+   *
+   * It is emitted as `activate` `{ node, from }` only while THIS client holds
+   * the role, for the CURRENT hostGen, and for `event: 'select'`; anything else
+   * is dropped without a word. `from` is the sender's session id, for the log
+   * line: it is never identity or authority (spec §9), and the connection-record
+   * guard at the top of `dispatch` has already dropped a stale socket's
+   * messages.
+   */
+  _onActivate(msg, record) {
+    if (this.scriptHost?.active !== true) return
+    if (msg.hostGen !== this.scriptHost.hostGen) return
+    if (msg.event !== 'select') return
+    if (typeof msg.node !== 'string' || msg.node.length === 0) return
+    this.emit('activate', { node: msg.node, from: msg.from })
+  }
+
   async _onServerHello(msg, record) {
     if (record.stale || record.closing) return
     // Clear connect timeout — connection established (pre-brief #4)
@@ -1343,6 +1385,67 @@ export class AtriumClient extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
+  // scripting-4c AC4 — a click in a tab that is NOT the host
+  // ---------------------------------------------------------------------------
+
+  /**
+   * scripting-4c AC4 — ask the server to run `nodeName`'s select behaviour in
+   * the host's tab.
+   *
+   * NOTHING is sent before the current connection has reached BOTH
+   * `session:ready` AND `world:loaded` (three states, Rev 1.2 S1): before
+   * `session:ready` an `error` would fail a pending connect (P15), and before
+   * `world:loaded` this client has no SOM to look the node up in.
+   *
+   * The seq → node name is recorded on the CONNECTION RECORD
+   * (`record.pendingActivations`), beside `pendingEdits` and in its OWN map:
+   * `_sendSeq` restarts at 0 on every connect (P21), so a map that outlived a
+   * connection could name the wrong node. At most 16 entries, oldest dropped —
+   * a successful activation has no answer, so entries cannot wait for one.
+   * Within one connection every seq comes from the one `_sendSeq` counter, so
+   * they cannot collide; across connections the counter restarts, which is why
+   * the map is per record.
+   *
+   * @param {string} nodeName
+   * @returns {number|null} the request seq, or null when nothing was sent
+   */
+  activate(nodeName) {
+    const record = this._connectionRecord
+    if (!record || record.stale || record.closing) return null
+    if (!this._connected || !this._worldReady) return null
+    if (typeof nodeName !== 'string' || nodeName.length === 0) return null
+
+    const seq = ++this._sendSeq
+    if (record.pendingActivations.size >= ACTIVATIONS_MAX) {
+      record.pendingActivations.delete(record.pendingActivations.keys().next().value)
+    }
+    record.pendingActivations.set(seq, nodeName)
+    this._wsSend({ type: 'activate', seq, node: nodeName, event: 'select' })
+    return seq
+  }
+
+  /**
+   * scripting-4c AC4 (Rev 1 M1) — this tab's runner is enabled: tell the server
+   * so it may forward activations here.
+   *
+   * At most ONCE per `hostGen` per connection (`record.readySent`), and only
+   * while this client holds the role. Called by the runner's `evaluate()`; the
+   * once-per-generation rule is what makes the runner's repeats harmless.
+   *
+   * @returns {boolean} true when it sent
+   */
+  scriptReady() {
+    const record = this._connectionRecord
+    if (!record || record.stale || record.closing) return false
+    if (this.scriptHost?.active !== true) return false
+    const hostGen = this.scriptHost.hostGen
+    if (record.readySent === hostGen) return false
+    record.readySent = hostGen
+    this._wsSend({ type: 'script-ready', hostGen })
+    return true
+  }
+
+  // ---------------------------------------------------------------------------
   // Edit tracking (A3) — one pending map per connection record
   // ---------------------------------------------------------------------------
 
@@ -1375,6 +1478,23 @@ export class AtriumClient extends EventEmitter {
     this.emit('edit:rejected', {
       seq: msg.seq, requestSeq: msg.seq, code: msg.code, message: msg.message, ...edit,
     })
+  }
+
+  /**
+   * scripting-4c AC4 — an error whose seq is in THIS connection's
+   * `pendingActivations` names the node that was refused, removes the entry and
+   * emits `activate:refused`. A seq that is not in the map (an old socket's, an
+   * edit's, an unknown one) is left alone — which is what keeps an activation
+   * refusal out of `_resolveRejected`'s edit paths (P15) and stops a reconnect
+   * from naming the previous connection's node (P21, Rev 1 S3).
+   */
+  _resolveActivateRefused(msg, record) {
+    const pending = record?.pendingActivations
+    if (!pending || msg?.seq == null) return
+    if (!pending.has(msg.seq)) return
+    const node = pending.get(msg.seq)
+    pending.delete(msg.seq)
+    this.emit('activate:refused', { node, code: msg.code, message: msg.message, seq: msg.seq })
   }
 
   /**
