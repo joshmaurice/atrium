@@ -6,7 +6,13 @@
   "required": ["type", "id"],
   "properties": {
     "type": { "const": "hello" },
-    "id": { "type": "string", "minLength": 1 },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "scripting-4c Rev 2 W1 — a session id is 1–64 characters of [A-Za-z0-9_-]. Every client in the repository and at PROD sends a 36-character UUID, so nothing real is refused; 64 leaves room for a non-UUID id. The bound is what keeps a visitor's id out of every log line, out of the forwarded `from`, and out of the avatar node's name (Rev 2 M1/S1)."
+    },
     "ticket": { "type": "string" },
     "displayName": { "type": "string", "description": "Optional display name sent by client (pre-brief #9)" },
     "capabilities": {

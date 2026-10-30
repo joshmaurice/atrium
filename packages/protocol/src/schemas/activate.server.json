@@ -10,7 +10,13 @@
     "seq": { "type": "integer", "minimum": 0 },
     "node": { "type": "string", "minLength": 1, "maxLength": 256 },
     "event": { "const": "select" },
-    "from": { "type": "string", "minLength": 1 },
+    "from": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "scripting-4c Rev 2 W2 — the same bound as `hello.client.json`'s `id` (1–64 characters of [A-Za-z0-9_-]). `from` is the forwarded `hello` id, for the log line only (pin 1); the server checks it before it forwards (defence in depth — W1 is what keeps it unreachable)."
+    },
     "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
   }
 }

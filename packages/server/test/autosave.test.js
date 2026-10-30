@@ -64,7 +64,7 @@ async function doHandshake(ws, clientId) {
   await waitForOpen(ws)
   ws.send(JSON.stringify({
     type: 'hello',
-    id: clientId || `test-${Date.now()}-${Math.random()}`,
+    id: clientId || `test-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     capabilities: { tick: { interval: 5000 } },
   }))
   return waitForMessage(ws, 2000)
