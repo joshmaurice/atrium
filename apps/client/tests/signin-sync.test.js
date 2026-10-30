@@ -355,7 +355,7 @@ describe('§6.4 (r2 J1) — the autoconnect after a change goes ahead', () => {
     await run.trackConnect(homeUrl(bob), { avatar: {} }, {})
 
     assert.equal(run.calls.me, 2, 'a new me() before it connects')
-    assert.equal(run.connects.length, 2)
+    assert.equal(run.connects.at(-1).url, homeUrl(bob), 'and it connected')
   })
 })
 
