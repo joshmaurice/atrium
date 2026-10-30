@@ -216,7 +216,12 @@ test('AC4/S3: after a reconnect, a refusal names the NEW node, never the old one
   const { client, mock, mocks } = makeClient()
   await handshake(client, mock)
   await loadWorld(client, mock)
-  const oldSeq = client.activate('Node-X')       // never answered
+  const staleSeq = client.activate('Node-X')       // never answered
+  const staleSeq2 = client.activate('Node-X2')     // and a second one, so a
+                                                   // connection-agnostic map keeps
+                                                   // an entry the new one never uses
+  assert.equal(staleSeq, 1)
+  assert.equal(staleSeq2, 2)
 
   // A new connection: a new record, and `_sendSeq` starts again at 0 (P21).
   client.connect('ws://mock-2')
@@ -228,7 +233,7 @@ test('AC4/S3: after a reconnect, a refusal names the NEW node, never the old one
   const refused = []
   client.on('activate:refused', (e) => refused.push(e))
   const newSeq = client.activate('Node-Y')
-  assert.equal(newSeq, oldSeq, 'the counter restarted, so the seq repeats across connections')
+  assert.equal(newSeq, staleSeq, 'the counter restarted, so the seq repeats across connections')
 
   mock2.simulateMessage({ type: 'error', code: 'RATE_LIMITED', message: 'too many', seq: newSeq })
   await delay(5)
@@ -236,8 +241,18 @@ test('AC4/S3: after a reconnect, a refusal names the NEW node, never the old one
   assert.equal(refused[0].node, 'Node-Y', 'the map is per record, so the answer names Y')
   assert.notEqual(refused[0].node, 'Node-X', 'NEVER the previous connection’s node')
 
+  // THE STAGE A CONNECTION-AGNOSTIC MAP CANNOT COVER (P21): a seq that belongs to
+  // no activation on THIS connection — the previous connection's — was consumed
+  // with it, so it names NOTHING. A map that outlived the connection still holds
+  // Node-X2 there, and would name it.
+  mock2.simulateMessage({ type: 'error', code: 'RATE_LIMITED', message: 'stale', seq: staleSeq2 })
+  await delay(5)
+  assert.equal(refused.length, 1,
+    'an error for a seq this connection never asked about names nothing, never the old connection’s node')
+  assert.equal(client._connectionRecord.pendingActivations.size, 0, 'and the new record’s map is empty')
+
   // A late error from the OLD socket is dropped by dispatch’s record guard.
-  mock.simulateMessage({ type: 'error', code: 'RATE_LIMITED', message: 'late', seq: oldSeq })
+  mock.simulateMessage({ type: 'error', code: 'RATE_LIMITED', message: 'late', seq: staleSeq })
   await delay(5)
   assert.equal(refused.length, 1, 'a superseded socket’s message is dropped')
 })
@@ -469,21 +484,32 @@ test('AC5/M1 — the held load: a click during the owner’s load is refused, an
   const realSerialize = world.serialize.bind(world)
   world.serialize = async (...args) => { await held; return realSerialize(...args) }
 
-  // --- 3. the OWNER: the role arrives, and its som-dump does NOT
+  // --- 3. the OWNER: its runner exists BEFORE the grant (as the app's does), the
+  //        role arrives, and its som-dump does NOT
   const refusals = []
   visitor.on('activate:refused', (e) => refusals.push(e))
-  const owner = await connectReal(port, { scriptRunner: true, avatar: { name: 'owner', translation: [0, 0, 4] } })
-  assert.equal(owner.scriptHost.active, true, 'the owner holds the role from its hello')
 
-  // THE REAL RUNNER, created where the app creates it: before the world arrives,
-  // so it sees the grant itself. This is what makes proof (g3) observable — a
-  // runner that said "ready" on the GRANT (instead of when its engines exist)
-  // would release the visitor's click into a tab that cannot run it yet.
+  const owner = new AtriumClient({ connectTimeout: 0 })
+  const ownerState = { loaded: false }
+  owner.on('world:loaded', () => { ownerState.loaded = true })
+  // THE REAL RUNNER, created where the app creates it: before the connect, so it
+  // sees the grant and the grant alone. This is what makes proof (g3) observable
+  // — a runner that said "ready" on the GRANT (instead of when its engines
+  // exist) would release the visitor's click into a tab that cannot run it yet.
   const runner = createBehaviorRunner({
     client: owner,
     position: (node) => (node ? [...node.translation] : undefined),
     localAvatar: () => owner.som?.getNodeByName(owner._avatarNodeName) ?? null,
   })
+  const ownerReady = new Promise((res, rej) => {
+    owner.on('session:ready', res)
+    owner.on('error', rej)
+  })
+  owner.connect(`ws://127.0.0.1:${port}`, { scriptRunner: true, avatar: { name: 'owner', translation: [0, 0, 4] } })
+  await ownerReady
+  owner.worldLoaded = () => ownerState.loaded
+  assert.equal(owner.scriptHost.active, true, 'the owner holds the role from its hello')
+
   try {
     await delay(120)
     assert.equal(owner.worldLoaded(), false, 'its world load is held, so no som-dump has arrived')

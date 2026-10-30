@@ -20,7 +20,9 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
   test('the runner is created, tracked in the frame loop, and torn down with the world', () => {
     assert.match(source, /runner = createBehaviorRunner\(\{/)
     assert.match(source, /runner\?\.tick\(\)/)
-    assert.match(source, /runner\?\.select\(/)
+    // scripting-4c AC6 — the click path hands the runner to `performActivateClick`,
+    // which is where `runner?.select(hit)` is called now (the branch is wiring).
+    assert.match(source, /performActivateClick\(\{[\s\S]{0,400}?runner,/)
     assert.match(source, /runner\?\.setGesture\(/)
   })
 
@@ -70,8 +72,10 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
   test('select comes from the VIEWPORT click, never from a SOM click', () => {
     // The sibling branch: `!modes.edit`, `e.target !== canvas`, `isSelectClick`.
     // scripting-4c AC6 — the branch resolves the hit through `activateClickTarget`
-    // and only the HOST half runs `runner?.select`, on that same hit.
-    assert.match(source, /if \(!modes\.edit\) \{[\s\S]{0,2600}?isSelectClick\(down[\s\S]{0,600}?runner\?\.select\(hit\)/)
+    // and hands it, with the runner, to `performActivateClick`. The tests for
+    // that call itself are `apps/client/tests/activate-click.test.js`, and
+    // `app-wiring.test.js` pins the branch’s call and its order.
+    assert.match(source, /if \(!modes\.edit\) \{[\s\S]{0,2600}?isSelectClick\(down[\s\S]{0,900}?performActivateClick\(\{[\s\S]{0,400}?runner,/)
     assert.match(source, /activateClickTarget\(hit\)/, '4c: the target comes from the one shared rule')
     assert.doesNotMatch(source, /dispatchPointerEvent\([^)]*\)[\s\S]{0,40}runner\?\.select/)
   })
