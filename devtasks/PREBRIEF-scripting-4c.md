@@ -1,16 +1,23 @@
 # Pre-brief: Phase 3 step 4c — visitors' `activate`: a click in any tab reaches the script host
 
-Status: **DRAFT, Revision 1.1 (2026-10-30). Decisions AC-L1–AC-L8
-approved by the operator (2026-10-30 00:32 PT), all as recommended:**
+Status: **DRAFT, Revision 1.2 (2026-10-30), ready for the operator to make
+FINAL. Decisions AC-L1–AC-L8 approved by the operator (2026-10-30 00:32
+PT), all as recommended:**
 AC-L1 (a) one round, six steps; AC-L2 (a) a fixed 10 m from the object's
 origin; AC-L3 (a) the same rule for the host's own clicks; AC-L4 (a) the
 session bucket charged for every attempt, the world bucket only for
 forwards; AC-L5 (a) existing codes plus `NO_SCRIPT_HOST`; AC-L6 (a)
 transient notices, with Rev 1's N1 texts; AC-L7 (a) by node name; AC-L8 (a)
-no carried items. **Not FINAL yet:** Rev 1 goes back to the outside
-reviewer first, since it adds a message (`script-ready`) and a capability
-change (`scriptRunner: 2`) that Rev 0's review didn't see.
-- **Rev 1.1 changes only this status line and §11.**
+no carried items.
+- **Rev 1.2 applies the second outside review, of Rev 1.1**
+  (`devtasks/REVIEW-scripting-4c-rev1.1.md`, CHANGES REQUESTED: 1
+  must-fix, 2 should-fix, 1 nit; read-only through GitHub's API). The
+  reviewer closed all nine Rev 0 findings, found the readiness design and
+  the version-2 election acceptable, and saw no reason to revisit
+  AC-L1–AC-L8: "Once the older-server compatibility issue is settled, I
+  would expect this pre-brief to be ready for FINAL without another broad
+  design review." Claude checked each finding and ran probe `p4`. **All
+  are taken;** §0.2 lists them. No decision changes.
 - **Rev 1 applies the outside review of Rev 0**
   (`devtasks/REVIEW-scripting-4c-rev0.md`, CHANGES REQUESTED: 2 must-fix,
   4 should-fix, 3 nits; read-only against `ec9ebc1f` through GitHub).
@@ -51,7 +58,9 @@ change (`scriptRunner: 2`) that Rev 0's review didn't see.
   "needed before any non-disconnect role move ships", and none ships here);
   a hover cursor over activatable objects (§10).
 
-## 0. Changes in Revision 1
+## 0. Changes
+
+### 0.1 Revision 1 (the review of Rev 0)
 - **M1, an `activate` lost while the host loads:** the server forwards only
   to a host that has said it is **ready**. A new client message,
   `script-ready { hostGen }`, is sent by the runner the moment it becomes
@@ -91,6 +100,32 @@ change (`scriptRunner: 2`) that Rev 0's review didn't see.
   determined visitor.
 - **N3:** a successful forward isn't a successful run. Stated in AC3 and
   §9, with the cases that can still drop a forwarded select.
+
+### 0.2 Revision 1.2 (the review of Rev 1.1)
+- **M1, `scriptRunner: 2` breaks connections to older servers:**
+  confirmed, and it's older than this round (P23, `p4`). A server's `hello`
+  schema refuses any `scriptRunner` it doesn't know, so today's 4b-2 client
+  is already refused by any pre-4b-2 server, and 4c's `2` would be refused
+  by every server released today. **That includes PROD while 4c is on DEV:**
+  the two are different origins, so a DEV page that opens a PROD world
+  connects cross-origin. **The policy (AC4, AC6):** the hello advertises
+  `scriptRunner` only on a connection to the page's own account origin,
+  where the server runs the same code as the page. A cross-origin hello
+  carries no `scriptRunner` at all, the shape every released server
+  accepts. Nothing is lost: a cross-origin connection is always anonymous
+  (signin-sync I1), so it can never be the host. `AtriumClient.connect`
+  gets a `scriptRunner` option (default off). The page sets it in the one
+  place every connect goes through (`connectNow`). The two frozen
+  `hello` schemas become test fixtures. (Tests and proof (j); browser
+  check 13; DEV step 8.)
+- **S1, the `activate()` readiness test:** three states, not two: before
+  `session:ready`, between `session:ready` and `world:loaded`, and after
+  both. (§6 AC4.)
+- **S2, the held-load test's order:** spelled out, with the visitor loaded
+  before the hold is installed, because `serialize` is shared. (§6 AC5.)
+- **N1, `script-ready`'s direction:** it joins the validator's direction
+  list and is compiled as `script-ready:client` only, so
+  `validate('server', …)` refuses it. (AC1; §6 AC1.)
 
 ## 1. What 4c delivers
 
@@ -251,8 +286,32 @@ opened in a browser for this draft. `p3` used a minimal page.
   the rule has to change both. The client sends `scriptRunner: 1`
   (`AtriumClient.js` L743), and the schema has `const: 1`
   (`hello.client.json` L29).
+- **P23. A server refuses a `hello` capability it doesn't know** (Rev 1.2,
+  the second review's M1; `p4`). `hello.client.json` closes
+  `capabilities` with `additionalProperties: false`. Before 4b-2 (the
+  schema at `9e8b1e4^`) it had no `scriptRunner` key. 4b-2 (`9e8b1e4`)
+  added it as `const: 1`. So every hello today's client sends is refused
+  by a pre-4b-2 server, and a hello with `2` would be refused by every
+  server released today (`ab02239b`, on PROD). The page already sends one
+  field only on same-origin connects: T7's `displayName` (`app.js`
+  L527–530, beside each connect site), checked with `sameOriginAsAccount`
+  (`wsUrl.js`, fixed in signin-sync). Every connect reaches the client
+  through **one** call, `connectNow` (`app.js` L1189–1191, the path
+  signin-sync made single). The SOM Inspector (`tools/som-inspector`) and
+  the playground also use `AtriumClient`, and they have no runner.
 
-### 2.4 Probes `p1`, `p2` and `p3` (2026-10-30)
+### 2.4 Probes `p1`–`p4` (2026-10-30)
+**`p4`, `hello` compatibility (Rev 1.2):** Ajv (as the server compiles it,
+`strict: false`) on the `hello.client.json` of two server versions: the
+one before 4b-2 (`9e8b1e4^`) and the base (`71b6e40b`, identical to
+released `ab02239b`):
+
+| The client's `capabilities` | pre-4b-2 server | `71b6e40b` server |
+|---|---|---|
+| `{ tick }` (no `scriptRunner`) | accepted | accepted |
+| `{ tick, scriptRunner: 1 }` (today's client) | **refused** (`must NOT have additional properties`) | accepted |
+| `{ tick, scriptRunner: 2 }` (Rev 1.1's client) | **refused** (`must NOT have additional properties`) | **refused** (`must be equal to constant`) |
+
 **`p3`, pointer lock (Rev 1):** Chromium from the workspace's Playwright,
 a page with `<div id="viewport"><canvas></canvas></div>` whose click
 handler logs and then calls `viewport.requestPointerLock()`. First click
@@ -285,7 +344,7 @@ Run from the workspace (`@atrium/protocol`, `@atrium/som`,
 | glTF-Transform `Node.getWorldTranslation()` | `[10, 2, -6]` |
 
 The client's `worldPosition` and glTF-Transform agree. The local
-translation is about 9.3 m from the real position. (All three probes were
+translation is about 9.3 m from the real position. (All four probes were
 scratch scripts, not committed.)
 
 ## 3. Decisions (for the operator)
@@ -437,13 +496,16 @@ scratch scripts, not committed.)
   `script-host.server.json` (integer, 1 to 2^53 − 1).
 - **`script-ready.client.json`** (Rev 1, M1): `{ type: 'script-ready',
   hostGen }`, both required, `additionalProperties: false`, `hostGen` as
-  above. Client to server only; the server never answers it.
+  above. Client to server only; the server never answers it. **Rev 1.2
+  (N1): it's directional.** It joins the direction list and is compiled as
+  `'script-ready:client'` only, so `validate('server', …)` finds no schema
+  and refuses it.
 - **`hello.client.json`** (Rev 1, S2): `capabilities.scriptRunner`
   becomes `enum: [1, 2]` (was `const: 1`). 1 stays valid, so a 4b-2 page
   still connects. 3 is refused.
 - **`index.js`:** `'activate:client'`, `'activate:server'` and
-  `'script-ready'` compiled; `activate` added to the direction list (P2);
-  `activate` and `script-ready` added to `messageTypes`.
+  `'script-ready:client'` compiled; `activate` and `script-ready` added to
+  the direction list (P2) and to `messageTypes`.
 - **`error.json`:** `NO_SCRIPT_HOST` added to the enum (AC-L5).
 
 ### AC2. The shared rule (`@atrium/behaviors` and the server's copy)
@@ -540,7 +602,15 @@ no broadcast, no change, no save.
   names.
 
 ### AC4. The client (`AtriumClient`)
-- **The hello** sends `scriptRunner: 2` (Rev 1, S2).
+- **The hello and its capability (Rev 1, S2; Rev 1.2, M1, P23):**
+  `connect(wsUrl, { …, scriptRunner = false })`. With `scriptRunner:
+  true`, the hello's `capabilities` carry `scriptRunner: 2`. Otherwise they
+  carry **no `scriptRunner` key at all** (not `0`, not `1`: the key's
+  absence is the one shape every released server accepts). The default is
+  off, so the SOM Inspector and the playground, which have no runner, stop
+  advertising one. **The rule for later rounds:** a hello field that older
+  servers don't know goes only on a same-origin connection. T7's
+  `displayName` already follows it.
 - **`activate(nodeName)`** returns the seq, or `null` without sending when
   the client isn't connected, the current connection hasn't reached
   `session:ready` and `world:loaded` (P15), or `nodeName` isn't a non-empty
@@ -610,6 +680,10 @@ no broadcast, no change, no save.
   tested), the element cleared after 3 s.
 - **`otherTab`** becomes "Behaviours run in another tab; clicks here are
   sent to it".
+- **The connect path (Rev 1.2, M1):** `connectNow` (`app.js` L1189–1191),
+  the one call every connect site goes through, passes `scriptRunner:
+  sameOriginAsAccount(wsUrl, accountWsBase)` to `client.connect`. No other
+  site sets it, so a seventh connect site can't get it wrong.
 - Edit mode: unchanged. A click selects in every tab (and Edit mode
   already releases the lock).
 
@@ -646,12 +720,12 @@ by the host from `view`, design §5.2). The election's ORDER is unchanged
 
 | Item | Tests | Proof of failure |
 |---|---|---|
-| AC1 | the three schemas: a valid message of each form accepted; each required field missing refused; `event: 'hover'` refused; an extra key refused; `node` of 257 characters refused; `hostGen: 0` refused; `validate('client', <server form>)` refused (`from` is an extra key); `NO_SCRIPT_HOST` in an `error` accepted; a `hello` with `scriptRunner` 1 and 2 accepted, 3 refused | (a) drop `activate` from the direction list (the client form is looked up as `activate` and every message is refused) |
+| AC1 | the three schemas: a valid message of each form accepted; each required field missing refused; `event: 'hover'` refused; an extra key refused; `node` of 257 characters refused; `hostGen: 0` refused; `validate('client', <server form>)` refused (`from` is an extra key); `NO_SCRIPT_HOST` in an `error` accepted; a `hello` with `scriptRunner` 1 and 2 accepted, 3 refused; `validate('server', <script-ready>)` refused, `validate('client', <script-ready>)` accepted (N1) | (a) drop `activate` from the direction list (the client form is looked up as `activate` and every message is refused) |
 | AC2 | the vectors through both copies: `listensForSelect` for each template (true for the three select templates, false for proximity and interval), `enabled: false`, a declaration with no node using it, `null`, a string, a graph with no `nodes`; `withinActivateDistance` at 9.999, 10, 10.000001, `NaN`, a missing point; `selectTargetFor` on a stand-in tree: the hit's own node, a model's inner node reaching its host, an enabled proximity behaviour on the parent stopping the walk (`null`), a disabled behaviour on the parent skipped to the grandparent, an avatar skipped; `worldPosition` from `@atrium/som` on P7's case gives `[10, 2, -6]`; **(M2) `apps/client`'s suite, run with its own `node --test tests/*.test.js` from `apps/client`, imports `src/world-position.js` and gets the `@atrium/som` function** | (b) accept `enabled: false` in the server copy only; (b2) walk past an enabled non-select behaviour in `selectTargetFor` |
 | AC3 | server, port 0, **real sessions over real sockets** (the seam rule): owner host + visitor; the visitor's `activate` within 10 m reaches the host with `from` and the current `hostGen`, and the visitor gets nothing back; **each refusal in §4 AC3's order** with its code and `seq`, and **nothing forwarded** (the host's socket sees no `activate`); the order itself: a far-away visitor's `activate` on an object with no behaviour gets `INVALID_FIELD`, not `PERMISSION_DENIED`; **a nested object** (P7's group) measured at its world position (7 m from the visitor at the world position passes; at the local translation it would fail); **buckets with the injected clock:** 5 in one instant pass the session check, the 6th is `RATE_LIMITED`, after 200 ms one more passes; 30 visitors each within their own limit: 20 forwarded in one instant, the 21st `RATE_LIMITED`; refused-for-distance attempts don't charge the world bucket. **Readiness (M1):** the owner's `hello` is answered with the role, and **before it sends `script-ready`** a visitor's `activate` is `NO_SCRIPT_HOST` (`isn't ready yet`) and the owner's socket sees no `activate`; after `script-ready` with the current `hostGen`, the next is forwarded; a `script-ready` from the visitor, or with an old `hostGen`, changes nothing. **Eligibility (S2):** an owner `hello` with `scriptRunner: 1` gets `scriptHost: false`, is never handed the role, and with only that owner connected a visitor's `activate` is `NO_SCRIPT_HOST`; the E4 tests still pass with `scriptRunner: 2`. **Handover (S1, the real invariants):** two owner sessions A (host, ready) and B and a visitor V; A closes; `activate`s from V before, around and after the close are each either forwarded to exactly one of A or B or refused, **never to a socket that isn't `OPEN`, never to both**, and every forward carries the `hostGen` current when it was sent; B is granted with `hostGen + 1`, and V's `activate`s are `NO_SCRIPT_HOST` **from the grant until B's `script-ready`**, then forwarded to B. With no successor, `NO_SCRIPT_HOST`. Then: an anonymous cross-origin visitor is forwarded like any other; a session with a refused avatar `add` gets `PERMISSION_DENIED`; the rate-limit log line once per session per 60 s; a G2-style throw in the case (injected) is answered and the session survives | (c) check distance against `getNodeTranslation` (the nested case fails); (c2) charge the world bucket before the distance check (the "refused attempts" test fails); (c3) forward to the first `canEdit` session instead of `scriptHost.sessionId`; **(g) skip the readiness check (the before-ready test fails); (g2) elect a `scriptRunner: 1` session (change only the `hello` election, then only `canRunBehaviors`: each alone must fail a test, P22)** |
-| AC4 | `packages/client` against a port-0 server (not a fake socket): the hello carries `scriptRunner: 2`; `activate` before `session:ready` returns `null` and sends nothing; after it, the exact message; a refusal emits `activate:refused` with the node and code, and **a pending connect is not failed by it** (P15: a teleport started after a refused `activate`); the 17th outstanding seq evicts the first; **(S3) reconnect after an unanswered `activate` on node X: the new connection's first `activate` (on node Y, the same seq 1 or 2) is refused, and `activate:refused` names Y, never X**; `scriptReady()` sends once per `hostGen` per connection, never while inactive, and again after a reconnect's new grant; an inbound `activate` with the current `hostGen` emits `activate`; with an older `hostGen`, or after `script-host` `active: false`, or on a non-host, it doesn't | (d) emit `activate` without the `hostGen` comparison; **(h) keep `pendingActivations` on the client instead of the connection record (the reconnect test names X)** |
-| AC5 | the runner with a fake client **and the real `selectTargetFor` and `withinActivateDistance`** (not stand-ins, signin-sync §4.1): **(M1) `scriptReady` is called exactly when the runner becomes enabled: not on the grant while the world is still loading, and once `world:loaded` arrives; never after `active: false`**; a forwarded select runs the engine and logs `from`; dropped when the runner isn't enabled, the node has no live engine, or the leaf no longer listens; dropped-once logging per node per generation; **a forwarded select runs while the app is in Edit mode** (nothing in the path consults Edit mode); the host's local `select` at 11 m returns `'too-far'` and the engine doesn't run, at 9 m `'ran'`, with no local avatar `'no-avatar'`; a disabled node with an enabled select behaviour on its parent: the parent doesn't run (the AC2 change), and 4b-2's existing select tests still pass. **And one test through the real client and a real port-0 server (M1, the reviewer's held load):** the owner's load is held **at the server**: the test hands `attachSessionHandlers` the real world with its `serialize` wrapped to await a promise the test controls, so the owner has the role and no `som-dump` yet (no test seam in `src`, the hotfix's D3 lesson; a slow world is not deterministic and isn't acceptable); a visitor's `activate` in that window is `NO_SCRIPT_HOST`; the test releases the promise, the owner's `world:loaded` and `script-ready` follow, and the visitor's next `activate` runs the engine | (e) skip the distance check on the host's local path; (e2) keep 4b-2's "first live engine" walk; **(g3) call `scriptReady` on the grant instead of when enabled (the held-load test fails)** |
-| AC6 | the strict DOM fake: the click branch for host, non-host owner and visitor tabs (local `select` vs `activate`, a pre-check refusal sends nothing and shows the notice), **through the real runner and the real `client.activate`** with only the socket faked; **(S4) with `document.pointerLockElement === viewportEl`, a click whose `target` is `viewportEl` is handled, and `behaviorAim` gives NDC `(0, 0)` whatever `clientX/Y` say; unlocked, a click on anything but the canvas is still ignored**; `activateNoticeText` for each row of AC-L6's table (N1: the page's "no avatar" and "too far" differ; the server's `PERMISSION_DENIED` has the neutral text); the notice clears after 3 s and a second one replaces the first; the `otherTab` text; a wiring guard that the click branch calls `selectTargetFor` and `behaviorAim`, and that the Edit-mode branch is unchanged | (f) send `activate` from the host tab (the host test sees a message on the socket); **(i) aim from `clientX/Y` while locked (the centre test fails)** |
+| AC4 | `packages/client` against a port-0 server (not a fake socket): **the hello (Rev 1.2, M1):** with `scriptRunner: true`, its capabilities carry `scriptRunner: 2` and the port-0 server elects the owner; without it, they have no `scriptRunner` key; and **the exact hello the client sends without it** (captured on a raw port-0 socket) **is accepted by the two frozen server schemas**, `tests/fixtures/protocol-compat/hello.client.pre-4b-2.json` (from `9e8b1e4^`) and `hello.client.71b6e40b.json` (from `71b6e40b`), copied byte for byte with their source commit and sha256 in a README beside them, and compiled the way the server compiles them; **`activate` in three states (Rev 1.2, S1):** before `session:ready`, `null` and nothing sent; after `session:ready` and before `world:loaded` (the som-dump held), `null` and nothing sent; after both, the exact message; a refusal emits `activate:refused` with the node and code, and **a pending connect is not failed by it** (P15: a teleport started after a refused `activate`); the 17th outstanding seq evicts the first; **(S3) reconnect after an unanswered `activate` on node X: the new connection's first `activate` (on node Y, the same seq 1 or 2) is refused, and `activate:refused` names Y, never X**; `scriptReady()` sends once per `hostGen` per connection, never while inactive, and again after a reconnect's new grant; an inbound `activate` with the current `hostGen` emits `activate`; with an older `hostGen`, or after `script-host` `active: false`, or on a non-host, it doesn't | (d) emit `activate` without the `hostGen` comparison; **(j) send `scriptRunner` on every hello (the frozen-schema test fails); (j2) gate `activate` on `session:ready` alone (the middle state sends)**; **(h) keep `pendingActivations` on the client instead of the connection record (the reconnect test names X)** |
+| AC5 | the runner with a fake client **and the real `selectTargetFor` and `withinActivateDistance`** (not stand-ins, signin-sync §4.1): **(M1) `scriptReady` is called exactly when the runner becomes enabled: not on the grant while the world is still loading, and once `world:loaded` arrives; never after `active: false`**; a forwarded select runs the engine and logs `from`; dropped when the runner isn't enabled, the node has no live engine, or the leaf no longer listens; dropped-once logging per node per generation; **a forwarded select runs while the app is in Edit mode** (nothing in the path consults Edit mode); the host's local `select` at 11 m returns `'too-far'` and the engine doesn't run, at 9 m `'ran'`, with no local avatar `'no-avatar'`; a disabled node with an enabled select behaviour on its parent: the parent doesn't run (the AC2 change), and 4b-2's existing select tests still pass. **And one test through the real client and a real port-0 server (M1, the reviewer's held load):** the owner's load is held **at the server**, by wrapping the real world's `serialize` to await a promise the test controls (no test seam in `src`, the hotfix's D3 lesson; a slow world isn't deterministic and isn't acceptable). **The order (Rev 1.2, S2), because `serialize` is shared by every connection:** (1) connect the visitor, wait for its `world:loaded`, its avatar `add` and a `view` within 10 m; (2) install the hold; (3) connect the owner with `scriptRunner: true`, wait for its `hello` (the role), and check that no `som-dump` has arrived; (4) the visitor's `activate`: `NO_SCRIPT_HOST` (`isn't ready yet`), and nothing on the owner's socket; (5) release the hold, wait for the owner's `world:loaded` and for the server to have received `script-ready`, then the visitor's next `activate` is forwarded and the owner's engine runs (its `set` reaches the visitor) | (e) skip the distance check on the host's local path; (e2) keep 4b-2's "first live engine" walk; **(g3) call `scriptReady` on the grant instead of when enabled (the held-load test fails)** |
+| AC6 | the strict DOM fake: the click branch for host, non-host owner and visitor tabs (local `select` vs `activate`, a pre-check refusal sends nothing and shows the notice), **through the real runner and the real `client.activate`** with only the socket faked; **(S4) with `document.pointerLockElement === viewportEl`, a click whose `target` is `viewportEl` is handled, and `behaviorAim` gives NDC `(0, 0)` whatever `clientX/Y` say; unlocked, a click on anything but the canvas is still ignored**; `activateNoticeText` for each row of AC-L6's table (N1: the page's "no avatar" and "too far" differ; the server's `PERMISSION_DENIED` has the neutral text); the notice clears after 3 s and a second one replaces the first; the `otherTab` text; a wiring guard that the click branch calls `selectTargetFor` and `behaviorAim`, and that the Edit-mode branch is unchanged; **a wiring guard that `connectNow` passes `scriptRunner: sameOriginAsAccount(…)`, and that no other connect site passes `scriptRunner` (Rev 1.2, M1)** | (f) send `activate` from the host tab (the host test sees a message on the socket); **(i) aim from `clientX/Y` while locked (the centre test fails)** |
 
 **Proofs:** commit first; break the file, run, record the failing test
 names, restore the file **from a saved copy, never with `git checkout`**,
@@ -699,6 +773,13 @@ real sign-in (`checks/signin-sync/` setup):
     loads a large world, and have the visitor click during the load:
     "isn't here right now", never silence. After the load, the click
     works.
+13. **An older server, cross-origin (Rev 1.2, M1):** a second world
+    server on another origin, built from the base (`setup.sh 71b6e40b`).
+    From a 4c page, open one of its worlds through the address bar: it
+    connects as an anonymous visitor (that server's log shows the `hello`
+    accepted), and the page's socket log shows a hello with no
+    `scriptRunner`. Back on the 4c origin, the owner's tab is still elected
+    host (`scriptRunner: 2` in its hello).
 
 ## 7. DEV acceptance (operator, Firefox, hard reload in every tab)
 1. **In an owned world:** a cube with "On select: show or hide" targeting a
@@ -719,6 +800,10 @@ real sign-in (`checks/signin-sync/` setup):
 7. **Mouse lock (S4):** in the visitor's window press `M`, click into the
    view, aim the crosshair at the cube and click: the model toggles. Press
    `M` again to release.
+8. **An older server (Rev 1.2, M1):** from DEV, open a PROD world through
+   the address bar (PROD still runs the released code): it connects, as a
+   visitor. (Before this fix, Rev 1.1's client would have been refused
+   there.)
 
 ## 8. Worker rules and release path
 As scripting-4b-2 and signin-sync, with this round's specifics:
@@ -730,15 +815,17 @@ As scripting-4b-2 and signin-sync, with this round's specifics:
      re-export, **`apps/client/package.json` and `pnpm-lock.yaml`** (M2);
   3. AC3: eligibility (both places, P22), readiness, the `activate` case,
      the buckets, forwarding, the log line, its tests. **The client still
-     sends `scriptRunner: 1` at this step,** so the server's own tests use
+     sends `scriptRunner: 1` at this step** (on every connect, as 4b-2
+     does), so the server's own tests use
      raw sockets with `scriptRunner: 2`, and the step's report says that a
      page built from this commit is never the host (expected until step 4);
-  4. AC4–AC5: the client (`scriptRunner: 2`, `activate`, `scriptReady`,
-     the per-record map) and the runner, their tests;
-  5. AC6: the app (the click branch, pointer lock, the notices), its tests
-     and wiring guards;
-  6. full suites (server files each on its own), proofs (a)–(i) with every
-     sub-proof (b2, c2, c3, e2, g2's two halves, g3), and the handoff.
+  4. AC4–AC5: the client (the `scriptRunner` connect option, `activate`,
+     `scriptReady`, the per-record map) and the runner, their tests, and
+     the frozen-schema fixtures;
+  5. AC6: the app (`connectNow`'s option, the click branch, pointer lock,
+     the notices), its tests and wiring guards;
+  6. full suites (server files each on its own), proofs (a)–(j) with every
+     sub-proof (b2, c2, c3, e2, g2's two halves, g3, j2), and the handoff.
 - **Each commit's report lists the suites run at that step** and names any
   test deferred to a later step.
 - **Every brief rule from signin-sync §4.1:** a test of a seam uses the
@@ -752,8 +839,10 @@ As scripting-4b-2 and signin-sync, with this round's specifics:
   **Acceptance needs a hard reload in every tab:** an unreloaded owner
   tab is a 4b-2 page and, after S2, is never the host (Q3).
 - **Files in scope beyond `src` and tests:** `apps/client/package.json`
-  and `pnpm-lock.yaml` (M2), the three new schemas, and
-  `tests/fixtures/behavior-vectors.json`. Nothing under `packages/` for
+  and `pnpm-lock.yaml` (M2), the three new schemas,
+  `tests/fixtures/behavior-vectors.json`, and
+  `tests/fixtures/protocol-compat/` (the two frozen `hello` schemas and
+  their README; Rev 1.2). Nothing under `packages/` for
   the vendored engine changes.
 - **The distance check is not a security boundary (Rev 1, N2; P8).** The
   brief, the code comments and the handoff must not describe the 10 m
@@ -846,3 +935,21 @@ As scripting-4b-2 and signin-sync, with this round's specifics:
 - **Rev 1.1** (2026-10-30 00:32 PT): the operator approved AC-L1–AC-L8 as
   recommended. Only the status line and this entry changed. Next: the
   outside reviewer re-reviews Rev 1.1, then FINAL.
+- **Rev 1.2** (2026-10-30, PT): a second outside review, of Rev 1.1
+  (`devtasks/REVIEW-scripting-4c-rev1.1.md`, CHANGES REQUESTED; read-only
+  through GitHub's API, no suites run). The reviewer verified Rev 1.1's
+  size and sha256, closed all nine Rev 0 findings, and found the readiness
+  design and the version-2 election acceptable. Claude checked each
+  finding: the `hello` schema's history (`9e8b1e4`, `9e8b1e4^`), probe
+  `p4` on both schemas, `connectNow` (`app.js` L1189–1191), T7's
+  same-origin `displayName` (L527–530), `AtriumClient.connect` (L593,
+  L645, L743–746), `session.js` L803–822 (`serialize` per `hello`), and
+  `protocol/src/index.js` L59–61. All are taken. No decision changes.
+
+| # | Finding | Severity | Where it went |
+|---|---|---|---|
+| M1 | `scriptRunner: 2` breaks the hello to older servers (cross-origin) | Must-fix | **Confirmed by `p4`, and older than 4c** (P23): 4b-2's `1` is already refused by pre-4b-2 servers, and DEV→PROD is cross-origin. AC4 (the connect option, absent by default), AC6 (`connectNow` only), the rule for later rounds; frozen-schema fixtures and the hello test, proofs (j); browser check 13; DEV step 8 |
+| S1 | `activate()`'s test conflated `session:ready` and `world:loaded` | Should-fix | §6 AC4: three states; proof (j2) |
+| S2 | The held-load test's setup order | Should-fix | §6 AC5: the five steps, visitor first, because `serialize` is shared (`session.js` L812–814) |
+| N1 | `script-ready` validated in both directions | Nit | AC1: in the direction list, compiled `:client` only; §6 AC1 |
+
