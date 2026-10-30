@@ -378,6 +378,130 @@ describe('E7 — the add paths pass through withNewObjectId', () => {
 // E8 — the Edit panel's host line (scripting-4b-1)
 // ===========================================================================
 
+describe('AC6 — the click branch, and the ONE connect path', () => {
+  const clickSource = () => readFileSync(resolve(__dirname, '../src/activate-click.js'), 'utf-8')
+
+  /** The body of the Nth `viewportEl.addEventListener('click', …)`, by braces. */
+  function viewportClickBody(nth = 0) {
+    let at = -1
+    for (let i = 0; i <= nth; i++) at = source.indexOf("viewportEl.addEventListener('click'", at + 1)
+    assert.ok(at >= 0, `app.js registers click listener #${nth}`)
+    const open = source.indexOf('{', at)
+    let depth = 0
+    for (let i = open; i < source.length; i++) {
+      if (source[i] === '{') depth++
+      else if (source[i] === '}') { depth--; if (depth === 0) return source.slice(open + 1, i) }
+    }
+    return assert.fail('the click listener’s body is balanced')
+  }
+
+  /** The behaviour branch: everything before the Edit-mode half of that listener. */
+  const behaviorBranch = () => {
+    const body = stripComments(viewportClickBody(0))
+    const editAt = body.indexOf('if (e.target !== canvas) return', body.indexOf('if (!modes.edit)'))
+    assert.ok(editAt > 0, 'the listener has its Edit-mode half after the behaviour half')
+    return flatten(body.slice(0, editAt))
+  }
+  const editBranch = () => {
+    const body = stripComments(viewportClickBody(0))
+    const editAt = body.indexOf('if (e.target !== canvas) return', body.indexOf('if (!modes.edit)'))
+    return flatten(body.slice(editAt))
+  }
+
+  test('the branch accepts a LOCKED click on the viewport, and aims from the centre', () => {
+    const branch = behaviorBranch()
+    assert.match(branch, /const locked = document\.pointerLockElement === viewportEl/,
+      'the branch asks whether the viewport holds the lock')
+    assert.match(branch, /if \(locked\) \{ if \(e\.target !== viewportEl\) return \} else if \(e\.target !== canvas\) \{ return \}/,
+      'locked: the viewport target is accepted (today every locked click returned early); unlocked: only the canvas')
+    assert.match(branch, /pickBehaviorTarget\(e, \{ locked \}\)/, 'and the aim is told whether it is locked')
+  })
+
+  test('the branch resolves the target through the ONE rule, and does nothing for scenery', () => {
+    const branch = behaviorBranch()
+    assert.match(branch, /const target = activateClickTarget\(hit\)/)
+    assert.match(branch, /if \(!target\) return/, 'an ordinary click on scenery does nothing at all')
+    assert.match(flatten(clickSource()), /export function activateClickTarget\(hitNode\) \{ return selectTargetFor\(hitNode\) \}/,
+      'and that one rule IS selectTargetFor (AC2)')
+  })
+  test('the host runs it here; every other tab sends activate()', () => {
+    const branch = behaviorBranch()
+    const targetAt = branch.indexOf('const target = activateClickTarget(hit)')
+    const callAt = branch.indexOf('performActivateClick({')
+    assert.ok(targetAt > 0, 'the branch resolves the target through the ONE rule')
+    assert.ok(callAt > targetAt, 'and hands it to performActivateClick (the tested decision)')
+    assert.match(branch.slice(callAt), /isHost: client\.scriptHost\?\.active === true/,
+      'the tab kind is read from the real client state, in ONE place')
+    assert.match(branch.slice(callAt), /runner,/, 'the real runner is handed in')
+    assert.match(branch.slice(callAt), /client,/, 'and the real client')
+    assert.match(branch.slice(callAt), /notice: activateNotice/, 'and the notice element')
+    const clickSource = flatten(readFileSync(resolve(__dirname, '../src/activate-click.js'), 'utf-8'))
+    assert.match(clickSource, /if \(isHost\) \{ const outcome = runner\?\.select\(hit\)/,
+      'performActivateClick runs the behaviour in the host’s tab')
+    assert.match(clickSource, /if \(outcome === 'too-far' \|\| outcome === 'no-avatar'\) \{ notice\?\.show\(activateNoticeText\(\{ by: 'page', reason: outcome \}\)\) \}/,
+      'and shows the page’s own notice for the two outcomes it can see')
+    assert.match(clickSource, /const text = activateClickNotice\(\{ avatarNode, avatarPosition, targetPosition \}\) if \(text\) \{ notice\?\.show\(text\) return \{ action: 'notice', notice: text \} \}/,
+      'a pre-check refusal shows the notice and sends NOTHING')
+    assert.match(clickSource, /client\?\.activate\(resolved\.name\)/,
+      'and only then does a non-host tab call activate()')
+  })
+
+  test('the EDIT-mode half is unchanged: a click selects, and never activates', () => {
+    const branch = editBranch()
+    assert.match(branch, /pickEditTarget\(e\)/)
+    assert.match(branch, /selectForEdit\(node\)/)
+    assert.match(branch, /if \(refused\) showEditError\(refused\)/)
+    assert.doesNotMatch(branch, /activate/,
+      'Edit mode still means selection: no activate, no notice, no lock handling')
+    assert.doesNotMatch(branch, /behaviorAim|pickBehaviorTarget/)
+  })
+
+  test('pickBehaviorTarget aims through behaviorAim', () => {
+    const body = flatten(functionBody('pickBehaviorTarget'))
+    assert.match(body, /behaviorAim\(\{ locked, clientX: e\.clientX, clientY: e\.clientY, rect \}\)/)
+    assert.doesNotMatch(body, /clientX - rect\.left/,
+      'the NDC arithmetic lives in ONE place, the pure function')
+    assert.match(clickSource(), /if \(locked\) return \{ x: 0, y: 0 \}/,
+      'and locked aims at the screen centre, where #crosshair is')
+  })
+
+  test('#activate-notice is in the page, hidden, and has ONE owner', () => {
+    assert.match(html, /id="activate-notice"/)
+    assert.match(html, /id="activate-notice"[^>]*display:none/, 'it starts hidden')
+    assert.match(flatten(source), /createActivateNotice\(\{ element: activateNoticeEl \}\)/)
+    const writers = source.match(/activateNoticeEl\.(textContent|style)\s*=/g) ?? []
+    assert.equal(writers.length, 0, 'app.js never writes it directly: createActivateNotice owns it')
+  })
+
+  test('the server’s refusal reaches the notice, and console-only codes do not', () => {
+    const handler = handlers('activate:refused')[0]
+    assert.ok(handler, 'app.js listens for activate:refused')
+    assert.match(flatten(handler), /activateNoticeText\(\{ by: 'server', code \}\)/)
+    assert.match(flatten(handler), /if \(text\) activateNotice\.show\(text\)/)
+    assert.match(clickSource(), /RATE_LIMITED|NODE_NOT_FOUND|INVALID_FIELD|ACTIVATE_SERVER_NOTICE/,
+      'and activate-click.js is where the code-to-text table lives')
+  })
+
+  test('connectNow passes scriptRunner: sameOriginAsAccount(…), and NOTHING else does', () => {
+    const body = flatten(functionBody('connectNow'))
+    assert.match(body, /const sid = client\.connect\(wsUrl, \{ \.\.\.connectOpts, scriptRunner: sameOriginAsAccount\(wsUrl, accountWsBase\), \}\)/)
+    const code = stripComments(source)
+    const mentions = code.match(/scriptRunner/g) ?? []
+    assert.equal(mentions.length, 1, `exactly one scriptRunner in app.js's code, found ${mentions.length}`)
+    const connects = code.match(/client\.connect\(/g) ?? []
+    assert.equal(connects.length, 1, `exactly one client.connect() call site, found ${connects.length}`)
+  })
+
+  test('the Behaviour section’s other-tab line is 4c’s', () => {
+    const form = readFileSync(resolve(__dirname, '../src/behavior-form.js'), 'utf-8')
+    assert.match(form, /otherTab: 'Behaviours run in another tab; clicks here are sent to it'/)
+  })
+})
+
+// ===========================================================================
+// E8 — the Edit panel's host line (scripting-4b-1)
+// ===========================================================================
+
 describe('E8 — refreshHostStatus() and the host line', () => {
   test('the line exists in the page and has ONE writer', () => {
     assert.match(html, /id="ep-host-status"/)

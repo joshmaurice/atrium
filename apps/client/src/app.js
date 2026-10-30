@@ -43,6 +43,9 @@ import { createStructureTracker, countDescendants, collectSubtree, structuralBlo
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
 import { withNewObjectId } from './object-identity.js'   // scripting-4b-1 E7
+// scripting-4c AC6 — the pure parts of a click outside Edit mode: the aim, the
+// page's pre-check, the notice texts, and the transient notice element.
+import { behaviorAim, activateNoticeText, activateClickTarget, performActivateClick, createActivateNotice } from './activate-click.js'
 import { hostStatusText } from './host-status.js'        // scripting-4b-1 E8
 import { createAuthSync, createConnectPath, NOTICE } from './auth-sync.js'   // signin-sync I2–I4, r2 J1/J2
 
@@ -64,6 +67,9 @@ const hudWorldEl    = document.getElementById('hud-world')
 const hudYouEl      = document.getElementById('hud-you')
 const hudPeersEl    = document.getElementById('hud-peers')
 const hudHintEl     = document.getElementById('hud-hint')
+// scripting-4c AC6 — the transient notice for a refused click, beside the HUD hint.
+const activateNoticeEl = document.getElementById('activate-notice')
+const activateNotice   = createActivateNotice({ element: activateNoticeEl })
 const modeSwitcher  = document.getElementById('mode-switcher')
 
 // Auth DOM refs
@@ -955,6 +961,27 @@ client.on('error', (err) => {
 })
 
 // ---------------------------------------------------------------------------
+// scripting-4c AC6 — the click's answer
+// ---------------------------------------------------------------------------
+
+/**
+ * The SERVER refused a click. AC-L6 (Rev 1 N1): the page shows the server's own
+ * text — one code for "no avatar or too far", one for "nobody home" — and
+ * `RATE_LIMITED`, `NODE_NOT_FOUND` and `INVALID_FIELD` go to the console only,
+ * because the clicker cannot act on any of them.
+ */
+client.on('activate:refused', ({ node, code, message }) => {
+  const text = activateNoticeText({ by: 'server', code })
+  if (text) activateNotice.show(text)
+  else console.warn(`[app] activate refused (${code}) on "${node}": ${message ?? ''}`)
+})
+
+// No notice outlives the connection it was about — a reconnect or a load is a
+// different world, and the element must not keep a stale sentence on screen.
+client.on('connecting', () => activateNotice.clear())
+client.on('world:loaded', () => activateNotice.clear())
+
+// ---------------------------------------------------------------------------
 // Avatar controller event listeners
 // ---------------------------------------------------------------------------
 
@@ -1188,7 +1215,16 @@ viewportEl.addEventListener('drop', async (e) => {
  */
 function connectNow(wsUrl, connectOpts, { onError } = {}) {
   return new Promise((resolve, reject) => {
-    const sid = client.connect(wsUrl, connectOpts)
+    // scripting-4c AC6 (Rev 1.2 M1) — THE one call every connect site goes
+    // through, so the `scriptRunner` capability is decided exactly once. It rides
+    // only a SAME-ORIGIN connection, where the server runs the same code as this
+    // page: a hello field older servers do not know is refused by them, and a
+    // cross-origin connection is always anonymous, so it could never be the host.
+    // No other site in this file passes `scriptRunner`.
+    const sid = client.connect(wsUrl, {
+      ...connectOpts,
+      scriptRunner: sameOriginAsAccount(wsUrl, accountWsBase),
+    })
     if (!sid) {
       reject(new Error('Connect failed to return a session ID'))
       return
@@ -2079,12 +2115,45 @@ viewportEl.addEventListener('click', (e) => {
   // the same slop and button rules as a selection (M3: a SOM `click` fires on
   // any button and any distance, so it is not used), and the same hit
   // resolution as `pickEditTarget`.
+  //
+  // scripting-4c AC6 — and it is now the click EVERY tab sends: the host runs the
+  // behaviour here, and every other tab asks the server to run it in the host's.
+  // While `#viewport` holds the pointer lock a click's target is the VIEWPORT and
+  // clientX/Y are stuck at the lock's start point (P17), so a locked click is
+  // accepted and aims from the screen centre.
   if (!modes.edit) {
-    if (e.target !== canvas) return
+    const locked = document.pointerLockElement === viewportEl
+    if (locked) {
+      if (e.target !== viewportEl) return
+    } else if (e.target !== canvas) {
+      return
+    }
     const down = pressDown
     pressDown = null
     if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
-    runner?.select(pickBehaviorTarget(e))
+    const hit = pickBehaviorTarget(e, { locked })
+    // AC2/AC6 — ONE rule for every tab: an ordinary click on scenery shows
+    // nothing and sends nothing.
+    const target = activateClickTarget(hit)
+    if (!target) return
+
+    // The decision and its execution live in `performActivateClick` (tested):
+    // this tab IS the host, so it runs the behaviour here (AC-L3 (a) — the same
+    // 10 m rule applies to the host's own clicks, so the same click works in
+    // every one of the owner's tabs); any other tab pre-checks and then asks the
+    // server to run it in the host's tab.
+    const avatarNode = avatar?.localNode ?? null
+    performActivateClick({
+      hit,
+      target,
+      isHost: client.scriptHost?.active === true,
+      runner,
+      client,
+      avatarNode,
+      avatarPosition: avatarNode ? worldPosition(avatarNode) : undefined,
+      targetPosition: worldPosition(target),
+      notice: activateNotice,
+    })
     return
   }
   if (e.target !== canvas) return
@@ -2097,14 +2166,17 @@ viewportEl.addEventListener('click', (e) => {
   if (refused) showEditError(refused)
 })
 
-/** F5 — the SOM node under the cursor, for the host's `select` outside Edit mode. */
-function pickBehaviorTarget(e) {
+/**
+ * F5 — the SOM node under the cursor, for the host's `select` outside Edit mode.
+ *
+ * scripting-4c AC6 — with the pointer lock held the aim comes from the screen
+ * centre (`behaviorAim`), never from the stale `clientX/Y` (P17).
+ */
+function pickBehaviorTarget(e, { locked = false } = {}) {
   if (!sceneGroup || !client.som) return null
   const rect = viewportEl.getBoundingClientRect()
-  const ndc = new THREE.Vector2(
-    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-    -((e.clientY - rect.top) / rect.height) * 2 + 1,
-  )
+  const { x, y } = behaviorAim({ locked, clientX: e.clientX, clientY: e.clientY, rect })
+  const ndc = new THREE.Vector2(x, y)
   const raycaster = new THREE.Raycaster()
   raycaster.setFromCamera(ndc, stage.camera)
   const hit = visibleHits(raycaster.intersectObjects(sceneGroup.children, true))[0]
@@ -3129,6 +3201,9 @@ runner = createBehaviorRunner({
   frame: 50,
   clips: clipStatusFor,
   position: (node) => (node ? worldPosition(node) : undefined),
+  // scripting-4c AC-L3 (a)/AC5 — the local avatar node, so the host's OWN click
+  // obeys the same 10 m rule as every visitor's.
+  localAvatar: () => avatar?.localNode ?? null,
   onEntry: () => { if (behaviorForm?.openState) behaviorForm.render() },
 })
 

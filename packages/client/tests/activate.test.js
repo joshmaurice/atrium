@@ -474,36 +474,41 @@ test('AC5/M1 — the held load: a click during the owner’s load is refused, an
   visitor.on('activate:refused', (e) => refusals.push(e))
   const owner = await connectReal(port, { scriptRunner: true, avatar: { name: 'owner', translation: [0, 0, 4] } })
   assert.equal(owner.scriptHost.active, true, 'the owner holds the role from its hello')
-  await delay(120)
-  assert.equal(owner.worldLoaded(), false, 'its world load is held, so no som-dump has arrived')
-  assert.equal(owner.connected, true)
 
-  // --- 4. the visitor’s click: NO_SCRIPT_HOST, and the owner sees nothing
-  const ownerActivates = []
-  owner.on('activate', (e) => ownerActivates.push(e))
-  const visitorSets = []
-  visitor.on('som:set', (e) => { if (e.nodeName === 'Target') visitorSets.push(e) })
-
-  visitor.activate('Switch')
-  const refused = await waitFor(() => refusals[0], 1500)
-  assert.ok(refused, 'a click during the load is answered, never silence')
-  assert.equal(refused.code, 'NO_SCRIPT_HOST')
-  assert.equal(refused.message, "the world's owner isn't ready yet")
-  assert.deepEqual(ownerActivates, [], 'and nothing was forwarded into the void')
-
-  // --- 5. release: the owner loads, the runner says it is ready, the click runs
-  release()
-  await waitFor(() => owner.worldLoaded(), 4000)
-  assert.equal(owner.worldLoaded(), true, 'the world reached the owner once the hold was released')
-
-  // The real runner, with the same ports the app gives it.
+  // THE REAL RUNNER, created where the app creates it: before the world arrives,
+  // so it sees the grant itself. This is what makes proof (g3) observable — a
+  // runner that said "ready" on the GRANT (instead of when its engines exist)
+  // would release the visitor's click into a tab that cannot run it yet.
   const runner = createBehaviorRunner({
     client: owner,
     position: (node) => (node ? [...node.translation] : undefined),
     localAvatar: () => owner.som?.getNodeByName(owner._avatarNodeName) ?? null,
   })
-  owner.emit('world:loaded', { name: 'w' })       // the app signals the runner here
   try {
+    await delay(120)
+    assert.equal(owner.worldLoaded(), false, 'its world load is held, so no som-dump has arrived')
+    assert.equal(owner.connected, true)
+    assert.equal(runner.enabled, false, 'and the runner is NOT enabled: no world, no engines')
+
+    // --- 4. the visitor’s click: NO_SCRIPT_HOST, and the owner sees nothing
+    const ownerActivates = []
+    owner.on('activate', (e) => ownerActivates.push(e))
+    const visitorSets = []
+    visitor.on('som:set', (e) => { if (e.nodeName === 'Target') visitorSets.push(e) })
+
+    visitor.activate('Switch')
+    const refused = await waitFor(() => refusals[0], 1500)
+    assert.ok(refused, 'a click during the load is answered, never silence')
+    assert.equal(refused.code, 'NO_SCRIPT_HOST')
+    assert.equal(refused.message, "the world's owner isn't ready yet")
+    assert.deepEqual(ownerActivates, [], 'and nothing was forwarded into the void')
+
+    // --- 5. release: the owner loads, the runner says it is ready, the click runs
+    release()
+    await waitFor(() => owner.worldLoaded(), 4000)
+    assert.equal(owner.worldLoaded(), true, 'the world reached the owner once the hold was released')
+    assert.ok(await waitFor(() => runner.enabled, 2000), 'and the runner became enabled: its engines exist')
+
     // The runner said it is ready; a probe may still land in the window, so the
     // click is retried — the point is that it NEVER stays refused. `runner.tick()`
     // is the app's frame loop: it is what drains the engine's queued send.

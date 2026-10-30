@@ -69,7 +69,10 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
 
   test('select comes from the VIEWPORT click, never from a SOM click', () => {
     // The sibling branch: `!modes.edit`, `e.target !== canvas`, `isSelectClick`.
-    assert.match(source, /if \(!modes\.edit\) \{[\s\S]{0,400}?isSelectClick\(down[\s\S]{0,200}?runner\?\.select\(pickBehaviorTarget\(e\)\)/)
+    // scripting-4c AC6 — the branch resolves the hit through `activateClickTarget`
+    // and only the HOST half runs `runner?.select`, on that same hit.
+    assert.match(source, /if \(!modes\.edit\) \{[\s\S]{0,2600}?isSelectClick\(down[\s\S]{0,600}?runner\?\.select\(hit\)/)
+    assert.match(source, /activateClickTarget\(hit\)/, '4c: the target comes from the one shared rule')
     assert.doesNotMatch(source, /dispatchPointerEvent\([^)]*\)[\s\S]{0,40}runner\?\.select/)
   })
 

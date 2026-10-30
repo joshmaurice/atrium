@@ -67,6 +67,9 @@ function setup(nodes) {
   const state = { clock: 0 }
   const runner = createBehaviorRunner({
     client, now: () => state.clock, position: (node) => node?.translation,
+    // scripting-4c AC-L3 (a) — the host's own select obeys the same 10 m rule,
+    // so the runner needs a local avatar. Every node here sits at the origin.
+    localAvatar: () => ({ name: 'avatar', translation: [0, 0, 0] }),
   })
   client.emit('world:loaded', { name: 'w' })
   client.emit('script-host:changed', { active: true, hostGen: 1 })
@@ -152,6 +155,8 @@ test('V5 — a clip that is not on a LOADED model is refused, and nothing is sen
     client,
     now: () => state.clock,
     position: (n) => n?.translation,
+    // scripting-4c AC-L3 (a) — the host's own select obeys the same 10 m rule.
+    localAvatar: () => ({ name: 'avatar', translation: [0, 0, 0] }),
     clips: (objectId) => clipsFor(objectId, {
       resolveObjectId: (id) => client.som.resolveObjectId(id),
       modelAnimations: { status: () => ({ clips: ['Idle'], state: 'stopped' }) },

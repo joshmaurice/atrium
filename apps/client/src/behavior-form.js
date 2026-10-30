@@ -105,7 +105,7 @@ export const FIELD_TEXTS = Object.freeze({
 export const BEHAVIOR_STATUS = Object.freeze({
   running: 'Running',
   idle: 'Not running: this tab isn’t the script host',
-  otherTab: 'Behaviours run in another tab; clicks here don’t trigger them',
+  otherTab: 'Behaviours run in another tab; clicks here are sent to it',
   saving: 'Saving…',
   cancelled: 'Save cancelled',
   // W3 (round 6) — the stored value changed under an unsaved edit.

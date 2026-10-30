@@ -404,6 +404,25 @@
   #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
   #crosshair::after  { height: 2px; width: 100%; top: 50%; transform: translateY(-50%); }
 
+  /* ── scripting-4c — the transient activate notice, above the HUD hint ──
+     No `display` here on purpose: the element starts hidden with an INLINE
+     `display:none`, and app.js shows it by clearing that inline style. A
+     stylesheet `display: none` would win over the cleared inline style and the
+     notice could never appear. */
+  #activate-notice {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #e2e8f0;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
   /* ── Drag-and-drop indicator ───────────────────────── */
   #viewport.drag-over {
     outline: 3px dashed #4a9eff;
@@ -620,6 +639,8 @@
   </div>
   <div id="overlay"></div>
   <div id="hud-hint"></div>
+  <!-- scripting-4c AC6 — the click notice. Empty and hidden until one is shown. -->
+  <div id="activate-notice" style="display:none"></div>
   <div id="crosshair"></div>
 
   <!-- Edit mode panel (Phase 3 step 1b-1) -->
