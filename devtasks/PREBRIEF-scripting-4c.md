@@ -1,14 +1,18 @@
 # Pre-brief: Phase 3 step 4c — visitors' `activate`: a click in any tab reaches the script host
 
-Status: **DRAFT, Revision 1.2 (2026-10-30), ready for the operator to make
-FINAL. Decisions AC-L1–AC-L8 approved by the operator (2026-10-30 00:32
-PT), all as recommended:**
+Status: **FINAL, Revision 1.3 (2026-10-30). The operator made Rev 1.2
+FINAL (2026-10-30 00:45 PT). Decisions AC-L1–AC-L8 approved by the
+operator (2026-10-30 00:32 PT), all as recommended:**
 AC-L1 (a) one round, six steps; AC-L2 (a) a fixed 10 m from the object's
 origin; AC-L3 (a) the same rule for the host's own clicks; AC-L4 (a) the
 session bucket charged for every attempt, the world bucket only for
 forwards; AC-L5 (a) existing codes plus `NO_SCRIPT_HOST`; AC-L6 (a)
 transient notices, with Rev 1's N1 texts; AC-L7 (a) by node name; AC-L8 (a)
 no carried items.
+- **Rev 1.3 changes only this status line and §11** (as 4b-2's Rev 2.1
+  did). **4c's kickoff is written from the commit that carries this
+  revision,** which is its base, and **it waits for the host round**
+  (signin-sync passdown §6.2) to finish, all of it.
 - **Rev 1.2 applies the second outside review, of Rev 1.1**
   (`devtasks/REVIEW-scripting-4c-rev1.1.md`, CHANGES REQUESTED: 1
   must-fix, 2 should-fix, 1 nit; read-only through GitHub's API). The
@@ -952,4 +956,7 @@ As scripting-4b-2 and signin-sync, with this round's specifics:
 | S1 | `activate()`'s test conflated `session:ready` and `world:loaded` | Should-fix | §6 AC4: three states; proof (j2) |
 | S2 | The held-load test's setup order | Should-fix | §6 AC5: the five steps, visitor first, because `serialize` is shared (`session.js` L812–814) |
 | N1 | `script-ready` validated in both directions | Nit | AC1: in the direction list, compiled `:client` only; §6 AC1 |
-
+- **Rev 1.3** (2026-10-30 00:45 PT): the operator made Rev 1.2 FINAL. Only
+  the status line and this entry changed. The kickoff,
+  `devtasks/KICKOFF-scripting-4c.md`, is written from this commit, after
+  the host round.
