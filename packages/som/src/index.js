@@ -16,6 +16,9 @@ export { SOMTexture }   from './SOMTexture.js'
 export { SOMSkin }      from './SOMSkin.js'
 export { parsePath }    from './SOMDocument.js'
 export { CREATABLE_PATHS } from './SOMDocument.js'
+// scripting-4c AC2 (Rev 1 M2) — worldPosition lives HERE now, so the server's
+// distance check and the page's pre-check measure with the same code.
+export { worldPosition } from './world-position.js'
 export {
   pruneCandidateProperties,
   pruneDocumentInPlace,

@@ -26,6 +26,7 @@ import {
   behaviorCheck, behaviorProblem, behaviorReasonText, behaviorCountIn,
   checkBehaviorValue, checkAtriumBehavior, authorizeSend, BEHAVIOR_LEAF,
   BEHAVIOR_NODES_PER_WORLD, SEND_INVALID, SEND_INVALID_FIELD,
+  listensForSelect, withinActivateDistance, ACTIVATE_MAX_DISTANCE,
 } from '../src/send-policy.js'
 import { templateGraph } from '../../behaviors/src/templates.js'
 
@@ -59,6 +60,45 @@ test('F1: each reason code has plain text of its own', () => {
     assert.notEqual(behaviorReasonText(code), 'the behaviour value is invalid',
       `${code} must have its own text`)
   }
+})
+
+// ===========================================================================
+// scripting-4c AC2 — the server's copies of the shared click rule
+// ===========================================================================
+
+test('AC2: every listensForSelect vector answers its expected value in the SERVER copy too', () => {
+  assert.ok(VECTORS.listensForSelect.length >= 12, 'the vectors are present')
+  for (const vector of VECTORS.listensForSelect) {
+    assert.equal(listensForSelect(vector.value), vector.expected,
+      `${vector.name}: expected ${vector.expected} (the two copies must not drift)`)
+  }
+})
+
+test('AC2: the server copy is TOTAL, and answers false for everything malformed', () => {
+  for (const value of [undefined, null, 42, 'x', [], { enabled: true }, { enabled: true, graph: 'x' }]) {
+    assert.doesNotThrow(() => listensForSelect(value))
+    assert.equal(listensForSelect(value), false)
+  }
+})
+
+test('AC2: every withinActivateDistance vector answers its expected value in the SERVER copy too', () => {
+  assert.ok(VECTORS.withinActivateDistance.length >= 10, 'the vectors are present')
+  for (const vector of VECTORS.withinActivateDistance) {
+    assert.equal(withinActivateDistance(vector.a, vector.b), vector.expected, vector.name)
+  }
+})
+
+test('AC2/AC-L2: 10 m is the reach, and it is inclusive', () => {
+  assert.equal(ACTIVATE_MAX_DISTANCE, 10)
+  assert.equal(withinActivateDistance([0, 0, 0], [10, 0, 0]), true, 'exactly 10 m passes')
+  assert.equal(withinActivateDistance([0, 0, 0], [10.000001, 0, 0]), false)
+})
+
+test('AC2/P8: the distance rule is NOT a security boundary — it measures the claim', () => {
+  // A client that sends a `view` next to an object and then `activate` passes
+  // this check (4b-2 P8). It stops ordinary far-away clicks and makes activation
+  // local; it is never described as stopping a determined visitor.
+  assert.equal(withinActivateDistance([5, 0, 0], [5, 0, 0]), true)
 })
 
 test('F1: an out-of-range declaration index is refused by the VALIDATOR, not by an F1 rule', () => {

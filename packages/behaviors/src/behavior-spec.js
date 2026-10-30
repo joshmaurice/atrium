@@ -241,6 +241,91 @@ export function templateParamsOk(id, params) {
 }
 
 // ---------------------------------------------------------------------------
+// scripting-4c AC2 — the shared click rule
+//
+// ONE rule for every tab (4b-2 P13): which node a click on a hit selects. The
+// page applies it before it sends (the server never walks ancestors), the
+// runner's own `select` resolves through it, and the server's copy of
+// `listensForSelect` decides whether the named node responds at all.
+// ---------------------------------------------------------------------------
+
+/** AC-L2 — one fixed reach, in metres. Measured from the object's ORIGIN. */
+export const ACTIVATE_MAX_DISTANCE = 10
+
+/**
+ * scripting-4c AC2 — true exactly when the STORED behaviour leaf says this node
+ * listens for a click (4b-2 P10): it is a plain object, `enabled === true`, and
+ * one of the graph's nodes indexes a declaration whose op is `event/onSelect`.
+ *
+ * TOTAL: it never throws and answers `false` for anything malformed (null, a
+ * string, a graph with no nodes, a declaration no node uses). The server's copy
+ * in `send-policy.js` reads the same vectors.
+ *
+ * @param {*} value  the stored `extras.atrium.behavior`, or anything
+ * @returns {boolean}
+ */
+export function listensForSelect(value) {
+  if (!isPlainObject(value)) return false
+  if (value.enabled !== true) return false
+  const graph = value.graph
+  if (!isPlainObject(graph)) return false
+  for (const { op } of graphNodes(graph)) {
+    if (op === 'event/onSelect') return true
+  }
+  return false
+}
+
+/**
+ * scripting-4c AC2 — the node a click on `somNode` selects, or null.
+ *
+ * Walk `somNode` and its ancestors to the FIRST node whose stored leaf has
+ * `enabled === true` (avatars are skipped). That node is the answer when it
+ * listens for select; when it does NOT, the answer is null — the walk does not
+ * continue past it. That is the one change to 4b-2: a node the runner disabled
+ * (or one whose behaviour does not listen for select) no longer passes the
+ * click to an ancestor.
+ *
+ * @param {{ extras?: object, parent?: object|null }} somNode
+ * @returns {object|null} the SOM node to select, or null
+ */
+export function selectTargetFor(somNode) {
+  for (let node = somNode; node; node = node.parent ?? null) {
+    if (node?.extras?.atrium?.ephemeral === true) continue      // an avatar is skipped
+    const leaf = node?.extras?.atrium?.behavior
+    if (!isPlainObject(leaf) || leaf.enabled !== true) continue
+    return listensForSelect(leaf) ? node : null
+  }
+  return null
+}
+
+/** True for a vector of exactly three finite numbers. */
+function isPoint3(p) {
+  return Array.isArray(p) && p.length === 3 && p.every(isFiniteNumber)
+}
+
+/**
+ * scripting-4c AC2/AC-L2 — true when `a` and `b` are within `max` metres of each
+ * other, INCLUSIVE (exactly 10 m passes). False when either point is missing or
+ * is not three finite numbers.
+ *
+ * This is NOT a security boundary: the position it measures is the client's own
+ * claim (4b-2 P8), and any client can send a `view` next to an object first. It
+ * stops ordinary far-away clicks and makes activation local, nothing more.
+ *
+ * @param {number[]|null|undefined} a
+ * @param {number[]|null|undefined} b
+ * @param {number} [max]
+ * @returns {boolean}
+ */
+export function withinActivateDistance(a, b, max = ACTIVATE_MAX_DISTANCE) {
+  if (!isPoint3(a) || !isPoint3(b)) return false
+  const dx = a[0] - b[0]
+  const dy = a[1] - b[1]
+  const dz = a[2] - b[2]
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) <= max
+}
+
+// ---------------------------------------------------------------------------
 // The rule
 // ---------------------------------------------------------------------------
 

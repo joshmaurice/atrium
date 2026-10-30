@@ -874,6 +874,68 @@ export function behaviorProblem(value, options = {}) {
   return behaviorCheck(value, options).problem
 }
 
+// ---------------------------------------------------------------------------
+// scripting-4c AC2 — the server's copies of the shared click rule
+//
+// The E1 pattern: `packages/behaviors/src/behavior-spec.js` has the page's copy,
+// this is the server's, and `tests/fixtures/behavior-vectors.json` pins them to
+// each other. The server never walks ancestors (AC-L7): the page resolves the
+// click to the behaviour node before it sends, and `activate` names exactly that
+// node.
+// ---------------------------------------------------------------------------
+
+/** AC-L2 — one fixed reach, in metres. Measured from the object's ORIGIN. */
+export const ACTIVATE_MAX_DISTANCE = 10
+
+/**
+ * scripting-4c AC2 — true exactly when the STORED behaviour leaf says this node
+ * listens for a click (4b-2 P10): a plain object, `enabled === true`, and a graph
+ * node whose declaration's op is `event/onSelect`.
+ *
+ * TOTAL, like the page's copy: it never throws and answers `false` for anything
+ * malformed.
+ *
+ * @param {*} value  the stored `extras.atrium.behavior`, or anything
+ * @returns {boolean}
+ */
+export function listensForSelect(value) {
+  if (!isPlainObject(value)) return false
+  if (value.enabled !== true) return false
+  const graph = value.graph
+  if (!isPlainObject(graph)) return false
+  for (const { op } of behaviorNodes(graph)) {
+    if (op === 'event/onSelect') return true
+  }
+  return false
+}
+
+/** True for a vector of exactly three finite numbers. */
+function isPoint3(p) {
+  return Array.isArray(p) && p.length === 3 && p.every(isFiniteNumber)
+}
+
+/**
+ * scripting-4c AC2/AC-L2 — true when `a` and `b` are within `max` metres of each
+ * other, INCLUSIVE (exactly 10 m passes). False when either point is missing or
+ * is not three finite numbers.
+ *
+ * NOT a security boundary: the position it measures is the client's own `view`
+ * claim (4b-2 P8). It stops ordinary far-away clicks and makes activation local,
+ * nothing more.
+ *
+ * @param {number[]|null|undefined} a
+ * @param {number[]|null|undefined} b
+ * @param {number} [max]
+ * @returns {boolean}
+ */
+export function withinActivateDistance(a, b, max = ACTIVATE_MAX_DISTANCE) {
+  if (!isPoint3(a) || !isPoint3(b)) return false
+  const dx = a[0] - b[0]
+  const dy = a[1] - b[1]
+  const dz = a[2] - b[2]
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) <= max
+}
+
 /**
  * F2 — how many SAVED nodes other than `excludeNode` carry a non-null
  * `extras.atrium.behavior`. The 64-behaviour cap's count (S1): it is of OTHER

@@ -1,5 +1,5 @@
 {
-  "description": "F1 vectors for extras.atrium.behavior (scripting-4b-2). Read by the client copy (packages/behaviors/src/behavior-spec.js) and by the server copy (packages/server/src/send-policy.js), so the two cannot drift. `ownId` is the behaviour node's own object id; every accepted value must pass the rule AND validateInteractivityGraph, and every refused value must return the named code.",
+  "description": "F1 vectors for extras.atrium.behavior (scripting-4b-2). Read by the client copy (packages/behaviors/src/behavior-spec.js) and by the server copy (packages/server/src/send-policy.js), so the two cannot drift. `ownId` is the behaviour node's own object id; every accepted value must pass the rule AND validateInteractivityGraph, and every refused value must return the named code. scripting-4c AC2 adds `listensForSelect` (a stored leaf, and whether a click on it is something this world listens for) and `withinActivateDistance` (the 10 m rule); both copies of each rule read these two arrays.",
   "ownId": "11111111-1111-4111-8111-111111111111",
   "targetId": "22222222-2222-4222-8222-222222222222",
   "accepted": [
@@ -10897,6 +10897,1258 @@
         "enabled": true,
         "origin": "local"
       }
+    }
+  ],
+  "listensForSelect": [
+    {
+      "name": "template: select-visibility",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "pointer/set"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "nodeIndex": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "stopPropagation": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 1,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/nodes/[n]/extensions/KHR_node_visibility/visible"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                },
+                "value": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [],
+        "template": {
+          "id": "select-visibility",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "action": "hide"
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": true
+    },
+    {
+      "name": "template: select-visibility, toggle",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "pointer/get"
+            },
+            {
+              "op": "math/not"
+            },
+            {
+              "op": "pointer/set"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "nodeIndex": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "stopPropagation": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 3,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/nodes/[n]/extensions/KHR_node_visibility/visible"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                }
+              }
+            },
+            {
+              "declaration": 2,
+              "values": {
+                "a": {
+                  "node": 1,
+                  "socket": "value"
+                }
+              }
+            },
+            {
+              "declaration": 3,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/nodes/[n]/extensions/KHR_node_visibility/visible"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                },
+                "value": {
+                  "node": 2,
+                  "socket": "value"
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [],
+        "template": {
+          "id": "select-visibility",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "action": "toggle"
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": true
+    },
+    {
+      "name": "template: select-animation",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "animation/start"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "nodeIndex": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "stopPropagation": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 1,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "values": {
+                "animation": {
+                  "type": 3,
+                  "value": [
+                    "/animations/0"
+                  ]
+                },
+                "startTime": {
+                  "type": 2,
+                  "value": [
+                    0
+                  ]
+                },
+                "endTime": {
+                  "type": 2,
+                  "value": [
+                    3600
+                  ]
+                },
+                "speed": {
+                  "type": 2,
+                  "value": [
+                    1
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [
+          {
+            "object": "22222222-2222-4222-8222-222222222222",
+            "clip": "Idle",
+            "loop": true
+          }
+        ],
+        "template": {
+          "id": "select-animation",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "clip": "Idle",
+            "action": "play",
+            "loop": true
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": true
+    },
+    {
+      "name": "template: select-light",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "pointer/get"
+            },
+            {
+              "op": "math/gt"
+            },
+            {
+              "op": "flow/branch"
+            },
+            {
+              "op": "pointer/set"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "nodeIndex": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "stopPropagation": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 3,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/extensions/KHR_lights_punctual/lights/[n]/intensity"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    2
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                }
+              }
+            },
+            {
+              "declaration": 2,
+              "values": {
+                "a": {
+                  "node": 1,
+                  "socket": "value"
+                },
+                "b": {
+                  "type": 2,
+                  "value": [
+                    0
+                  ]
+                }
+              }
+            },
+            {
+              "declaration": 3,
+              "values": {
+                "condition": {
+                  "node": 2,
+                  "socket": "value"
+                }
+              },
+              "flows": {
+                "true": {
+                  "node": 4,
+                  "socket": "in"
+                },
+                "false": {
+                  "node": 5,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 4,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/extensions/KHR_lights_punctual/lights/[n]/intensity"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    2
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                },
+                "value": {
+                  "type": 2,
+                  "value": [
+                    0
+                  ]
+                }
+              }
+            },
+            {
+              "declaration": 4,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/extensions/KHR_lights_punctual/lights/[n]/intensity"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    2
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                },
+                "value": {
+                  "type": 2,
+                  "value": [
+                    2.5
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [],
+        "template": {
+          "id": "select-light",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "intensity": 2.5
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": true
+    },
+    {
+      "name": "template: proximity-animation",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/receive"
+            },
+            {
+              "op": "animation/start"
+            },
+            {
+              "op": "animation/stop"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "event": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 2,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 0,
+              "configuration": {
+                "event": {
+                  "value": [
+                    1
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 3,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "values": {
+                "animation": {
+                  "type": 3,
+                  "value": [
+                    "/animations/0"
+                  ]
+                },
+                "startTime": {
+                  "type": 2,
+                  "value": [
+                    0
+                  ]
+                },
+                "endTime": {
+                  "type": 2,
+                  "value": [
+                    3600
+                  ]
+                },
+                "speed": {
+                  "type": 2,
+                  "value": [
+                    1
+                  ]
+                }
+              }
+            },
+            {
+              "declaration": 2,
+              "values": {
+                "animation": {
+                  "type": 3,
+                  "value": [
+                    "/animations/0"
+                  ]
+                }
+              }
+            }
+          ],
+          "events": [
+            {
+              "id": "atrium/enter"
+            },
+            {
+              "id": "atrium/exit"
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [
+          {
+            "object": "22222222-2222-4222-8222-222222222222",
+            "clip": "Walk",
+            "loop": true
+          }
+        ],
+        "proximity": {
+          "radius": 3
+        },
+        "template": {
+          "id": "proximity-animation",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "clip": "Walk",
+            "loop": true,
+            "radius": 3
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": false
+    },
+    {
+      "name": "template: interval-animation",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/receive"
+            },
+            {
+              "op": "animation/start"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "event": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 1,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "values": {
+                "animation": {
+                  "type": 3,
+                  "value": [
+                    "/animations/0"
+                  ]
+                },
+                "startTime": {
+                  "type": 2,
+                  "value": [
+                    0
+                  ]
+                },
+                "endTime": {
+                  "type": 2,
+                  "value": [
+                    3600
+                  ]
+                },
+                "speed": {
+                  "type": 2,
+                  "value": [
+                    1
+                  ]
+                }
+              }
+            }
+          ],
+          "events": [
+            {
+              "id": "atrium/interval"
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [
+          {
+            "object": "22222222-2222-4222-8222-222222222222",
+            "clip": "Idle",
+            "loop": true
+          }
+        ],
+        "interval": {
+          "seconds": 30
+        },
+        "template": {
+          "id": "interval-animation",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "clip": "Idle",
+            "loop": true,
+            "seconds": 30
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": false
+    },
+    {
+      "name": "a disabled select behaviour",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "pointer/set"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 0,
+              "configuration": {
+                "nodeIndex": {
+                  "type": 1,
+                  "value": [
+                    0
+                  ]
+                },
+                "stopPropagation": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              },
+              "flows": {
+                "out": {
+                  "node": 1,
+                  "socket": "in"
+                }
+              }
+            },
+            {
+              "declaration": 1,
+              "configuration": {
+                "pointer": {
+                  "value": [
+                    "/nodes/[n]/extensions/KHR_node_visibility/visible"
+                  ]
+                },
+                "type": {
+                  "value": [
+                    0
+                  ]
+                }
+              },
+              "values": {
+                "n": {
+                  "type": 1,
+                  "value": [
+                    1
+                  ]
+                },
+                "value": {
+                  "type": 0,
+                  "value": [
+                    false
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [],
+        "template": {
+          "id": "select-visibility",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "action": "hide"
+          }
+        },
+        "enabled": false,
+        "origin": "local"
+      },
+      "expected": false
+    },
+    {
+      "name": "a declaration with no node using it",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "debug/log"
+            }
+          ],
+          "nodes": [
+            {
+              "declaration": 1,
+              "configuration": {
+                "message": {
+                  "value": [
+                    "hi"
+                  ]
+                },
+                "severity": {
+                  "value": [
+                    0
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [
+          {
+            "object": "22222222-2222-4222-8222-222222222222",
+            "clip": "Idle",
+            "loop": true
+          }
+        ],
+        "template": {
+          "id": "select-animation",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "clip": "Idle",
+            "action": "play",
+            "loop": true
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": false
+    },
+    {
+      "name": "null",
+      "value": null,
+      "expected": false
+    },
+    {
+      "name": "a string",
+      "value": "select-visibility",
+      "expected": false
+    },
+    {
+      "name": "an array",
+      "value": [],
+      "expected": false
+    },
+    {
+      "name": "a graph with no nodes",
+      "value": {
+        "kind": "graph",
+        "graph": {
+          "types": [
+            {
+              "signature": "bool"
+            },
+            {
+              "signature": "int"
+            },
+            {
+              "signature": "float"
+            },
+            {
+              "signature": "ref"
+            }
+          ],
+          "declarations": [
+            {
+              "op": "event/onSelect",
+              "extension": "KHR_node_selectability"
+            },
+            {
+              "op": "pointer/set"
+            }
+          ],
+          "nodes": []
+        },
+        "nodeMap": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "targets": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "animations": [],
+        "template": {
+          "id": "select-visibility",
+          "params": {
+            "target": "22222222-2222-4222-8222-222222222222",
+            "action": "hide"
+          }
+        },
+        "enabled": true,
+        "origin": "local"
+      },
+      "expected": false
+    },
+    {
+      "name": "no graph at all",
+      "value": {
+        "kind": "graph",
+        "origin": "local",
+        "enabled": true
+      },
+      "expected": false
+    },
+    {
+      "name": "an undefined value",
+      "expected": false
+    }
+  ],
+  "withinActivateDistance": [
+    {
+      "name": "9.999 m apart",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        9.999,
+        0,
+        0
+      ],
+      "expected": true
+    },
+    {
+      "name": "exactly 10 m apart",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        10,
+        0,
+        0
+      ],
+      "expected": true
+    },
+    {
+      "name": "10 m apart on the diagonal",
+      "a": [
+        1,
+        2,
+        3
+      ],
+      "b": [
+        1,
+        2,
+        13
+      ],
+      "expected": true
+    },
+    {
+      "name": "10.000001 m apart",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        10.000001,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "11 m apart",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        11,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "the same point",
+      "a": [
+        3,
+        1,
+        -6
+      ],
+      "b": [
+        3,
+        1,
+        -6
+      ],
+      "expected": true
+    },
+    {
+      "name": "a missing first point",
+      "a": null,
+      "b": [
+        0,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "a missing second point",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "a NaN",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        null,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "a non-number",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        "10",
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "two numbers, not three",
+      "a": [
+        0,
+        0
+      ],
+      "b": [
+        0,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "four numbers, not three",
+      "a": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "b": [
+        0,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "an Infinity",
+      "a": [
+        0,
+        0,
+        0
+      ],
+      "b": [
+        null,
+        0,
+        0
+      ],
+      "expected": false
+    },
+    {
+      "name": "a vector of strings",
+      "a": [
+        "0",
+        "0",
+        "0"
+      ],
+      "b": [
+        0,
+        0,
+        0
+      ],
+      "expected": false
     }
   ]
 }

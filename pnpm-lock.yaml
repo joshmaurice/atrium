@@ -16,6 +16,9 @@ importers:
       '@atrium/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@atrium/som':
+        specifier: workspace:*
+        version: link:../../packages/som
 
   apps/playground:
     dependencies:

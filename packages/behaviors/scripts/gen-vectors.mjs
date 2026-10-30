@@ -2,7 +2,7 @@
 // Run from packages/behaviors: node scripts/gen-vectors.mjs
 import { writeFileSync } from 'node:fs'
 import { templateGraph } from '../src/templates.js'
-import { behaviorCheck } from '../src/behavior-spec.js'
+import { behaviorCheck, listensForSelect, withinActivateDistance } from '../src/behavior-spec.js'
 import { validateInteractivityGraph } from '@khronosgroup/gltf-interactivity-engine'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
@@ -396,17 +396,78 @@ addBad('the value is not an object', 'behavior-type', 42)
   addBad('a __proto__ key inside template.params', 'behavior-type', v)
 }
 
+// ---------------------------------------------------------------------------
+// scripting-4c AC2 — listensForSelect
+//
+// The rule is a pure read of the STORED leaf (4b-2 P10): `enabled === true` and
+// a graph node whose declaration's op is `event/onSelect`. Total: it answers
+// `false` for anything malformed, and never throws.
+// ---------------------------------------------------------------------------
+const listenVectors = []
+const addListen = (name, value, expected) => listenVectors.push({ name, value, expected })
+
+addListen('template: select-visibility', visHide, true)
+addListen('template: select-visibility, toggle', visToggle, true)
+addListen('template: select-animation', animPlay, true)
+addListen('template: select-light', light, true)
+addListen('template: proximity-animation', prox, false)
+addListen('template: interval-animation', interval, false)
+addListen('a disabled select behaviour', { ...clone(visHide), enabled: false }, false)
+{
+  // An `event/onSelect` DECLARATION no node indexes: the declaration is there,
+  // but no graph node uses it.
+  const v = clone(animPlay)
+  v.graph.declarations = [
+    { op: 'event/onSelect', extension: 'KHR_node_selectability' },
+    { op: 'debug/log' },
+  ]
+  v.graph.nodes = [{ declaration: 1, configuration: { message: { value: ['hi'] }, severity: { value: [0] } } }]
+  addListen('a declaration with no node using it', v, false)
+}
+addListen('null', null, false)
+addListen('a string', 'select-visibility', false)
+addListen('an array', [], false)
+addListen('a graph with no nodes', { ...clone(visHide), graph: { ...clone(visHide.graph), nodes: [] } }, false)
+addListen('no graph at all', { kind: 'graph', origin: 'local', enabled: true }, false)
+addListen('an undefined value', undefined, false)
+
+// ---------------------------------------------------------------------------
+// scripting-4c AC2 — withinActivateDistance (AC-L2: one fixed 10 m, INCLUSIVE)
+// ---------------------------------------------------------------------------
+const distanceVectors = []
+const addDistance = (name, a, b, expected) => distanceVectors.push({ name, a, b, expected })
+
+addDistance('9.999 m apart', [0, 0, 0], [9.999, 0, 0], true)
+addDistance('exactly 10 m apart', [0, 0, 0], [10, 0, 0], true)
+addDistance('10 m apart on the diagonal', [1, 2, 3], [1, 2, 13], true)
+addDistance('10.000001 m apart', [0, 0, 0], [10.000001, 0, 0], false)
+addDistance('11 m apart', [0, 0, 0], [11, 0, 0], false)
+addDistance('the same point', [3, 1, -6], [3, 1, -6], true)
+addDistance('a missing first point', null, [0, 0, 0], false)
+addDistance('a missing second point', [0, 0, 0], undefined, false)
+addDistance('a NaN', [0, 0, 0], [NaN, 0, 0], false)
+addDistance('a non-number', [0, 0, 0], ['10', 0, 0], false)
+addDistance('two numbers, not three', [0, 0], [0, 0, 0], false)
+addDistance('four numbers, not three', [0, 0, 0, 0], [0, 0, 0], false)
+addDistance('an Infinity', [0, 0, 0], [Infinity, 0, 0], false)
+addDistance('a vector of strings', ['0', '0', '0'], [0, 0, 0], false)
+
 const fixture = {
   description:
     'F1 vectors for extras.atrium.behavior (scripting-4b-2). Read by the client copy ' +
     '(packages/behaviors/src/behavior-spec.js) and by the server copy ' +
     '(packages/server/src/send-policy.js), so the two cannot drift. `ownId` is the ' +
     'behaviour node\'s own object id; every accepted value must pass the rule AND ' +
-    'validateInteractivityGraph, and every refused value must return the named code.',
+    'validateInteractivityGraph, and every refused value must return the named code. ' +
+    'scripting-4c AC2 adds `listensForSelect` (a stored leaf, and whether a click on ' +
+    'it is something this world listens for) and `withinActivateDistance` (the 10 m ' +
+    'rule); both copies of each rule read these two arrays.',
   ownId: OWN,
   targetId: TGT,
   accepted,
   refused,
+  listensForSelect: listenVectors,
+  withinActivateDistance: distanceVectors,
 }
 
 // Self-check before writing: every accepted value must pass F1 and the validator,
@@ -422,6 +483,14 @@ for (const { name, value } of accepted) {
 for (const { name, code, value } of refused) {
   const problem = behaviorCheck(value, { ownId: OWN }).problem
   if (problem !== code) { console.log(`REFUSED ${name}: expected ${code}, got ${problem}`); bad++ }
+}
+for (const { name, value, expected } of listenVectors) {
+  const got = listensForSelect(value)
+  if (got !== expected) { console.log(`listensForSelect ${name}: expected ${expected}, got ${got}`); bad++ }
+}
+for (const { name, a, b, expected } of distanceVectors) {
+  const got = withinActivateDistance(a, b)
+  if (got !== expected) { console.log(`withinActivateDistance ${name}: expected ${expected}, got ${got}`); bad++ }
 }
 if (bad > 0) { console.log(`${bad} PROBLEMS — fixture NOT written`); process.exit(1) }
 

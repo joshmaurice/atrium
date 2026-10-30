@@ -78,3 +78,27 @@ describe('world-position: subtreeSome', () => {
     assert.equal(subtreeSome(null, isTeleporter), false)
   })
 })
+
+// ===========================================================================
+// scripting-4c AC2 (Rev 1 M2) — the math moved to @atrium/som
+// ===========================================================================
+
+describe('AC2/M2 — src/world-position.js re-exports the @atrium/som function', () => {
+  test('the app module and the som module hand out the SAME function', async () => {
+    const som = await import('@atrium/som')
+    assert.equal(worldPosition, som.worldPosition,
+      'the page and the server must measure with one implementation, not two copies')
+  })
+
+  test('the som module has it whether or not the app module is loaded', async () => {
+    const som = await import('@atrium/som')
+    assert.equal(typeof som.worldPosition, 'function')
+    assert.deepEqual(som.worldPosition(node({ translation: [3, 0, -2] })), [3, 0, -2])
+  })
+
+  test('the app module still exports subtreeSome, which the som module does not', async () => {
+    const som = await import('@atrium/som')
+    assert.equal(typeof subtreeSome, 'function')
+    assert.equal('subtreeSome' in som, false, 'subtreeSome stays the page’s own walk')
+  })
+})
