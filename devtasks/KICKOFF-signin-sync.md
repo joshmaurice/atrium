@@ -12,33 +12,43 @@ How to use this file:
   - the sentinel's id.
 
 **Front-door note (check before creating the card):**
-- **Base:** `base_main_sha = 1837436688b63b0cc622863a10689fbfd9381d85` (the
+- **Base:** `base_main_sha = 6220ffef58e4b11c7f5192dba38f6e4b87b22b0e` (the
   commit that carries the FINAL pre-brief).
   - Its runtime code is identical to the release on DEV, MAIN and PROD,
-    `0c31ddc0`. `git diff --stat 0c31ddc0 1837436 -- packages apps tools
+    `0c31ddc0`. `git diff --stat 0c31ddc0 6220ffef -- packages apps tools
     package.json pnpm-lock.yaml pnpm-workspace.yaml` is empty.
   - Confirm it with a host fetch of `origin/main`. Any later commit on
     `main` (this file's) must touch only `devtasks/`.
-- **The base must carry `devtasks/PREBRIEF-signin-sync.md`,** FINAL Rev 0,
-  21,432 bytes, sha256
-  `8f68b2e78a8a452a9039f4c2b0d687522c3456b04913bc3813c654dba66ae070`.
+- **The base must carry `devtasks/PREBRIEF-signin-sync.md`,** FINAL Rev 1,
+  29,785 bytes, sha256
+  `10444d771dbd4251318964919a15d0bd303d8fb0b696b6cb4403ab19956465cf`.
   **Check the hash yourself and post the commit and hash on the kickoff
   card.** The kickoff has only `kanban_*` tools and can't check it.
 - **The spec goes by git reference,** as for the last two rounds.
 - **No open sentinel.** scripting-4b-2's last one, `t_95c8aa33`, is done.
   Create a new one for this slug and post its id.
-- **`workflow/signin-sync` doesn't exist yet.** Do a push dry run first.
+- **Revision 1 replaces Rev 0** (`8f68b2e7…`, at `1837436`), which an
+  outside review of this kickoff sent back for correction (the spec's §0). If
+  any card already quotes Rev 0's hash, stop and tell the operator.
+- **`workflow/signin-sync` doesn't exist yet.** Do a push dry run first, with
+  a concrete refspec:
+  `git -C /workspace/atrium push --dry-run origin 6220ffef58e4b11c7f5192dba38f6e4b87b22b0e:refs/heads/workflow/signin-sync`.
+  Expect `* [new branch]`.
 - **Card bodies go in the body field.** Round 7's kickoff created its cards
   with empty bodies and posted the bodies as comments (4b-2 passdown §4.5).
   **After every create, read the card back.** If a body or field is still
   missing (the known `kanban_create` field drop), post the missing text as
   that card's first comment while it's `todo`. **Never create a second card in
   its place.**
-  - Check that the implementation card's `max_runtime_seconds` is **10800**.
+  - Check that the implementation card's `max_runtime_seconds` is **14400**.
   - Round 6's implementation card got a 90-minute cap instead of what was
     asked.
 - **Read the kickoff body back after posting.** If it's cut, post the rest as
   PART comments before the orchestrator runs (4b-1 passdown §3).
+- **Post the three comments right after creating the card.** If the
+  orchestrator is dispatched first, it blocks the kickoff card with its own
+  id, as the body allows in that one case. Post the missing comments, then
+  ask the operator to unblock it with an explicit reason, as for 4b-1.
 - **On the review gate's APPROVE, build the WHOLE release chain in one go:**
   - Publish, DEV deploy, DEV finalizer and the acceptance gate. Use the same
     four cards and bodies as scripting-4b-2 round 7's (`t_b44ceed9`,
@@ -73,10 +83,20 @@ anything yourself.
 - **Your tools:** only `kanban_*`.
 - **`OPERATOR BLOCK:`** This body quotes that prefix for the gates it
   describes. **Never use it in a block or comment of your own.**
-- **Blocking:** **never call `kanban_block` without an explicit `task_id`,
-  and never block this card.**
-- **Titles and bodies:** use every title and body below **exactly as
-  written**. Do not invent titles: the guard refuses them.
+- **Blocking:** **never call `kanban_block` without an explicit `task_id`.**
+  **Never block this card, with one exception:** the missing-comments case
+  below. There, and only there, you block this card, passing **its own id**
+  as `task_id`.
+- **Exact wording:** these are copied **character for character**:
+  - every card title;
+  - every text shown in backticks or quoted as "Body exactly";
+  - the review card's opening line;
+  - the gate's block reason.
+
+  Do not invent titles: the guard refuses them.
+  **Everything else under a card is a list of what its body must contain.**
+  Write it in full, leaving nothing out, but the wording is yours. The spec
+  reference, the hash check and the requirements section are copied whole.
 - **Bodies go in each card's body field when you create it,** never only in a
   comment. Read each card back; if its body is empty, post the body as its
   first comment while it's `todo`, and never create a second card in its
@@ -87,8 +107,9 @@ anything yourself.
 - the `WORKER-CARD REQUIREMENTS (canonical)` comment;
 - the sentinel id.
 
-If you are dispatched before all three are on this card, block with
-`kind="needs_input"` and do nothing else.
+If you are dispatched before all three are on this card, call
+`kanban_block(task_id=<this card's id>, kind="needs_input", reason="waiting for: <the missing comments>")`
+and do nothing else. This is the only time you block this card.
 
 #### Where the spec is: in git, by reference
 **You don't read or check the spec.** You have no shell. The front door has
@@ -100,15 +121,16 @@ spec first with:
 
 ```
 git -C /workspace/atrium fetch origin main
-git -C /workspace/atrium show 1837436688b63b0cc622863a10689fbfd9381d85:devtasks/PREBRIEF-signin-sync.md > /tmp/prebrief.md
-sha256sum /tmp/prebrief.md   # must be 8f68b2e78a8a452a9039f4c2b0d687522c3456b04913bc3813c654dba66ae070
+git -C /workspace/atrium show 6220ffef58e4b11c7f5192dba38f6e4b87b22b0e:devtasks/PREBRIEF-signin-sync.md > /tmp/prebrief.md
+sha256sum /tmp/prebrief.md   # must be 10444d771dbd4251318964919a15d0bd303d8fb0b696b6cb4403ab19956465cf
 ```
 
 On a mismatch, the card blocks with `kind="capability"`, quotes both hashes,
 and does not work from a different text.
 
-- **The spec:** `devtasks/PREBRIEF-signin-sync.md`, **FINAL Revision 0
+- **The spec:** `devtasks/PREBRIEF-signin-sync.md`, **FINAL Revision 1
   (2026-10-29)**:
+  - §0: what Revision 1 changed;
   - §1: the problem and the reproduction;
   - §2: verified facts;
   - §3: **the operator's decisions I1–I8, the contract**;
@@ -116,20 +138,23 @@ and does not work from a different text.
   - §5: questions the brief settles;
   - §6: the tests and proofs.
 - **The reproduction script** is on the same commit:
-  `devtasks/harness/checks/signin-sync/repro.mjs`. Usage:
-  `node devtasks/harness/checks/signin-sync/repro.mjs <worktree root>`, after
-  `pnpm install`.
+  `devtasks/harness/checks/signin-sync/repro.mjs`. Usage, after
+  `pnpm install`:
+  `node devtasks/harness/checks/signin-sync/repro.mjs <worktree root> --expect-fixed`.
+  It prints PASS or FAIL for each of six checks and exits 1 on any FAIL. On
+  the base, all six fail.
 - **The worker-card requirements** are a separate comment on this card,
   headed `WORKER-CARD REQUIREMENTS (canonical)`. Card bodies refer to that
   comment by its id; they never point at a host path.
 
 #### Settlement (operator) — do not reopen
-- **Base:** `base_main_sha = 1837436688b63b0cc622863a10689fbfd9381d85`.
+- **Base:** `base_main_sha = 6220ffef58e4b11c7f5192dba38f6e4b87b22b0e`.
   - Workflow branch: **`workflow/signin-sync`**, created from that SHA.
   - Worktree: `/workspace/wt/signin-sync`, made with
-    `git -C /workspace/atrium worktree add -b workflow/signin-sync /workspace/wt/signin-sync 1837436688b63b0cc622863a10689fbfd9381d85`.
-- **Scope:** I1–I7 as written in the spec's §3, with the recommended choice
-  wherever §3 offers an alternative:
+    `git -C /workspace/atrium worktree add -b workflow/signin-sync /workspace/wt/signin-sync 6220ffef58e4b11c7f5192dba38f6e4b87b22b0e`.
+- **Scope:** I1–I7 as written in the spec's §3, **including every Rev 1
+  addition** (§0), with the recommended choice wherever §3 offers an
+  alternative:
   - I4: "what a reload would do", not alternative (b);
   - I6: renewal at half-life, not a longer fixed lifetime.
 
@@ -162,8 +187,9 @@ and does not work from a different text.
    - The brief it writes is the **self-contained contract** for the
      implementation:
      - I1–I7 written out;
-     - every user-facing text exactly (the three notices, "Reload the page",
-       `SIGNED_OUT`'s message and its `codeToReason` sentence);
+     - every user-facing text exactly: the four notices, "Reload the page",
+       "Couldn't sign out. Try again.", `SIGNED_OUT`'s message and its
+       `codeToReason` sentence;
      - I7's log lines exactly;
      - every §6 test and proof;
      - the step list below.
@@ -182,7 +208,7 @@ and does not work from a different text.
 3. **DeepSeek implementation** — assignee `atrium-deepseek`. Title:
    `Implement — signin-sync`.
    - **Its parent MUST be the gate** (step 2), not the brief.
-   - Create it with **`--max-runtime 3h`** (10800 s), passed explicitly.
+   - Create it with **`--max-runtime 4h`** (14400 s), passed explicitly.
    - Its body carries:
      - the spec reference and hash check;
      - the instruction to **read the GLM brief's card, comments included**,
@@ -227,26 +253,42 @@ the new SHA.
    1. **Protocol:** `hello.server.json`'s `signedIn`/`userId` with the
       `if`/`then`/`else` pairing (not in `required`); `SIGNED_OUT` in
       `error.json`; §6.1.
-   2. **Server, identity:** one resolver returning
-      `{ userId, authSessionId }`, with the two existing resolvers as thin
-      wrappers; the auth session id carried to each socket; `signedIn`/
-      `userId` in every `hello`; I7's log lines; §6.2 (a) and (e).
-   3. **Server, logout:** I5 across every world host, pre-hello sockets
-      included; §6.2 (b) and (c).
+   2. **Server, identity:**
+      - one resolver returning `{ userId, authSessionId }`, with the two
+        existing resolvers as thin wrappers;
+      - the auth session id carried to each socket;
+      - `signedIn`/`userId` in every `hello`;
+      - I7's log lines;
+      - §6.2 (a) and (e).
+   3. **Server, logout:**
+      - I5 across every world host, pre-hello sockets included;
+      - final admission re-resolving the sign-in after any wait (Rev 1, M1);
+      - the logout failure contract (Rev 1, M4);
+      - §6.2 (b), (c), (f) and (g).
    4. **Server, renewal:** I6; §6.2 (d).
    5. **Client package:** `AtriumClient` keeps `signedIn`/`userId` from
-      `hello` and adds them to `session:ready`; §6.3.
+      `hello`, resets them on every new connection, and adds them to
+      `session:ready`; §6.3, including one client and two servers (Rev 1,
+      S3).
    6. **App, re-checks:**
       - the new module's `syncAuth()`;
       - `auth.js`'s `me()` with `cache: 'no-store'`;
       - one connect wrapper used by all six sites;
       - `visibilitychange`;
       - the `BroadcastChannel`;
-      - §6.4's `syncAuth`, connect-site, ordering and channel tests.
-   7. **App, after a change:** I3, I4, the notices, `SIGNED_OUT` handling and
-      `codeToReason`; the rest of §6.4; the design-doc line.
-   8. **Full suites, proofs** (p1)–(p6), the repro script's output on the
-      tip, and the handoff.
+      - the other 401 paths through `syncAuth()`, and the auth generation
+        check on late responses (Rev 1, M2);
+      - §6.4's `syncAuth`, connect-site, ordering, channel, 401 and
+        late-response tests.
+   7. **App, after a change:**
+      - I3, I4 and the notices;
+      - `SIGNED_OUT` handling, including the same user (Rev 1, S1);
+      - this tab's own logout (Rev 1);
+      - `codeToReason`;
+      - the rest of §6.4;
+      - the design-doc line.
+   8. **Full suites, proofs** (p1)–(p10), the repro script's
+      `--expect-fixed` output on the tip, and the handoff.
 
    **Each step's report lists the suites run.** **If a run stops partway:**
    block with `kind="needs_input"` once. Use a different kind for a second
@@ -276,6 +318,26 @@ the new SHA.
      - The same user's other auth sessions are untouched.
      - On `SIGNED_OUT`, the client runs `syncAuth()` and **doesn't assume
        signed-out**.
+   - **Admission after a wait re-resolves the sign-in (Rev 1, M1).** On the
+     home and public routes' `pendingCreations` paths, the identity used for
+     both the admission check and the admitted socket is the one resolved
+     when the wait ends.
+     - There is no `await` and no callback boundary between that resolution
+       and the socket being findable by the logout sweep.
+     - Capturing the identity before the wait is the bug, not a shortcut.
+   - **A failed session deletion is a failed logout (Rev 1, M4):**
+     - the reply is 500;
+     - no cookie is cleared and no socket is closed;
+     - the log line has no ids.
+
+     Zero rows deleted is a success.
+   - **Every 401 goes through `syncAuth()`** (Rev 1, M2). No path calls
+     `setAuthState(null)` directly except the logout button. Responses that
+     started under an earlier auth generation are ignored, a 401 included.
+   - **`SIGNED_OUT` with the same user still reconnects** (Rev 1, S1).
+   - **This tab's own logout:** while it is in flight, a `SIGNED_OUT` on its
+     own sockets is expected: no `syncAuth()` and no notice. On a 500, the
+     tab stays signed in and connected and posts nothing.
    - **I6 renews only below half-life,** re-setting the cookie with the same
      attributes. An expired session gets 401 and is not renewed.
    - **No cookie value and no auth session id in any log line.**
@@ -283,11 +345,10 @@ the new SHA.
    - **App tests use the strict DOM fake,** and `dataset` is never assigned
      (scripting-4b-2 round 5's V1 and V12).
 3. **The handoff includes:**
-   - every proof, (p1)–(p6), each with its failing test names; (p4) is run
+   - every proof, (p1)–(p10), each with its failing test names; (p4) is run
      once for **each** of the six connect sites;
-   - the repro script's full output on the tip. After logout, the old socket
-     is **closed**, and `hello`'s keys include `signedIn` (and `userId` when
-     signed in);
+   - the repro script's full `--expect-fixed` output on the tip: **all six
+     checks PASS, exit 0**;
    - what canonical requirement §2 asks: the per-file counts with their
      commands and exit codes, and the Node version.
 
@@ -297,7 +358,15 @@ the new SHA.
    - Either the break is wrong (fix the break) or the test is weak
      (strengthen it).
    - **The reviewer reproduces every proof itself,** and runs the repro
-     script on the tip itself.
+     script with `--expect-fixed` on the tip itself.
+   - **The reviewer writes its own held-load check** (Rev 1, M1), rather than
+     trusting 6.2(f):
+     - hold a home world's load, log out, release it, and confirm the
+       upgrade is refused;
+     - the same for a public world, which must be admitted with
+       `signedIn: false`.
+   - **The reviewer reads every path in `world-registry.js` that ends in
+     `handleUpgrade`** for a captured identity used after a wait.
    - **The reviewer greps `apps/client/src` for every `client.connect` and
      `trackConnect` call** and confirms each goes through the guard.
    - **The reviewer reads every `hello` the server can send** for the new
@@ -325,7 +394,7 @@ Report every task id, and confirm each of the following:
   hash you copied from the front door's comment, **in their body fields**;
 - the brief-review gate's parent, and its `blocked`/no-runs state;
 - the implementation card's parent is the gate, and its `max-runtime` is
-  10800 s;
+  14400 s;
 - the review card's opening line;
 - the review gate creates nothing and blocks on APPROVE;
 - the review gate is linked to this round's sentinel.
