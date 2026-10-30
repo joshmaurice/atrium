@@ -19,7 +19,8 @@
         "UNKNOWN_MESSAGE",
         "WORLD_UNAVAILABLE",
         "WORLD_NOW_PRIVATE",
-        "SESSION_CONFLICT"
+        "SESSION_CONFLICT",
+        "SIGNED_OUT"
       ]
     },
     "seq": { "type": "integer", "minimum": 0 },

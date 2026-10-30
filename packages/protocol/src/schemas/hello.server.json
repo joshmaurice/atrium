@@ -14,6 +14,8 @@
     "displayName": { "type": "string", "description": "Server-assigned display name (pre-brief #9)" },
     "canPlaceTeleporters": { "type": "boolean", "description": "True when this session may place teleporter pads (world owner, policy permits owner mutation)" },
     "canEdit": { "type": "boolean", "description": "True when this session may edit the world (world owner, policy permits owner mutation)" },
+    "signedIn": { "type": "boolean", "description": "signin-sync I1 — true when the server admitted this socket as a signed-in user. Present in every hello this server sends; NOT required, because a client may talk to another or older Atrium server. Absent means unknown, never anonymous." },
+    "userId": { "type": "string", "minLength": 1, "description": "signin-sync I1 — the admitted user's id, present exactly when signedIn is true" },
     "scriptHost": { "type": "boolean", "description": "scripting-4b-1 E4/E5 — true when this session holds the world's script-host role" },
     "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "scripting-4b-1 E5 — the host generation, present exactly when scriptHost is true" },
     "capabilities": {
@@ -34,8 +36,17 @@
       "additionalProperties": false
     }
   },
-  "if": { "required": ["scriptHost"], "properties": { "scriptHost": { "const": true } } },
-  "then": { "required": ["hostGen"] },
-  "else": { "not": { "required": ["hostGen"] } },
+  "allOf": [
+    {
+      "if": { "required": ["scriptHost"], "properties": { "scriptHost": { "const": true } } },
+      "then": { "required": ["hostGen"] },
+      "else": { "not": { "required": ["hostGen"] } }
+    },
+    {
+      "if": { "required": ["signedIn"], "properties": { "signedIn": { "const": true } } },
+      "then": { "required": ["userId"] },
+      "else": { "not": { "required": ["userId"] } }
+    }
+  ],
   "additionalProperties": false
 }
