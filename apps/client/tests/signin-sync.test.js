@@ -22,6 +22,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createAuthSync, NOTICE, AUTH_CHANNEL, SYNC_TIMEOUT_MS } from '../src/auth-sync.js'
+import { computeWsUrl, sameOriginAsAccount } from '../src/wsUrl.js'
 import { el } from './strict-element.mjs'
 import * as authJs from '../src/auth.js'
 import { codeToReason } from '../src/teleport-failure.js'
@@ -271,6 +272,26 @@ describe('§6.4 I3 — the backstop comparison', () => {
     })
     assert.equal(result, null)
     assert.equal(calls.me, 0)
+  })
+
+  // signin-sync r2 J3 — with `accountWsBase` exactly as app.js computes it,
+  // the page's own origin is same-origin, so I3's comparison runs. Round 1's
+  // helper compared a converted world origin with a raw `wss:` base and was
+  // always false, so no comparison ran at all.
+  test('J3 — a same-origin session:ready runs I3 with accountWsBase as app.js computes it', async () => {
+    const accountWsBase = computeWsUrl({
+      protocol: 'https:', host: '127.0.0.1:8443', pathname: '/apps/client/local.html',
+    })
+    const worldUrl = 'wss://127.0.0.1:8443/worlds/alice/home'
+    const sameOrigin = sameOriginAsAccount(worldUrl, accountWsBase)
+    assert.equal(sameOrigin, true, "the page's own origin is same-origin")
+
+    const { sync, calls } = makeSync({ user: alice, connected: true, me: async () => alice })
+    await sync.handleSessionReady({ sameOrigin, signedIn: true, userId: bob.id, displayName: 'Bob' })
+
+    assert.equal(calls.me, 1, 'I3 ran the comparison')
+    assert.deepEqual(calls.notices, [NOTICE.RELOAD('Bob', 'Alice')],
+      'hello says bob, the page says alice: the reload notice shows')
   })
 })
 

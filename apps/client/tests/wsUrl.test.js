@@ -332,6 +332,40 @@ describe('sameOriginAsAccount', () => {
   test('null worldUrl → false', () => {
     assert.equal(sameOriginAsAccount(null, 'https://example.com'), false)
   })
+
+  // signin-sync r2 J3 — the account base is a wss: URL, as app.js passes it.
+  describe('J3 — a wss: account base (computeWsUrl(location))', () => {
+    // Exactly what app.js computes for an https: page.
+    const accountWsBase = computeWsUrl({
+      protocol: 'https:', host: '127.0.0.1:8443', pathname: '/apps/client/local.html',
+    })
+
+    test('computeWsUrl gives the wss: account base app.js passes', () => {
+      assert.equal(accountWsBase, 'wss://127.0.0.1:8443/apps/client/local.html')
+    })
+
+    test('the page’s own world is same-origin', () => {
+      assert.equal(sameOriginAsAccount('wss://127.0.0.1:8443/worlds/a/home', accountWsBase), true)
+    })
+
+    test('a different port is not', () => {
+      assert.equal(sameOriginAsAccount('wss://127.0.0.1:8444/', accountWsBase), false)
+    })
+
+    test('a ws: world against an https: account is false (mixed schemes)', () => {
+      assert.equal(sameOriginAsAccount('ws://127.0.0.1:8443/world', 'https://127.0.0.1:8443'), false)
+    })
+
+    test('a ws: world against an http: account is true', () => {
+      assert.equal(sameOriginAsAccount('ws://127.0.0.1:8443/world', 'http://127.0.0.1:8443'), true)
+    })
+
+    test('garbage is false', () => {
+      assert.equal(sameOriginAsAccount('not a url', accountWsBase), false)
+      assert.equal(sameOriginAsAccount('wss://127.0.0.1:8443/worlds/a/home', 'garbage'), false)
+      assert.equal(sameOriginAsAccount(undefined, undefined), false)
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

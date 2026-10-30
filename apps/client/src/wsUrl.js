@@ -104,23 +104,50 @@ export function httpOriginToWsOrigin(urlStr) {
 }
 
 /**
+ * Reduce any URL to its http(s) origin, whatever scheme it uses.
+ *
+ * signin-sync r2 J3 — the two sides are normalised the SAME way: a ws:/wss:
+ * URL becomes http:/https: through the existing `wsOriginToHttpOrigin`, and
+ * an http:/https: one is used as it is. `app.js` passes
+ * `computeWsUrl(location)`, a `wss:` URL, as the account base, so comparing a
+ * converted world origin against a raw `wss:` account origin was always
+ * false. Anything that is not http(s) after conversion, and anything
+ * unparseable, is null.
+ *
+ * @param {string|null} urlStr
+ * @returns {string|null} e.g. 'https://127.0.0.1:8443', or null
+ */
+function httpOriginOf(urlStr) {
+  if (!urlStr) return null
+  const converted = AtriumClient.wsOriginToHttpOrigin(urlStr)
+  if (!converted) return null
+  try {
+    const parsed = new URL(converted)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    return parsed.origin
+  } catch {
+    return null
+  }
+}
+
+/**
  * Determine whether a world URL's HTTP origin matches the account server's
  * HTTP origin. Used by T7: only send displayName to the account server.
  *
+ * signin-sync r2 J3 — BOTH arguments are normalised the same way, so the
+ * helper works whatever schemes the caller passes. `app.js` passes
+ * `accountWsBase` (`computeWsUrl(location)`, a `wss:` URL) at all six of its
+ * call sites, and I3 and I4 use it too: all of them are fixed here.
+ *
  * @param {string} worldUrl — a full ws:// or wss:// URL
- * @param {string} accountOrigin — the account server's http(s) origin
+ * @param {string} accountOrigin — the account server's origin, ws(s):// or http(s)://
  * @returns {boolean}
  */
 export function sameOriginAsAccount(worldUrl, accountOrigin) {
-  const worldHttp = AtriumClient.wsOriginToHttpOrigin(worldUrl)
-  if (!worldHttp) return false
-  try {
-    const wo = new URL(worldHttp)
-    const ao = new URL(accountOrigin)
-    return wo.origin === ao.origin
-  } catch {
-    return false
-  }
+  const worldHttp = httpOriginOf(worldUrl)
+  const accountHttp = httpOriginOf(accountOrigin)
+  if (!worldHttp || !accountHttp) return false
+  return worldHttp === accountHttp
 }
 
 /**
