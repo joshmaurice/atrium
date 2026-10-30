@@ -1,0 +1,23 @@
+diff --git a/host/lib/atrium_host/buildrun.py b/host/lib/atrium_host/buildrun.py
+index 675eb85..b5b76ae 100644
+--- a/host/lib/atrium_host/buildrun.py
++++ b/host/lib/atrium_host/buildrun.py
+@@ -42,7 +42,7 @@ n=$( { find node_modules/.pnpm -xdev -type f 2>/dev/null || true; } | wc -l)
+ echo "install check: $n package files, each with a single link; store is the build store"
+ """])
+ 
+-# The test list, in order (from atrium-deploy as of 2026-10-14). Each entry's
++# The test list, in order (from atrium-deploy as of 2026-10-14; behaviors added 2026-10-30). Each entry's
+ # first value is its RuntimeMaxSec; the per-file server timeouts stay inside.
+ TESTS = [
+     ("protocol", 300, [PNPM, "--filter", "@atrium/protocol", "test"]),
+@@ -59,6 +59,9 @@ done
+                      "node --test --test-force-exit tests/*.test.js"]),
+     ("renderer-three", 300, [PNPM, "--filter", "@atrium/renderer-three", "test"]),
+     ("interaction", 300, [PNPM, "--filter", "@atrium/interaction", "test"]),
++    # Host round 2026-10-30 (scripting-4b-2 round 5's S4): the behaviour adapter,
++    # runner and rule (packages/behaviors), 132 tests at ab02239b.
++    ("behaviors", 300, [PNPM, "--filter", "@atrium/behaviors", "test"]),
+     ("apps-client", 300, ["/bin/bash", "-c", "cd apps/client && exec node --test tests/*.test.js"]),
+ ]
+ TEST_NAMES = [t[0] for t in TESTS]

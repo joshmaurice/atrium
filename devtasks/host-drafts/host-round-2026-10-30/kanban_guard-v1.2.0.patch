@@ -1,0 +1,191 @@
+--- kanban_guard.py.v1.1.4
++++ kanban_guard.py
+@@ -15,6 +15,12 @@
+   - Tasks without max_runtime_seconds get a cap; stage tasks, gates,
+     finalizers and sentinels get max_retries=1 (set after creation, since the
+     kanban_create tool cannot pass it).
++  - v1.2.0 (host round 2026-10-30, signin-sync passdown §4.3): a card created on a
++    guarded board WITHOUT a parent (anything but a "Kickoff — <slug>" card) is created
++    blocked, so the dispatcher can never claim it before its parents are linked; the
++    first kanban_link that gives it a parent releases it to todo. And the argument
++    KEYS (never values) of every kanban_create / kanban_complete are logged, to find
++    where bodies, runtime caps and summaries are being dropped.
+   - v1.1.4: sentinel auto-link only for review/revision gates; a human gate may not be
+     linked as a sentinel's parent; blocked "acceptance"/"approval" gates must use the
+     canonical titles; notes on own-card scope for block/complete, and on the
+@@ -50,6 +56,9 @@
+ FOOTER_MARK = "Operating notes for this task (added automatically; your instructions above are complete):"
+ OLD_FOOTER_MARKS = ("[atrium-kanban-guard]",)  # v1.0.0/1.0.1 footer; never add a second footer
+ APPROVAL_PREFIX = "HUMAN APPROVAL:"
++NO_PARENT_NOTE = ("- This card was created without a parent, so the guard created it blocked: nothing "
++                  "runs it until a parent is linked. Linking its parent with kanban_link releases it.")
++_KICKOFF = re.compile(r"^\s*kickoff\b", re.I)
+ 
+ # stage: (canonical title, required assignee, atrium_deploy action, cap minutes, human gate)
+ STAGES = {
+@@ -145,7 +154,7 @@
+         return None
+ 
+ 
+-def _with_footer(body, cap_min, finalizer=False, assignee=""):
++def _with_footer(body, cap_min, finalizer=False, assignee="", no_parent=False):
+     """Append plain-prose operating notes. v1.0.2: no bracketed tag or separator,
+     which a fast model misread as a truncation marker and then kept re-fetching."""
+     if FOOTER_MARK in body or any(m in body for m in OLD_FOOTER_MARKS):
+@@ -182,6 +191,8 @@
+     if assignee == ORCH:
+         lines.append("- A child task titled \"... sentinel\" is the workflow's completion notifier, "
+                      "linked to gates and finalizers on purpose. It is not work left by an earlier run.")
++    if no_parent:
++        lines.append(NO_PARENT_NOTE)
+     if finalizer:
+         lines.append("- Verify only from the parent task's handoff (deployed SHA, health results). "
+                      "Do not probe host services, files, or logs from the sandbox; if the handoff "
+@@ -213,6 +224,46 @@
+     return {"action": "block", "message": "atrium-kanban-guard: " + msg}
+ 
+ 
++def _parents(args):
++    """The parent ids a kanban_create call passes: a list, or a comma/space separated string."""
++    raw = args.get("parents")
++    if raw is None:
++        raw = args.get("parent")
++    if isinstance(raw, str):
++        raw = re.split(r"[\s,]+", raw)
++    if not isinstance(raw, (list, tuple)):
++        return []
++    return [str(p).strip() for p in raw if str(p or "").strip()]
++
++
++def _needs_parent_hold(args):
++    """v1.2.0: True when this create has no parent and isn't a kickoff (the only root card)."""
++    return not _parents(args) and not _KICKOFF.match(str(args.get("title") or ""))
++
++
++def _hold_mods(args, mods):
++    """v1.2.0: create a parentless card blocked. A card the caller already creates blocked
++    (a human gate) keeps that and is never released by a link."""
++    if not _needs_parent_hold(args):
++        return mods
++    if str(args.get("initial_status") or "") != "blocked":
++        mods["initial_status"] = "blocked"
++    _log({"event": "no_parent_hold", "title": str(args.get("title") or "")[:120],
++          "assignee": args.get("assignee"),
++          "caller_blocked": str(args.get("initial_status") or "") == "blocked"})
++    return mods
++
++
++def _arg_keys_log(tool_name, args):
++    """v1.2.0 diagnostics: which argument KEYS arrived (never their values), plus sizes."""
++    _log({"event": "args", "tool": tool_name, "keys": sorted(str(k) for k in args),
++          "body_chars": len(str(args.get("body") or "")),
++          "summary_chars": len(str(args.get("summary") or "")),
++          "result_chars": len(str(args.get("result") or "")),
++          "parents": len(_parents(args)),
++          "max_runtime_seconds": _cap_arg(args)})
++
++
+ def _check_create(board, args):
+     title = str(args.get("title") or "")
+     body = str(args.get("body") or "")
+@@ -249,7 +300,10 @@
+         cap_s = max(given or 0, _default_cap_min(assignee, title) * 60)
+         if given and given < cap_s:
+             _log({"event": "cap_raised", "title": title[:120], "given": given, "set": cap_s})
+-        mods = {"body": _with_footer(body, cap_s // 60, assignee=assignee), "max_runtime_seconds": cap_s}
++        mods = {"body": _with_footer(body, cap_s // 60, assignee=assignee,
++                                     no_parent=_needs_parent_hold(args)),
++                "max_runtime_seconds": cap_s}
++        mods = _hold_mods(args, mods)
+         _log({"event": "modify", "title": title[:120], "assignee": assignee, "keys": sorted(mods)})
+         return {"action": "modify", "args": mods}
+ 
+@@ -293,8 +347,10 @@
+     if given and given < cap_s:
+         _log({"event": "cap_raised", "stage": stage, "given": given, "set": cap_s})
+     mods = {"title": f"{canon} — {sha8}", "idempotency_key": f"atrium:{stage}:{sha}",
+-            "body": _with_footer(body, cap_s // 60, finalizer=(stage == "dev-finalize"), assignee=assignee),
++            "body": _with_footer(body, cap_s // 60, finalizer=(stage == "dev-finalize"), assignee=assignee,
++                                 no_parent=_needs_parent_hold(args)),
+             "max_runtime_seconds": cap_s}
++    mods = _hold_mods(args, mods)
+     _log({"event": "modify", "stage": stage, "sha": sha, "assignee": assignee, "keys": sorted(mods)})
+     return {"action": "modify", "args": mods}
+ 
+@@ -389,13 +445,17 @@
+         except Exception as exc:  # fail open; the host release state machine still applies
+             _log({"event": "error", "tool": tool_name, "error": repr(exc)})
+             return None
+-    if tool_name not in ("kanban_create", "kanban_unblock", "kanban_link"):
++    if tool_name not in ("kanban_create", "kanban_unblock", "kanban_link", "kanban_complete"):
+         return None
+     args = args if isinstance(args, dict) else {}
+     try:
+         board = _board(args)
+         if board not in GUARDED_BOARDS:
+             return None
++        if tool_name in ("kanban_create", "kanban_complete"):
++            _arg_keys_log(tool_name, args)
++        if tool_name == "kanban_complete":
++            return None   # v1.2.0: logged only, never changed
+         if tool_name == "kanban_create":
+             return _check_create(board, args)
+         if tool_name == "kanban_link":
+@@ -407,6 +467,15 @@
+ 
+ 
+ def post_tool_call(tool_name=None, args=None, result=None, **kwargs):
++    if tool_name == "kanban_link":
++        try:
++            args = args if isinstance(args, dict) else {}
++            board = _board(args)
++            if board in GUARDED_BOARDS:
++                _release_held(board, str(args.get("child_id") or "").strip())
++        except Exception as exc:
++            _log({"event": "error", "tool": "post_kanban_link", "error": repr(exc)})
++        return None
+     if tool_name != "kanban_create":
+         return None
+     try:
+@@ -436,6 +505,41 @@
+     return None
+ 
+ 
++def _is_gate_title(title):
++    """A human gate or an operator gate: never released by a link (they stay blocked)."""
++    stage, _ = _match_stage(title)
++    return bool(stage and STAGES[stage][4]) or "OPERATOR BLOCK" in (title or "").upper()
++
++
++def _release_held(board, child):
++    """v1.2.0: a card this guard created blocked for want of a parent goes to todo once it
++    has one. Released only when ALL hold: it was created blocked with no parents; its body
++    carries NO_PARENT_NOTE (so the guard, not the caller, made it blocked); it is still
++    blocked with no later block event and no run; it now has a parent; it isn't a gate."""
++    if not child:
++        return
++    from hermes_cli import kanban_db as kb
++    with _connect(board) as conn:
++        row = conn.execute("SELECT title, status, body FROM tasks WHERE id = ?", (child,)).fetchone()
++        if not row or row[1] != "blocked" or _is_gate_title(row[0]) or NO_PARENT_NOTE not in str(row[2] or ""):
++            return
++        if not conn.execute("SELECT 1 FROM task_links WHERE child_id = ? LIMIT 1", (child,)).fetchone():
++            return
++        events = conn.execute("SELECT kind, payload FROM task_events WHERE task_id = ? ORDER BY id",
++                              (child,)).fetchall()
++        kinds = [e[0] for e in events]
++        try:
++            created = json.loads(events[0][1] or "{}") if events and events[0][0] == "created" else {}
++        except Exception:
++            created = {}
++        if created.get("status") != "blocked" or created.get("parents"):
++            return
++        if "blocked" in kinds or "claimed" in kinds or "unblocked" in kinds:
++            return   # someone blocked it since, it has run, or it was released already
++        released = bool(kb.unblock_task(conn, child))
++    _log({"event": "no_parent_released", "task_id": child, "released": released})
++
++
+ def _link_sentinel(board, new_tid, title, assignee):
+     """Make the workflow's single open sentinel wait on a newly created gate/finalizer."""
+     stage, _ = _match_stage(title)

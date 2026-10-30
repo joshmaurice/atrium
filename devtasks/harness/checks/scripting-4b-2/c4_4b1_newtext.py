@@ -64,7 +64,11 @@ with sync_playwright() as pw:
     b.ev("() => { window.__log.length = 0 }"); a.ev("() => { window.__log.length = 0 }")
     # The app's Connect button disconnects first, so it isn't supersession; a teleport
     # calls client.connect() on the live connection, which this does directly.
-    b.ev("(u) => { atriumClient.connect(u, { avatar: atriumClient._avatarDescriptor }) }", W2)
+    # scripting-4c: the app's every connect goes through connectNow, which passes
+    # `scriptRunner` on a same-origin connection (AC6); a direct client.connect() without it
+    # sends no scriptRunner and is never elected, so this stand-in passes it as connectNow does.
+    # (A base client ignores the option.)
+    b.ev("(u) => { atriumClient.connect(u, { avatar: atriumClient._avatarDescriptor, scriptRunner: true }) }", W2)
     b.wait("() => atriumClient.connected && atriumClient.som", timeout=15000); b.page.wait_for_timeout(800)
     print('C5 B event order', b.ev('__log'))
     a.wait("() => document.getElementById('ep-host-status').textContent === 'Script host: this tab (behaviours run here)'", timeout=10000)

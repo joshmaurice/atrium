@@ -1,5 +1,5 @@
 import re, os, sys, difflib
-B, R = '/tmp/reg/base', '/tmp/reg/r2'
+B, R = (sys.argv[1], sys.argv[2]) if len(sys.argv) > 2 else ('/tmp/reg/base', '/tmp/reg/r2')
 def norm(t):
     t = re.sub(r'GL Driver Message.*', '', t)
     t = re.sub(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', 'UUID', t)
