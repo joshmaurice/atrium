@@ -73,7 +73,7 @@ STAGES = {
 APPROVAL_GATE_FOR = {"main": "dev-accept", "prod-deploy": "prod-approval"}
 _STAGE_RES = [
     (stage, re.compile(r"^\s*" + r"\s+".join(map(re.escape, spec[0].split()))
-                       + r"\s*[—–-]\s*(?P<sha8>[0-9a-fA-F]{8})\s*$", re.I))
+                       + r"\s*[\u2014\u2013-]\s*(?P<sha8>[0-9a-fA-F]{8})\s*$", re.I))
     for stage, spec in STAGES.items()]
 _SHA40 = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{40}(?![0-9A-Za-z])")
 _ACTION = re.compile(r"""action\s*[=:]\s*["']?(publish|dev|main|prod)\b""", re.I)
