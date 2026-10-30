@@ -1,9 +1,9 @@
 # Host round 2026-10-30: the small host round before 4c's kickoff
 
 Status: **INSTALLED on the VPS (2026-10-30, about 08:23 UTC)** by the
-operator, with steps A–C below. Open: item 4's memory limit (the operator's
-choice) and step D (the first orchestrator run's `args` lines). Neither
-holds up 4c's kickoff. A short brief, not a pipeline round: no kickoff, no
+operator, with steps A–C below. Item 4's memory limit applied the same
+day (§5). Open: step D (the first orchestrator run's `args` lines), which
+doesn't hold up 4c's kickoff. A short brief, not a pipeline round: no kickoff, no
 cards, no GLM.
 - **The result:** step B printed `INSTALLED.`, with every baseline matched
   first. Five guard copies are at v1.2.0 (`644`, `plugin.yaml` 1.2.0),
@@ -205,6 +205,26 @@ v1.2.0's `d14f7b85…`. The 12 tests and the seven breaks were re-run on it.
      It's in the container's environment, so it needs a container recreate.
      Recommended later, not in this round.
 
+- **Applied (2026-10-30, about 08:30 UTC):**
+  - **Where the 5 GiB came from:** the container already had a 5 GiB limit
+    (`5368709120`, created 2026-09-29, `restart=no`, not compose). It came
+    from Hermes's own `container_memory: 5120` (MiB), set in
+    `/root/.hermes/config.yaml` and in each of the five profiles' configs.
+    All profiles share the one persistent container (`container_persistent:
+    true`). It sits above the RAM, so it never applied.
+  - **The change:** all six lines now say `container_memory: 2600`, so a
+    recreated container gets the cap. The running one was capped with
+    `docker update --memory 2600m --memory-swap 3600m`, giving
+    `memory=2726297600 swap=3774873600`. No agent run was in progress
+    (`kanban_list running`: none).
+  - **Backups:** `/root/host-round-2026-10-30-backup/hermes-config/`. To
+    undo, copy the backups back and run `docker update --memory 5120m
+    --memory-swap 10240m hermes-c6b7f940`.
+  - **Not covered:** Hermes has no swap setting, so a recreated container
+    gets Docker's default swap.
+  - **Noticed in passing:** `container_cpu: 1`. The agents' container gets one
+    CPU, which may explain slow proof runs. Unchanged.
+
 ## 6. Operator steps
 Every block is self-contained, and each is also a file in the drafts folder.
 **Check what each step says to check before running the next.** Steps B, C
@@ -341,10 +361,12 @@ sha256sum /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py /usr/
 - [x] Step B printed `INSTALLED.` (2026-10-30).
 - [x] Step C: the content match on both health lines, eight test names,
   `modify blocked True`.
-- [ ] Item 4's memory limit decided (applied or declined).
+- [x] Item 4's memory limit applied (2026-10-30, §5): the Hermes container at
+  2,600 MiB plus 1,000 MiB swap, and `container_memory: 2600` in all six
+  Hermes configs.
 - [ ] Step D: the first orchestrator run's `args` lines pasted, and the
   dropped-fields diagnosis written from them.
-- [ ] A fresh front-door session (`/new`), so it loads v1.2.0.
+- [x] A fresh front-door session (`/new`), so it loads v1.2.0.
 - [ ] `atrium-ops`: `claude/host-round-2026-10-30` merged, or kept as the
   record (it's pushed, at `61c1d01` or later).
 
