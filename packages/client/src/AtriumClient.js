@@ -221,6 +221,13 @@ export class AtriumClient extends EventEmitter {
     this._worldReady = false
     this.canPlaceTeleporters = false
     this.canEdit = false
+    // signin-sync I1 — who the server admitted, from `hello`: `this.signedIn`
+    // is true/false, `undefined` when the server did not say (an older or
+    // another server) — unknown, NEVER anonymous. `this.userId` is the
+    // admitted user's id, present exactly when the server said signedIn true.
+    // The app compares `userId`, never the display name.
+    this.signedIn = undefined
+    this.userId = undefined
     this._transmitName = null
 
     // 4b-1 E6 — the script-host role this client believes it holds. Set ONLY
@@ -625,6 +632,11 @@ export class AtriumClient extends EventEmitter {
     this._worldReady = false
     this.canPlaceTeleporters = false
     this.canEdit = false
+    // signin-sync I1 — who the server admitted on this connection. Reset on
+    // EVERY new connection, so a second connection can never inherit the first
+    // one's identity. `undefined` means unknown, never anonymous.
+    this.signedIn = undefined
+    this.userId = undefined
 
     // ---- Create new session identity ----
     const sessionId      = globalThis.crypto.randomUUID()
@@ -802,6 +814,9 @@ export class AtriumClient extends EventEmitter {
       this._worldReady = false
       this.canPlaceTeleporters = false
       this.canEdit = false
+      // signin-sync I1 — no connection, no admission: back to unknown.
+      this.signedIn = undefined
+      this.userId = undefined
       // A3 — a socket close ends the connection with any pending edit.
       this._resolveAllPendingAsUnknown(record)
       this.emit('disconnected', {
@@ -857,6 +872,9 @@ export class AtriumClient extends EventEmitter {
         this._connected = false
         this._wsUrl = null
         this.canEdit = false
+        // signin-sync I1 — back to unknown.
+        this.signedIn = undefined
+        this.userId = undefined
         // A3 — a connect timeout ends the connection with any pending edit.
         this._resolveAllPendingAsUnknown(record)
         // 4) Close the socket (which may fire error/close later)
@@ -919,6 +937,9 @@ export class AtriumClient extends EventEmitter {
     this._worldReady = false
     this.canPlaceTeleporters = false
     this.canEdit = false
+    // signin-sync I1 — no connection, no admission: back to unknown.
+    this.signedIn = undefined
+    this.userId = undefined
     this._clearPointerState()
 
     // A3 — every pending edit on this connection becomes edit:unknown at once.
@@ -1082,6 +1103,15 @@ export class AtriumClient extends EventEmitter {
     this.canPlaceTeleporters = msg.canPlaceTeleporters === true
     this.canEdit = msg.canEdit === true
 
+    // signin-sync I1 — who the server admitted. `signedIn` absent means
+    // UNKNOWN (`undefined`), never `false`; `userId` is kept exactly when the
+    // server said signedIn true, and is never inherited from an earlier
+    // connection (connect() resets both).
+    this.signedIn = typeof msg.signedIn === 'boolean' ? msg.signedIn : undefined
+    this.userId = (this.signedIn === true && typeof msg.userId === 'string')
+      ? msg.userId
+      : undefined
+
     // 4b-1 E6 — the role from `hello`, read with E5's rules and AFTER canEdit
     // is set, so ONE listener covers both `hello` and `script-host`. A hello
     // that fails is treated as inactive and logged once.
@@ -1102,6 +1132,10 @@ export class AtriumClient extends EventEmitter {
       url:         this._wsUrl,
       canPlaceTeleporters: this.canPlaceTeleporters,
       canEdit:     this.canEdit,
+      // signin-sync I1 — who the server admitted for THIS connection.
+      // `undefined` means the server didn't say: unknown, never anonymous.
+      signedIn:    this.signedIn,
+      userId:      this.userId,
     })
   }
 
