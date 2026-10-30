@@ -805,6 +805,58 @@ test('AC3/S1: a handover forwards to exactly one OPEN socket, and only to a READ
   }
 })
 
+test('AC3/S1/W6: the handover skips an EARLIER scriptRunner: 1 owner and goes to B (g2 half 2)', async () => {
+  // Outside review's (g2) half 2, taken into this round as W6: the round-1 test
+  // had the legacy owner AFTER the capable one, so the map order never put it in
+  // the way. Here the order is A (the host), then the legacy owner, then B — so
+  // a handover that accepted `scriptRunner: 1` would elect the legacy owner.
+  const { world, port, sessions } = await startWorld()
+  addNodes(world, [behaviourNode('Switch')])
+  const a = await open(port, 'owner-a', { as: OWNER })
+  const legacy = await open(port, 'legacy-owner', {
+    as: OWNER, capabilities: { tick: { interval: 5000 }, scriptRunner: 1 },
+  })
+  const b = await open(port, 'owner-b', { as: OWNER })
+  const visitor = await open(port, 'visitor-1')
+  try {
+    assert.equal(a.hello.scriptHost, true, 'A is the host')
+    assert.equal(a.hello.hostGen, 1)
+    assert.equal(legacy.hello.scriptHost, false, 'the 4b-2 owner is never the host')
+    assert.equal(b.hello.scriptHost, false, 'and B is not the host while A holds the role')
+    assert.deepEqual([...sessions.keys()], ['owner-a', 'legacy-owner', 'owner-b', 'visitor-1'],
+      'the legacy owner really is EARLIER in the session map than B')
+    a.ready(); await a.barrier()
+    await placeAvatar(port, sessions, visitor, [0, 0, 1])
+    legacy.forget(); b.forget()
+
+    // A closes: the role goes to B, the first session at or after the legacy
+    // owner that is actually eligible.
+    a.ws.close()
+    await waitForClose(a.ws)
+    const handed = await b.next((m) => m.type === 'script-host' && m.active === true)
+    assert.ok(handed, 'B is granted the role')
+    assert.equal(handed.hostGen, 2, 'with hostGen + 1')
+
+    // The legacy owner hears nothing at all — not then, and not later.
+    assert.deepEqual(legacy.of('script-host'), [],
+      'a scriptRunner: 1 owner receives no `script-host`, even when it is the earlier session')
+    await delay(120)
+    assert.deepEqual(legacy.of('script-host'), [], 'and no late `script-host` arrives')
+
+    // B says it is ready: the next activate is forwarded to B under generation 2.
+    b.ready(2)
+    await b.barrier()
+    visitor.activate('Switch')
+    assert.ok(await b.next(isActivateFor('Switch', 'visitor-1', 2)),
+      'the world is served by B, not by the legacy owner')
+    assertNothingForwarded(legacy, 'and the legacy owner is never forwarded to')
+  } finally {
+    await visitor.close()
+    await legacy.close()
+    await b.close()
+  }
+})
+
 test('AC3/S1: with no successor the answer is NO_SCRIPT_HOST, never silence', async () => {
   const { world, port, sessions } = await startWorld()
   addNodes(world, [behaviourNode('Switch')])
