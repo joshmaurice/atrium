@@ -44,6 +44,7 @@ import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
 import { withNewObjectId } from './object-identity.js'   // scripting-4b-1 E7
 import { hostStatusText } from './host-status.js'        // scripting-4b-1 E8
+import { createAuthSync, NOTICE } from './auth-sync.js'   // signin-sync I2–I4
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -75,6 +76,7 @@ const authToggleBtn = document.getElementById('auth-toggle-btn')
 const authLogoutBtn = document.getElementById('auth-logout-btn')
 const authUserLabel = document.getElementById('auth-user-label')
 const authError     = document.getElementById('auth-error')
+const authNoticeEl  = document.getElementById('auth-notice')
 const authWebsite   = document.getElementById('auth-website')
 
 // World browser DOM refs
@@ -92,7 +94,12 @@ const wbList        = document.getElementById('wb-list')
 
 let currentUser = null   // { id, username, displayName } or null
 
-function setAuthState(user) {
+/**
+ * The DOM writer for the auth state. It does NOT bump the auth generation:
+ * `setAuthState()` below is the page's only writer after load and it bumps
+ * first, so nothing here can be mistaken for a fresh sign-in.
+ */
+function renderAuthState(user) {
   currentUser = user
   if (user) {
     authLoggedOut.style.display = 'none'
@@ -116,6 +123,42 @@ function setAuthState(user) {
     subbarWorlds.style.display = 'none'
     wbList.innerHTML = ''
   }
+}
+
+// ---------------------------------------------------------------------------
+// signin-sync I2–I4 — the sign-in re-check
+// ---------------------------------------------------------------------------
+
+/**
+ * I4 — the notice line in the top bar. Plain words, visible without opening
+ * anything, and never inside `authError` (the signed-in form hides that one).
+ * It stays until the next sign-in or sign-out in this tab, or until cleared.
+ */
+function showAuthNotice(text) { authNoticeEl.textContent = text || '' }
+function clearAuthNotice()    { authNoticeEl.textContent = '' }
+
+// Every dependency is a closure, so nothing the module holds is read until one
+// of its calls happens. `setAuthState` below is the page's only writer.
+const authSync = createAuthSync({
+  me: () => me(),
+  getCurrentUser: () => currentUser,
+  setAuthState: renderAuthState,
+  showNotice: showAuthNotice,
+  clearNotice: clearAuthNotice,
+  isConnected: () => client.connected === true,
+  connectionIsSameOrigin: () => sameOriginAsAccount(currentWorldUrl || '', accountWsBase),
+  disconnect: () => client.disconnect(),
+  autoConnect: (user) => autoConnectToHomeWorld(user),
+})
+
+/**
+ * I2 — the page's one writer of the auth state after load. It bumps the auth
+ * generation, so a response that started under an earlier sign-in is ignored,
+ * a 401 included. The only callers are syncAuth()'s change handling, the login
+ * and register submit, the logout button, and the load-time check.
+ */
+function setAuthState(user) {
+  authSync.setAuthState(user)
 }
 
 async function handleAuthSubmit() {
@@ -158,6 +201,10 @@ async function handleAuthSubmit() {
 
     setAuthState(result)
 
+    // signin-sync I2 — every tab posts this after its own login or register.
+    // The honeypot branch returned above, so it posts nothing.
+    authSync.postAuthChanged()
+
     // Auto-connect to home world after successful auth.
     if (result && result.id) {
       autoConnectToHomeWorld(result)
@@ -186,15 +233,22 @@ function toggleAuthMode() {
 // ---------------------------------------------------------------------------
 
 async function refreshWorldList() {
+  // signin-sync Rev 1, M2 — note the auth generation this request starts
+  // under. When the response arrives under a different one, it belongs to an
+  // earlier sign-in and is dropped, a 401 included.
+  const gen = authSync.currentGeneration()
   try {
     const res = await fetch('/api/worlds')
+    if (authSync.currentGeneration() !== gen) return
     if (res.status === 401) {
-      // Session expired — hide browser and update auth state
-      setAuthState(null)
+      // Session expired — ask the one re-check. It runs I4's handling (with the
+      // disconnect and the notice); this path never signs the page out itself.
+      authSync.syncAuth()
       return
     }
     if (!res.ok) return
     const worlds = await res.json()
+    if (authSync.currentGeneration() !== gen) return
     renderWorldList(worlds)
   } catch {
     // Network error — leave current list visible
@@ -235,6 +289,14 @@ function renderWorldList(worlds) {
     }
     toggle.addEventListener('change', async () => {
       toggle.disabled = true
+      // signin-sync Rev 1, M2 — the auth generation this request starts under,
+      // and the toggle's state before the click.
+      const gen = authSync.currentGeneration()
+      const wasChecked = !toggle.checked
+      const restore = () => {
+        toggle.checked = wasChecked
+        toggleText.textContent = ' ' + (wasChecked ? 'Public' : 'Private')
+      }
       const newVis = toggle.checked ? 'public' : 'private'
       try {
         const res = await fetch(`/api/worlds/${w.id}`, {
@@ -242,8 +304,18 @@ function renderWorldList(worlds) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ visibility: newVis }),
         })
+        // A response that started under an earlier sign-in is ignored, a 401
+        // included, and the toggle returns to its state before the click.
+        if (authSync.currentGeneration() !== gen) {
+          restore()
+          return
+        }
         if (res.ok) {
           const data = await res.json()
+          if (authSync.currentGeneration() !== gen) {
+            restore()
+            return
+          }
           // Update in-place instead of refreshWorldList()
           toggle.checked = data.visibility === 'public'
           toggleText.textContent = ' ' + (data.visibility === 'public' ? 'Public' : 'Private')
@@ -254,15 +326,18 @@ function renderWorldList(worlds) {
           wbError.textContent = ''
           return
         }
-        // Failure: restore and show error
-        toggle.checked = !toggle.checked
+        // Failure: restore, then let the one re-check decide who we are
+        restore()
         const data = await res.json().catch(() => ({}))
-        wbError.textContent = data.error || "Couldn't change visibility"
         if (res.status === 401) {
-          setAuthState(null)
+          // Rev 1, M2 — every 401 goes through syncAuth(). This path never
+          // signs the page out itself.
+          authSync.syncAuth()
+          return
         }
+        wbError.textContent = data.error || "Couldn't change visibility"
       } catch {
-        toggle.checked = !toggle.checked
+        restore()
         wbError.textContent = "Couldn't change visibility"
       } finally {
         toggle.disabled = isCommons
@@ -627,7 +702,11 @@ function autoConnectToHomeWorld(user) {
   const avatarDesc = buildAvatarDescriptor()
   const connectOpts = { avatar: avatarDesc }
   connectOpts.displayName = user.displayName || user.username
-  client.connect(homeWsUrl, connectOpts)
+  // signin-sync I2 — this is a connect site like the other five: it goes
+  // through the one wrapper, so a change found first cancels it.
+  return trackConnect(homeWsUrl, connectOpts, {
+    onError: (msg) => { console.warn(`[app] home world connect failed: ${msg}`) },
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +814,7 @@ client.on('world:loaded', ({ name, description, author }) => {
   }
 })
 
-client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) => {
+client.on('session:ready', ({ sessionId, displayName, url: connectUrl, signedIn, userId } = {}) => {
   setConnectionState('connected')
   updateHintText()
   // Hide failure panel on successful session
@@ -751,6 +830,20 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl } = {}) =>
   currentWorldUrl = connectUrl || wsUrlInput.value
   // Rebuild pads on session ready (world loaded before session:ready)
   rebuildPads()
+
+  // -------------------------------------------------------------------------
+  // signin-sync I3 — the backstop. On a SAME-ORIGIN connection whose hello
+  // carried `signedIn`, compare what the world admitted with what the page
+  // says. Cross-origin connections and a hello without `signedIn` are never
+  // compared: a hello the server did not annotate means UNKNOWN, never
+  // anonymous.
+  // -------------------------------------------------------------------------
+  authSync.handleSessionReady({
+    sameOrigin: sameOriginAsAccount(currentWorldUrl, accountWsBase),
+    signedIn,
+    userId,
+    displayName,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -844,6 +937,14 @@ client.on('error', (err) => {
       evictionMessage(err.url),
       { showGoBack: false }
     )
+  }
+  // signin-sync I5 — the server closed this socket because the sign-in it was
+  // admitted with signed out. The client does NOT assume it is signed out:
+  // another tab may already have signed back in, so it asks `me()` and I4
+  // applies to whatever the answer is. While this tab's own logout is in
+  // flight, its own SIGNED_OUT is expected and nothing happens here.
+  if (err.code === 'SIGNED_OUT') {
+    authSync.handleSignedOut()
   }
 })
 
@@ -1079,7 +1180,7 @@ viewportEl.addEventListener('drop', async (e) => {
  *   session:ready ({status:'ready', data}) or superseded
  *   ({status:'superseded'}), rejects on error/disconnect
  */
-function trackConnect(wsUrl, connectOpts, { onError } = {}) {
+function connectNow(wsUrl, connectOpts, { onError } = {}) {
   return new Promise((resolve, reject) => {
     const sid = client.connect(wsUrl, connectOpts)
     if (!sid) {
@@ -1136,6 +1237,33 @@ function trackConnect(wsUrl, connectOpts, { onError } = {}) {
     client.on('disconnected', onDisco)
     client.on('connecting', onConnecting)
   })
+}
+
+/**
+ * signin-sync I2 — the ONE connect wrapper. Every connect site goes through
+ * this function (the world list's Load, the teleport trigger, its Go back,
+ * autoConnectToHomeWorld, the som:desync resync and the Connect button), so a
+ * seventh site cannot miss the re-check.
+ *
+ * It awaits syncAuth() first. When that reports a change, the connect is
+ * CANCELLED: no client.connect call is made and any overlay the caller raised
+ * is cleared. The caller gets `{ status: 'auth-changed' }`.
+ *
+ * @param {string} wsUrl
+ * @param {object} connectOpts
+ * @param {{onError?: Function, onCancelled?: Function}} [ui]
+ * @returns {Promise<{status: string, data?: object}>}
+ */
+async function trackConnect(wsUrl, connectOpts, { onError, onCancelled } = {}) {
+  const guard = await authSync.guardConnect()
+  if (!guard.proceed) {
+    // A change found before the connect cancels it, and the overlay goes.
+    showOverlay('')
+    hideTeleportFailurePanel()
+    if (typeof onCancelled === 'function') onCancelled(guard)
+    return { status: 'auth-changed', data: guard }
+  }
+  return connectNow(wsUrl, connectOpts, { onError })
 }
 
 // ---------------------------------------------------------------------------
@@ -2744,15 +2872,23 @@ authToggleBtn.addEventListener('click', toggleAuthMode)
 
 authLogoutBtn.addEventListener('click', async () => {
   authLogoutBtn.disabled = true
+  // signin-sync Rev 1 — this tab's own logout. Marked in flight BEFORE the
+  // POST, so a SIGNED_OUT arriving on this tab's own sockets while it is in
+  // flight is expected: no syncAuth() and no notice.
+  authSync.beginOwnLogout()
   try {
     await logout()
+    // On success: disconnect, sign the page out, tell the other tabs. No notice.
     client.disconnect()
-  } catch (err) {
-    client.disconnect()
-    // Even if the server request fails, clear local state — the session
-    // may still be invalidated on the next request.
+    clearAuthNotice()
+    authSync.setAuthState(null)
+    authSync.postAuthChanged()
+  } catch {
+    // signin-sync I5's failure contract: the tab STAYS signed in and
+    // connected, and nothing is posted.
+    authSync.showNotice(NOTICE.LOGOUT_FAILED)
   } finally {
-    setAuthState(null)
+    authSync.endOwnLogout()
     authLogoutBtn.disabled = false
   }
 })
@@ -3062,8 +3198,13 @@ updateHintText()
 // ---------------------------------------------------------------------------
 
 me().then(user => {
+  // signin-sync I2 — the load-time answer IS the page's starting answer, and it
+  // counts as the guard's answer for the autoconnect below: syncAuth() is not
+  // called again before it.
+  authSync.adoptLoadAnswer()
+  setAuthState(user ?? null)
   if (user) {
-    setAuthState(user)
+    clearAuthNotice()
     // Auto-connect to home world on page load if a valid session exists
     // and we're not already connected.
     if (!client.connected) {
@@ -3081,6 +3222,22 @@ me().then(user => {
 }, (error) => {
   console.warn('the sign-in check failed; staying signed out', error)
 })
+
+// ---------------------------------------------------------------------------
+// signin-sync I2 — the two re-check triggers that are not connects
+// ---------------------------------------------------------------------------
+
+// 1. The tab became visible again. A hidden tab misses the broadcast (a closed
+//    laptop, a throttled background tab), so this is what catches it up.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') return
+  authSync.handleVisible()
+})
+
+// 2. Another tab says the sign-in changed. The message carries no identity;
+//    `me()` stays the only source of truth. A page with no BroadcastChannel
+//    still works — `start()` returns a no-op stop().
+authSync.start()
 
 // ---------------------------------------------------------------------------
 // Models by URL (Phase 3 step 3a) — devtasks/PREBRIEF-models-by-url.md

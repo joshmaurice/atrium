@@ -162,7 +162,9 @@ corresponding requirements (no `Domain` attribute, `Path=/`, `Secure`).
 - On page load / WebSocket upgrade, the server reads the cookie, resolves
   `authSessionId → userId` (or null for anonymous), and attaches `userId` to the
   server-side session object. No token appears in any SOP message.
-- The `hello` schema does not change for auth purposes.
+- The `hello` schema carries `signedIn`, plus the admitted `userId` exactly when
+  `signedIn` is true. No token appears in any SOP message: the id is the same one
+  `/api/auth/me` already returns to that page.
 - Session expiry column + periodic sweep of the `auth_sessions` table.
 
 ### Anonymous sessions

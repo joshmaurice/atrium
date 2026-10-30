@@ -60,8 +60,10 @@ export async function logout({ baseUrl = BASE } = {}) {
  * Get current session info. Returns null on 401 (not logged in) rather than
  * throwing — callers should treat null as the expected "not logged in" state.
  */
-export async function me({ baseUrl = BASE } = {}) {
-  const res = await fetch(`${baseUrl}/api/auth/me`)
+export async function me({ baseUrl = BASE, signal } = {}) {
+  // signin-sync I2 — the sign-in check is never served from the HTTP cache:
+  // a cached 200 would keep a signed-out tab looking signed in.
+  const res = await fetch(`${baseUrl}/api/auth/me`, { cache: 'no-store', signal })
   if (res.status === 401) return null
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))

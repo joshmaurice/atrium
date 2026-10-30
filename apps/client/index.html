@@ -119,6 +119,22 @@
     flex-shrink: 0;
   }
 
+  /* signin-sync I4 — the sign-in notice line. It stands out (bordered
+     highlight, plain words) and is visible without opening anything. It is a
+     sibling of #auth-error, never inside it: the signed-in form hides
+     #auth-error, and the notice must be readable while signed in too. */
+  #auth-notice {
+    font-size: 12px;
+    color: #fcd34d;
+    border: 1px solid #b45309;
+    background: rgba(180, 83, 9, 0.18);
+    border-radius: 4px;
+    padding: 2px 8px;
+    max-width: 460px;
+    flex-shrink: 0;
+  }
+  #auth-notice:empty { display: none; }
+
   /* Status dot */
   .status-dot {
     width: 8px; height: 8px;
@@ -578,6 +594,9 @@
       <span id="auth-user-label"></span>
       <button id="auth-logout-btn">Logout</button>
     </div>
+    <!-- signin-sync I4 — the sign-in notice. Plain words, in the top bar,
+         visible in both the signed-in and the signed-out state. -->
+    <span id="auth-notice"></span>
     <div class="toolbar-sep"></div>
     <!-- edit-polish-2 (Z4): the toolbar's Place Teleporter and its Cancel are
          gone. A pad is added from the Edit panel's Teleporter button, moved

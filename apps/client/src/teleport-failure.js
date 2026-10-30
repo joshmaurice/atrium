@@ -24,6 +24,9 @@ export function codeToReason(code) {
       return "That world doesn't exist, or it isn't public."
     case 'WORLD_NOW_PRIVATE':
       return 'Its owner has just made it private.'
+    case 'SIGNED_OUT':
+      // signin-sync I5 — the pin from the brief-review gate: this exact sentence.
+      return 'You have been signed out.'
     default:
       return ''
   }
