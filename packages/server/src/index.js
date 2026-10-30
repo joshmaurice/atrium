@@ -70,6 +70,8 @@ const httpServer = createServer(createRequestHandler({
   defaultHostRef,
   getWorldHost: (id) => registry.getWorldHost(id),
   getRootWorldId: () => registry.getRootWorldId(),
+  // signin-sync I5 — logout closes the sockets admitted with that auth session
+  closeAuthSessions: (authSessionId) => registry.closeAuthSessions(authSessionId),
 }))
 
 // ---------------------------------------------------------------------------

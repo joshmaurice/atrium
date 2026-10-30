@@ -123,7 +123,7 @@ export function createRequestHandler(opts = {}) {
   // `world`, `sessionsRef` and `defaultHostRef` stay accepted for backward
   // compatibility (existing callers and tests pass them), but creating a
   // world no longer reads the live world, so nothing here uses them any more.
-  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef, getWorldHost, getRootWorldId } = opts
+  const { db, auth, world: legacyWorld, sessionsRef, defaultHostRef, getWorldHost, getRootWorldId, closeAuthSessions } = opts
 
   /**
    * Get the correct live world for a specific worldId (D4 fix).
@@ -173,9 +173,12 @@ export function createRequestHandler(opts = {}) {
         return
       }
 
-      const userId = resolveUserIdFromCookie(req, db)
+      // One resolver: the userId and the auth session id come from the same
+      // lookup (signin-sync I5). An expired session resolves to null — it is
+      // deleted on the way out and is never renewed below.
+      const sessionInfo = resolveAuthSession(req, db)
 
-      if (!userId) {
+      if (!sessionInfo) {
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not authenticated' }))
         return
@@ -183,7 +186,7 @@ export function createRequestHandler(opts = {}) {
 
       const user = db.database.prepare(
         'SELECT id, username, display_name, created_at FROM users WHERE id = ?'
-      ).get(userId)
+      ).get(sessionInfo.userId)
 
       if (!user) {
         res.writeHead(401, { 'Content-Type': 'application/json' })
@@ -477,13 +480,56 @@ export function createRequestHandler(opts = {}) {
 
       const authSessionId = parseAuthSessionCookie(req)
 
+      // signin-sync I7 — the log line names the user, never an id. Best-effort:
+      // a row that is already gone simply has no name to report.
+      let logoutUsername = null
       if (authSessionId) {
-        // Best-effort deletion: even if the session doesn't exist or DB fails,
-        // we still clear the cookie so the client can logout
+        try {
+          const sessionRow = db.database.prepare(
+            'SELECT user_id FROM auth_sessions WHERE id = ?'
+          ).get(authSessionId)
+          if (sessionRow) {
+            const userRow = db.database.prepare(
+              'SELECT username FROM users WHERE id = ?'
+            ).get(sessionRow.user_id)
+            if (userRow && userRow.username) logoutUsername = userRow.username
+          }
+        } catch {
+          // No name available — the deletion below still decides the outcome.
+        }
+      }
+
+      if (authSessionId) {
+        // signin-sync Rev 1 M4 — a failed deletion is a failed logout. The
+        // error is NOT swallowed: the reply is 500, the cookie stays, no socket
+        // is closed, and one log line names the user (no ids).
         try {
           db.database.prepare('DELETE FROM auth_sessions WHERE id = ?').run(authSessionId)
         } catch {
-          // Swallow — cookie clearing is the important part
+          console.error(`[auth] logout failed ${logoutUsername ?? 'unknown'}`)
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Sign-out failed' }))
+          return
+        }
+
+        // Deleting zero rows (the session already expired or was already
+        // removed) is a success.
+
+        // signin-sync I5 — close every socket admitted with this auth session,
+        // on every host, pre-hello sockets included. Only that auth session's:
+        // the same user signed in elsewhere keeps their sockets.
+        let closed = 0
+        if (typeof closeAuthSessions === 'function') {
+          try {
+            closed = closeAuthSessions(authSessionId) ?? 0
+          } catch (err) {
+            console.error(`[auth] logout socket sweep failed: ${err?.message ?? err}`)
+            closed = 0
+          }
+        }
+
+        if (logoutUsername !== null) {
+          console.log(`[auth] logout ${logoutUsername} closed ${closed} sockets`)
         }
       }
 

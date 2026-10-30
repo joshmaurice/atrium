@@ -36,7 +36,7 @@ function isSafeSegment(name) {
  *   - anything else  → 404 at upgrade
  */
 export function createWorldRegistry(opts = {}) {
-  const { httpServer, db = null } = opts
+  const { httpServer, db = null, beforeWorldLoad = null } = opts
 
   if (!httpServer) {
     throw new Error('createWorldRegistry requires httpServer option')
@@ -312,13 +312,28 @@ export function createWorldRegistry(opts = {}) {
       const hostId = row.id
 
       // 8. Lazy create host on first join (with concurrency guard)
+      //
+      // signin-sync Rev 1 M1 — the identity is NOT captured from before the
+      // wait. `doUpgrade` re-resolves the cookie at the moment of admission and
+      // uses that result for both the admission check and the socket. The
+      // resolution and `handleUpgrade` are in the same synchronous turn, so
+      // there is no await or callback boundary between them and the socket
+      // becoming findable by the logout sweep.
       const doUpgrade = () => {
         const host = hosts.get(hostId)
         if (!host) {
           sendHttpResponse(socket, 404, 'World Not Found')
           return
         }
-        host.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
+        let auth = null
+        if (db) {
+          try { auth = resolveUpgradeAuth(request, db) } catch { auth = null }
+        }
+        if (!auth || auth.userId !== descriptor.homeUserId) {
+          sendRefusal(request, socket, head)
+          return
+        }
+        host.handleUpgrade(request, socket, head, auth.userId, auth.authSessionId)
       }
 
       if (hosts.has(hostId)) {
@@ -336,6 +351,11 @@ export function createWorldRegistry(opts = {}) {
 
       const createPromise = (async () => {
         try {
+          // Test seam (signin-sync §6.2(f)): `beforeWorldLoad` lets a test hold
+          // a world's load until it releases it, so the "admission after a
+          // wait" rule can be exercised. Production passes nothing, and the
+          // hook is never awaited between the final resolution and admission.
+          if (typeof beforeWorldLoad === 'function') await beforeWorldLoad(row)
           const host = await registerWorldFromDocument(row)
           return host
         } catch (err) {
@@ -423,12 +443,22 @@ export function createWorldRegistry(opts = {}) {
       const hostId = row.id
 
       // 5. Lazy create host on first join (with concurrency guard)
+      //
+      // signin-sync Rev 1 M1 — re-resolve at the moment of admission (see the
+      // home route). For a public world the socket is admitted as the identity
+      // resolved then: anonymous when the session is gone, and its hello says
+      // signedIn: false.
       const doUpgrade = () => {
         const host = hosts.get(hostId)
         if (!host) {
           sendHttpResponse(socket, 404, 'World Not Found')
           return
         }
+        let auth = null
+        if (db) {
+          try { auth = resolveUpgradeAuth(request, db) } catch { auth = null }
+        }
+        const currentUserId = auth?.userId ?? null
         // TOCTOU re-check: re-fetch row to verify visibility hasn't changed
         // between the initial admission check and now (owner could flip
         // public↔private while we were creating the host).
@@ -437,13 +467,13 @@ export function createWorldRegistry(opts = {}) {
             'SELECT visibility FROM worlds WHERE id = ?'
           ).get(hostId)
           if (currentRow && currentRow.visibility === 'private') {
-            if (!upgradeUserId || upgradeUserId !== row.owner_user_id) {
+            if (!currentUserId || currentUserId !== row.owner_user_id) {
               sendRefusal(request, socket, head)
               return
             }
           }
         }
-        host.handleUpgrade(request, socket, head, upgradeUserId, upgradeAuth?.authSessionId ?? null)
+        host.handleUpgrade(request, socket, head, currentUserId, auth?.authSessionId ?? null)
       }
 
       if (hosts.has(hostId)) {
@@ -460,6 +490,8 @@ export function createWorldRegistry(opts = {}) {
 
       const createPromise = (async () => {
         try {
+          // Test seam — see the home route (signin-sync §6.2(f)).
+          if (typeof beforeWorldLoad === 'function') await beforeWorldLoad(row)
           const host = await registerWorldFromDocument(row)
           return host
         } catch (err) {
@@ -485,6 +517,32 @@ export function createWorldRegistry(opts = {}) {
   // resolveWsUserId — imported from http-routes.js (shared to avoid duplication
   // with session.js)
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // signin-sync I5 — close every socket admitted with one auth session
+  // ---------------------------------------------------------------------------
+  /**
+   * Ask every world host to close the sockets it admitted with
+   * `authSessionId`: the default/commons host and every lazily-created world
+   * host, pre-hello sockets included. Returns the total number closed, which
+   * is what the I7 log line reports.
+   *
+   * Only that auth session's sockets: the same user signed in elsewhere keeps
+   * their sockets.
+   *
+   * @param {string} authSessionId
+   * @returns {number}
+   */
+  function closeAuthSessions(authSessionId) {
+    if (!authSessionId) return 0
+    let closed = 0
+    for (const [, host] of hosts) {
+      if (typeof host.closeAuthSessionSockets === 'function') {
+        closed += host.closeAuthSessionSockets(authSessionId)
+      }
+    }
+    return closed
+  }
 
   // ---------------------------------------------------------------------------
   // Session lifecycle — called from WorldHost when a session is removed
@@ -671,6 +729,7 @@ export function createWorldRegistry(opts = {}) {
     getRootWorldId,
     setRootWorldId,
     onSessionRemoved,
+    closeAuthSessions,
     scheduleTeardown,
     cancelTeardown,
     performTeardown,
