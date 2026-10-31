@@ -364,9 +364,15 @@ sha256sum /root/.hermes/profiles/*/plugins/atrium-kanban-guard/__init__.py /usr/
 - [x] Item 4's memory limit applied (2026-10-30, §5): the Hermes container at
   2,600 MiB plus 1,000 MiB swap, and `container_memory: 2600` in all six
   Hermes configs.
-- [ ] Step D: the first orchestrator run's `args` lines pasted, and the
-  dropped-fields diagnosis written from them.
-- [x] A fresh front-door session (`/new`), so it loads v1.2.0.
+- [x] Step D: the first orchestrator run's `args` lines pasted. **Diagnosis:**
+  every orchestrator `kanban_create` carried `body`, `parents` and the cap, so
+  nothing on the path strips them; the earlier drops were the model omitting
+  fields, in runs that were looping (scripting-4c passdown §3.1).
+- [x] ~~A fresh front-door session (`/new`), so it loads v1.2.0.~~
+  **Correction:** a new chat session doesn't reload the guard; the gateway
+  process loads it at start. The gateway (`hermes-gateway.service`, a systemd
+  user unit) was restarted 2026-10-30 16:48 UTC, and the front door's next
+  cards carried v1.2.0's `args` lines (scripting-4c passdown §4.6).
 - [x] `atrium-ops`: `main` fast-forwarded to `claude/host-round-2026-10-30`
   (`cf84e1b` → `0557880`, 2026-10-30). It now carries pass-a, least-privilege,
   S22 and this round, which is what the VPS runs. `claude/prebrief-s22-pass-b`
