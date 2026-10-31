@@ -78,7 +78,8 @@ and MAIN.
   lock cases); the review's M1 interleaving, rerun, is closed. Details: the checks README, "Results on DEV
   `1d4ccf17`". **One new finding, F7 (LOW):** the SIGTERM/SIGINT handlers exit 143/130, so systemd marks every
   clean stop `failed`, and Rev 1.6's §8 line expects `inactive`. Not yet fixed.
-- **Next:** the operator's round-4 host block (README); the short outside review of `769825ce..85669db0`
+- **Host block, round 4: PASS** (14:55 PT; the README has the output).
+- **Next:** the short outside review of `769825ce..85669db0`
   (the operator has the prompt); then F7's disposition and DEV acceptance (`t_80abe650`).
 - **Harness lesson:** c2's 30 s form could click check 3's cube before the visitor's view resolved it; c2 now
   waits for the visitor's own pick. Don't edit the pre-brief on `main` while rounds edit it on the branch: the

@@ -86,6 +86,16 @@ ls -la /var/lib/atrium-dev/ | grep 'atrium.db.lock' || echo 'NO LOCK FILES (unex
 set +e; node $S/behaviors-export.mjs /var/lib/atrium-dev/atrium.db $W/should-not-exist.json; echo "exit $? (expect 1)"; ls $W/should-not-exist.json 2>/dev/null && echo "UNEXPECTED: an export was written"
 ```
 
+**Host result, round 4 (operator, 2026-10-31 14:55 PT): PASS.** PROD's copy: `integrity ok`, 0 worlds / 0 leaves,
+all zeros. DEV's copy: `integrity ok`, 4 worlds / 9 leaves, `unchanged 9 … writes 0` three times. DEV's lock files,
+all `atrium-dev:atrium-dev`: `atrium.db.lock.db` (0 B, `-rw-------`), `atrium.db.lock.db-journal` (512 B,
+`-rw-r--r--`, SQLite's, present while the lock is held), `atrium.db.lock.json` (97 B, `-rw-------`). Against DEV's
+live database: `the world server is running (pid 3088813 on ubuntu-4gb-hil-1); stop it before running this script
+(lock /var/lib/atrium-dev/atrium.db.lock.db)`, exit 1, nothing written; pid 3088813 is the server the journal shows
+starting at 20:25 UTC. *Note:* `matchDatabaseOwnership` covers the lock database and the sidecar, not SQLite's
+`-journal`; a journal a root script leaves after a crash is root's, readable by the service, in a directory the
+service can write — the outside review was asked to judge it.
+
 ## Results on DEV `5eebe09f` (round 3: `769825ce` + main), 2026-10-31
 **All eleven run. Ten pass (check 11 locally and on the host); check 1 passes except its R16 line (F5).** Two new findings (F5, F6), one note (N2).
 
