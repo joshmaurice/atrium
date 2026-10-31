@@ -15,18 +15,26 @@ G1 = graph([
     {'op': 'flow/setDelay', 'values': {'duration': lit('float', 2.0)}, 'flows': {'done': flow(4)}},
     setter(VIS_PTR.format(i=1), 'bool', lit('bool', True)),
 ])
-# ---- check 4's graph: a hover node (the spec's identity) that only ends a flow; a /materials/ get feeding a translation;
-# and the rest (onStart → scale 1.5) runs.
+# ---- check 4's graphs (Rev 1.5, R-L4 (a)):
+# G4: a hover node carrying KHR_node_hoverability that only ends a flow, and a /materials/ pointer/SET that nothing
+#     reads (inert, listed); the rest (onStart → scale 1.5 → the material write) runs.
+# G4b: the same material pointer READ by a running node (extract4 → combine3 → a translation set): refused at import,
+#     naming the reference and its consumer (G6's consumer rule, Rev 1.1 S3 / Rev 1.2 N4).
 MAT = '/materials/0/pbrMetallicRoughness/baseColorFactor'
 G4 = graph([
     {'op': 'event/onStart', 'flows': {'out': flow(1)}},                                   # 0
-    setter('/nodes/0/scale', 'float3', lit('float3', [1.5, 1.5, 1.5])) | {'flows': {'out': flow(7)}},   # 1: the rest runs
+    setter('/nodes/0/scale', 'float3', lit('float3', [1.5, 1.5, 1.5])) | {'flows': {'out': flow(4)}},   # 1: the rest runs
     {'op': 'event/onHoverIn', 'extension': 'KHR_node_hoverability', 'configuration': {'nodeIndex': {'value': [0]}}, 'flows': {'out': flow(3)}},  # 2: inert
     setter(VIS_PTR.format(i=0), 'bool', lit('bool', False)),                                # 3: never runs
-    getter(MAT, 'float4'),                                                                  # 4: an unsupported pointer family
-    {'op': 'math/extract4', 'values': {'a': sock(4)}},                                      # 5
-    {'op': 'math/combine3', 'values': {'a': sock(5, '0'), 'b': sock(5, '1'), 'c': sock(5, '2')}},  # 6
-    setter('/nodes/0/translation', 'float3', sock(6)),                                      # 7: must write nothing
+    setter(MAT, 'float4', lit('float4', [1.0, 0.0, 0.0, 1.0])),                             # 4: an unsupported pointer family, written, read by nothing
+])
+G4b = graph([
+    {'op': 'event/onStart', 'flows': {'out': flow(1)}},                                   # 0
+    setter('/nodes/0/scale', 'float3', lit('float3', [1.5, 1.5, 1.5])) | {'flows': {'out': flow(5)}},   # 1
+    getter(MAT, 'float4'),                                                                  # 2: the unsupported pointer...
+    {'op': 'math/extract4', 'values': {'a': sock(2)}},                                      # 3: ...read by a running node
+    {'op': 'math/combine3', 'values': {'a': sock(3, '0'), 'b': sock(3, '1'), 'c': sock(3, '2')}},  # 4
+    setter('/nodes/0/translation', 'float3', sock(4)),                                      # 5
 ])
 
 
@@ -56,7 +64,7 @@ with sync_playwright() as pw:
     check('1 the mapping table has one row per referenced file node, naming the file node and the kind', [q['label'] for q in rows] == ['Switch (node)', 'Target (node)'] and all(x in q['options'] and y in q['options'] for q in rows), rows)
     check('1 Save is disabled until every reference is mapped', r['before']['save_disabled'] is True and r['mapped']['save_disabled'] is False and r['before']['status'] == 'Choose a target…' and r['mapped']['status'] == 'Every reference is mapped.', (r['before']['status'], r['mapped']['status']))
     yid = a.ev(OID, y)
-    check("1 the grant names the target outside the own subtree", r['mapped']['grants'] == f'It can change: {yid}', (r['mapped']['grants'], yid))
+    check("1 the grant names the target outside the own subtree by its object name (R16), not its id", r['mapped']['grants'] == f'It can change: {y}' and yid not in r['mapped']['grants'], (r['mapped']['grants'], y, yid))
     check('1 no notes for an on-select graph (no start-on-load, no per-frame)', r['mapped']['notes'] == '', r['mapped']['notes'])
     L = leaf(a, x)
     check('1 saved disabled, as a custom graph with the target in targets', L is not None and L.get('enabled') is False and L.get('targets') == [yid] and 'template' not in L and L['nodeMap'][0] == a.ev(OID, x), (L or {}).get('enabled'), )
@@ -74,12 +82,13 @@ with sync_playwright() as pw:
     check(f'1 ... and shows it again 2 s later (shown at {t_show:.2f} s)', shown and 2.3 < t_show < 4.5 and a.ev(VIS, y)['obj'] is True, (shown, t_show))
     print('   A runner log', rlog(a, 6))
 
-    print('\n== 4. "Partially supported": a hover node (KHR_node_hoverability) and a /materials/ pointer')
+    print('\n== 4. "Partially supported" (R-L4 (a)): a hover node (KHR_node_hoverability) and a /materials/ pointer/set nothing reads')
     a.edit_on(); z = add_cube(a); a.ev(MOVE, {'name': z, 't': [2, 0.5, -3]}); a.page.wait_for_timeout(300)
     r4 = import_graph(a, z, gltf_doc(G4, ['Own']), 'partial.gltf', {'Own (node)': z})
     print('   mapped:', json.dumps({k: r4['mapped'][k] for k in ('report', 'grants', 'notes', 'status')}))
     rep = r4['mapped']['report']
     check('4 the importer lists the hover op with its extension and the material pointer', 'Unsupported: event/onHoverIn (KHR_node_hoverability) ×1' in rep and f'Unsupported pointers: {MAT} ×1' in rep, rep)
+    check('4 the material ref is kept (read by nothing), and the import is accepted', f'Kept: {MAT}' in rep and r4['mapped']['status'] == 'Every reference is mapped.' and r4.get('after', {}).get('status', '').startswith('Saved'), (rep, r4['mapped']['status'], r4.get('after', {}).get('status')))
     check('4 the start-on-load note is shown (the graph writes on onStart)', r4['mapped']['notes'].startswith('This graph runs again'), r4['mapped']['notes'])
     check('4 saved disabled', (leaf(a, z) or {}).get('enabled') is False)
     s0 = a.ev("(n) => [...atriumClient.som.getNodeByName(n).scale]", z); n0 = len(a.ev('__beh().runner.log'))
@@ -91,10 +100,18 @@ with sync_playwright() as pw:
     check('4 the status line says "Partially supported" with both items', (f4['lines'] or '').startswith('Partially supported: event/onHoverIn with the extension KHR_node_hoverability (1 nodes); ' + MAT + ' (1 nodes)'), f4['lines'])
     check('4 the rest runs: the own scale became 1.5 (host and visitor)', a.ev("(n) => [...atriumClient.som.getNodeByName(n).scale]", z) == [1.5, 1.5, 1.5] and v.ev("(n) => [...atriumClient.som.getNodeByName(n).scale]", z) == [1.5, 1.5, 1.5], (s0, a.ev("(n) => [...atriumClient.som.getNodeByName(n).scale]", z)))
     newlog = a.ev('__beh().runner.log')[n0:]
-    refused = [l for l in newlog if l.get('node') == z and 'translation' in l['message']]
-    print('   new log lines for', z, [l['message'] for l in newlog if l.get('node') == z])
-    check('4 the material get feeding a translation writes nothing: the translation is unchanged, one refused value logged', tr(a, z) == [2, 0.5, -3] and len(refused) == 1 and engine(a, z)['live'] is True, (tr(a, z), [l['message'] for l in newlog if l.get('node') == z]))
-    check('4 the engine stays live (not disposed by the refused write)', engine(a, z)['live'] is True and engine(a, z)['reason'] is None, engine(a, z))
+    zlog = [l['message'] for l in newlog if l.get('node') == z]
+    print('   new log lines for', z, zlog)
+    mat_sent = [m for m in of(a.ws, 'set', '>') if m.get('node') == z and 'material' in json.dumps(m)]
+    check('4 the material write is inert: translation unchanged, nothing refused or thrown, no material set on the wire', tr(a, z) == [2, 0.5, -3] and not any('refused' in m or 'threw' in m or 'disabled' in m for m in zlog) and not mat_sent, (tr(a, z), zlog, mat_sent))
+    check('4 the engine stays live', engine(a, z)['live'] is True and engine(a, z)['reason'] is None, engine(a, z))
+    # the second half: the same material pointer READ by a running node is refused at import, naming the reference and its consumer
+    a.edit_on(); z2 = add_cube(a); a.ev(MOVE, {'name': z2, 't': [2, 0.5, -4.5]}); a.page.wait_for_timeout(300)
+    r4b = import_graph(a, z2, gltf_doc(G4b, ['Own']), 'partial-read.gltf', {'Own (node)': z2}, save=False)
+    st4b = r4b['mapped']['status']; print('   G4b status:', st4b, '| save disabled:', r4b['mapped']['save_disabled'])
+    check('4 the material pointer read by a running node is refused at import, naming the reference and its consumer', f'the reference {MAT} (node 2\'s pointer) is read by math/extract4 at node 3' in st4b and "can't survive the import" in st4b and r4b['mapped']['save_disabled'] is True, st4b)
+    check('4 ... and nothing was saved onto that cube', leaf(a, z2) is None, leaf(a, z2))
+    a.page.click('#ep-import-close'); edit_off(a)
 
     print('\n== 7. XSS: HTML in the file name, node names, an op name, an event id, a variable name')
     EVIL = '<img src=x onerror="window.__xss=1">'
@@ -145,7 +162,7 @@ with sync_playwright() as pw:
     check('8 healing logged nothing (no dropped/malformed behaviour lines after the restart)', 'dropped' not in log_after and 'malformed' not in log_after, [l for l in log_after.splitlines() if 'dropped' in l or 'malformed' in l][:3])
     print('   heal lines:', [l for l in log_after.splitlines() if '[world] healed' in l][-3:])
     print('   engines', engine(a, x), engine(a, z), '| log', rlog(a, 6))
-    check("8 check 4's graph ran again on load (the start-on-load note is true): one refused translation, scale written", any(l.get('node') == z and 'translation' in l['message'] for l in a.ev('__beh().runner.log')) and engine(a, z)['live'] is True, rlog(a, 8))
+    check("8 check 4's graph ran again on load (the start-on-load note is true): live, Partially supported, nothing refused", engine(a, z)['live'] is True and ' '.join(lines(a, z) or []).startswith('Partially supported') and not any(l.get('node') == z and ('refused' in l['message'] or 'threw' in l['message']) for l in a.ev('__beh().runner.log')), (engine(a, z), lines(a, z), rlog(a, 8)))
     check('8 check 1\'s graph runs: a visitor click hides the target', (click_node(v, x), wait_vis(v, y, False, 3000))[1] and a.ev(VIS, y)['obj'] is False, (a.ev(VIS, y), v.ev(VIS, y)))
     wait_vis(v, y, True, 4000)
     check("8 ... and shows it again", a.ev(VIS, y)['obj'] is True and v.ev(VIS, y)['obj'] is True)
