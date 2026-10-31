@@ -20,6 +20,17 @@ timeout 60  node devtasks/spike-4d/p4.mjs    # {ref} and wired [i] pointers, in 
 timeout 60  node devtasks/spike-4d/p5.mjs    # the engine's delay table never shrinks
 KHRONOS_ASSETS=<assets>/Tests/Interactivity timeout 300 node devtasks/spike-4d/p6.mjs   # the conformance subset
 timeout 60  node devtasks/spike-4d/p7.mjs    # loops through event/send
+# Added for Rev 1 (the review of Rev 0):
+timeout 30  node devtasks/spike-4d/r1-extension-collision.mjs   # M1: an extension declaration borrowing a core op name
+timeout 30  node devtasks/spike-4d/r2-clock-and-defaults.mjs    # M3: the tick's own performance.now(); S1: NaN defaults reaching writes
+```
+
+The static survey of §2.4 is in `survey/` (Python 3, reads the assets' JSON only):
+```bash
+python3 -I survey/ops_survey.py <assets> survey.json   # every graph's ops, sizes and pointers
+python3 -I survey/dedupe.py survey.json                # counts per distinct asset
+python3 -I survey/ptr_dedupe.py <assets>               # pointer families, {ref} templates, wired sockets
+python3 -I survey/ref_values.py <assets>               # the literal ref values
 ```
 `p6` needs `glTF-Test-Assets-Interactivity` at `926bec45` (281 MB):
 ```bash
@@ -38,3 +49,5 @@ git fetch --depth 1 origin 926bec45dfbe052bad4013ab5852ed2f4042bff5 && git check
 | `p5` | 10,000 slots after 10,000 delays, all still there once fired; `dispose` empties it |
 | `p6` | 156 indexed, 143 in the subset: 134 pass, 8 fail, `math/random` disposed `over-budget` (same in two runs) |
 | `p7` | send → receive loop: 2 steps a tick for 30 ticks; doubling fan-out: 2 … 8,192, disposed on tick 14 |
+| `r1` | bare `flow/sequence` and `flow/sequence` with `extension: 'EXT_probe'` both build `Sequence` and write; an extension `event/onTick` builds `OnTickNode` and is ticked |
+| `r2` | a throwing `performance.now` disposes the engine (`engine-error`); with the real clock jumping, `timeSinceStart` follows the injected clock (0, 0.25); a get of an unregistered float3 writes `[NaN, NaN, NaN]`; the first `timeSinceLastTick` writes `[NaN, 0, 0]` |
