@@ -34,7 +34,57 @@ HARNESS_ROOT=/tmp/atrium-harness BASE_ROOT=/tmp/ah-base python3 c11.py  # ≈ 2 
 | `c9.sh` | 9 | `reg4c.sh` (a copy pointed at this clone) on the base root and the round's, `regdiff.py`; 4c's `c1.py`–`c3.py` (the base `authserver.mjs` on :8447 for 4c check 13); signin-sync `c.py`, `c4b.py` (`/tmp/ah` → the round's root). `PARTS=123` picks parts. Results in `/tmp/reg/4d/_summary.txt`. `ATRIUM_REPO` must be a clone with `scripts/library-build` installed (`server.mjs` needs sharp) |
 | `c10.py` | 10 (Q7) | world A: 8 leaves of `debug/log` messages (3-byte CJK, 2-byte Latin, emoji), 1,047,001 B by the server's measure, stored disabled; world B: the same cubes, no leaves; 5 runs each, interleaved, each from an UNLOADED world (past the 3 s teardown) so it logs a heal; three fresh anonymous visitors join at once with NO socket route; heap and som-dump bytes through CDP; then a send past the total |
 | `c11.py` | 11 (local) | phase 1 on the round, phase 2 on the base (PROD's 4c) over the SAME database (`AUTH_DB=/tmp/rh/prod.db`, `KEEP_DB=1`), phase 3 the round again; backups with SQLite's backup API; the scripts from the round's root. The host half is the operator's block below |
-| `probe_r16.py` | R16 | prints what `resolveObjectId` returns and what the importer's grant line and the Q3 prompt show |
+| `probe_r16.py` | R16 / R18 | what `resolveObjectId` returns, the importer's grant line, and **the real Q3 Enable prompt** (a start-on-load graph, dismissed) |
+| `probe_r24.py` | R24 | a ~3 MiB many-light `.gltf` through the panel: time to the mapping rows, the longest main-thread stall |
+| `probe_c3.py` | (diagnosis) | check 3's click and interpolation outside c2's sequence, with and without the spinner |
+
+## Results on DEV `1d4ccf17` (round 4: `85669db0` + main `c4b87111`, devtasks/ only), 2026-10-31
+**Every round-4 item holds in the browser and on a real database; one new finding (F7).** Checks 9 and 10 were not
+rerun: no round-4 card touched their areas (R23 adds declaration-map checks that check 10's leaves don't use).
+
+| Check | Result | Seen |
+|---|---|---|
+| R18 (F5), `probe_r16.py` | **PASS** | grant line `It can change: Cube 2`; **the real Q3 prompt** (a start-on-load graph, dismissed) `It can also change: Cube 2. Enable it?` |
+| R24 (review S2), `probe_r24.py` | **PASS** | a 3.15 MiB `.gltf`, 46,000 nodes + 46,000 lights, through the panel: ready in 1.05 s (upload included), longest main-thread stall 446 ms, the graph's two rows shown. Round 3: 33 s in Node. Node probe: 20,000 lights 66 ms (round 3: 4.9 s) |
+| R23 (review S1), Node probe | **PASS** | a 65-char, 1,000-char and `a\n<b>` `outputValueSockets` key: refused by both copies (round 3: accepted) |
+| 1, 4, 7, 8 (`c1.py`) | **PASS** 34/34 | check 1's R16 line now passes; delay hide/show at 0.86 s / 2.77 s |
+| 2, 3 (`c2.py`, 120 s) | **PASS** | host 71 frames → 203.4° (predicted 203.4°); visitor 17.1/s; host closed at 1.9 s: visitor, saved document and new host agree. **The 30 s form missed check 3's click twice** (no select reached the host; `probe_c3.py` shows the click and interpolation work): a harness race, fixed by waiting for the visitor's pick to resolve the cube; two 30 s runs then 15/15 |
+| 5, 6 (`c5.py`) | **PASS** | host p95 frame time 92.2 ms (round 3: 130.8), skips 51.7/frame, nothing disabled, Throttled on all 64; the 4c tab never elected |
+| 11 (`c11.py`, local) | **PASS** 27/27 | as round 3, plus R22/R19: refusal through a symlink to the file and through a symlinked directory; `kill -9` of the server frees the lock at once and the export proceeds despite the stale sidecar; **a server start refuses while a paused export holds the lock** (`… (pid N, export)`), and the export then finishes; a leftover round-3 `<db>.lock` is ignored and logged |
+| Review M1, rerun | **closed** | the sidecar emptied under a live server: export refuses (`another process holds … (an unknown process: …)`), a second server **refuses to start**, nothing deleted (round 3: export ran, the lock file was deleted, a second server started) |
+
+### Findings
+- **F7 (LOW; operations).** `packages/server/src/index.js` (round 3's R8, kept in round 4) handles SIGTERM with
+  `process.exit(143)` and SIGINT with `process.exit(130)`. systemd treats an exit status of 143 as a failure (a
+  process killed *by* SIGTERM is a clean stop): DEV's journal shows round 2's server `Deactivated successfully`
+  on both stops (10:59, 14:35 UTC) and round 3's `Main process exited, code=exited, status=143 … Failed with
+  result 'exit-code'` (20:25). So **every clean stop of a 4d server leaves the unit `failed`**, and Rev 1.6's new
+  §8 line ("check `systemctl is-active atrium` reports `inactive`") would read `failed` mid-rollback. Under R22 the
+  OS releases the kernel lock on any exit, so the handlers are no longer needed. Fix: drop both handlers (the
+  `exit` hook can stay), test that a SIGTERM'd server exits *by the signal*, and say "anything but `active`" in
+  §8. A host-side stopgap: `SuccessExitStatus=130 143` in the units' drop-ins.
+- **Carried (Hermes, noted on the acceptance card):** `packages/server/src/db.js` L19–21 still says the scripts
+  and the lock "agree on `<db>.lock`"; the lock is `<canonical db>.lock.db` now.
+
+### Check 11 on the host, round 4 (the operator)
+The same as round 3's block, for the new lock: reads PROD's and DEV's live databases, writes only under
+`/root/rh4d-r4`, stops nothing. Expected: both copies `integrity ok`; PROD `0 world(s), 0 behaviour leaf(s)` and
+all zeros; DEV `4 world(s), 9 behaviour leaf(s)` and `unchanged 9 … writes 0` three times; DEV's lock files listed
+(`atrium.db.lock.db`, `atrium.db.lock.json`, owned by the service user); the last export **refuses** with `the
+world server is running (pid N on ubuntu-4gb-hil-1)… (lock /var/lib/atrium-dev/atrium.db.lock.db)`, exit 1.
+```bash
+set -euo pipefail
+R=/srv/atrium-dev; S=$R/packages/server/scripts; W=/root/rh4d-r4; B=$R/packages/server/node_modules/better-sqlite3
+[ "$(git -C $R rev-parse HEAD)" = 1d4ccf17e62e9a94bb577d9c8ee694439a57c44b ] || { echo "DEV's checkout is not 1d4ccf17: stop"; exit 1; }
+mkdir -p -m 700 $W && cd $W
+for pair in prod:/var/lib/atrium/atrium.db dev:/var/lib/atrium-dev/atrium.db; do n=${pair%%:*}; db=${pair#*:}; echo "== $n ($db)"
+  node -e 'const D=require(process.argv[1]); const s=new D(process.argv[2],{readonly:true,fileMustExist:true}); s.backup(process.argv[3]).then(()=>{const c=new D(process.argv[3],{readonly:true}); console.log("integrity", c.pragma("integrity_check",{simple:true}))})' "$B" "$db" $W/$n-copy.db
+  node $S/behaviors-export.mjs $W/$n-copy.db $W/$n-export.json | tail -1
+  for a in "" --apply --apply; do node $S/behaviors-reconcile.mjs $W/$n-copy.db $W/$n-export.json $a | grep -v '^REPORT_JSON' | tail -2 | head -1; done
+done
+ls -la /var/lib/atrium-dev/ | grep 'atrium.db.lock' || echo 'NO LOCK FILES (unexpected: DEV holds one)'
+set +e; node $S/behaviors-export.mjs /var/lib/atrium-dev/atrium.db $W/should-not-exist.json; echo "exit $? (expect 1)"; ls $W/should-not-exist.json 2>/dev/null && echo "UNEXPECTED: an export was written"
+```
 
 ## Results on DEV `5eebe09f` (round 3: `769825ce` + main), 2026-10-31
 **All eleven run. Ten pass (check 11 locally and on the host); check 1 passes except its R16 line (F5).** Two new findings (F5, F6), one note (N2).

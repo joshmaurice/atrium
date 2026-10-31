@@ -70,7 +70,15 @@ with sync_playwright() as pw:
     dlg, en = set_enabled(a, y, True)
     check('3 an on-select interpolation enables without a prompt', dlg is None and en is True, (dlg, en))
     edit_off(a); v.page.wait_for_timeout(800)
+    # wait until the visitor's own pick resolves the slider (round 4: a click straight after the 30 s spinner could
+    # miss it; the host then logged no select at all)
+    for _ in range(30):
+        if (pick_at(v, y) or {}).get('target') == y: break
+        v.page.wait_for_timeout(100)
+    print('   visitor pick at the slider:', pick_at(v, y), '| host', a.ev(HOST), '| host log before:', rlog(a, 3))
     n0 = len(v.ws); click_node(v, y); v.page.wait_for_timeout(3000)
+    print('   visitor sent:', sorted({m.get('type') for (d, m) in v.ws[n0:] if d == '>' and isinstance(m, dict)}),
+          '| received:', sorted({m.get('type') for (d, m) in v.ws[n0:] if d == '<' and isinstance(m, dict)}), '| notice:', v.ev(NOTICE))
     tsets = [m for (d, m) in v.ws[n0:] if d == '<' and isinstance(m, dict) and m.get('type') == 'set' and m.get('node') == y and m.get('field') == 'translation']
     print(f'   visitor saw {len(tsets)} translation steps; last', tsets[-1]['value'] if tsets else None, '| host SOM', tr(a, y))
     check("3 steady host: the visitor's last value equals the target", tsets and all(abs(p - q) < 1e-6 for p, q in zip(tsets[-1]['value'], TARGET)) and tr(v, y) == TARGET, (tsets[-1]['value'] if tsets else None, tr(v, y)))

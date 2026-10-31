@@ -15,7 +15,11 @@
 #                 node is gone), B1 unchanged; one world written; the second --apply writes nothing, same conflicts.
 #   after         the 4d server again: N1's leaf is back byte for byte and RUNS (a click hides N4 after the delay),
 #                 N4's transform, N2's template and the new cube are kept, B1 intact, healing dropped nothing.
-#                 A stale lock (dead pid) is warned about, removed, and the script proceeds.
+#   the lock      (round 4, R22 / R19) the lock is a kernel lock (SQLite, `<db>.lock.db`) held for the whole run by
+#                 the server and both scripts; `<db>.lock.json` only names the holder. Checked here: a script refuses
+#                 through a symlink to the file and through a symlinked directory; a server start refuses while a
+#                 script holds the lock (ATRIUM_TEST_LOCK_SIGNAL pauses it), and starts once it exits; after a
+#                 `kill -9` of the server the lock is free at once; a leftover round-3 `<db>.lock` is ignored, logged.
 # Nothing else may be listening on 8443/8444. Run with the Bash tool's run_in_background (≈ 4 min).
 #   HARNESS_ROOT=/tmp/atrium-harness BASE_ROOT=/tmp/ah-base python3 c11.py
 import subprocess, signal, sqlite3, hashlib, shutil
@@ -25,6 +29,7 @@ R = os.environ.get('HARNESS_ROOT', '/tmp/atrium-harness'); BASE = os.environ.get
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', '..'))
 AUTHSERVER = os.path.join(REPO, 'devtasks/harness/checks/signin-sync/authserver.mjs')
 D = '/tmp/rh'; shutil.rmtree(D, ignore_errors=True); os.makedirs(D)
+if os.path.islink(D + '-alias'): os.unlink(D + '-alias')
 DB = f'{D}/prod.db'
 SCRIPTS = f'{R}/wt/packages/server/scripts'
 
@@ -47,7 +52,7 @@ def start(root, label, keep=True):
         time.sleep(0.3)
         if 'listening 8444' in open(path).read(): break
     p.label, p.logpath = label, path
-    print(f'   [{label}] server up on {git_sha(root)[:8]}, lock file: {lock()}')
+    print(f'   [{label}] server up on {git_sha(root)[:8]}, lock: {lock()}')
     return p
 
 
@@ -56,14 +61,24 @@ def stop(p):
     try: p.wait(10)
     except Exception: os.killpg(p.pid, signal.SIGKILL); p.wait()
     time.sleep(1)
-    print(f'   [{p.label}] server stopped, lock file: {lock()}')
+    print(f'   [{p.label}] server stopped, lock: {lock()}')
 
 
 def git_sha(root): return subprocess.run(['git', '-C', f'{root}/wt', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+def held(db=None):
+    """Is the kernel lock on `db`'s lock database held right now? Asks the lock itself (BEGIN EXCLUSIVE, timeout 0)."""
+    path = (db or DB) + '.lock.db'
+    if not os.path.exists(path): return False
+    js = ("const D=require(process.argv[1]); const c=new D(process.argv[2],{fileMustExist:true,timeout:0});"
+          "try{c.exec('BEGIN EXCLUSIVE');c.exec('ROLLBACK');console.log('free')}catch(e){console.log(e.code)}")
+    r = subprocess.run(['node', '-e', js, f'{R}/wt/packages/server/node_modules/better-sqlite3', path], capture_output=True, text=True)
+    return r.stdout.strip().startswith('SQLITE_BUSY')
+def sidecar():
+    try: return json.loads(open(DB + '.lock.json').read())
+    except Exception: return None
 def lock():
-    try: return json.loads(open(DB + '.lock').read())
-    except FileNotFoundError: return None
-    except Exception as e: return {'unreadable': str(e)}
+    """None when the lock is free; otherwise who the sidecar says holds it (the sidecar never decides anything)."""
+    return (sidecar() or {'pid': None}) if held() else None
 def pid_alive(pid):
     try: os.kill(pid, 0); return True
     except ProcessLookupError: return False
@@ -153,7 +168,7 @@ with sync_playwright() as pw:
     a.connect(); b.close(); a.page.wait_for_timeout(5000)       # back home: W1 and W2 autosave, flush and tear down
 
     print('\n== 11. the lock (R-L2 (a)): with the 4d server UP, both scripts refuse')
-    L = lock(); print('   lock file:', L, '| pid alive:', L and pid_alive(L['pid']))
+    L = lock(); print('   lock:', L, '| pid alive:', L and pid_alive(L['pid']))
     rc_e, out_e, _ = script('behaviors-export.mjs', DB, f'{D}/live-export.json'); show(out_e, 4)
     open(f'{D}/empty-export.json', 'w').write(json.dumps({'worlds': []}))
     rc_r, out_r, _ = script('behaviors-reconcile.mjs', DB, f'{D}/empty-export.json'); show(out_r, 4)
@@ -161,7 +176,7 @@ with sync_playwright() as pw:
           rc_e != 0 and f"the world server is running (pid {L['pid']}" in out_e and not os.path.exists(f'{D}/live-export.json'), (rc_e, out_e[:300]))
     check('11 reconcile refuses while the server holds the lock', rc_r != 0 and f"the world server is running (pid {L['pid']}" in out_r, (rc_r, out_r[:300]))
     a.close(); stop(srv)
-    check('11 a clean stop removes the lock file', lock() is None, lock())
+    check('11 after a clean stop the lock is free', lock() is None, lock())
 
     print('\n== 11. steps 1–2: backup (SQLite backup API), verify, export against the COPY')
     sha1, ok1 = backup(f'{D}/copy1.db')
@@ -181,7 +196,7 @@ with sync_playwright() as pw:
 
     print(f'\n== 11. phase 2: roll back to 4c ({git_sha(BASE)[:8]}) over the same database')
     srv = start(BASE, '4c', keep=True)
-    check('11 the 4c server creates NO lifetime lock (it predates R8)', lock() is None, lock())
+    check('11 the 4c server holds NO lifetime lock (it predates R8)', lock() is None, lock())
     rc_r4c, out_r4c, rep4c = script('behaviors-reconcile.mjs', DB, f'{D}/export.json')
     print('   reconcile (dry run) with the 4c server UP: exit', rc_r4c); show(out_r4c, 3)
     check('11 RECORDED: with the 4c server running, the scripts cannot tell (no lock) and proceed — the runbook must stop the server first', rc_r4c == 0, (rc_r4c, out_r4c[:200]))
@@ -238,11 +253,31 @@ with sync_playwright() as pw:
           (rep2 and rep2['totals'], o2))
     reasons = sorted({v[1] for v in o.values() if v[0] == 'conflict'}); print('   conflict reasons:', reasons)
 
-    print('\n== 11. a stale lock (dead pid) is warned about, removed, and the script proceeds')
-    dead = subprocess.Popen(['true']); dead.wait()
-    open(DB + '.lock', 'w').write(json.dumps({'pid': dead.pid, 'host': 'rehearsal', 'startedAt': '2026-10-31T00:00:00Z'}) + '\n')
-    rc, out, _ = script('behaviors-export.mjs', DB, f'{D}/export-after.json'); show(out, 3)
-    check(f'11 stale lock from pid {dead.pid}: warned, removed, the export proceeds', rc == 0 and f'stale lock from pid {dead.pid}, removed' in out and lock() is None, (rc, out[:300]))
+    print('\n== 11. the lock (round 4, R22 / R19): symlinks, a script holding it, kill -9, the old lock file')
+    srv = start(R, '4d-lock', keep=True); L = lock()
+    os.symlink(DB, f'{D}/alias.db'); os.symlink(D, D + '-alias')
+    for label, path in (('a symlink to the file', f'{D}/alias.db'), ('a symlinked directory', D + '-alias/prod.db')):
+        rc, out, _ = script('behaviors-export.mjs', path, f'{D}/sym.json'); show(out, 2)
+        check(f'11 with the server up, export through {label} refuses, naming the server', rc != 0 and f"the world server is running (pid {L['pid']}" in out and not os.path.exists(f'{D}/sym.json'), (rc, out[:240]))
+    os.killpg(srv.pid, signal.SIGKILL); srv.wait(); time.sleep(0.5)
+    check('11 kill -9 of the server: the lock is free at once (the OS released it)', lock() is None, lock())
+    rc, out, _ = script('behaviors-export.mjs', DB, f'{D}/after-kill.json'); show(out, 2)
+    check('11 ... and the export proceeds, whatever the leftover sidecar says', rc == 0 and os.path.exists(f'{D}/after-kill.json'), (rc, out[:240], sidecar()))
+    sig = f'{D}/hold.sig'
+    hold = subprocess.Popen(['node', f'{SCRIPTS}/behaviors-export.mjs', DB, f'{D}/held.json'], env=dict(os.environ, ATRIUM_TEST_LOCK_SIGNAL=sig),
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for _ in range(100):
+        if os.path.exists(sig): break
+        time.sleep(0.1)
+    check('11 a paused export holds the lock', os.path.exists(sig) and lock() is not None and (sidecar() or {}).get('role') == 'export', (os.path.exists(sig), lock()))
+    env = dict(os.environ, HARNESS_ROOT=R, AUTH_DB=DB, KEEP_DB='1', HOOKS='1'); env.pop('STALE_ROOT', None)
+    lp = f'{D}/server-refused.log'
+    r = subprocess.run(['node', AUTHSERVER], env=env, stdout=open(lp, 'w'), stderr=subprocess.STDOUT, timeout=60)
+    refused = open(lp).read(); print('   server start while the export holds the lock:', [l for l in refused.splitlines() if 'lock' in l or 'refuse' in l][:3])
+    check('11 a server start refuses while a script holds the lock, naming the script', 'refuses to start' in refused and f"pid {hold.pid}, export" in refused and 'listening 8444' not in refused, refused[-400:])
+    open(sig + '.release', 'w').close(); out = hold.communicate(timeout=60)[0]
+    check('11 ... and the export, released, finishes', hold.returncode == 0 and os.path.exists(f'{D}/held.json'), (hold.returncode, out[-200:]))
+    open(DB + '.lock', 'w').write('{"pid": 1, "host": "round-3"}\n')        # a leftover round-3 lock file
 
     print(f'\n== 11. upgrade again: the round ({git_sha(R)[:8]}) loads the reconciled worlds')
     srv = start(R, '4d-2', keep=True)
@@ -250,6 +285,7 @@ with sync_playwright() as pw:
     vctx = br.new_context(ignore_https_errors=True, viewport={'width': 1280, 'height': 800})
     v = Tab(vctx, 'V'); print('   V connected', v.connect(W1)); a.page.wait_for_timeout(1500)
     lg = open(srv.logpath).read()
+    check('11 the round-3 lock file left behind is ignored, and the start says so', 'is ignored' in lg and 'listening 8444' in lg, [l for l in lg.splitlines() if 'lock' in l][:3])
     check('11 the restored world loads and healing drops nothing', 'dropped' not in lg.split('listening 8444')[-1] and leaf(a, N[0]) == leaf0[ids[N[0]]], [l for l in lg.splitlines() if 'drop' in l][:3])
     check("11 N1's restored leaf runs: the engine is live", (engine(a, N[0]) or {}).get('live') is True, engine(a, N[0]))
     click_node(v, N[0])

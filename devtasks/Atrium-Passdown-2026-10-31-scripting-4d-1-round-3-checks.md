@@ -64,3 +64,22 @@ join +0.543 s (slowest of three; gate 1.5 s), heal + serialize 28 ms (gate 250 m
 (prompt: the operator has it); hold round 4 until the review returns, so one round carries F5, F6 (b), the §8
 runbook line for F6 (a) and the review's findings; then a short review of round 4's delta; then DEV acceptance
 and MAIN.
+
+## 6. Update, 13:50 PT: round 4 on DEV (`1d4ccf17`), its checks run
+- **Round 4** (`REVISION-scripting-4d-1-round-4.md`, approved 11:40 PT, R-L6–R-L8 (a)): tip `85669db0`, on DEV as
+  release merge `1d4ccf17` (code identical to `85669db0`), `WAITING_FOR_HUMAN_DEV_ACCEPTANCE`. Cards (Hermes):
+  steps `t_2eeb1557`, `t_343624e0`, `t_714ca3f2`, `t_e2f8a912`; GLM review `t_c728de60`; gate `t_76440821`;
+  finalizer `t_485c5a5d`; acceptance `t_80abe650`; sentinel `t_bc296ffe` (the guard linked it to the gate and the
+  finalizer itself, after §4's cleanup). Card bodies are empty by the kickoff's fallback (instructions in each
+  card's first comment, canonical requirements summarised); cards 2–4's completion metadata dropped, and their
+  handoffs are comments (card 3's R15 handoff on `t_714ca3f2`, card 4's on `t_e2f8a912`). Hermes's comment 1280
+  supersedes 1275 on the review card.
+- **Claude's checks on `1d4ccf17`:** R18, R22, R23, R24 hold; checks 1–8 and 11 pass (27/27 for 11, with the new
+  lock cases); the review's M1 interleaving, rerun, is closed. Details: the checks README, "Results on DEV
+  `1d4ccf17`". **One new finding, F7 (LOW):** the SIGTERM/SIGINT handlers exit 143/130, so systemd marks every
+  clean stop `failed`, and Rev 1.6's §8 line expects `inactive`. Not yet fixed.
+- **Next:** the operator's round-4 host block (README); the short outside review of `769825ce..85669db0`
+  (the operator has the prompt); then F7's disposition and DEV acceptance (`t_80abe650`).
+- **Harness lesson:** c2's 30 s form could click check 3's cube before the visitor's view resolved it; c2 now
+  waits for the visitor's own pick. Don't edit the pre-brief on `main` while rounds edit it on the branch: the
+  release merge would conflict (it lives at Rev 1.4 on `main`, Rev 1.6 on the branch).
