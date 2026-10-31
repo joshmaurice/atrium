@@ -1627,7 +1627,8 @@ export class AtriumClient extends EventEmitter {
 
       if (renamed) this.emit('som:rename', { from: msg.node, to: msg.value })
       if (this._debug) this._log(`som:set ${msg.node}.name`)
-      this.emit('som:set', { nodeName: msg.node, path: 'name', value: msg.value })
+      // G5 — where the set CAME FROM: another session's write.
+      this.emit('som:set', { nodeName: msg.node, path: 'name', value: msg.value, origin: 'remote' })
       return
     }
 
@@ -1640,7 +1641,8 @@ export class AtriumClient extends EventEmitter {
     }
 
     if (this._debug) this._log(`som:set ${msg.node}.${msg.field}`)
-    this.emit('som:set', { nodeName: msg.node, path: msg.field, value: msg.value })
+    // G5 — another session's field write.
+    this.emit('som:set', { nodeName: msg.node, path: msg.field, value: msg.value, origin: 'remote' })
   }
 
   /**
@@ -1673,8 +1675,9 @@ export class AtriumClient extends EventEmitter {
       })
       if (applied) this.emit('som:rename', { from: edit.node, to: edit.value })
       // A8 — som:set is still emitted for the `name` field, with nodeName set
-      // to the old name, for compatibility.
-      this.emit('som:set', { nodeName: edit.node, path: 'name', value: edit.value })
+      // to the old name, for compatibility. G5 — this tab's OWN echo, carrying
+      // the `requestSeq` it answers.
+      this.emit('som:set', { nodeName: edit.node, path: 'name', value: edit.value, origin: 'own', requestSeq: msg.requestSeq })
     }
 
     if (edit.type === 'send' && edit.field === MODEL_ANIMATION_FIELD) {
@@ -1682,7 +1685,8 @@ export class AtriumClient extends EventEmitter {
         const target = this._som?.getObjectByName?.(edit.node) ?? null
         if (target) this._som.setPath(target, MODEL_ANIMATION_FIELD, msg.value)
       })
-      this.emit('som:set', { nodeName: edit.node, path: MODEL_ANIMATION_FIELD, value: msg.value })
+      // G5 — an OWN echo, with the seq it answers (a remote set has none).
+      this.emit('som:set', { nodeName: edit.node, path: MODEL_ANIMATION_FIELD, value: msg.value, origin: 'own', requestSeq: msg.requestSeq })
     }
 
     // 4b-1 E6 (S-A) — the THIRD case, exactly 4a's Z2a pattern: the set-once
@@ -1693,7 +1697,7 @@ export class AtriumClient extends EventEmitter {
         const target = this._som?.getObjectByName?.(edit.node) ?? null
         if (target) this._som.setPath(target, OBJECT_ID_FIELD, msg.value)
       })
-      this.emit('som:set', { nodeName: edit.node, path: OBJECT_ID_FIELD, value: msg.value })
+      this.emit('som:set', { nodeName: edit.node, path: OBJECT_ID_FIELD, value: msg.value, origin: 'own', requestSeq: msg.requestSeq })
     }
 
     // scripting-4b-2 F5 — the FOURTH case and the generic one: a tracked send
@@ -1704,7 +1708,8 @@ export class AtriumClient extends EventEmitter {
         const target = this._som?.getObjectByName?.(edit.node) ?? null
         if (target) this._som.setPath(target, edit.field, msg.value)
       })
-      this.emit('som:set', { nodeName: edit.node, path: edit.field, value: msg.value })
+      // G5 — the runner's own echo is the site the overlay matches by seq.
+      this.emit('som:set', { nodeName: edit.node, path: edit.field, value: msg.value, origin: 'own', requestSeq: msg.requestSeq })
     }
 
     this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit })

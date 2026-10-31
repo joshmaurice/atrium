@@ -1,0 +1,271 @@
+{
+  "note": "G4 value vectors for the runner's write check (scripting-4d-1). Read by the page copy (packages/behaviors/src/value-rules.js, through packages/behaviors/tests/value-rules.test.js) and by the server copy (packages/server/src/send-policy.js, through packages/server/test/value-rules.test.js), so the two implementations cannot drift: 'field' and 'value' are one candidate write, 'ok' is the verdict, and 'message' is the EXACT refusal text both must give when ok is false. The 'node' group is checked through authorizeNodeSend and the 'light' group through authorizeLightSend. JSON cannot carry NaN or Infinity (JSON.stringify writes both as null), so the NaN cases G4 names ([NaN, 0, 0] and a NaN in a scale) are asserted as NUMBERS in both test files and deliberately do not appear here — a null-vector proves a different thing (a non-number), and saying it proved NaN was 4b-2 W5's bug.",
+  "node": [
+    {
+      "label": "translation: three finite numbers",
+      "field": "translation",
+      "value": [1, 2, 3],
+      "ok": true
+    },
+    {
+      "label": "translation: the origin",
+      "field": "translation",
+      "value": [0, 0, 0],
+      "ok": true
+    },
+    {
+      "label": "translation: a negative component is fine",
+      "field": "translation",
+      "value": [-1.5, 0, 0.25],
+      "ok": true
+    },
+    {
+      "label": "translation: null is not a number",
+      "field": "translation",
+      "value": [null, 0, 0],
+      "ok": false,
+      "message": "translation must be 3 finite numbers"
+    },
+    {
+      "label": "translation: two elements",
+      "field": "translation",
+      "value": [1, 2],
+      "ok": false,
+      "message": "translation must be 3 finite numbers"
+    },
+    {
+      "label": "translation: four elements",
+      "field": "translation",
+      "value": [1, 2, 3, 4],
+      "ok": false,
+      "message": "translation must be 3 finite numbers"
+    },
+    {
+      "label": "translation: a numeric string is not a number",
+      "field": "translation",
+      "value": ["1", 0, 0],
+      "ok": false,
+      "message": "translation must be 3 finite numbers"
+    },
+    {
+      "label": "translation: not an array at all",
+      "field": "translation",
+      "value": 0,
+      "ok": false,
+      "message": "translation must be 3 finite numbers"
+    },
+    {
+      "label": "rotation: the identity quaternion",
+      "field": "rotation",
+      "value": [0, 0, 0, 1],
+      "ok": true
+    },
+    {
+      "label": "rotation: a unit quaternion a quarter turn about y",
+      "field": "rotation",
+      "value": [0, 0.7071067811865476, 0, 0.7071067811865475],
+      "ok": true
+    },
+    {
+      "label": "rotation: within the 1e-3 unit tolerance (the boundary, just inside)",
+      "field": "rotation",
+      "value": [0, 0, 0, 1.0005],
+      "ok": true
+    },
+    {
+      "label": "rotation: [0, 0, 0, 2] is finite but NOT a unit quaternion",
+      "field": "rotation",
+      "value": [0, 0, 0, 2],
+      "ok": false,
+      "message": "rotation must be a unit quaternion"
+    },
+    {
+      "label": "rotation: past the 1e-3 unit tolerance (the boundary, just outside)",
+      "field": "rotation",
+      "value": [0, 0, 0, 1.002],
+      "ok": false,
+      "message": "rotation must be a unit quaternion"
+    },
+    {
+      "label": "rotation: the zero quaternion is not a unit quaternion",
+      "field": "rotation",
+      "value": [0, 0, 0, 0],
+      "ok": false,
+      "message": "rotation must be a unit quaternion"
+    },
+    {
+      "label": "rotation: four finite numbers with one null",
+      "field": "rotation",
+      "value": [0, 0, 0, null],
+      "ok": false,
+      "message": "rotation must be 4 finite numbers"
+    },
+    {
+      "label": "rotation: three elements",
+      "field": "rotation",
+      "value": [0, 0, 1],
+      "ok": false,
+      "message": "rotation must be 4 finite numbers"
+    },
+    {
+      "label": "scale: the unit scale",
+      "field": "scale",
+      "value": [1, 1, 1],
+      "ok": true
+    },
+    {
+      "label": "scale: a negative component is allowed (mirroring is valid glTF)",
+      "field": "scale",
+      "value": [-1, 1, 1],
+      "ok": true
+    },
+    {
+      "label": "scale: exactly 1e-6 in magnitude is the boundary and passes",
+      "field": "scale",
+      "value": [1e-6, 1, 1],
+      "ok": true
+    },
+    {
+      "label": "scale: a zero component is refused",
+      "field": "scale",
+      "value": [0, 1, 1],
+      "ok": false,
+      "message": "scale components must be non-zero"
+    },
+    {
+      "label": "scale: 1e-7 is below the 1e-6 floor and is refused",
+      "field": "scale",
+      "value": [1e-7, 1, 1],
+      "ok": false,
+      "message": "scale components must be non-zero"
+    },
+    {
+      "label": "scale: a negative component below the floor is refused too",
+      "field": "scale",
+      "value": [-1e-7, 1, 1],
+      "ok": false,
+      "message": "scale components must be non-zero"
+    },
+    {
+      "label": "scale: a null component is a SHAPE failure, not the floor's",
+      "field": "scale",
+      "value": [null, 1, 1],
+      "ok": false,
+      "message": "scale must be 3 finite numbers"
+    },
+    {
+      "label": "scale: two elements",
+      "field": "scale",
+      "value": [1, 1],
+      "ok": false,
+      "message": "scale must be 3 finite numbers"
+    },
+    {
+      "label": "visible: true",
+      "field": "visible",
+      "value": true,
+      "ok": true
+    },
+    {
+      "label": "visible: false",
+      "field": "visible",
+      "value": false,
+      "ok": true
+    },
+    {
+      "label": "visible: 1 is not a boolean",
+      "field": "visible",
+      "value": 1,
+      "ok": false,
+      "message": "visible must be a boolean"
+    },
+    {
+      "label": "visible: 0 is not a boolean either",
+      "field": "visible",
+      "value": 0,
+      "ok": false,
+      "message": "visible must be a boolean"
+    },
+    {
+      "label": "visible: the string \"true\" is not a boolean",
+      "field": "visible",
+      "value": "true",
+      "ok": false,
+      "message": "visible must be a boolean"
+    },
+    {
+      "label": "visible: null is not a boolean",
+      "field": "visible",
+      "value": null,
+      "ok": false,
+      "message": "visible must be a boolean"
+    }
+  ],
+  "light": [
+    {
+      "label": "intensity: a whole number",
+      "field": "intensity",
+      "value": 1,
+      "ok": true
+    },
+    {
+      "label": "intensity: zero",
+      "field": "intensity",
+      "value": 0,
+      "ok": true
+    },
+    {
+      "label": "intensity: a negative number is finite and passes",
+      "field": "intensity",
+      "value": -2.5,
+      "ok": true
+    },
+    {
+      "label": "intensity: null is not a number",
+      "field": "intensity",
+      "value": null,
+      "ok": false,
+      "message": "intensity must be a finite number"
+    },
+    {
+      "label": "intensity: the string \"2\" is not a number",
+      "field": "intensity",
+      "value": "2",
+      "ok": false,
+      "message": "intensity must be a finite number"
+    },
+    {
+      "label": "color: three finite numbers",
+      "field": "color",
+      "value": [1, 1, 1],
+      "ok": true
+    },
+    {
+      "label": "color: black",
+      "field": "color",
+      "value": [0, 0, 0],
+      "ok": true
+    },
+    {
+      "label": "color: a null component",
+      "field": "color",
+      "value": [null, 0, 0],
+      "ok": false,
+      "message": "color must be 3 finite numbers"
+    },
+    {
+      "label": "color: two elements",
+      "field": "color",
+      "value": [1, 1],
+      "ok": false,
+      "message": "color must be 3 finite numbers"
+    },
+    {
+      "label": "color: an out-of-range-free but non-numeric component",
+      "field": "color",
+      "value": [1, true, 1],
+      "ok": false,
+      "message": "color must be 3 finite numbers"
+    }
+  ]
+}

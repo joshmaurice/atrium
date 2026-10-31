@@ -22,6 +22,10 @@ import { clipsFor, clipsForNode } from './behavior-clips.js'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
 import { worldPosition, subtreeSome } from './world-position.js'
+// scripting-4d-1 G-L4 — the read-only `matrix` / `globalMatrix` pointers the
+// behaviour runner injects: the SAME `@atrium/som` implementation the page's
+// own `worldPosition` re-export uses.
+import { localMatrix, worldMatrix } from '@atrium/som'
 import { quatToEulerDeg, eulerDegToQuat } from './rotation-degrees.js'
 // `firstFreeName` is imported for the guard's sake only: app.js no longer calls
 // it, but the name still appears in app.js as the key of the dep the Model form
@@ -3122,16 +3126,26 @@ let runner = null
 let behaviorForm = null
 let lastBehaviorNode = null
 
-/** F9's status line, from the role, `canEdit` and the runner's own record. */
+/**
+ * F9's status line, from the role, `canEdit` and the runner's own record.
+ * scripting-4d-1 G4 — `lines` carries the runner's own status lines
+ * ("Partially supported" with `graphReport`'s list, and "Throttled: …"), and
+ * `notes` the G6 notes the owner sees; the form renders them (card 4).
+ */
 function runnerStatus() {
   if (client.scriptHost?.active !== true) {
     // A non-host OWNER tab gets F-L9's text; a tab that isn't an owner at all
     // (a visitor never sees the panel) gets the plainer one.
     return client.canEdit === true ? { state: 'other-tab' } : { state: 'idle' }
   }
-  const record = selected ? runner?.engines.get(selected.name) : null
+  const name = selected?.name
+  const record = name ? runner?.engines.get(name) : null
   if (record?.reason) return { state: 'disabled', reason: record.reason }
-  return { state: 'running' }
+  return {
+    state: 'running',
+    lines: name ? (runner?.statusLines?.(name) ?? []) : [],
+    notes: name ? (runner?.statusNotes?.(name) ?? []) : [],
+  }
 }
 
 /**
@@ -3201,6 +3215,10 @@ runner = createBehaviorRunner({
   frame: 50,
   clips: clipStatusFor,
   position: (node) => (node ? worldPosition(node) : undefined),
+  // scripting-4d-1 G-L4 — the read-only `matrix` and `globalMatrix` pointers,
+  // from the SAME `@atrium/som` implementation the page's own reads use.
+  matrix: (node) => (node ? localMatrix(node) : undefined),
+  worldMatrix: (node) => (node ? worldMatrix(node) : undefined),
   // scripting-4c AC-L3 (a)/AC5 — the local avatar node, so the host's OWN click
   // obeys the same 10 m rule as every visitor's.
   localAvatar: () => avatar?.localNode ?? null,

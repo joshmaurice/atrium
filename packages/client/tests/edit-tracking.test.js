@@ -381,7 +381,8 @@ test('A8 case 6: a remote rename is applied and emits som:rename plus som:set', 
   })
 
   assert.deepEqual(renamed, [{ from: 'Crate', to: 'Box' }])
-  assert.deepEqual(sets, [{ nodeName: 'Crate', path: 'name', value: 'Box' }])
+  // scripting-4d-1 G5 — the remote site says where it came from.
+  assert.deepEqual(sets, [{ nodeName: 'Crate', path: 'name', value: 'Box', origin: 'remote' }])
   assert.ok(client.som.getNodeByName('Box'), 'the renamed node is found under its new name')
   assert.equal(client.som.getNodeByName('Crate'), null)
 })
