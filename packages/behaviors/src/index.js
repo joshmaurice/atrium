@@ -9,6 +9,9 @@ export * from './templates.js'
 export {
   createBehaviorEngine, loadBehavior, installBudgetedLoops, NodeEventBus,
   BudgetExceeded, STEP_BUDGET, LOG_MESSAGE_MAX,
+  graphReport, inertLoadCopy, keepRegistryByAllowlist,
+  createDelayTable, installDelaySubclasses,
+  DELAY_PENDING_MAX, DELAY_SECONDS_MAX, INERT_OP_PREFIX, MISSING_SELECT_OUTPUTS,
 } from './adapter.js'
 export {
   createBehaviorRunner, SEND_FRAME_MS, SEND_KEYS_MAX, LOG_LINES_MAX,

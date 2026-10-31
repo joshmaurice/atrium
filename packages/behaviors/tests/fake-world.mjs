@@ -60,6 +60,7 @@ export function makeWorld(options = {}) {
     setCalls: [],
     lightHosts: new Set(options.lights ?? []),
     lightValues: new Map(),
+    lightColors: new Map(),
     descendants: new Set(options.descendants ?? []),
     granted: new Set(options.granted ?? []),
     parents: options.parents ?? {},
@@ -97,6 +98,19 @@ export function makeWorld(options = {}) {
       state.setCalls.push([i, 'intensity', value])
       return true
     },
+    // scripting-4d-1 G-L4 — the light's colour, and the two read-only matrices.
+    // The matrix reads are injected functions: in production they are
+    // `@atrium/som`'s `localMatrix` / `worldMatrix` over the SOM node.
+    lightColor(i) { return state.lightColors.get(i) },
+    setLightColor(i, value) {
+      if (state.throwSet(i, 'color')) throw new Error('the world setter threw')
+      if (state.refuseSet(i, 'color')) return false
+      state.lightColors.set(i, value)
+      state.setCalls.push([i, 'color', value])
+      return true
+    },
+    matrix(i) { return options.matrix ? options.matrix(i) : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+    worldMatrix(i) { return options.worldMatrix ? options.worldMatrix(i) : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
     clipStatus(objectId) { return state.clips[objectId] ?? { status: 'none' } },
     play(objectId, clip, loop, speed) { state.plays.push([objectId, clip, loop, speed]); return true },
     stop(objectId, clip) { state.stops.push([objectId, clip]); return true },

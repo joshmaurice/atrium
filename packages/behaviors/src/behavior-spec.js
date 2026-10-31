@@ -174,6 +174,17 @@ const POINTER_FAMILIES = [
   { re: new RegExp(`^/extensions/KHR_lights_punctual/lights/${NODE_INDEX}/(intensity|color)$`), family: 'light' },
 ]
 
+/**
+ * G-L4 / G3 — true when `pointer` is one of the pointer families 4d registers.
+ *
+ * A pointer outside these families is stored, inert and REPORTED (G-L3 (a)):
+ * `graphReport` lists it in `unsupportedPointers`. One definition of the
+ * families, so the rule, the decorator and the report cannot disagree.
+ */
+export function isSupportedPointerPath(pointer) {
+  return typeof pointer === 'string' && POINTER_FAMILIES.some((entry) => entry.re.test(pointer))
+}
+
 /** The plain text of every reason code. */
 export const BEHAVIOR_MESSAGES = Object.freeze({
   'behavior-type':       'the behaviour must be a plain object with only the behaviour keys',
