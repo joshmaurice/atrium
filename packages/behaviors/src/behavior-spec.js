@@ -57,8 +57,9 @@ export const BEHAVIOR_DEPTH_MAX   = 8
  * bounds has a bound and a character set.
  *
  *   - **identifiers** — every key of a socket map (`values`, `configuration`,
- *     `flows`, and a declared event's `values`) and every `{ node, socket }`
- *     reference's socket name: 1–64 characters of `[A-Za-z0-9_]`;
+ *     `flows`, a declared event's `values`, and R23's `declarations[].inputValueSockets`
+ *     / `outputValueSockets`) and every `{ node, socket }` reference's socket name:
+ *     1–64 characters of `[A-Za-z0-9_]`;
  *   - **pointers** — `configuration.pointer`'s literal: 1–256 characters of
  *     `[A-Za-z0-9_/{}\[\]\.:-]` (the pointer families bound the index too);
  *   - **prose** — every other string LITERAL (`{ type, value: [ … ] }`), such
@@ -71,8 +72,8 @@ export const BEHAVIOR_DEPTH_MAX   = 8
  * (the Khronos JSON schema permits additional properties) is not one of these
  * places: it is bounded only by the leaf cap, as `graph.pad` is.
  *
- * Both rule copies carry the same four constants and the same walk; the shared
- * vectors pin them.
+ * Both rule copies carry the same four constants and the same walk (R23 adds a
+ * declaration's two socket maps to it); the shared vectors pin them.
  */
 export const BEHAVIOR_IDENTIFIER_RE  = /^[A-Za-z0-9_]{1,64}$/
 export const BEHAVIOR_POINTER_RE     = /^[A-Za-z0-9_/{}\[\]\.:-]{1,256}$/
@@ -388,17 +389,45 @@ function socketMapProblem(map, proseExcept = null) {
 }
 
 /**
+ * R23 (the outside review's S1) — a declaration's socket map
+ * (`inputValueSockets` / `outputValueSockets`): every key is an identifier,
+ * the same rule and the same reason code a node's socket map uses. Its entries
+ * are the schema's `{ type }` objects, so there is no socket name and no string
+ * literal to bound here — the keys are the whole of it.
+ *
+ * The walk covered the node maps, the pointer and a declared event's `values`,
+ * but not these two, so an extension declaration's `outputValueSockets` key of
+ * 65 characters (or 1,000, or `"a\n<b>"`) was stored by both copies.
+ *
+ * @param {object} map
+ * @returns {string|null}
+ */
+function declarationMapProblem(map) {
+  if (!isPlainObject(map)) return null
+  for (const key of Object.keys(map)) if (!BEHAVIOR_IDENTIFIER_RE.test(key)) return 'behavior-type'
+  return null
+}
+
+/**
  * R9 — the string policy over a stored graph. Returns the reason code of the
  * FIRST string that is out of bounds, or null. It walks exactly R-L3 (a)'s
- * places: the socket maps (`values`, `configuration`, `flows`, an event's
- * `values`), their `{ node, socket }` names, `configuration.pointer`, and the
- * prose of every string literal in a node's values, a variable's value and an
- * event's values.
+ * places: the socket maps (`values`, `configuration`, `flows`, a declaration's
+ * `inputValueSockets` and `outputValueSockets`, an event's `values`), their
+ * `{ node, socket }` names, `configuration.pointer`, and the prose of every
+ * string literal in a node's values, a variable's value and an event's values.
  *
  * @param {object} graph
  * @returns {string|null}
  */
 function graphStringProblem(graph) {
+  // R23 — the declarations come first, in the schema's order.
+  const declarations = Array.isArray(graph.declarations) ? graph.declarations : []
+  for (const decl of declarations) {
+    if (!isPlainObject(decl)) continue
+    const problem = declarationMapProblem(decl.inputValueSockets) ??
+      declarationMapProblem(decl.outputValueSockets)
+    if (problem) return problem
+  }
   const nodes = Array.isArray(graph.nodes) ? graph.nodes : []
   for (const node of nodes) {
     if (!isPlainObject(node)) continue

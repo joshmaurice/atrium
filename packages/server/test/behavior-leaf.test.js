@@ -76,6 +76,30 @@ test('R9: the server and the page hold the SAME string policy', () => {
   assert.equal(BEHAVIOR_PROSE_CTRL_RE.source, CLIENT_PROSE_CTRL_RE.source)
 })
 
+test('R23: the SERVER copy walks a declaration\'s two socket maps too', () => {
+  // The outside review's S1 (round-4 revision §2): both maps' keys are
+  // identifiers, with the node maps' reason code. The shared vectors carry the
+  // boundaries; this pins the walk is present HERE, per map.
+  const base = VECTORS.accepted.find((v) => v.name === 'template: select-animation play').value
+  const withMap = (which, keys) => {
+    const v = JSON.parse(JSON.stringify(base))
+    v.graph.declarations.push({ op: 'flow/sequence', extension: 'EXT_probe', [which]: keys })
+    return v
+  }
+  for (const which of ['inputValueSockets', 'outputValueSockets']) {
+    assert.equal(behaviorProblem(withMap(which, { a: { type: 1 } }), { ownId: VECTORS.ownId }), null,
+      `${which}: an identifier key is accepted`)
+    assert.equal(behaviorProblem(withMap(which, { ['a'.repeat(64)]: { type: 1 } }), { ownId: VECTORS.ownId }), null,
+      `${which}: exactly 64 characters is accepted`)
+    assert.equal(behaviorProblem(withMap(which, { ['a'.repeat(65)]: { type: 1 } }), { ownId: VECTORS.ownId }),
+      'behavior-type', `${which}: 65 characters is refused`)
+    assert.equal(behaviorProblem(withMap(which, { 'a-b': { type: 1 } }), { ownId: VECTORS.ownId }),
+      'behavior-type', `${which}: punctuation is refused`)
+    assert.equal(behaviorProblem(withMap(which, { ['\u0007\n<b>']: { type: 1 } }), { ownId: VECTORS.ownId }),
+      'behavior-type', `${which}: a control character is refused`)
+  }
+})
+
 test('F1: each reason code has plain text of its own', () => {
   const codes = new Set(VECTORS.refused.map((v) => v.code))
   for (const code of codes) {

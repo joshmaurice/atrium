@@ -391,6 +391,83 @@ function withLogLiteral(value, message) {
   v.graph.nodes[1].configuration.pointer = { value: ['/materials/0/not a pointer'] }
   addBad('R9: a pointer with a character outside the pointer set', 'behavior-pointer', v)
 }
+// ---------------------------------------------------------------------------
+// R23 / the outside review's S1 — a declaration's two socket maps are socket
+// maps too (round-4 revision §2). Every key of `inputValueSockets` and
+// `outputValueSockets` is an identifier (1-64 of `[A-Za-z0-9_]`), the same rule
+// and the same reason code the node maps use. R9's walk covered the node maps,
+// the pointer and a declared event's `values`, but not these two, so an
+// extension declaration's key of 65 characters (or 1,000, or `"a\n<b>"`) was
+// stored by both copies.
+//
+// The declaration is an EXTENSION one (`flow/sequence` + `EXT_probe`, stored
+// and inert): a CORE declaration's socket maps are the validator's own schema,
+// so a stray key there is refused by the validator rather than by this rule.
+// Each map is carried at the boundary (a 64-character key accepted), one past
+// it (65 refused), with punctuation refused, and with a C0 control character and
+// with `\n<b>` refused.
+// ---------------------------------------------------------------------------
+
+/** A copy of `value` with an extension declaration whose `which` map is `keys`. */
+function withDeclarationMap(value, which, keys) {
+  const v = clone(value)
+  const decl = { op: 'flow/sequence', extension: 'EXT_probe' }
+  decl[which] = keys
+  v.graph.declarations.push(decl)
+  return v
+}
+
+{
+  // An ordinary extension declaration that carries BOTH maps, every key a legal
+  // identifier: accepted by the rule and by the validator.
+  const v = clone(animPlay)
+  v.graph.declarations.push({
+    op: 'flow/sequence', extension: 'EXT_probe',
+    inputValueSockets: { a: { type: 1 } }, outputValueSockets: { result: { type: 2 } },
+  })
+  addOk('R23: an ordinary extension declaration with both socket maps', v)
+}
+{
+  addOk('R23: an inputValueSockets key of exactly 64 characters',
+    withDeclarationMap(animPlay, 'inputValueSockets', { ['a'.repeat(64)]: { type: 1 } }))
+}
+{
+  addBad('R23: an inputValueSockets key of 65 characters', 'behavior-type',
+    withDeclarationMap(animPlay, 'inputValueSockets', { ['a'.repeat(65)]: { type: 1 } }))
+}
+{
+  addBad('R23: an inputValueSockets key with punctuation', 'behavior-type',
+    withDeclarationMap(animPlay, 'inputValueSockets', { 'a-b': { type: 1 } }))
+}
+{
+  addBad('R23: an inputValueSockets key with a control character', 'behavior-type',
+    withDeclarationMap(animPlay, 'inputValueSockets', { ['\u0007']: { type: 1 } }))
+}
+{
+  addBad('R23: an inputValueSockets key of `\\n<b>`', 'behavior-type',
+    withDeclarationMap(animPlay, 'inputValueSockets', { ['\n<b>']: { type: 1 } }))
+}
+{
+  addOk('R23: an outputValueSockets key of exactly 64 characters',
+    withDeclarationMap(animPlay, 'outputValueSockets', { ['b'.repeat(64)]: { type: 2 } }))
+}
+{
+  addBad('R23: an outputValueSockets key of 65 characters', 'behavior-type',
+    withDeclarationMap(animPlay, 'outputValueSockets', { ['b'.repeat(65)]: { type: 2 } }))
+}
+{
+  addBad('R23: an outputValueSockets key with punctuation', 'behavior-type',
+    withDeclarationMap(animPlay, 'outputValueSockets', { 'a.b': { type: 2 } }))
+}
+{
+  addBad('R23: an outputValueSockets key with a control character', 'behavior-type',
+    withDeclarationMap(animPlay, 'outputValueSockets', { ['\u0007']: { type: 2 } }))
+}
+{
+  addBad('R23: an outputValueSockets key of `\\n<b>`', 'behavior-type',
+    withDeclarationMap(animPlay, 'outputValueSockets', { ['\n<b>']: { type: 2 } }))
+}
+
 {
   // G-L3 (a) — a BARE unknown core op is refused, by the VALIDATOR (the rule
   // stores it): "the validator is the gate, not the loader".
@@ -858,7 +935,9 @@ const fixture = {
     '`{ node, socket }` reference\'s name) is 1-64 characters of [A-Za-z0-9_], a ' +
     'pointer is 1-256 characters of the pointer set, and every other string literal ' +
     'is prose of at most 256 characters with no control character but \\n and \\t and ' +
-    'no U+2028/U+2029.',
+    'no U+2028/U+2029. scripting-4d round-4 R23 adds the two declaration socket maps ' +
+    '(`inputValueSockets` and `outputValueSockets`) to that identifier rule: every key of ' +
+    'both maps is 1-64 characters of [A-Za-z0-9_], in both copies.',
   ownId: OWN,
   targetId: TGT,
   accepted,

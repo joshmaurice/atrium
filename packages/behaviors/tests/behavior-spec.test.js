@@ -162,6 +162,29 @@ describe('F1 (client copy) — the rules the vectors pin', () => {
     assert.equal(BEHAVIOR_PROSE_CTRL_RE.test('a\u0007b'), true)
     assert.equal(BEHAVIOR_PROSE_CTRL_RE.test('a\u2028b'), true)
   })
+  test('R23 — the walk covers a declaration\'s two socket maps, in THIS copy too', () => {
+    // The outside review's S1: an extension declaration's `inputValueSockets` /
+    // `outputValueSockets` keys were never bounded, so a 65-character key (or
+    // one with punctuation or a control character) was stored. The shared
+    // vectors carry the boundaries; this pins the walk is present HERE, per map.
+    const withMap = (which, keys) => {
+      const v = JSON.parse(JSON.stringify(base))
+      v.graph.declarations.push({ op: 'flow/sequence', extension: 'EXT_probe', [which]: keys })
+      return v
+    }
+    for (const which of ['inputValueSockets', 'outputValueSockets']) {
+      assert.equal(behaviorProblem(withMap(which, { a: { type: 1 } }), { ownId }), null,
+        `${which}: an identifier key is accepted`)
+      assert.equal(behaviorProblem(withMap(which, { ['a'.repeat(64)]: { type: 1 } }), { ownId }), null,
+        `${which}: exactly 64 characters is accepted`)
+      assert.equal(behaviorProblem(withMap(which, { ['a'.repeat(65)]: { type: 1 } }), { ownId }), 'behavior-type',
+        `${which}: 65 characters is refused`)
+      assert.equal(behaviorProblem(withMap(which, { 'a-b': { type: 1 } }), { ownId }), 'behavior-type',
+        `${which}: punctuation is refused`)
+      assert.equal(behaviorProblem(withMap(which, { ['\u0007\n<b>']: { type: 1 } }), { ownId }), 'behavior-type',
+        `${which}: a control character is refused`)
+    }
+  })
 })
 
 describe('F8 — the templates build graphs the rule and the validator accept', () => {
