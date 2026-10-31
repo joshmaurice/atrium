@@ -1,6 +1,6 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **FINAL, Revision 1.5 (2026-10-31; FINAL since Rev 1.3). The operator approved
+Status: **FINAL, Revision 1.6 (2026-10-31; FINAL since Rev 1.3). The operator approved
 decisions G-L1–G-L12, Q3 and Q7 and made Rev 1.2 FINAL (2026-10-30 20:57
 PT), all as recommended:**
 G-L1 (a) 4d-1, one round with seven steps, and `KHR_animation_pointer`
@@ -312,6 +312,52 @@ recorded the four notes below. **No decision changes.**
 §0.5, G7, G-L2, §6.1 and
 `tests/fixtures/behavior-conformance-khronos/expected-4d.json` change; the
 status line names Rev 1.5. Nothing else.
+
+### 0.6 Revision 1.6 (after FINAL, round 4)
+Round 4's revision (`devtasks/REVISION-scripting-4d-1-round-4.md`, R18–R24)
+recorded the five notes below. **No decision changes**, with one exception:
+R-L8 (a) replaces the *mechanism* of R-L2 (a)'s lifetime lock (a lock file,
+which the second outside review showed is not mutually exclusive) and keeps
+R-L2 (a)'s decision — a lock the server holds for its lifetime, which the
+scripts check.
+
+1. **The rollback procedure's 4c window (F6 (a)).** §8's procedure, step 3,
+   now says: "The 4c server you roll back to holds no lifetime lock (it
+   predates R8), so the scripts can't detect it. Don't run either script until
+   step 4, after the fixed server has been deployed and stopped again; check
+   `systemctl is-active atrium` reports `inactive` first."
+2. **G10, the offline check (R22, R19; the outside review's M1, F6 (b)).**
+   Under R-L8 (a) the lock is not a lock file: it is a **kernel lock, through
+   SQLite**. The server, and both scripts, hold an exclusive transaction on a
+   lock database beside the database (`<canonical db>.lock.db`) for the whole
+   of their run, so the **OS releases it when its holder exits for any
+   reason** — `kill -9` included — and there is no stale lock to recover and
+   no recovery race. It is keyed on the database's **canonical path** (R19),
+   so a symlinked file or a symlinked directory reaches the same lock; the
+   sidecar that names the holder (`<canonical db>.lock.json`) is never the
+   lock, and the pre-R8 `<db>.lock` file is ignored. **What it doesn't
+   cover:** a **hard link** to the database, or the same file reached through
+   another mount, is a different path after `realpath`, and so a different
+   lock. R-L6 is decided (a), so there is no `/proc` scan. `BEGIN IMMEDIATE`
+   on the main database stays, for atomicity only; it is not the offline
+   check.
+3. **G7, the string policy (R23; the review's S1).** Both of a declaration's
+   socket maps' keys — `declarations[].inputValueSockets` and
+   `declarations[].outputValueSockets` — are **identifiers** (1–64,
+   `[A-Za-z0-9_]`), in **both rule copies**, with the node maps' own reason
+   code. The review's S1 named the gap: the maps' keys were not walked.
+4. **G6, the importer (R24; the review's S2).** The light table is matched to
+   its hosts in **one pass over the nodes** (`O(nodes + lights)`), with the
+   same zero-host and many-host refusals and the same texts, so a large
+   many-light graph no longer costs `O(lights × nodes)` on the main thread.
+5. **G6/Q3, the names in the grant line and the Enable prompt (R18; F5).**
+   Objects are named through **`objectNameOf(som, id)`**, the one helper that
+   reads the SOM's `{ node } | { problem }` shape, so both texts show the
+   object's name instead of the raw id, and fall back to the id for a
+   `{ problem }` (`not-found`, `ambiguous`, `unaddressable`).
+
+§0.6, §8's step 3, G10, G7, G6 and §5's Q3 change; the status line names Rev
+1.6. Nothing else.
 
 ## 1. What 4d delivers
 
@@ -1279,6 +1325,13 @@ itself; the engine is the reference here.
   `targets` = every mapped object outside the own subtree, `animations`
   from the mapping), and it **must pass `behaviorCheck`** before the panel
   offers Save. The `report` is `graphReport` plus the grants.
+- **The light table is matched to its hosts in one pass over the nodes**
+  (Rev 1.6, R24; the second outside review's S2). `parseGraphSource` builds
+  one `Map<lightIndex, hostNodeIndices[]>` in a **single** walk of the
+  graph's nodes and then applies the same zero-host and many-host refusals,
+  with the same texts, in `O(nodes + lights)` — never a loop over every node
+  for every light. 20,000 nodes and 20,000 lights with one host each (1.36 MiB)
+  parse in **under 2 s** on the build host.
 - **The panel** (in the Behaviour section; "Import a graph…" beside the
   template list): the source, the graph picker, the mapping table (each
   reference with its file name and a target picker, filtered by kind), the
@@ -1292,7 +1345,10 @@ itself; the engine is the reference here.
   **every time** the owner turns Enabled on in the form for such a graph (a
   custom graph with no `template`, `graphReport` showing a write and
   `startsOnLoad` or `perFrame`). Nothing is stored for it, and reloads and host
-  changes never ask, because they don't change Enabled.
+  changes never ask, because they don't change Enabled. Every object the
+  grants name is shown through **`objectNameOf(som, id)`**, the one helper that
+  reads the SOM's `{ node } | { problem }` shape (Rev 1.6, R18; F5), so the
+  prompt and the import panel's grant line read as object names, not raw ids.
 - **The notes the owner sees, at import and beside Enable** (Rev 1, S7):
   for `startsOnLoad`, "This graph runs again whenever the owner reconnects,
   the host tab changes or it is re-enabled. It may overwrite what visitors
@@ -1315,7 +1371,7 @@ itself; the engine is the reference here.
 | Graph nodes / declarations / types | 64 / 32 / 16 | 256 / 64 / 16 | static, F1 |
 | Variables / events | 0 / 8 | 32 / 16 | static, F1 |
 | String fields (`op`, `extension`, event ids) | — | 1–64, a character set each | characters; static, F1 |
-| **Identifiers** (Rev 1.5, R-L3 (a)) | — | 1–64, `[A-Za-z0-9_]` | characters; **every object key inside the graph** (`values`, `configuration`, `flows`, declaration socket maps, event `values`) and **every socket name in a `{ node, socket }` reference**; static, F1 |
+| **Identifiers** (Rev 1.5, R-L3 (a)) | — | 1–64, `[A-Za-z0-9_]` | characters; **every object key inside the graph** (`values`, `configuration`, `flows`, declaration socket maps — **both** a declaration's maps, `inputValueSockets` and `outputValueSockets`, in **both rule copies** (Rev 1.6, R23) — event `values`) and **every socket name in a `{ node, socket }` reference**; static, F1 |
 | **Pointers** (Rev 1.5, R-L3 (a)) | — | 1–256, `[A-Za-z0-9_/{}\[\].:-]` | characters; `configuration.pointer`, already partly bounded by the pointer family rule; static, F1 |
 | **Prose** (Rev 1.5, R-L3 (a)) | — | ≤256, no C0 controls other than `\n` and `\t`, no U+2028/2029 | characters; `debug/log`'s `message` literal and any other string literal; the validator's own type rules still apply; static, F1 |
 | `nodeMap` / `targets` / `animations` | 1–16 / 0–16 / 0–8 | unchanged | static, F1 |
@@ -1381,9 +1437,24 @@ operator. That is the authority: no owner's session is involved (P24).
   and reason, and splits restores into **world untouched since the
   export** and **world edited during the rollback** (from `updated_at`), so
   the operator knows which owners to ask (N3).
-- **Both scripts take an exclusive lock** (`BEGIN IMMEDIATE`) and refuse to
-  run if they can't, so "with the server stopped" is checked, not assumed
-  (N3).
+- **The offline check is the lifetime lock** (Rev 1.6, R-L8 (a), R22, R19; N3;
+  the second outside review's M1 and F6 (b)). Both scripts **acquire and hold**
+  the same lock the server holds for its lifetime — an exclusive transaction
+  through SQLite on a lock database beside the database
+  (`<canonical db>.lock.db`) — **before** they open the database, and hold it
+  until they have closed it. While a server holds it they refuse, naming its
+  pid and host (`the world server is running (pid N on <host>)…`); while a
+  script holds it a server refuses to start. The **OS releases the lock when
+  its holder exits for any reason**, `kill -9` included, so there is no stale
+  lock to recover and nothing to delete. Both sides derive the lock from the
+  database's **canonical path**, so a symlinked file or a symlinked directory
+  reaches the same lock. The sidecar that names the holder
+  (`<canonical db>.lock.json`) is never the lock — a missing, empty or stale
+  one changes no decision — and a leftover pre-R8 `<db>.lock` file is ignored
+  (the server logs one line naming it). **What it doesn't cover:** a hard link
+  to the database, or the same file reached through another mount, is a
+  different path after `realpath`, and so a different lock. `BEGIN IMMEDIATE`
+  on the main database stays, for atomicity only; it is not the offline check.
 - **File-backed worlds are out of scope:** they are never autosaved
   (`world.js` L462–470), so they never hold a healed leaf in storage.
 - **Limit, stated:** a node that had a 4d leaf, was healed to `null`, and
@@ -1403,7 +1474,10 @@ and what is still open for the operator.
   as the reviews advised): yes,** every time the owner turns Enabled on in
   the form for a custom graph that writes and **either starts on load or
   runs every frame**, naming its grants outside its own subtree. Reloads
-  and handovers never ask, and the note stays (G6).
+  and handovers never ask, and the note stays (G6). **Rev 1.6:** the grants
+  the prompt shows, like the import panel's grant line, are named through
+  `objectNameOf(som, id)` (R18), so they read as object names, not raw ids
+  (F5).
 - **Q4 (select outputs):** flagged (`missingSelectOutputs`, G3 and G6).
 - **Q5 (fairness):** no automatic disable; a visible "Throttled" status
   (G4).
@@ -1567,7 +1641,11 @@ As scripting-4c, with this round's specifics:
   2. run `behaviors-export.mjs` (G10) against it, and keep the export with
      the copy;
   3. roll back, and tell owners to reload every tab (a 4d page's `hello` is
-     refused by the 4c server, P16);
+     refused by the 4c server, P16); **the 4c server you roll back to holds no
+     lifetime lock (it predates R8), so the scripts can't detect it. Don't run
+     either script until step 4, after the fixed server has been deployed and
+     stopped again; check `systemctl is-active atrium` reports `inactive`
+     first** (Rev 1.6, F6 (a));
   4. once the fix is deployed, stop the server again, take a second backup
      the same way, run `behaviors-reconcile.mjs` as a dry run, read its
      conflicts, then run it with `--apply`, then start the server;
