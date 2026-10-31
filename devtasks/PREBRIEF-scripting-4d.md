@@ -1,6 +1,6 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **FINAL, Revision 1.3 (2026-10-30). The operator approved
+Status: **FINAL, Revision 1.4 (2026-10-30; FINAL since Rev 1.3). The operator approved
 decisions G-L1–G-L12, Q3 and Q7 and made Rev 1.2 FINAL (2026-10-30 20:57
 PT), all as recommended:**
 G-L1 (a) 4d-1, one round with seven steps, and `KHR_animation_pointer`
