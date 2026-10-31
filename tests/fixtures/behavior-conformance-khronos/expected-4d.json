@@ -2,6 +2,11 @@
   "description": "G8 — the Khronos subset of PREBRIEF-scripting-4d, run through the scripting-4d-1 adapter on the injected clock and timers (a deterministic simulated time). Regenerate with `node packages/behaviors/scripts/conformance.mjs --write`; every change against the manifest's p6 baseline carries its reason in `note`.",
   "source": "KhronosGroup/glTF-Test-Assets-Interactivity @ 926bec45dfbe052bad4013ab5852ed2f4042bff5",
   "adapter": "scripting-4d-1 (workflow/scripting-4d-1)",
+  "acceptedNoResult": {
+    "asset": "core:flow/setDelay_and_cancelDelay",
+    "result": "no result",
+    "reason": "R-L5 (a): the graph exceeds G7's 16 pending delays and reads the engine's `/extensions/KHR_interactivity/delays/<n>` path, which the adapter's delay subclass does not register; both are G7/G3 decisions, so the result is accepted and recorded, the fixture stays, and nothing in the round changes for it."
+  },
   "baselineCounts": {
     "pass": 134,
     "fail": 8,
@@ -24,7 +29,7 @@
       "asset": "core:flow/setDelay_and_cancelDelay",
       "baseline": "pass",
       "result": "no result",
-      "note": "FINDING — a pass that no longer reproduces. This asset holds more pending delays than G7 allows: 16 are live from tick 1 (measured on the adapter's own table, `engine.delays.size`, which never drops below 16 before tick 13), and the graph has 23 `flow/setDelay` nodes, so at least one of them takes `err`. The one it loses is the final 2.5 s delay whose `done` flow is the graph's ONLY test verdict (nodes 239–243), so the asset reports nothing at all under the round's adapter. Two independent changes are behind it: (1) G7's 16-pending-delay cap, which the shipped adapter did not have; (2) with the cap raised to 64 the asset reaches its verdict and reports `test/onFailed` — its `lastDelayref isValid` check fails, because that check reads a delay's `lastDelay` through `pointer/get` on `/extensions/KHR_interactivity/delays/<n>` and the round's delay subclasses schedule with the injected timers instead of the engine's `pushScheduledDelay`, which is what registers that trie path (`packages/gltf-interactivity-engine/build/index.js` L8358). The `p6` baseline passed because the shipped adapter's `SetDelay` ran the engine's own real-timer path. For the operator; nothing in the round was changed for it."
+      "note": "FINDING — a pass that no longer reproduces; ACCEPTED under R-L5 (a) (operator, round 3) and recorded here. One-line reason: the graph exceeds G7's 16 pending delays and reads the engine's `/extensions/KHR_interactivity/delays/<n>` path, which the adapter's delay subclass does not register — both are G7/G3 decisions. In full: this asset holds more pending delays than G7 allows: 16 are live from tick 1 (measured on the adapter's own table, `engine.delays.size`, which never drops below 16 before tick 13), and the graph has 23 `flow/setDelay` nodes, so at least one of them takes `err`. The one it loses is the final 2.5 s delay whose `done` flow is the graph's ONLY test verdict (nodes 239–243), so the asset reports nothing at all under the round's adapter. Two independent changes are behind it: (1) G7's 16-pending-delay cap, which the shipped adapter did not have; (2) with the cap raised to 64 the asset reaches its verdict and reports `test/onFailed` — its `lastDelayref isValid` check fails, because that check reads a delay's `lastDelay` through `pointer/get` on `/extensions/KHR_interactivity/delays/<n>` and the round's delay subclasses schedule with the injected timers instead of the engine's `pushScheduledDelay`, which is what registers that trie path (`packages/gltf-interactivity-engine/build/index.js` L8358). The `p6` baseline passed because the shipped adapter's `SetDelay` ran the engine's own real-timer path. **Accepted under R-L5 (a): the result stays `no result`, the fixture stays, and nothing in the round changes for it.**"
     },
     {
       "asset": "math:math/matDecomp-Shear",

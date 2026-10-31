@@ -1,6 +1,6 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **FINAL, Revision 1.4 (2026-10-30; FINAL since Rev 1.3). The operator approved
+Status: **FINAL, Revision 1.5 (2026-10-31; FINAL since Rev 1.3). The operator approved
 decisions G-L1–G-L12, Q3 and Q7 and made Rev 1.2 FINAL (2026-10-30 20:57
 PT), all as recommended:**
 G-L1 (a) 4d-1, one round with seven steps, and `KHR_animation_pointer`
@@ -285,6 +285,33 @@ method.
   With the fix emulated, 20 of the 21 fixtures pass against today's adapter
   (the 21st needs 4d's delay cap), and `p6`'s Khronos baseline is the same
   (134, 8, 1), so it doesn't depend on P26.
+
+### 0.5 Revision 1.5 (after FINAL, round 3)
+Round 3's revision (`devtasks/REVISION-scripting-4d-1-round-3.md`, R6–R17)
+recorded the four notes below. **No decision changes.**
+
+1. **G-L2's "Not run" list, split (F3).** `event/stopPropagation` and
+   `animation/stopAt` are **core** ops, stored bare and inert;
+   `event/onHoverIn`/`onHoverOut` are **extension** ops, valid only with
+   `KHR_node_hoverability`, stored and inert in that form, and **a bare one
+   is not a valid `KHR_interactivity` graph** — the engine's validator
+   refuses it (`unknown core operation <op>`), in both rule copies. G-L3's
+   "any declaration the engine's validator accepts" is the rule; this makes
+   the hover case explicit. §6.1 check 4's graph carries the extension.
+2. **The string policy (S1).** Every string in a stored graph has a bound
+   and a character set: G7's three new rows (identifiers, pointers and
+   prose; R-L3 (a)). G7's three existing string fields stay as they are.
+3. **"Exclusive lock" (M2).** It means R-L2 (a): a server-lifetime lock
+   file (`<db>.lock`) that the server holds and the rollback scripts check
+   before opening the database; `BEGIN IMMEDIATE` is kept for atomicity
+   only, and is not the offline check.
+4. **Injected host functions are called unbound (F1).** The adapter keeps
+   its injected `setT`/`clearT` as plain locals and calls them unbound; the
+   fakes for injected host functions are `this`-sensitive.
+
+§0.5, G7, G-L2, §6.1 and
+`tests/fixtures/behavior-conformance-khronos/expected-4d.json` change; the
+status line names Rev 1.5. Nothing else.
 
 ## 1. What 4d delivers
 
@@ -729,11 +756,18 @@ itself; the engine is the reference here.
     - **every `math/*` and `type/*` op the engine registers, and
       `ref/eq`;**
     - **`animation/start`, `animation/stop`, `debug/log`.**
-    - **Not run:** `event/onHoverIn`/`onHoverOut` (hover isn't in Phase 3,
-      design §5.2); `event/stopPropagation` (a click already resolves to
-      exactly one behaviour node, 4c AC2, so there is nothing to stop);
-      `animation/stopAt` (4a's leaf has no end time, 4b-2 F4). Under G-L3
-      (a) these are stored and inert.
+    - **Not run — core ops (Rev 1.5, F3):** `event/stopPropagation` (a click
+      already resolves to exactly one behaviour node, 4c AC2, so there is
+      nothing to stop) and `animation/stopAt` (4a's leaf has no end time,
+      4b-2 F4). Both are **core** declarations: stored bare and inert under
+      G-L3 (a).
+    - **Not run — extension ops (Rev 1.5, F3):** `event/onHoverIn` /
+      `event/onHoverOut` (hover isn't in Phase 3, design §5.2). These are
+      **extension** ops, valid only with `KHR_node_hoverability`: written
+      that way they are stored and inert under G-L3 (a), and **a bare one is
+      not a valid `KHR_interactivity` graph** — the engine's validator
+      refuses it (`unknown core operation <op>`), in both rule copies.
+      §6.1 check 4's graph carries the extension.
   - (b) Event-driven only: (a) without `onTick` and the two interpolates.
   - (c) Everything the engine registers.
 
@@ -1281,6 +1315,9 @@ itself; the engine is the reference here.
 | Graph nodes / declarations / types | 64 / 32 / 16 | 256 / 64 / 16 | static, F1 |
 | Variables / events | 0 / 8 | 32 / 16 | static, F1 |
 | String fields (`op`, `extension`, event ids) | — | 1–64, a character set each | characters; static, F1 |
+| **Identifiers** (Rev 1.5, R-L3 (a)) | — | 1–64, `[A-Za-z0-9_]` | characters; **every object key inside the graph** (`values`, `configuration`, `flows`, declaration socket maps, event `values`) and **every socket name in a `{ node, socket }` reference**; static, F1 |
+| **Pointers** (Rev 1.5, R-L3 (a)) | — | 1–256, `[A-Za-z0-9_/{}\[\].:-]` | characters; `configuration.pointer`, already partly bounded by the pointer family rule; static, F1 |
+| **Prose** (Rev 1.5, R-L3 (a)) | — | ≤256, no C0 controls other than `\n` and `\t`, no U+2028/2029 | characters; `debug/log`'s `message` literal and any other string literal; the validator's own type rules still apply; static, F1 |
 | `nodeMap` / `targets` / `animations` | 1–16 / 0–16 / 0–8 | unchanged | static, F1 |
 | Behaviour nodes per world | 64 | unchanged | server |
 | Steps per tick per behaviour | 10,000 | unchanged | node starts; adapter |
@@ -1428,9 +1465,16 @@ real sign-in:
    host tab at about 1.9 s** with a second owner tab open: the visitor and
    the saved document show the same last sent value, and the new host
    starts from it.
-4. **"Partially supported":** a graph with `event/onHoverIn` and a
-   `/materials/…` pointer: the list, and the rest runs; a material `get`
-   feeding a translation writes nothing (the log's refused value).
+4. **"Partially supported" (Rev 1.5, R-L4 (a)):** a graph with
+   `event/onHoverIn` **carrying the extension `KHR_node_hoverability`** and a
+   `/materials/…` `pointer/set` that nothing reads: the list ("Partially
+   supported: event/onHoverIn with the extension KHR_node_hoverability (1
+   nodes); /materials/… (1 nodes)"), the rest runs, the material write is
+   inert. **And the same material pointer read by a running node is refused
+   at import,** naming the reference and its consumer (G6's consumer rule,
+   Rev 1.1 S3 / Rev 1.2 N4). The run-time half — a material `get` feeding a
+   translation writes nothing — is a runner test with a stored leaf (G4's
+   write check refuses the `NaN`), since the importer never produces one.
 5. **The frame limit, stressed:** 64 behaviours, eight of them heavy
    `onTick` graphs with matrix ops and interpolations; **record the host's
    p95 frame time** and the skip counts; nothing is disabled, a light graph
