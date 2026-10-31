@@ -427,6 +427,40 @@ describe('G3 — the clock: the ops observe the injected `now`, never the real o
 // ---------------------------------------------------------------------------
 
 describe('G3 — the delays: the adapter owns the timers, the ids and the cap', () => {
+  // R6 (F1) — the fakes for INJECTED host functions are `this`-sensitive, as the
+  // browser's own are: `window.setTimeout` throws `TypeError: Illegal
+  // invocation` for any receiver but `window`, so `table.setT(…)` (receiver =
+  // the delay table) killed the first delay of every behaviour on DEV — `the
+  // graph threw: Illegal invocation` → `behaviour disabled — engine-error`.
+  // Node ignores `this`, so every suite, fixture and conformance run stayed
+  // green; this guard makes the method call fail HERE. Every delay test below —
+  // done, cancel, the stale handle, the 17th, the 10,000 sequential, dispose —
+  // runs on these fakes.
+  test('R6 (F1): the injected timer fakes are `this`-sensitive; the delay path calls them unbound', () => {
+    const timers = fakeTimers()
+    assert.throws(() => timers.setTimeout(() => {}, 1),
+      { name: 'TypeError', message: 'Illegal invocation' }, 'a method call throws, as in Chromium')
+    assert.throws(() => timers.clearTimeout(1),
+      { name: 'TypeError', message: 'Illegal invocation' }, 'and so does clearTimeout')
+
+    const { setTimeout: setT, clearTimeout: clearT } = timers
+    assert.equal(typeof setT(() => {}, 1), 'number', 'an unbound call is accepted')
+    clearT(1)
+
+    // ...and the adapter's own delay path takes the unbound call: the graph the
+    // `done` test uses reaches the fake and schedules a real delay.
+    const g = graph([
+      { op: 'event/onStart', flows: { out: to(1) } },
+      { op: 'flow/setDelay', values: { duration: lit(T.float, 0.1) }, flows: { done: to(2) } },
+      setter('/nodes/0/translation', T.float3, [1, 1, 1]),
+    ])
+    const world = makeWorld({ ids: [OWN] })
+    const engine = engineFor(g, world, { setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout })
+    engine.tick()
+    assert.deepEqual(timers.sizes(), [100], 'the delay reached the fake, called unbound')
+    assert.equal(engine.problem, null, 'and nothing was refused or thrown')
+  })
+
   test('done runs after the injected time, on the tick after the timer fires', () => {
     const g = graph([
       { op: 'event/onStart', flows: { out: to(1) } },

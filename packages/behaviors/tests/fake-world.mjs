@@ -27,7 +27,15 @@ export function graph(nodes, { variables, events } = {}) {
 export const lit = (type, value) => ({ type, value: Array.isArray(value) ? value : [value] })
 export const to = (node, socket = 'in') => ({ node, socket })
 
-/** Injected timers, so nothing in a test touches a real clock. */
+/**
+ * Injected timers, so nothing in a test touches a real clock.
+ *
+ * R6 (F1) — the fakes for INJECTED host functions are `this`-SENSITIVE, like the
+ * browser's own: `window.setTimeout` throws `TypeError: Illegal invocation` for
+ * any receiver but `window`. Called unbound — the adapter's rule — `this` is
+ * `undefined` in a module, which is accepted. A `timers.setTimeout(…)` method
+ * call therefore fails HERE, as it failed in Chromium on DEV `7a60dbb8`.
+ */
 export function fakeTimers() {
   let nextId = 0
   const live = new Map()
@@ -35,8 +43,14 @@ export function fakeTimers() {
   return {
     live,
     cleared,
-    setTimeout(fn, ms) { const id = ++nextId; live.set(id, { fn, ms }); return id },
-    clearTimeout(id) { cleared.push(id); live.delete(id) },
+    setTimeout: function setT(fn, ms) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation')
+      const id = ++nextId; live.set(id, { fn, ms }); return id
+    },
+    clearTimeout: function clearT(id) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation')
+      cleared.push(id); live.delete(id)
+    },
     /** Fire the one live timer whose period is `ms`, as the clock would. */
     fire(ms) {
       for (const [id, timer] of [...live]) {

@@ -162,6 +162,66 @@ describe('G4 — the write check, before the queue and the overlay', () => {
       assert.equal(lightValueProblem(vector.field, vector.value), vector.ok ? null : vector.message, `${vector.label} (light)`)
     }
   })
+
+  // R12 (d3) — the check's POSITION, not just its verdict. A refused write must
+  // spend nothing: it is not queued, it does not enter the overlay, and it does
+  // NOT take a revision. Proof (d3): move `writeValueProblem` to after
+  // `queue.set` / `overlay.set` and this test fails — the queued and overlaid
+  // counts are 1, the overlay reports the NaN, and the accepted write's revision
+  // is 2, not 1.
+  test('R12 (d3): a refused write spends no revision — the check is before the queue and the overlay', () => {
+    const { runner } = setup()
+    assert.equal(write(runner, TGT, 'node', 'translation', [NaN, 0, 0]), false, 'the NaN translation is refused')
+    assert.equal(runner.queue.size, 0, 'nothing is queued')
+    assert.equal(runner.overlay.size, 0, 'nothing is in the overlay')
+
+    const key = nodeKey(TGT, 'node', 'visible')
+    assert.equal(write(runner, TGT, 'node', 'visible', false), true, 'the next write is accepted')
+    assert.equal(runner.queue.get(key).revision, 1, 'the refusal did not consume a revision')
+    assert.equal(runner.overlay.get(key).revision, 1, 'and the overlay names that same revision')
+    assert.equal(runner.overlay.get(key).value, false, 'the overlay holds the accepted value, not the NaN')
+  })
+})
+
+// ===========================================================================
+// 1b. R-L4 — a material read that feeds a translation writes nothing
+// ===========================================================================
+
+describe('G4/G6 — R-L4: a graph that reads /materials/… and writes a translation stores a NoOp write', () => {
+  /**
+   * R-L4 (a): the importer refuses a `/materials/…` get that a RUNNING node
+   * consumes (G6's own consumer rule), so the run-time half has to be pinned
+   * here, on a stored leaf the importer would never produce: the material family
+   * is not registered, the engine's `PointerGet` returns `getDefaultValueForType`
+   * — `[NaN, NaN, NaN]` for `float3` — and G4's write check refuses the
+   * translation before the queue and the overlay. Nothing is written.
+   */
+  test('a stored leaf reading /materials/0/… into /nodes/1/translation queues nothing', () => {
+    const leaf = leafFor(graph([
+      { op: 'event/onStart', flows: { out: to(2) } },
+      {
+        op: 'pointer/get',
+        configuration: {
+          pointer: { value: ['/materials/0/pbrMetallicRoughness/baseColorFactor'] },
+          type: { value: [T.float3] },
+        },
+      },
+      {
+        op: 'pointer/set',
+        configuration: { pointer: { value: ['/nodes/1/translation'] }, type: { value: [T.float3] } },
+        values: { value: { node: 1, socket: 'value' } },
+      },
+    ]), [OWN, TGT], [TGT])
+    const { runner, client } = setup({ nodes: [makeNode({ name: 'crate', id: OWN, behavior: leaf })] })
+    assert.ok(runner.engines.get('crate')?.engine, 'the graph loaded (a supported pointer/set is executable)')
+
+    runner.tick()
+    assert.equal(runner.queue.size, 0, 'the material read queued nothing')
+    assert.equal(runner.overlay.size, 0, 'and nothing entered the overlay')
+    assert.deepEqual(client.som.getNodeByName('target').translation, [0, 0, 0], 'the SOM holds the untouched translation')
+    const refused = runner.log.filter((l) => l.message.includes('refused write'))
+    assert.equal(refused.length, 1, 'the refusal is logged once, as G4 says')
+  })
 })
 
 // ===========================================================================

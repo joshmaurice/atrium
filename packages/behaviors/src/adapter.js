@@ -249,6 +249,17 @@ export function installDelaySubclasses(engine, table) {
   const BaseSet = engine.registry.get('flow/setDelay')
   const BaseCancel = engine.registry.get('flow/cancelDelay')
 
+  // R6 (F1) — the injected timers are called UNBOUND. An injected host function
+  // may be `this`-sensitive: in Chromium `window.setTimeout` throws
+  // `TypeError: Illegal invocation` for ANY receiver but `window`, so calling
+  // `table.setT(…)` (the receiver being the table object) killed the first delay
+  // of every behaviour in a real browser — `the graph threw: Illegal
+  // invocation` → `behaviour disabled — engine-error`. Node ignores `this`,
+  // which is why every suite, fixture and conformance run stayed green. Keep the
+  // timers as plain locals and call them unbound; the fakes in
+  // `tests/fake-world.mjs` are `this`-sensitive so a regression fails here.
+  const setT = table.setT
+
   if (BaseSet) {
     const SetDelay = class extends BaseSet {
       processNode(flowSocket) {
@@ -270,7 +281,7 @@ export function installDelaySubclasses(engine, table) {
           return
         }
         const id = table.next()
-        const timer = table.setT(() => {
+        const timer = setT(() => {
           table.live.delete(id)
           const ids = this._runningDelayIndices ?? []
           const at = ids.indexOf(id)
