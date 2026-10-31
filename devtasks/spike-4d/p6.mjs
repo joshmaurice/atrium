@@ -38,8 +38,23 @@ const subset = all.filter(fits)
 console.log(`indexed assets ${all.length}; in G-L2 (a) + G7: ${subset.length}`)
 const runOne = async (asset) => {
   let outcome = null, duration = 5000, reason = ''
-  const e = createBehaviorEngine({ graph: asset.graph, nodeMap: asset.nodes.map((_, i) => String(i)), animations: [], world: world(asset.nodes), setTimeout: () => 0, clearTimeout: () => {}, log: () => {} })
+  const fakeWorld = world(asset.nodes)
+  const e = createBehaviorEngine({ graph: asset.graph, nodeMap: asset.nodes.map((_, i) => String(i)), animations: [], world: fakeWorld, setTimeout: () => 0, clearTimeout: () => {}, log: () => {} })
+  e.__world = fakeWorld
   if (e.problem) return { name: `${asset.set}:${asset.name}`, result: 'rejected', reason: e.message?.slice(0, 120) }
+  // FIXED_POINTERS=1 — the P26 fix emulated: one registration per family at
+  // the highest index, the index read from the path (see fixtures-check.mjs).
+  if (process.env.FIXED_POINTERS === '1' && asset.nodes.length > 0) {
+    const w = e.__world
+    const idx = (p) => Number(/^\/nodes\/(\d+)\//.exec(p)?.[1])
+    const fam = { translation: 'float3', rotation: 'float4', scale: 'float3', 'extensions/KHR_node_visibility/visible': 'bool' }
+    for (const [suffix, type] of Object.entries(fam)) {
+      const field = suffix.endsWith('visible') ? 'visible' : suffix
+      e.engine.registerJsonPointer(`/nodes/${asset.nodes.length - 1}/${suffix}`,
+        (p) => { const v = w.get(String(idx(p)), field); return field === 'visible' ? [v] : v },
+        (p, v) => { w.set(String(idx(p)), field, field === 'visible' ? (Array.isArray(v) ? v[0] : v) : v) }, type, false)
+    }
+  }
   const original = e.eventBus.dispatchCustomEvent
   e.eventBus.dispatchCustomEvent = (name, vals) => {
     const ch = String(name).replace(/^KHR_INTERACTIVITY:/, '')
@@ -61,3 +76,4 @@ const by = {}
 for (const r of results) (by[r.result] ??= []).push(r)
 for (const [k, v] of Object.entries(by)) console.log(`${k}: ${v.length}`)
 for (const r of results.filter((r) => r.result !== 'pass')) console.log(`  ${r.result.padEnd(9)} ${r.name} ${r.reason ?? ''}`)
+if (process.env.P6_JSON) { (await import('node:fs')).writeFileSync(process.env.P6_JSON, JSON.stringify(results, null, 1)) }

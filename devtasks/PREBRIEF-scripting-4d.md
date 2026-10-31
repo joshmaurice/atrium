@@ -16,6 +16,16 @@ the kickoff and the Khronos subset checked in; G-L12 (a) N1 only; Q3 the
 confirmation on every Enable of a custom graph that writes and starts on
 load or runs every frame; Q7 1 MiB, provisional, with §5's thresholds and
 method.
+- **Rev 1.4 (2026-10-30, after FINAL) records one finding from writing the
+  conformance fixtures (G-L11), with no decision change:** **P26**, a latent
+  defect in the shipped adapter. The engine's pointer trie keeps one index
+  node per level, so a decorator that registers one callback per `nodeMap`
+  index reaches only the last. Every node pointer write and read goes to the
+  last index. No shipped template is affected, because each writes only the
+  last index; a 4d graph that writes its own node beside others would be.
+  G3's pointer bullet now says how to register (once per family, at the top
+  index, the index read from the path), and fixtures 18 and 21 pin it.
+  §0.4, P26, G3, §6 and §11 change.
 - **Rev 1.3 changes only this status line and §11** (as 4c's Rev 1.3 did).
   **4d-1's kickoff is written from the commit that carries this revision,**
   which is its base, together with the `tests/`-only commit of Claude's
@@ -265,6 +275,17 @@ method.
   frame**. **Q7:** the measurement method (an A/B of the same world,
   three visitors, five runs, the median; the heap in Chromium through CDP).
 
+### 0.4 Revision 1.4 (after FINAL: the fixtures found P26)
+- **P26, every node pointer reaches the last `nodeMap` index** (`r4`,
+  fixtures 18 and 21). Fixed in G3: each pointer family is registered
+  **once**, at the highest index it covers, and its getter and setter read
+  the index from the path the engine passes. A light family is registered
+  at the highest light host's index and refuses an index that isn't a light
+  host. A test with a three-entry `nodeMap` writes and reads each index.
+  With the fix emulated, 20 of the 21 fixtures pass against today's adapter
+  (the 21st needs 4d's delay cap), and `p6`'s Khronos baseline is the same
+  (134, 8, 1), so it doesn't depend on P26.
+
 ## 1. What 4d delivers
 
 | Who | What they get |
@@ -492,6 +513,35 @@ as today, with no unhandled rejection. **The two kinds of action differ:**
 `pointer/interpolate`'s is `async` (L8584), so its throw is a rejection;
 `variable/interpolate`'s is a plain function (L6579–6595), so its throw is
 synchronous and today reaches the adapter's tick wrapper.
+
+**P26. Every node pointer reaches the last registered index (found while
+writing the fixtures).** The engine's `JsonPtrTrie.addPath` keeps **one
+index child per level**: a numeric segment re-keys the existing index child
+rather than adding another (L382–411, "a numeric segment re-keys the
+existing index child instead of adding a second one"), and `indexBound`
+becomes that number. So `/nodes/0/translation` and `/nodes/1/translation`
+share one trie node, which keeps the callbacks of the **last**
+registration. The engine passes the concrete path to them (`r4` (h): one
+registration at index 1 served `get /nodes/0/…` and `set /nodes/1/…`, and
+`/nodes/2/…` took `err`). **The adapter registers a closure per `nodeMap`
+index and ignores the path** (`adapter.js` L155–175, `(_p, v) =>
+this.write(i, …)`), so with a `nodeMap` of two or more entries every node
+pointer, read or write, reaches the last index (`r4` (a)–(g): a lone
+`/nodes/0/scale` wrote node 1). The light family has the same shape (the
+last light host wins).
+- **Shipped impact:** none of the five templates is affected. Each writes
+  only index 1 of a two-entry `nodeMap`, or index 0 of a one-entry one
+  (`templates.js`). Authority is checked for the same index the write goes
+  to, so nothing is written that the behaviour isn't allowed to write; the
+  target is simply wrong. A graph stored through the console or a world
+  file that writes index 0 beside other entries writes the last entry
+  instead.
+- **Why the tests missed it:** every authority test in `adapter.test.js`
+  (L41–146) uses `ids: [OWN, TGT]` and writes index 1, the one case where
+  the last index is the right one (signin-sync §4.1's shape again: a test
+  value that happens to match).
+- **The Khronos baseline doesn't depend on it:** `p6` rerun with the fix
+  emulated gives the same 134 / 8 / 1.
 
 ### 2.3 The client and the server
 **P16. `scriptRunner`.** `hello.client.json` accepts `1` and `2` (L35).
@@ -1048,10 +1098,14 @@ itself; the engine is the reference here.
   delay in one behaviour takes `err` (§2.6's dynamic limit). `dispose()`
   clears every live delay with the injected `clearTimeout` before
   `engine.dispose()`.
-- **Pointers (G-L4):** the decorator registers, per `nodeMap` index, the
-  four node fields (as now), read-only `matrix` and `globalMatrix`
-  (`world.matrix(i)`, `world.worldMatrix(i)`), and light `intensity` and
-  `color` for a light host. **`world` gains exactly those reads and
+- **Pointers (G-L4; Rev 1.4, P26):** **each pointer family is registered
+  once**, at the highest index it covers, and its getter and setter read
+  the index from the path the engine passes (the trie keeps one index node
+  per level, P26). The families: the four node fields, read-only `matrix`
+  and `globalMatrix` (`world.matrix(i)`, `world.worldMatrix(i)`), and light
+  `intensity` and `color`, registered at the highest light host's index,
+  whose callbacks refuse an index that isn't a light host (`world.hasLight`)
+  as a missing pointer: `err` for a set, `isValid: false` for a get. **`world` gains exactly those reads and
   `setLightColor`**, total like the rest (4b-2 S4).
 - **Interpolation:** unchanged engine behaviour (one per path, P13), on the
   injected clock. **Because the callback is `async`** (P13, `r3`), the
@@ -1343,7 +1397,7 @@ and what is still open for the operator.
 |---|---|---|
 | G1 | the vectors through **both copies and the validator**; each new limit at its boundary and one past, with multi-byte strings; the string rules; `event/send` to `atrium/*`; literal and wired refs; an unknown extension op accepted; **an extension-qualified `flow/sequence` judged unsupported, and a supported node reading its value refused**; a `math/combine3` reading an `event/onHoverIn` output refused, and a hover node that only ends a flow accepted (`p3`); **`event/onSelect` with `EXT_probe` refused, and `listensForSelect` / `selectTargetFor` false for a graph whose only `onSelect` isn't the exact identity** (both copies); each 4b-2 vector that moves sides | (a) accept `event/send` to `atrium/interval` in one copy only; (a2) skip the ref bound in the server copy; (a3) judge support by op name only in one copy (the extension vector fails) |
 | G2 | server, port 0, real sockets (signin-sync §4.1): a 4d graph accepted, broadcast, saved and **re-read through healing**; a 65,537-unit one refused with nothing broadcast; **the world total, on every path** (Rev 1.1, S2): at 1 MiB minus N bytes, a `send` that replaces a leaf, an `add`, a Duplicate and an Undo re-add, each once just under and once just over, with multi-byte strings; the same outcome on each path and **no partial change** when refused; the Undo's refusal text reaches the owner; healing counts only the leaves it keeps; **an oversized and a multi-byte value over a real socket** (4c passdown §4.1); **election:** `scriptRunner: 2` never elected, `3` elected; each of the two places alone (4c's P22 pattern); N1's line has a `logId` | (b) elect on `2` in the `hello` path only; (b2) in `canRunBehaviors` only; (b3) count the world total with the leaf being replaced included twice |
-| G3 | the real engine and loader, a fake world, fake timers and a fake `now`: **the identity gate:** `r1`'s graph neither advances a flow nor ticks; the bare core op does; the exact `onSelect` declaration works; the registry's key set equals the allowlist; an unsupported flow op's downstream never runs; with `skipRules`, a running node reading an unsupported core value op disposes `engine-error` at its first tick (`p3b`); **the clock:** with the real `performance.now()` jumping between ticks, `onTick`, throttle and both interpolations follow only `now` (`r2`), and a throwing global `setTimeout` is never called; **delays:** `done` after the injected time, `cancel`, `cancelDelay` by `lastDelay`, **a stale `lastDelay` (A fired, B scheduled) cancels nothing and B completes**, the 17th `err`, 10,000 sequential delays leave one live entry, `dispose` clears every live delay with the injected `clearTimeout`; an interpolation replaced mid-way; **`r3`'s forced rejection** (`engine.setPathValue` throwing, test-only) with an `unhandledRejection` listener: none reaches it, one log line, the engine disposed once at the start of the next tick, and nothing after disposal; **a forced synchronous throw in a variable interpolation: one log line, disposed in the same tick** (Rev 1.2, N1); `x1`'s over-budget `done` flow disposed `over-budget` in the next tick; `globalMatrix` of a nested node matches `worldMatrix`; light colour; a send/receive loop once per tick; a doubling fan-out `over-budget` (`p7`); `graphReport` for each flag | (c) gate by op name (the `r1` test runs `Sequence`); (c2) schedule with the global `setTimeout` (the stub throws); (c3) reuse delay ids (the stale-handle test cancels B); (c4) leave `dispose` to the engine's own `clearTimeout` (a fake timer still fires) |
+| G3 | the real engine and loader, a fake world, fake timers and a fake `now`: **each index its own node (P26):** with a three-entry `nodeMap`, a write to each of `/nodes/0`, `/1` and `/2` lands on that index, a read of `/nodes/0` reads node 0, and the same through `[x]` and `{x}`; with two light hosts at indices 0 and 2, each light's intensity reaches its own light, and index 1's takes `err`; **the identity gate:** `r1`'s graph neither advances a flow nor ticks; the bare core op does; the exact `onSelect` declaration works; the registry's key set equals the allowlist; an unsupported flow op's downstream never runs; with `skipRules`, a running node reading an unsupported core value op disposes `engine-error` at its first tick (`p3b`); **the clock:** with the real `performance.now()` jumping between ticks, `onTick`, throttle and both interpolations follow only `now` (`r2`), and a throwing global `setTimeout` is never called; **delays:** `done` after the injected time, `cancel`, `cancelDelay` by `lastDelay`, **a stale `lastDelay` (A fired, B scheduled) cancels nothing and B completes**, the 17th `err`, 10,000 sequential delays leave one live entry, `dispose` clears every live delay with the injected `clearTimeout`; an interpolation replaced mid-way; **`r3`'s forced rejection** (`engine.setPathValue` throwing, test-only) with an `unhandledRejection` listener: none reaches it, one log line, the engine disposed once at the start of the next tick, and nothing after disposal; **a forced synchronous throw in a variable interpolation: one log line, disposed in the same tick** (Rev 1.2, N1); `x1`'s over-budget `done` flow disposed `over-budget` in the next tick; `globalMatrix` of a nested node matches `worldMatrix`; light colour; a send/receive loop once per tick; a doubling fan-out `over-budget` (`p7`); `graphReport` for each flag | (c0) register a callback per index (the three-entry test writes index 2 three times); (c) gate by op name (the `r1` test runs `Sequence`); (c2) schedule with the global `setTimeout` (the stub throws); (c3) reuse delay ids (the stale-handle test cancels B); (c4) leave `dispose` to the engine's own `clearTimeout` (a fake timer still fires) |
 | G4 | the runner with **the real `AtriumClient`** on a fake socket, and the real adapter: **write checks, against the server's rules** (Rev 1.1, M2): `[NaN, 0, 0]`, `[null, 0, 0]`, a two-element translation, a non-boolean `visible`, rotation `[0, 0, 0, 2]` and scale `[0, 1, 1]` and `[1e-7, 1, 1]` are refused before the queue and the overlay, logged once; rotation `[0, 0, 0, 1]` and scale `[-1, 1, 1]` go; **the shared vectors give the same verdict as the server's `authorizeNodeSend`**; **a send that doesn't happen** (Rev 1.1, M1): with `canSend()` false (the socket `CLOSING`), with `sendField` throwing `World not loaded`, and with a non-numeric return, the entry is dropped, the overlay falls back to the SOM, one line is logged, no exception leaves `tick()`, and the other engines still tick; the same for a light key, an animation key and two producers; **with a gesture on the target, an `onTick` write: no queue entry, no overlay entry, the next `get` reads the SOM, one line** (Rev 1.2, S2); **a remote `som:set` for `X.light` and for `extras.atrium.animation` each clear the matching entry and drop the queued write, and a remote rename clears nothing**; **the frame limit:** three engines each doing 6,000 steps per tick tick two per frame and all progress over three frames in rotation; with a fake clock, an engine whose tick takes 9 ms stops the frame; "Throttled" after two seconds of skips; one doing 10,001 in a tick is disposed as now; **the overlay** (the review's sequence): send `v1`, queue `v2`, receive the own echo and `edit:accepted` for `v1`, read `v2`; a remote `som:set(v3)` between those steps wins and drops the queued `v2`; an equal-valued remote write still counts as remote; answers out of order; a rejection or unknown for the older seq keeps `v2`; a drag drop; a second producer on the same key; disposal of one producer; the same for a light and an animation key; `get → add → set` on `onTick` for 30 frames with no echo advances 30 times; **an interpolation interrupted at 1.99 s by `active: false`:** nothing more is sent, and the last value sent is what the SOM shows | (d) clear the overlay on any echo for the key (the `v1`/`v2` test reads `v1`); (d2) a fixed tick order (the third engine starves); (d3) check writes after the overlay (the overlay reports a `NaN`); (d4) check only finiteness for rotation (the `[0, 0, 0, 2]` case is queued); (d5) keep the overlay when the send didn't happen (the closed-socket read returns the unsent value) |
 | G5 | the hello with `scriptRunner: true` carries `3`; without it no key; **the captured hello accepted by the three frozen schemas** (pre-4b-2, `71b6e40b`, `14ab0076`); **every `som:set` site's shape** (`origin`, and `requestSeq` on own echoes); `canSend()` false before `world:loaded`, true after, false once the socket is `CLOSING` | (e) send `scriptRunner` cross-origin; (e2) emit an own echo without `origin` |
 | G6 | the pure importer: each source shape; **a `.glb` with a bad magic, a total length that doesn't match, a JSON chunk length past the end, an unaligned chunk and two JSON chunks, each refused**; a source of 4 MiB + 1 byte (multi-byte text) refused before decoding; depth 65 and 17 graphs refused; references found in pointer indices, `{ref}` literals, **a variable's initial ref, an event value default** and `nodeIndex`; **an unmapped node reference refused, naming where it is**; a wired index refused; two `onSelect` nodes refused; **a `/materials/3` ref literal feeding only an unsupported pointer kept and listed, and the same literal feeding a `ref/eq` that decides a supported `pointer/set` refused, naming both** (Rev 1.1, S3); **the same through `math/select` and through `math/switch`, refused; through `variable/set` → `variable/get` into an unsupported pointer, kept** (Rev 1.2, N4); the confirmation shown for the four combinations of `startsOnLoad` and `perFrame` with a write, and never for a template; duplicate file names; a survey asset that fits converts, **passes `behaviorCheck`** and keeps its write log under the mapping (`nodeMap` permuted, results equal); `enabled: false`; the grants list; the three notes; **the panel through the strict DOM fake:** a file name, an op name and a problem text of `<img src=x onerror=…>` all show as text | (f) leave a variable's ref literal unmapped (the write log differs); (f2) render op names as HTML (the guard fails); (f3) skip the GLB length check (the truncated file parses) |
@@ -1633,3 +1687,9 @@ As scripting-4c, with this round's specifics:
 - **Rev 1.3** (2026-10-30): the operator approved G-L1–G-L12, Q3 and Q7 as
   recommended and made Rev 1.2 FINAL (20:57 PT). This revision changes only
   the status line and this log.
+- **Rev 1.4** (2026-10-30, after FINAL): writing the conformance fixtures
+  (G-L11, `tests/fixtures/behavior-conformance-4d/`, 21 of them) found
+  **P26**, a latent defect in the shipped adapter's pointer registration
+  (`r4`; `index.js` L382–411; `adapter.js` L155–175). G3's pointer bullet,
+  a G3 test and proof (c0), §0.4 and P26 change. No decision changes.
+

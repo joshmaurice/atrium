@@ -27,6 +27,13 @@ timeout 30  node devtasks/spike-4d/r2-clock-and-defaults.mjs    # M3: the tick's
 timeout 30  node devtasks/spike-4d/r3-interpolation-rejection.mjs   # S4: an async interpolation's rejection, and the bus wrapper
 # Added for Rev 1.2 (the third review's own probe):
 timeout 30  node devtasks/spike-4d/x1-done-flow-rejection.mjs       # an interpolation's done flow over the step budget
+# Added with the conformance fixtures (Rev 1.4):
+timeout 30  node devtasks/spike-4d/r4-literal-after-ref.mjs        # P26: every node pointer reaches the last nodeMap index
+node devtasks/spike-4d/fixtures-gen.mjs                            # writes tests/fixtures/behavior-conformance-4d/ (expectations typed by hand)
+node devtasks/spike-4d/fixtures-check.mjs                          # runs them through today's adapter (G3's gate, clock and timers emulated)
+FIXED_POINTERS=1 node devtasks/spike-4d/fixtures-check.mjs         # the same, with P26's fix emulated
+KHRONOS_ASSETS=… P6_JSON=/tmp/p6.json node devtasks/spike-4d/p6.mjs  # p6, saving its results
+KHRONOS_ASSETS=… node devtasks/spike-4d/khronos-extract.mjs /tmp/p6.json   # writes tests/fixtures/behavior-conformance-khronos/
 ```
 
 The static survey of §2.4 is in `survey/` (Python 3, reads the assets' JSON only):
@@ -57,3 +64,5 @@ git fetch --depth 1 origin 926bec45dfbe052bad4013ab5852ed2f4042bff5 && git check
 | `r2` | a throwing `performance.now` disposes the engine (`engine-error`); with the real clock jumping, `timeSinceStart` follows the injected clock (0, 0.25); a get of an unregistered float3 writes `[NaN, NaN, NaN]`; the first `timeSinceLastTick` writes `[NaN, 0, 0]` |
 | `r3` | with `engine.setPathValue` forced to throw, an interpolation's rejections are unhandled and the engine isn't disposed; wrapped on the adapter's bus, both are caught and none is unhandled |
 | `x1` | the reviewer's: an interpolation's `done` flow is queued, not run in the action; over budget, it is disposed `over-budget` in the next tick, with no unhandled rejection |
+| `r4` | with a two-entry `nodeMap`, a lone `/nodes/0/scale` writes node 1, and so does every node pointer; one registration at index 1 serves `/nodes/0` and `/nodes/1` with the concrete path, and `/nodes/2` takes `err` (P26) |
+| fixtures | 18 of 21 pass on today's adapter; 07, 18, 21 differ as their `requires4d` says; with `FIXED_POINTERS=1`, 20 pass |
