@@ -6,7 +6,7 @@ import { resolve as resolvePath, dirname } from 'node:path'
 import { createServer } from 'node:http'
 import { createRequestHandler } from './http-routes.js'
 import { createDb, resolveDbPath } from './db.js'
-import { acquireServerLock } from './server-lock.js'
+import { acquireLock, legacyLockExists, legacyLockPathFor } from './server-lock.js'
 import { createWorldRegistry } from './world-registry.js'
 import * as auth from './auth.js'
 import { setupCommons } from './commons.js'
@@ -56,16 +56,26 @@ port ??= 3000
 // Database
 // ---------------------------------------------------------------------------
 
-// R-L2 (a) — the server's LIFETIME lock, beside the database. It is what makes
-// "the world server is stopped" CHECKED by the rollback scripts rather than
-// assumed (round 2's M2: `BEGIN IMMEDIATE` is an atomicity lock, not an
-// offline check). A live pid in `<db>.lock` refuses a second server, and
-// refuses the scripts. Removed on a clean exit below.
+// R22 (as R-L8 (a)) — the server's LIFETIME lock, beside the database: a KERNEL
+// lock taken through SQLite (`<canonical db>.lock.db`, `BEGIN EXCLUSIVE`) and
+// held for the whole run. It is what makes "the world server is stopped"
+// CHECKED by the rollback scripts rather than assumed (round 2's M2:
+// `BEGIN IMMEDIATE` is an atomicity lock, not an offline check). Taken BEFORE
+// the database is opened, so nothing writes to it unlocked; the OS releases it
+// when this process exits, `kill -9` included.
 const dbPath = resolveDbPath(process.env.ATRIUM_DB_PATH)
+
+const lockLog = (line) => console.error(`[lock] ${line}`)
+
+// The pre-R8 lock FILE is ignored now (R22). Say so once, so an operator who
+// kept one knows it can go.
+if (legacyLockExists(dbPath)) {
+  lockLog(`leftover ${legacyLockPathFor(dbPath)} from an earlier release is ignored; you may delete it`)
+}
 
 let serverLock
 try {
-  serverLock = acquireServerLock(dbPath, { log: (line) => console.error(`[lock] ${line}`) })
+  serverLock = acquireLock(dbPath, { role: 'server', log: lockLog })
 } catch (error) {
   console.error(`Atrium server refuses to start: ${error.message}`)
   process.exit(1)

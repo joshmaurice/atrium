@@ -1,140 +1,251 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 //
-// server-lock.js — scripting-4d-1 round 3, card 4 (R8, R-L2 (a)).
+// server-lock.js — scripting-4d-1 round 4, card 3 (R22 as R-L8 (a), R19).
 //
-// THE OFFLINE CHECK. `BEGIN IMMEDIATE` is a WRITE lock: it keeps a transaction
-// atomic, but an idle server between transactions holds none, so it is NOT
-// evidence that "the world server is stopped" (round 2's M2). What the scripts
-// need is a lock the server holds for its whole lifetime.
+// THE LIFETIME LOCK. It is what makes "the world server is stopped" CHECKED by
+// the rollback scripts rather than assumed (round 2's M2: `BEGIN IMMEDIATE` is
+// an atomicity lock, not an offline check).
 //
-// The server creates `<db>.lock` EXCLUSIVELY (`O_CREAT | O_EXCL`) at start,
-// with its pid and host, and removes it on a clean exit. It refuses to start
-// while a lock file exists whose pid is still alive (two servers on one
-// database is the same hazard as a script running against a live one). The
-// rollback scripts refuse while such a lock exists; if the pid is dead the
-// file is stale (a crash), they warn and remove it (`stale lock from pid N,
-// removed`) and proceed.
+// Round 3 built it as a lock FILE and the review broke it (round 4's M1): the
+// file was created empty and the pid written in a second call, so a script that
+// read it in that instant called it malformed and DELETED it; two recoverers
+// could each delete the other's new file; and the scripts only CHECKED the file
+// instead of holding it, so a server could start mid-reconcile. Under R-L8 (a)
+// the lock is now a KERNEL lock, taken through SQLite:
 //
-// Portable: `node:fs` + `process.kill(pid, 0)`, no dependency.
+//   * beside the database sits a small LOCK DATABASE, `<canonical db>.lock.db`
+//     (`journal_mode = DELETE`). The holder opens a connection with
+//     `timeout: 0` and runs `BEGIN EXCLUSIVE`, and KEEPS THE TRANSACTION OPEN
+//     for the whole of its run. Anyone else gets `SQLITE_BUSY` at once.
+//   * the OS releases the lock when the holder exits for ANY reason, `kill -9`
+//     included. There is no stale lock to recover and no recovery race; nothing
+//     ever deletes the lock database.
+//   * the SERVER takes it at start, before it opens the database, and holds it
+//     until exit. BOTH SCRIPTS take the SAME lock before they open the
+//     database and hold it until they have closed it. While either holds it the
+//     other refuses.
+//   * who holds it (for the MESSAGES only) is in a sidecar `<canonical
+//     db>.lock.json`, written after acquiring. THE SIDECAR IS NEVER THE LOCK: a
+//     missing, empty or stale sidecar changes no decision.
+//   * the lock is keyed on the database's CANONICAL path (R19), so a symlink to
+//     the database — or to its directory — reaches the same lock. (A hard link,
+//     or the same file through another mount, is a different path after
+//     `realpath`; out of scope under R-L6 (a).)
+//   * whoever creates the lock database or the sidecar gives them the main
+//     database's owner, group and mode, so a lock database root's script made
+//     first never stops the service from opening it later.
+//   * the pre-R8 `<db>.lock` FILE is no longer read or written. A leftover one
+//     is IGNORED; the server's start logs one line naming it.
 
-import { openSync, writeSync, closeSync, readFileSync, unlinkSync } from 'node:fs'
+import { chmodSync, chownSync, existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { hostname } from 'node:os'
+import Database from 'better-sqlite3'
 
-/** The lock file beside a database file: `<db>.lock`. */
-export function lockPathFor(dbPath) {
-  return `${dbPath}.lock`
-}
+// ---------------------------------------------------------------------------
+// Paths: the database's canonical path, and the three paths derived from it
+// ---------------------------------------------------------------------------
 
 /**
- * The lock file's contents, or `null` when there is none is not what is
- * wanted here: `null` means "no lock file"; a parse failure returns
- * `{ problem }`.
+ * R19 — the database's CANONICAL path: the lock must be one lock for one
+ * database, whatever spelling reached it.
+ *
+ *   * the file exists → `realpathSync(dbPath)` (a symlink to the file collapses
+ *     to its target, as does a symlinked directory above it);
+ *   * it doesn't (the server's first start) → `realpathSync(dirname)` + the
+ *     basename, so a symlinked directory still collapses;
+ *   * the directory doesn't exist either → the `resolve()`d path, as before.
  */
-export function readLockFile(lockPath) {
+export function canonicalDbPath(dbPath) {
+  const resolved = resolve(dbPath)
+  try {
+    return realpathSync(resolved)
+  } catch {
+    // The database file isn't there yet; canonicalise its directory instead.
+  }
+  try {
+    return join(realpathSync(dirname(resolved)), basename(resolved))
+  } catch {
+    // Neither is there: nothing to resolve against.
+  }
+  return resolved
+}
+
+/** The lock database beside a database file: `<canonical db>.lock.db`. */
+export function lockPathFor(dbPath) {
+  return `${canonicalDbPath(dbPath)}.lock.db`
+}
+
+/** The holder's sidecar: `<canonical db>.lock.json`. Never the lock itself. */
+export function sidecarPathFor(dbPath) {
+  return `${canonicalDbPath(dbPath)}.lock.json`
+}
+
+/** The pre-R8 lock FILE (`<canonical db>.lock`), ignored since round 4. */
+export function legacyLockPathFor(dbPath) {
+  return `${canonicalDbPath(dbPath)}.lock`
+}
+
+/** Does the legacy (pre-R8) lock file exist? Its content means nothing now. */
+export function legacyLockExists(dbPath) {
+  return existsSync(legacyLockPathFor(dbPath))
+}
+
+// ---------------------------------------------------------------------------
+// The sidecar (messages only)
+// ---------------------------------------------------------------------------
+
+/**
+ * The holder's sidecar, or `null` when there is none. A parse failure or a
+ * missing pid returns `{ problem }` — which is still never a decision, only a
+ * reason to say "an unknown process" in the message.
+ */
+export function readLockSidecar(dbPath) {
   let raw
   try {
-    raw = readFileSync(lockPath, 'utf8')
+    raw = readFileSync(sidecarPathFor(dbPath), 'utf8')
   } catch {
-    return null                       // no lock file at all
+    return null                                    // no sidecar at all
   }
   let parsed
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return { problem: 'the lock file is not valid JSON', raw }
+    return { problem: 'the lock sidecar is not valid JSON', raw }
   }
-  if (!parsed || typeof parsed !== 'object' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) {
-    return { problem: 'the lock file carries no pid', raw }
+  if (!parsed || typeof parsed !== 'object') {
+    return { problem: 'the lock sidecar is not an object', raw }
   }
   return parsed
 }
 
-/**
- * Is `pid` a live process? `process.kill(pid, 0)` sends no signal; it reports
- * ESRCH when there is no such process and EPERM when there is one we may not
- * signal — which is still alive, so EPERM counts.
- */
+/** Is `pid` a live process? Only used to NAME a holder in a message, never to decide. */
 export function pidIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true
   } catch (error) {
-    return error?.code === 'EPERM'
+    return error?.code === 'EPERM'          // alive, we just may not signal it
   }
 }
 
-function removeLockFile(lockPath) {
+/** How a message names whoever holds the lock: `pid 1234 (the server)`. */
+function describeHolder(sidecar) {
+  if (!sidecar || sidecar.problem || !Number.isInteger(sidecar.pid) || sidecar.pid <= 0) {
+    return 'an unknown process: its lock sidecar is missing or unreadable'
+  }
+  const role = typeof sidecar.role === 'string' && sidecar.role.length > 0 ? sidecar.role : 'unknown role'
+  return `pid ${sidecar.pid}, ${role}`
+}
+
+/** The message a refusal carries, for the requester's own role. */
+function busyMessage(lockPath, sidecar, requesterRole) {
+  const holder = sidecar && !sidecar.problem ? sidecar : null
+  if (requesterRole !== 'server' && holder?.role === 'server') {
+    return `the world server is running (pid ${holder.pid} on ${holder.host ?? 'this host'}); ` +
+      `stop it before running this script (lock ${lockPath})`
+  }
+  return `another process holds ${lockPath} (${describeHolder(sidecar)})`
+}
+
+// ---------------------------------------------------------------------------
+// Ownership: the new files wear the database's owner, group and mode
+// ---------------------------------------------------------------------------
+
+/**
+ * Give every path the main database's owner, group and mode, so a lock the
+ * root user's script created first is still openable by the service user. When
+ * there is no database yet (the server's first start) there is nothing to copy.
+ * Best-effort: a non-root holder cannot chown, and must not fail over it.
+ */
+function matchDatabaseOwnership(dbPath, paths) {
+  let stat
   try {
-    unlinkSync(lockPath)
-    return true
+    stat = statSync(canonicalDbPath(dbPath))
   } catch {
-    return false
+    return                                   // no database yet: nothing to copy
+  }
+  for (const path of paths) {
+    try { chmodSync(path, stat.mode & 0o7777) } catch { /* best effort */ }
+    try { chownSync(path, stat.uid, stat.gid) } catch { /* best effort */ }
   }
 }
 
 /**
- * Create the server's lifetime lock, exclusively. Refuses (throws) when the
- * file exists and its pid is alive; a stale file (dead pid) is removed with a
- * warning and the acquire retried once.
- *
- * @returns {{ lockPath: string, release: () => void }}
+ * A TEST-ONLY hook (R22's test 2): when `ATRIUM_TEST_LOCK_SIGNAL` names a file,
+ * a holder writes its pid there once it HAS the lock and then waits (up to 60 s)
+ * for `<signal>.release` before it goes on. Inert unless that variable is set,
+ * so a production run never waits.
  */
-export function acquireServerLock(dbPath, { log = () => {} } = {}) {
-  const lockPath = lockPathFor(dbPath)
-  const payload = JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }) + '\n'
+export function testLockHoldHook() {
+  const signal = process.env.ATRIUM_TEST_LOCK_SIGNAL
+  if (!signal) return
+  writeFileSync(signal, `${process.pid}\n`)
+  const releaseFile = `${signal}.release`
+  const deadline = Date.now() + 60000
+  const sleeper = new Int32Array(new SharedArrayBuffer(4))
+  while (!existsSync(releaseFile) && Date.now() < deadline) {
+    Atomics.wait(sleeper, 0, 0, 25)
+  }
+}
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(lockPath, 'wx')     // O_CREAT | O_EXCL — exclusive
-      try {
-        writeSync(fd, payload)
-      } finally {
-        closeSync(fd)
-      }
-      return { lockPath, release: () => { removeLockFile(lockPath) } }
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error
-      const existing = readLockFile(lockPath)
-      if (existing && !existing.problem && pidIsAlive(existing.pid) && existing.pid !== process.pid) {
-        throw new Error(`another server is running (pid ${existing.pid} on ${existing.host ?? 'this host'}) and holds ${lockPath}`)
-      }
-      // A stale file, or our own pid from a lock we already hold: clear it.
-      log(`stale lock from pid ${existing?.pid ?? '?'}, removed`)
-      removeLockFile(lockPath)
+// ---------------------------------------------------------------------------
+// Acquire / release
+// ---------------------------------------------------------------------------
+
+/**
+ * Take the database's lifetime lock: a `BEGIN EXCLUSIVE` on
+ * `<canonical db>.lock.db`, held until `release()` (or until this process
+ * exits, however it exits). Refuses with a thrown `Error` when someone else
+ * holds it.
+ *
+ * @param {string} dbPath
+ * @param {{role?: string, log?: (line: string) => void}} [opts]  `role` names
+ *        the holder in the others' messages ('server', 'export', 'reconcile').
+ * @returns {{ lockPath: string, sidecarPath: string, release: () => void }}
+ */
+export function acquireLock(dbPath, { role = 'server', log = () => {} } = {}) {
+  const lockPath = lockPathFor(dbPath)
+  const sidecarPath = sidecarPathFor(dbPath)
+
+  let lockDb
+  try {
+    lockDb = new Database(lockPath, { timeout: 0 })
+  } catch (error) {
+    throw new Error(`could not open ${lockPath}: ${error.message}`)
+  }
+
+  try {
+    lockDb.pragma('journal_mode = DELETE')
+    lockDb.pragma('busy_timeout = 0')
+    lockDb.exec('BEGIN EXCLUSIVE')          // the kernel lock; SQLITE_BUSY at once
+  } catch (error) {
+    const sidecar = readLockSidecar(dbPath)
+    try { lockDb.close() } catch { /* nothing to close cleanly */ }
+    if (String(error?.code ?? '').startsWith('SQLITE_BUSY')) {
+      throw new Error(busyMessage(lockPath, sidecar, role))
     }
+    throw new Error(`could not lock ${lockPath}: ${error.message}`)
   }
 
-  throw new Error(`could not create ${lockPath}: it keeps reappearing`)
-}
+  // The sidecar: who holds it, for the others' messages. Never the lock.
+  const holder = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), role }
+  try {
+    writeFileSync(sidecarPath, `${JSON.stringify(holder)}\n`)
+  } catch (error) {
+    log(`could not write ${sidecarPath}: ${error.message} (the lock is held anyway)`)
+  }
+  matchDatabaseOwnership(dbPath, [lockPath, sidecarPath])
 
-/**
- * The rollback scripts' offline check: throw when the server's lifetime lock
- * exists and its pid is alive; warn and remove a stale one, then proceed.
- *
- * @returns {{ stale: number|null }}  `stale` is the dead pid that was removed
- */
-export function assertServerStopped(dbPath, { log = () => {} } = {}) {
-  const lockPath = lockPathFor(dbPath)
-  const existing = readLockFile(lockPath)
-  if (existing === null) return { stale: null }
-
-  if (existing.problem) {
-    // A file we cannot read is not evidence of a running server; warn, clear it
-    // and go on (the operator keeps the database, not the lock file).
-    log(`stale lock from pid ?, removed (${existing.problem})`)
-    removeLockFile(lockPath)
-    return { stale: null }
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    try { lockDb.exec('ROLLBACK') } catch { /* the transaction is already gone */ }
+    try { lockDb.close() } catch { /* already closed */ }
   }
 
-  if (pidIsAlive(existing.pid) && existing.pid !== process.pid) {
-    throw new Error(
-      `the world server is running (pid ${existing.pid} on ${existing.host ?? 'this host'}); stop it before running this script (lock file ${lockPath})`
-    )
-  }
-
-  log(`stale lock from pid ${existing.pid}, removed`)
-  removeLockFile(lockPath)
-  return { stale: existing.pid }
+  return { lockPath, sidecarPath, release }
 }

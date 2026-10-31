@@ -5,7 +5,7 @@
 // card 4 adds the offline check (R8, R-L2 (a)) and R11's escaping. The two
 // rollback scripts on a scratch database built by the SERVER's own code
 // (`createDb`), driven as real processes so the CLI, the two locks
-// (`BEGIN IMMEDIATE` for atomicity; the server's lifetime lock file for the
+// (`BEGIN IMMEDIATE` for atomicity; the database's kernel lock, R22, for the
 // offline check) and `--apply` are all exercised.
 //
 // The three outcomes of `behaviors-reconcile.mjs`:
@@ -32,6 +32,7 @@ import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import Database from 'better-sqlite3'
 import { createDb } from '../src/db.js'
+import { acquireLock, lockPathFor } from '../src/server-lock.js'
 import { createWorldFromDocument } from '../src/world.js'
 import { behaviorCheck, behaviorLeafBytes } from '../src/send-policy.js'
 import { templateGraph } from '../../behaviors/src/templates.js'
@@ -313,65 +314,56 @@ test('G10: both scripts refuse while another connection holds the database', asy
 })
 
 // ===========================================================================
-// R8 / R-L2 (a) — the offline check: the server's LIFETIME lock file
+// R22 (R-L8 (a)) — the offline check: the database's KERNEL lock, held
 // ===========================================================================
 
-/** A pid that is certainly dead: a child that has exited and been reaped. */
-const deadPid = () => new Promise((res) => {
-  const child = execFile(process.execPath, ['-e', 'process.exit(0)'], () => res(child.pid))
-})
-
-const writeLock = (dbPath, pid) => writeFileSync(
-  `${dbPath}.lock`, JSON.stringify({ pid, host: 'test-host', startedAt: new Date().toISOString() }) + '\n'
-)
-
-test('G10/R8: both scripts refuse while the server lifetime lock names a LIVE pid', async () => {
+test('G10/R22: both scripts refuse while another process HOLDS the database lock, and run once it is freed', async () => {
   const dir = scratchDir()
-  const dbPath = join(dir, 'live.db')
-  const outPath = join(dir, 'live-export.json')
+  const dbPath = join(dir, 'held.db')
+  const outPath = join(dir, 'held-export.json')
   const id = randomUUID()
   buildDb(dbPath, { WL: { document: documentWithNodes([{ name: 'n', atrium: { objectId: id, behavior: leafFor(id) } }]) } })
 
-  // The lock file exactly as `acquireServerLock` writes it, naming a live pid
-  // (this test's own process — alive, and never the child script's pid).
-  writeLock(dbPath, process.pid)
+  // A real holder, in this process: the kernel lock the server takes too.
+  const holder = acquireLock(dbPath, { role: 'reconcile' })
 
   const exported = await run(EXPORT, [dbPath, outPath])
   assert.notEqual(exported.code, 0, 'the export refuses')
-  assert.match(exported.stderr, /the world server is running \(pid \d+ on test-host\)/)
+  assert.match(exported.stderr, new RegExp(`another process holds .*held\\.db\\.lock\\.db \\(pid ${process.pid}, reconcile\\)`))
   assert.equal(existsSync(outPath), false, 'nothing was written')
 
   writeFileSync(outPath, JSON.stringify({ version: 1, worlds: [] }))
   const reconciled = await run(RECONCILE, [dbPath, outPath])
   assert.notEqual(reconciled.code, 0, 'the reconcile refuses')
-  assert.match(reconciled.stderr, /the world server is running \(pid \d+ on test-host\)/)
+  assert.match(reconciled.stderr, new RegExp(`another process holds .*held\\.db\\.lock\\.db \\(pid ${process.pid}, reconcile\\)`))
 
-  // A refusal does NOT remove the server's lock: it is still held.
-  assert.equal(existsSync(`${dbPath}.lock`), true, 'the live lock file survives the refusal')
+  // A refusal neither takes nor deletes the holder's lock.
+  assert.equal(existsSync(lockPathFor(dbPath)), true, 'the lock database survives the refusal')
+
+  holder.release()
+
+  const afterStop = await run(EXPORT, [dbPath, outPath])
+  assert.equal(afterStop.code, 0, `the export runs once the lock is free: ${afterStop.stderr}`)
+  assert.equal(JSON.parse(readFileSync(outPath, 'utf8')).worlds.length, 1, 'the export proceeded')
+  const afterReconcile = await run(RECONCILE, [dbPath, outPath])
+  assert.equal(afterReconcile.code, 0, afterReconcile.stderr)
 })
 
-test('G10/R8: a STALE server lifetime lock is warned about and removed, and both scripts proceed', async () => {
+test('G10/R22: a leftover pre-R8 <db>.lock FILE is ignored — it blocks neither script', async () => {
   const dir = scratchDir()
-  const dbPath = join(dir, 'stale.db')
-  const outPath = join(dir, 'stale-export.json')
+  const dbPath = join(dir, 'legacy.db')
+  const outPath = join(dir, 'legacy-export.json')
   const id = randomUUID()
   buildDb(dbPath, { WS: { document: documentWithNodes([{ name: 'n', atrium: { objectId: id, behavior: leafFor(id) } }]) } })
 
-  const dead = await deadPid()
-  writeLock(dbPath, dead)
+  // Exactly as round 3 wrote it, naming a live pid: it means nothing now.
+  writeFileSync(`${dbPath}.lock`, JSON.stringify({ pid: process.pid, host: 'test-host', startedAt: new Date().toISOString() }) + '\n')
 
   const exported = await run(EXPORT, [dbPath, outPath])
   assert.equal(exported.code, 0, exported.stderr)
-  assert.match(exported.stderr, new RegExp(`stale lock from pid ${dead}, removed`))
-  assert.equal(existsSync(`${dbPath}.lock`), false, 'the stale lock file was removed')
-  assert.equal(JSON.parse(readFileSync(outPath, 'utf8')).worlds.length, 1, 'the export proceeded')
-
-  // Stale again, for the reconcile.
-  writeLock(dbPath, dead)
+  assert.equal(existsSync(`${dbPath}.lock`), true, 'the leftover file is left alone')
   const reconciled = await run(RECONCILE, [dbPath, outPath])
   assert.equal(reconciled.code, 0, reconciled.stderr)
-  assert.match(reconciled.stderr, new RegExp(`stale lock from pid ${dead}, removed`))
-  assert.equal(existsSync(`${dbPath}.lock`), false, 'the stale lock file was removed again')
   assert.equal(reportOf(reconciled.stdout).totals.writes, 0, 'a dry run still writes nothing')
 })
 

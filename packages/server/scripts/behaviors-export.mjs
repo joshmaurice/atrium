@@ -12,18 +12,21 @@
 //
 // Usage: node behaviors-export.mjs <db> <out>
 //
-// "The world server is stopped" is CHECKED, not assumed (N3): the server holds
-// a LIFETIME lock file beside the database, and this script refuses while that
-// file's pid is alive (R-L2 (a), round 3). A stale lock (a dead pid) is warned
-// about and removed. `BEGIN IMMEDIATE` is taken as well, but for ATOMICITY
-// against a concurrent writer — it is not the offline check: an idle server
-// between transactions holds no write lock (round 2's M2).
+// "The world server is stopped" is CHECKED, not assumed (N3), and now so is
+// "no other script is running": under R22 (as R-L8 (a)) the server holds a
+// KERNEL lock for its whole lifetime, taken through SQLite on
+// `<canonical db>.lock.db`, and this script takes the SAME lock — before it
+// opens the database — and holds it until it has closed it. A running server
+// (or a concurrent export/reconcile) refuses at once; there is no stale lock to
+// recover, because the OS releases the lock when its holder exits. `BEGIN
+// IMMEDIATE` is taken as well, but for ATOMICITY against a concurrent writer:
+// it is not the offline check (round 2's M2).
 
 import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import Database from 'better-sqlite3'
-import { assertServerStopped } from '../src/server-lock.js'
+import { acquireLock, testLockHoldHook } from '../src/server-lock.js'
 
 const sha256Json = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export { sha256Json }
@@ -100,13 +103,18 @@ function main() {
   const dbPath = resolve(dbArg)
   const warn = (line) => console.error(`[export] ${line}`)
 
-  // The offline check (R-L2 (a)): a live server's lifetime lock refuses.
+  // The offline check (R22): the server's lifetime lock, taken as OURS for
+  // this run and held until the database is closed. Nothing to recover — a
+  // holder that dies frees the lock.
+  let lock
   try {
-    assertServerStopped(dbPath, { log: warn })
+    lock = acquireLock(dbPath, { role: 'export', log: warn })
   } catch (error) {
     console.error(`[export] ${error.message}`)
     process.exit(1)
   }
+  process.on('exit', () => lock.release())
+  testLockHoldHook()   // inert unless ATRIUM_TEST_LOCK_SIGNAL is set (R22's test 2)
 
   let db
   try {
@@ -140,10 +148,12 @@ function main() {
     console.log(`[export] wrote ${outPath}: ${exported.worlds.length} world(s), ${nodeCount} behaviour leaf(s)`)
     db.exec('ROLLBACK')   // read-only: nothing was written
     db.close()
+    lock.release()        // the database is closed; the lock goes with it
     process.exit(0)
   } catch (error) {
     try { db.exec('ROLLBACK') } catch { /* already rolled back */ }
     db.close()
+    lock.release()
     console.error(`[export] failed: ${error.message}`)
     process.exit(1)
   }

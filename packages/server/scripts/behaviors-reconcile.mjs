@@ -33,11 +33,14 @@
 //
 // Usage: node behaviors-reconcile.mjs <db> <export> [--apply]
 //
-// "The world server is stopped" is CHECKED, not assumed (N3): the server holds
-// a LIFETIME lock file beside the database, and this refuses while its pid is
-// alive (R-L2 (a), round 3); a stale lock is warned about and removed.
-// `BEGIN IMMEDIATE` is taken for ATOMICITY of the write, not as the offline
-// check (round 2's M2).
+// "The world server is stopped" is CHECKED, not assumed (N3), and so is "no
+// other script is running": under R22 (as R-L8 (a)) the server holds a KERNEL
+// lock for its whole lifetime, taken through SQLite on `<canonical db>.lock.db`,
+// and this script takes the SAME lock — before it opens the database — and holds
+// it until it has closed it. A running server (or a concurrent export/reconcile)
+// refuses at once; there is nothing to recover, because the OS releases the lock
+// when its holder exits. `BEGIN IMMEDIATE` is taken for ATOMICITY of the write,
+// not as the offline check (round 2's M2).
 //
 // File-backed worlds are out of scope: they are never autosaved, so they never
 // hold a healed leaf in storage.
@@ -46,7 +49,7 @@ import Database from 'better-sqlite3'
 import { resolve } from 'node:path'
 import { createWorldFromDocument } from '../src/world.js'
 import { behaviorCheck } from '../src/send-policy.js'
-import { assertServerStopped } from '../src/server-lock.js'
+import { acquireLock, testLockHoldHook } from '../src/server-lock.js'
 import { sha256Json, quoteName } from './behaviors-export.mjs'
 
 /** objectId → the indices of the nodes carrying it. */
@@ -227,13 +230,17 @@ function main() {
 
     const resolvedDbPath = resolve(dbPath)
 
-    // The offline check (R-L2 (a)): a live server's lifetime lock refuses.
+    // The offline check (R22): the server's lifetime lock, taken as OURS for
+    // this run and held until the database is closed.
+    let lock
     try {
-      assertServerStopped(resolvedDbPath, { log: (line) => console.error(`[reconcile] ${line}`) })
+      lock = acquireLock(resolvedDbPath, { role: 'reconcile', log: (line) => console.error(`[reconcile] ${line}`) })
     } catch (error) {
       console.error(`[reconcile] ${error.message}`)
       process.exit(1)
     }
+    process.on('exit', () => lock.release())
+    testLockHoldHook()   // inert unless ATRIUM_TEST_LOCK_SIGNAL is set (R22's test 2)
 
     let db
     try {
@@ -276,10 +283,12 @@ function main() {
       if (apply) db.exec('COMMIT')
       else db.exec('ROLLBACK')
       db.close()
+      lock.release()      // the database is closed; the lock goes with it
       process.exit(0)
     } catch (error) {
       try { db.exec('ROLLBACK') } catch { /* already rolled back */ }
       db.close()
+      lock.release()
       console.error(`[reconcile] failed: ${error.message}`)
       process.exit(1)
     }
