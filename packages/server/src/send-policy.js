@@ -505,12 +505,17 @@ export function checkObjectIdValue(node, value, objectIdInUse = null) {
 /** The fourth node extras leaf (F-L2). */
 export const BEHAVIOR_LEAF = 'extras.atrium.behavior'
 
-/** F7's limits. */
-export const BEHAVIOR_BYTES_MAX    = 16384
-export const BEHAVIOR_NODES_MAX    = 64
-export const BEHAVIOR_DECLS_MAX    = 32
+/** G7's limits. */
+export const BEHAVIOR_BYTES_MAX    = 65536
+export const BEHAVIOR_NODES_MAX    = 256
+export const BEHAVIOR_DECLS_MAX    = 64
 export const BEHAVIOR_TYPES_MAX    = 16
-export const BEHAVIOR_EVENTS_MAX   = 8
+export const BEHAVIOR_EVENTS_MAX   = 16
+export const BEHAVIOR_VARIABLES_MAX = 32
+export const BEHAVIOR_STRING_MAX   = 64
+export const BEHAVIOR_OP_RE        = /^[A-Za-z0-9_/]+$/
+export const BEHAVIOR_EXTENSION_RE = /^[A-Za-z0-9_]+$/
+export const BEHAVIOR_EVENT_ID_RE  = /^[A-Za-z0-9_./:-]+$/
 export const BEHAVIOR_NODEMAP_MIN  = 1
 export const BEHAVIOR_NODEMAP_MAX  = 16
 export const BEHAVIOR_TARGETS_MAX  = 16
@@ -533,11 +538,49 @@ const BEHAVIOR_KEYS = [
   'kind', 'graph', 'nodeMap', 'targets', 'animations', 'proximity', 'interval', 'template', 'enabled', 'origin',
 ]
 
-/** F-L4 — the op allowlist, exactly the templates' ops plus debug/log. */
-const BEHAVIOR_OPS = [
-  'event/onSelect', 'event/receive', 'flow/branch', 'pointer/get', 'pointer/set',
-  'math/not', 'math/gt', 'animation/start', 'animation/stop', 'debug/log',
+/**
+ * G-L2 (a) / G1 — the executable IDENTITIES. The same text as the page's copy in
+ * `packages/behaviors/src/behavior-spec.js`; the vectors pin them to each other.
+ * Every bare core op the engine registers LESS the four 4d does not run, plus
+ * exactly `(event/onSelect, KHR_node_selectability)`.
+ */
+export const EXECUTABLE = [
+  'event/onStart', 'event/onTick', 'flow/branch', 'flow/setDelay', 'flow/cancelDelay', 'flow/doN',
+  'flow/for', 'flow/multiGate', 'flow/sequence', 'flow/switch', 'flow/throttle', 'flow/waitAll',
+  'flow/while', 'pointer/get', 'pointer/set', 'pointer/interpolate', 'math/abs', 'event/receive',
+  'event/send', 'variable/get', 'variable/set', 'variable/interpolate', 'math/E', 'math/Inf',
+  'math/NaN', 'math/Pi', 'math/Tau', 'math/sign', 'math/trunc', 'math/floor', 'math/fract',
+  'math/ceil', 'math/round', 'math/neg', 'math/add', 'math/sub', 'math/mul', 'math/div', 'math/rem',
+  'math/min', 'math/max', 'math/mix', 'math/saturate', 'math/clamp', 'math/smoothStep', 'math/rad',
+  'math/deg', 'math/sin', 'math/cos', 'math/tan', 'math/asin', 'math/acos', 'math/atan', 'math/atan2',
+  'math/sinh', 'math/cosh', 'math/tanh', 'math/asinh', 'math/acosh', 'math/atanh', 'math/exp',
+  'math/log', 'math/log2', 'math/log10', 'math/pow', 'math/sqrt', 'math/cbrt', 'math/random',
+  'math/lt', 'math/le', 'math/eq', 'math/ge', 'math/gt', 'math/dot', 'math/cross', 'math/normalize',
+  'math/rotate2D', 'math/rotate3D', 'math/length', 'math/slerp', 'math/isInf', 'math/isNaN',
+  'math/select', 'math/switch', 'math/extract2', 'math/extract3', 'math/extract4', 'math/extract2x2',
+  'math/extract3x3', 'math/extract4x4', 'math/combine2', 'math/combine3', 'math/combine4',
+  'math/combine2x2', 'math/combine3x3', 'math/combine4x4', 'type/boolToInt', 'type/boolToFloat',
+  'type/floatToBool', 'type/floatToInt', 'type/intToBool', 'type/intToFloat', 'math/not', 'math/xor',
+  'math/or', 'math/and', 'math/lsl', 'math/asr', 'math/clz', 'math/ctz', 'math/popcnt', 'math/quatMul',
+  'math/quatConjugate', 'math/quatFromAxisAngle', 'math/quatAngleBetween', 'math/quatSlerp',
+  'math/quatToAxisAngle', 'math/quatFromDirections', 'math/quatFromUpForward', 'math/quatFromAngles',
+  'math/matDecompose', 'math/matCompose', 'math/determinant', 'math/transform', 'math/transpose',
+  'math/matMul', 'math/inverse', 'debug/log', 'ref/eq', 'math/rgbToOkLCh', 'math/rgbFromOkLCh',
+  'animation/start', 'animation/stop', 'event/onSelect',
 ]
+
+/** G1 — a declaration's identity: `op|extension`. */
+function behaviorDeclarationIdentity(op, extension) {
+  return `${op}|${typeof extension === 'string' ? extension : ''}`
+}
+
+/** G1 — true exactly when `(op, extension)` is an executable identity. */
+function isExecutableDeclaration(op, extension) {
+  if (typeof op !== 'string') return false
+  const identity = behaviorDeclarationIdentity(op, extension)
+  if (identity === `event/onSelect|${ONSELECT_EXTENSION}`) return true
+  return EXECUTABLE.includes(op) && op !== 'event/onSelect' && typeof extension !== 'string'
+}
 
 /** F-L7 — the three event ids this round dispatches. */
 const BEHAVIOR_EVENT_IDS = ['atrium/enter', 'atrium/exit', 'atrium/interval']
@@ -550,11 +593,18 @@ const BEHAVIOR_TEMPLATE_IDS = [
 /** S9 — event/onSelect is declared WITH its extension, and exactly so. */
 const ONSELECT_EXTENSION = 'KHR_node_selectability'
 
-/** M1 — the pointer paths. `[n]` is the INT index socket; `{n}` never matches. */
-const BEHAVIOR_POINTER_PATTERNS = [
-  /^\/nodes\/(\[n\]|\d+)\/(translation|rotation|scale)$/,
-  /^\/nodes\/(\[n\]|\d+)\/extensions\/KHR_node_visibility\/visible$/,
-  /^\/extensions\/KHR_lights_punctual\/lights\/(\[n\]|\d+)\/intensity$/,
+/**
+ * G-L4 — the pointer families. `[x]` is the engine's INT index socket and `{x}`
+ * a REF socket; either may be a LITERAL or WIRED (the registry bounds a wired
+ * one at run time). A pointer matching NONE of these families is not checked
+ * here (G-L3 (a): stored and inert).
+ */
+const NODE_INDEX = '(\\[[A-Za-z0-9_]+\\]|\\{[A-Za-z0-9_]+\\}|\\d+)'
+const BEHAVIOR_POINTER_FAMILIES = [
+  { re: new RegExp(`^/nodes/${NODE_INDEX}/(translation|rotation|scale)$`), family: 'node' },
+  { re: new RegExp(`^/nodes/${NODE_INDEX}/(matrix|globalMatrix)$`), family: 'node' },
+  { re: new RegExp(`^/nodes/${NODE_INDEX}/extensions/KHR_node_visibility/visible$`), family: 'node' },
+  { re: new RegExp(`^/extensions/KHR_lights_punctual/lights/${NODE_INDEX}/(intensity|color)$`), family: 'light' },
 ]
 
 /** The reason codes and their plain text. */
@@ -605,19 +655,24 @@ function behaviorSocket(input) {
   return isPlainObject(input) && input.node !== undefined && input.socket !== undefined
 }
 
-/** The op of a node's declaration, or null. */
-function behaviorDeclarationOp(graph, index) {
+/** The declaration a node indexes, or null. */
+function behaviorDeclarationOf(graph, index) {
   const declarations = Array.isArray(graph?.declarations) ? graph.declarations : []
   const decl = declarations[index]
-  return isPlainObject(decl) ? decl.op : null
+  return isPlainObject(decl) ? decl : null
 }
 
-/** Every graph node with its declaration's op resolved, in order. */
+/** Every graph node with its declaration resolved: `{ node, op, identity }`. */
 function behaviorNodes(graph) {
   const out = []
   const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
   for (const node of nodes) {
-    out.push({ node, op: isPlainObject(node) ? behaviorDeclarationOp(graph, node.declaration) : null })
+    const decl = isPlainObject(node) ? behaviorDeclarationOf(graph, node.declaration) : null
+    out.push({
+      node,
+      op: decl ? decl.op : null,
+      identity: decl && typeof decl.op === 'string' ? behaviorDeclarationIdentity(decl.op, decl.extension) : null,
+    })
   }
   return out
 }
@@ -669,21 +724,46 @@ export function behaviorParamsOk(id, params) {
   }
 }
 
-/** The `[n]` / `<int>` index a pointer names, or null. */
-function behaviorPointerIndex(node, pointer, nodeMapLength) {
-  const match = /\/(\[n\]|\d+)\//.exec(pointer)
-  if (!match) return null
-  let index
-  if (match[1] === '[n]') {
-    const values = isPlainObject(node) ? node.values : null
-    if (!isPlainObject(values)) return null
-    if (behaviorSocket(values.n)) return null
-    index = behaviorLiteral(values.n)
-  } else {
-    index = Number(match[1])
+/**
+ * G1 / G-L4 — how a pointer's index binds to `nodeMap`.
+ *
+ * `false` means the pointer IS in one of G-L4's families and its LITERAL index
+ * or LITERAL ref is out of bounds (or malformed): the rule refuses it. `true`
+ * means the pointer is outside the families (not checked here) or its index is
+ * a WIRED socket (the registry bounds it at run time). Otherwise the bound index
+ * and the family are returned.
+ */
+function behaviorPointerBinding(node, pointer, nodeMapLength) {
+  const family = BEHAVIOR_POINTER_FAMILIES.find((entry) => entry.re.test(pointer))
+  if (!family) return true
+  const match = family.re.exec(pointer)
+  const token = match[1]
+  const values = isPlainObject(node) ? node.values : null
+
+  if (/^\d+$/.test(token)) {
+    const index = Number(token)
+    if (!Number.isInteger(index) || index < 0 || index >= nodeMapLength) return false
+    return { index, family: family.family }
   }
-  if (!Number.isInteger(index) || index < 0 || index >= nodeMapLength) return null
-  return index
+
+  const socket = token.slice(1, -1)
+  const input = isPlainObject(values) ? values[socket] : null
+  if (behaviorSocket(input)) return true                    // wired: allowed (P15)
+  const literal = behaviorLiteral(input)
+
+  if (token.startsWith('[')) {                              // [x] — an INT index literal
+    if (!Number.isInteger(literal) || literal < 0 || literal >= nodeMapLength) return false
+    return { index: literal, family: family.family }
+  }
+
+  // {x} — a REF literal: `/nodes/<i>` or, for a light, the light's own pointer.
+  const prefix = family.family === 'light' ? '/extensions/KHR_lights_punctual/lights/' : '/nodes/'
+  if (typeof literal !== 'string' || !literal.startsWith(prefix)) return false
+  const rest = literal.slice(prefix.length)
+  if (!/^\d+$/.test(rest)) return false
+  const index = Number(rest)
+  if (!Number.isInteger(index) || index < 0 || index >= nodeMapLength) return false
+  return { index, family: family.family }
 }
 
 /**
@@ -728,27 +808,64 @@ export function behaviorCheck(value, { ownId } = {}) {
   if (!nodes || nodes.length > BEHAVIOR_NODES_MAX) return fail('behavior-size')
   if (!declarations || declarations.length > BEHAVIOR_DECLS_MAX) return fail('behavior-size')
   if (!types || types.length > BEHAVIOR_TYPES_MAX) return fail('behavior-size')
-  if (Object.hasOwn(graph, 'variables')) return fail('behavior-size')
+  if (Object.hasOwn(graph, 'variables')) {
+    if (!Array.isArray(graph.variables)) return fail('behavior-size')
+    if (graph.variables.length === 0 || graph.variables.length > BEHAVIOR_VARIABLES_MAX) return fail('behavior-size')
+  }
   if (Object.hasOwn(graph, 'events')) {
     if (!Array.isArray(graph.events)) return fail('behavior-event')
     if (graph.events.length === 0) return fail('behavior-size')
     if (graph.events.length > BEHAVIOR_EVENTS_MAX) return fail('behavior-size')
   }
 
+  // G1 — **any declaration the validator accepts is STORED** (G-L3 (a)). The
+  // rule decides each string's bound and character set, uniqueness by
+  // `(op, extension)`, and the one event/onSelect exception.
   const seen = new Set()
   for (const decl of declarations) {
     if (!isPlainObject(decl) || typeof decl.op !== 'string') return fail('behavior-op')
-    if (!BEHAVIOR_OPS.includes(decl.op)) return fail('behavior-op')
+    if (decl.op.length < 1 || decl.op.length > BEHAVIOR_STRING_MAX || !BEHAVIOR_OP_RE.test(decl.op)) {
+      return fail('behavior-op')
+    }
+    if (Object.hasOwn(decl, 'extension')) {
+      const extension = decl.extension
+      if (typeof extension !== 'string' || extension.length < 1 ||
+        extension.length > BEHAVIOR_STRING_MAX || !BEHAVIOR_EXTENSION_RE.test(extension)) {
+        return fail('behavior-op')
+      }
+    }
     if (decl.op === 'event/onSelect') {
       const keys = Object.keys(decl)
       if (keys.length !== 2 || keys.some((k) => k !== 'op' && k !== 'extension')) return fail('behavior-op')
       if (decl.extension !== ONSELECT_EXTENSION) return fail('behavior-op')
-    } else if (Object.keys(decl).length !== 1) {
-      return fail('behavior-op')
     }
-    const identity = `${decl.op}|${decl.extension ?? ''}`
+    const identity = behaviorDeclarationIdentity(decl.op, decl.extension)
     if (seen.has(identity)) return fail('behavior-op')
     seen.add(identity)
+  }
+
+  // G1/P9 — a node 4d RUNS may not read a value output of a node it does not
+  // run (judged by identity, not by name). An unsupported node may only end
+  // flows. A supported node's value inputs must all come from executable
+  // declarations.
+  const supportedNodes = new Set()
+  for (const { node, op, identity } of behaviorNodes(graph)) {
+    const decl = isPlainObject(node) ? behaviorDeclarationOf(graph, node.declaration) : null
+    if (decl && identity !== null && isExecutableDeclaration(op, decl.extension)) supportedNodes.add(node)
+  }
+  for (const { node } of behaviorNodes(graph)) {
+    if (!supportedNodes.has(node)) continue
+    const values = isPlainObject(node) ? node.values : null
+    for (const [socket, input] of Object.entries(isPlainObject(values) ? values : {})) {
+      if (!behaviorSocket(input)) continue
+      const source = graph?.nodes?.[input.node]
+      if (!isPlainObject(source)) return fail('behavior-op')
+      const sourceDecl = behaviorDeclarationOf(graph, source.declaration)
+      if (!sourceDecl || typeof sourceDecl.op !== 'string' ||
+        !isExecutableDeclaration(sourceDecl.op, sourceDecl.extension)) {
+        return fail('behavior-op', `a node reads a value from an operation Atrium doesn't run (${socket})`)
+      }
+    }
   }
 
   for (const { node, op } of behaviorNodes(graph)) {
@@ -760,12 +877,30 @@ export function behaviorCheck(value, { ownId } = {}) {
     if (behaviorLiteral(configuration.stopPropagation) !== false) return fail('behavior-op')
   }
 
+  // G1 — the declared events. An id is 1–64 characters of `[A-Za-z0-9_./:-]` and
+  // unique; the `atrium/` prefix is reserved for the three Atrium ids (which
+  // keep their own rules); an event/send may not target an atrium/* event.
   const events = Array.isArray(graph.events) ? graph.events : []
+  const seenEventIds = new Set()
   for (const entry of events) {
     if (!isPlainObject(entry)) return fail('behavior-event')
     const keys = Object.keys(entry)
     if (keys.length !== 1 || keys[0] !== 'id') return fail('behavior-event')
-    if (!BEHAVIOR_EVENT_IDS.includes(entry.id)) return fail('behavior-event')
+    const id = entry.id
+    if (typeof id !== 'string' || id.length < 1 || id.length > BEHAVIOR_STRING_MAX) return fail('behavior-event')
+    if (!BEHAVIOR_EVENT_ID_RE.test(id)) return fail('behavior-event')
+    if (seenEventIds.has(id)) return fail('behavior-event')
+    seenEventIds.add(id)
+    if (id.startsWith('atrium/') && !BEHAVIOR_EVENT_IDS.includes(id)) return fail('behavior-event')
+  }
+  for (const { node, op } of behaviorNodes(graph)) {
+    if (op !== 'event/send') continue
+    const configuration = isPlainObject(node) ? node.configuration : null
+    const index = isPlainObject(configuration) ? behaviorLiteral(configuration.event) : null
+    const target = events[index]
+    if (isPlainObject(target) && typeof target.id === 'string' && target.id.startsWith('atrium/')) {
+      return fail('behavior-event', 'an event/send may not target an Atrium event')
+    }
   }
   const declared = behaviorDeclaredEvents(graph)
 
@@ -800,12 +935,12 @@ export function behaviorCheck(value, { ownId } = {}) {
   if (hasAnimationOp && animations.length === 0) return fail('behavior-animations')
 
   for (const { node, op } of animationNodes) {
-    if (op === 'pointer/get' || op === 'pointer/set') {
+    if (op === 'pointer/get' || op === 'pointer/set' || op === 'pointer/interpolate') {
       const configuration = isPlainObject(node) ? node.configuration : null
       const pointer = isPlainObject(configuration) ? behaviorLiteral(configuration.pointer) : null
       if (typeof pointer !== 'string') return fail('behavior-pointer')
-      if (!BEHAVIOR_POINTER_PATTERNS.some((re) => re.test(pointer))) return fail('behavior-pointer')
-      if (behaviorPointerIndex(node, pointer, nodeMap.length) === null) return fail('behavior-pointer')
+      // A pointer outside G-L4's families is not checked here (stored and inert).
+      if (behaviorPointerBinding(node, pointer, nodeMap.length) === false) return fail('behavior-pointer')
       continue
     }
     if (op === 'animation/start' || op === 'animation/stop') {
@@ -903,8 +1038,8 @@ export function listensForSelect(value) {
   if (value.enabled !== true) return false
   const graph = value.graph
   if (!isPlainObject(graph)) return false
-  for (const { op } of behaviorNodes(graph)) {
-    if (op === 'event/onSelect') return true
+  for (const { op, identity } of behaviorNodes(graph)) {
+    if (op === 'event/onSelect' && identity === `event/onSelect|${ONSELECT_EXTENSION}`) return true
   }
   return false
 }

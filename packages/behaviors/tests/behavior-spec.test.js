@@ -19,9 +19,11 @@ import { fileURLToPath } from 'node:url'
 import { validateInteractivityGraph } from '@khronosgroup/gltf-interactivity-engine'
 import {
   behaviorProblem, behaviorCheck, behaviorReasonText, templateParamsOk,
+  isExecutableDeclaration,
   BEHAVIOR_OPS, BEHAVIOR_EVENTS, BEHAVIOR_TEMPLATES, BEHAVIOR_MESSAGES,
   BEHAVIOR_NODES_MAX, BEHAVIOR_BYTES_MAX, BEHAVIOR_CLIP_MAX, BEHAVIOR_PROX_MIN, BEHAVIOR_PROX_MAX,
   BEHAVIOR_INTERVAL_MIN, BEHAVIOR_INTERVAL_MAX, BEHAVIOR_SPEED_MIN, BEHAVIOR_SPEED_MAX,
+  BEHAVIOR_DECLS_MAX, BEHAVIOR_TYPES_MAX, BEHAVIOR_VARIABLES_MAX, BEHAVIOR_EVENTS_MAX, BEHAVIOR_STRING_MAX,
 } from '../src/behavior-spec.js'
 import { templateGraph, TEMPLATE_IDS, TEMPLATE_LABELS, TEMPLATE_FIELDS } from '../src/templates.js'
 
@@ -79,7 +81,7 @@ describe('F1 (client copy) — the rules the vectors pin', () => {
     assert.equal(behaviorProblem(value, { ownId }), 'behavior-type')
   })
 
-  test('variables is absent, never an empty array (M4)', () => {
+  test('variables is optional; an empty array is refused (M4/G7)', () => {
     const value = JSON.parse(JSON.stringify(base))
     value.graph.variables = []
     assert.equal(behaviorProblem(value, { ownId }), 'behavior-size')
@@ -87,15 +89,25 @@ describe('F1 (client copy) — the rules the vectors pin', () => {
     assert.equal(behaviorProblem(value, { ownId }), null)
   })
 
-  test('the op allowlist is F-L4\'s exactly', () => {
+  test('the executable set is G-L2 (a)\'s core ops, less the four it does not run', () => {
+    // G-L2 (a): every registered core op except these four, each as a bare core
+    // declaration — plus event/onSelect exactly with its extension.
     for (const op of ['flow/while', 'flow/for', 'flow/setDelay', 'pointer/interpolate',
-      'variable/get', 'event/onTick', 'event/onStart']) {
-      assert.equal(BEHAVIOR_OPS.includes(op), false, `${op} is out of this round`)
+      'variable/get', 'event/onTick', 'event/onStart', 'math/add', 'flow/sequence',
+      'variable/set', 'variable/interpolate', 'pointer/get', 'pointer/set',
+      'math/not', 'math/gt', 'animation/start', 'animation/stop', 'debug/log', 'ref/eq']) {
+      assert.equal(BEHAVIOR_OPS.includes(op), true, `${op} is executable`)
     }
-    for (const op of ['event/onSelect', 'event/receive', 'flow/branch', 'pointer/get', 'pointer/set',
-      'math/not', 'math/gt', 'animation/start', 'animation/stop', 'debug/log']) {
-      assert.equal(BEHAVIOR_OPS.includes(op), true, `${op} is in`)
+    for (const op of ['event/onHoverIn', 'event/onHoverOut', 'event/stopPropagation', 'animation/stopAt',
+      'atrium/notreal', 'debug/nope']) {
+      assert.equal(BEHAVIOR_OPS.includes(op), false, `${op} is not executable`)
     }
+    // An allowlisted op name with ANY other extension is not an executable
+    // identity (P19); the one event/onSelect declaration is.
+    assert.equal(isExecutableDeclaration('flow/sequence', 'EXT_probe'), false)
+    assert.equal(isExecutableDeclaration('event/onSelect', 'EXT_probe'), false)
+    assert.equal(isExecutableDeclaration('event/onSelect', 'KHR_node_selectability'), true)
+    assert.equal(isExecutableDeclaration('math/add'), true)
   })
 
   test('the declared event ids are the three this round dispatches', () => {
@@ -121,9 +133,14 @@ describe('F1 (client copy) — the rules the vectors pin', () => {
     assert.equal(templateParamsOk('proximity-animation', { target, clip: 'Idle', loop: true, radius: 0.49 }), false)
   })
 
-  test('the limits are F7\'s numbers', () => {
-    assert.equal(BEHAVIOR_NODES_MAX, 64)
-    assert.equal(BEHAVIOR_BYTES_MAX, 16384)
+  test('the limits are G7\'s numbers', () => {
+    assert.equal(BEHAVIOR_NODES_MAX, 256)
+    assert.equal(BEHAVIOR_DECLS_MAX, 64)
+    assert.equal(BEHAVIOR_TYPES_MAX, 16)
+    assert.equal(BEHAVIOR_VARIABLES_MAX, 32)
+    assert.equal(BEHAVIOR_EVENTS_MAX, 16)
+    assert.equal(BEHAVIOR_STRING_MAX, 64)
+    assert.equal(BEHAVIOR_BYTES_MAX, 65536)
     assert.equal(BEHAVIOR_CLIP_MAX, 300)
     assert.deepEqual([BEHAVIOR_PROX_MIN, BEHAVIOR_PROX_MAX], [0.5, 50])
     assert.deepEqual([BEHAVIOR_INTERVAL_MIN, BEHAVIOR_INTERVAL_MAX], [1, 3600])

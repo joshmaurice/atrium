@@ -127,8 +127,119 @@ addBad('the value is not an object', 'behavior-type', 42)
   // The size rule runs before the template rule, so an over-long clip in
   // template.params is the cheapest legal-keyed value past the byte cap.
   const v = clone(animPlay)
-  v.template.params.clip = 'x'.repeat(20000)
-  addBad('bytes past 16,384', 'behavior-bytes', v)
+  v.template.params.clip = 'x'.repeat(66000)
+  addBad('bytes past 65,536', 'behavior-bytes', v)
+}
+{
+  // G1/N1 — the size boundary is UTF-16 code units, so a multi-byte character
+  // counts once: exactly 65,536 units is accepted...
+  const v = clone(animPlay)
+  v.graph.declarations.push({ op: 'debug/log' })
+  v.graph.nodes.push({
+    declaration: v.graph.declarations.length - 1,
+    configuration: { message: { value: [''] }, severity: { value: [0] } },
+  })
+  const filler = v.graph.nodes[v.graph.nodes.length - 1].configuration.message.value
+  filler[0] = ''
+  const empty = JSON.stringify(v).length
+  filler[0] = 'é'.repeat(65536 - empty)
+  if (JSON.stringify(v).length === 65536) addOk('boundary: exactly 65,536 code units, multi-byte text', v)
+  else addBad('boundary: 65,536 code units (built wrong)', 'behavior-bytes', v)
+}
+{
+  // ... and one unit past it is refused.
+  const v = clone(animPlay)
+  v.graph.declarations.push({ op: 'debug/log' })
+  v.graph.nodes.push({
+    declaration: v.graph.declarations.length - 1,
+    configuration: { message: { value: [''] }, severity: { value: [0] } },
+  })
+  const filler = v.graph.nodes[v.graph.nodes.length - 1].configuration.message.value
+  filler[0] = ''
+  const empty = JSON.stringify(v).length
+  filler[0] = 'é'.repeat(65536 - empty + 1)
+  addBad('65,537 code units, multi-byte text', 'behavior-bytes', v)
+}
+{
+  const v = clone(animPlay); v.graph.variables = Array.from({ length: 32 }, () => ({ type: 2, value: [1] }))
+  addOk('boundary: 32 variables', v)
+}
+{
+  // 256 nodes is G7's boundary. debug/log needs no flow and its configuration
+  // is two literals, so 256 of them validate.
+  const v = clone(animPlay)
+  v.graph.types = [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }]
+  v.graph.declarations = [{ op: 'debug/log' }]
+  v.graph.nodes = Array.from({ length: 256 }, () => ({
+    declaration: 0,
+    configuration: { message: { value: ['x'] }, severity: { value: [0] } },
+  }))
+  addOk('boundary: 256 graph nodes', v)
+}
+{
+  const v = clone(animPlay)
+  v.graph.types = [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }]
+  v.graph.declarations = Array.from({ length: 64 }, (_, i) => ({ op: 'debug/log', extension: `EXT_${i}` }))
+  v.graph.nodes = [{ declaration: 0, configuration: { message: { value: ['x'] }, severity: { value: [0] } } }]
+  addOk('boundary: 64 declarations', v)
+}
+{
+  const v = clone(prox)
+  v.graph.events = [
+    { id: 'atrium/enter' }, { id: 'atrium/exit' },
+    ...Array.from({ length: 14 }, (_, i) => ({ id: `toolkit/e${i}` })),
+  ]
+  addOk('boundary: 16 declared events', v)
+}
+{
+  const v = clone(animPlay); v.graph.variables = Array.from({ length: 33 }, () => ({ type: 2, value: [1] }))
+  addBad('33 variables', 'behavior-size', v)
+}
+{
+  // The forbidden-key walk reaches inside a variable's value too.
+  const v = clone(animPlay)
+  v.graph.variables = [{ type: 2, value: [1], ['__proto__']: { x: 1 } }]
+  addBad('a __proto__ key inside a variable\'s value', 'behavior-type', v)
+}
+{
+  const v = clone(prox); v.graph.events = [{ id: 'a'.repeat(65) }, { id: 'atrium/exit' }]
+  addBad('an event id of 65 characters', 'behavior-event', v)
+}
+{
+  const v = clone(prox); v.graph.events = [{ id: 'has space' }, { id: 'atrium/exit' }]
+  addBad('an event id with a space', 'behavior-event', v)
+}
+{
+  // A custom (non-Atrium) event id is allowed (G1: only `atrium/` is reserved).
+  const v = clone(prox); v.graph.events = [{ id: 'atrium/enter' }, { id: 'atrium/exit' }, { id: 'toolkit/step' }]
+  addOk('a custom event id outside the atrium/ prefix', v)
+}
+{
+  // G1 — an event/send may not target an atrium/* event.
+  const v = clone(animPlay)
+  v.graph = {
+    types: [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }],
+    declarations: [{ op: 'event/send' }],
+    nodes: [{ declaration: 0, configuration: { event: { value: [0] } } }],
+    events: [{ id: 'atrium/enter' }],
+  }
+  addBad('an event/send that targets atrium/enter', 'behavior-event', v)
+}
+{
+  // G-L3 (a) — a BARE unknown core op is refused, by the VALIDATOR (the rule
+  // stores it): "the validator is the gate, not the loader".
+  const v = clone(animPlay)
+  v.graph.declarations[0] = { op: 'atrium/notreal' }
+  v.graph.nodes[0].declaration = 0
+  addBad('a bare unknown core op (the validator refuses it)', 'behavior-graph', v)
+}
+{
+  const v = clone(animPlay); v.graph.declarations[0] = { op: 'x'.repeat(65) }
+  addBad('an op of 65 characters', 'behavior-op', v)
+}
+{
+  const v = clone(animPlay); v.graph.declarations[0] = { op: 'flow/sequence', extension: 'E'.repeat(65) }
+  addBad('an extension of 65 characters', 'behavior-op', v)
 }
 {
   const v = clone(animPlay); v.graph.variables = []
@@ -140,13 +251,13 @@ addBad('the value is not an object', 'behavior-type', 42)
 }
 {
   const v = clone(animPlay)
-  v.graph.nodes = Array.from({ length: 65 }, () => ({ declaration: 0 }))
-  addBad('65 graph nodes', 'behavior-size', v)
+  v.graph.nodes = Array.from({ length: 257 }, () => ({ declaration: 0 }))
+  addBad('257 graph nodes', 'behavior-size', v)
 }
 {
   const v = clone(animPlay)
-  v.graph.declarations = Array.from({ length: 33 }, () => ({ op: 'debug/log' }))
-  addBad('33 declarations', 'behavior-size', v)
+  v.graph.declarations = Array.from({ length: 65 }, (_, i) => ({ op: 'debug/log', extension: `EXT_${i}` }))
+  addBad('65 declarations', 'behavior-size', v)
 }
 {
   const v = clone(animPlay)
@@ -155,8 +266,8 @@ addBad('the value is not an object', 'behavior-type', 42)
 }
 {
   const v = clone(prox)
-  v.graph.events = Array.from({ length: 9 }, () => ({ id: 'atrium/enter' }))
-  addBad('9 declared events', 'behavior-size', v)
+  v.graph.events = Array.from({ length: 17 }, (_, i) => ({ id: i === 0 ? 'atrium/enter' : `atrium/e${i}` }))
+  addBad('17 declared events', 'behavior-size', v)
 }
 {
   const v = clone(animPlay)
@@ -257,14 +368,47 @@ addBad('the value is not an object', 'behavior-type', 42)
   addBad('an animation reference that is not a literal', 'behavior-literal', v)
 }
 {
+  // MOVED (4d): 4b-2 refused every `{…}` spelling; 4d accepts a LITERAL ref that
+  // is exactly `/nodes/<i>` within `nodeMap`.
   const v = clone(visHide)
-  v.graph.nodes[1].configuration.pointer = { value: ['/nodes/{n}/extensions/KHR_node_visibility/visible'] }
-  addBad('a {n} pointer (a ref socket)', 'behavior-pointer', v)
+  v.graph.nodes[1].configuration.pointer = { value: ['/nodes/{r}/extensions/KHR_node_visibility/visible'] }
+  delete v.graph.nodes[1].values.n
+  v.graph.nodes[1].values.r = { type: 3, value: ['/nodes/1'] }
+  addOk('moved: a {r} ref literal "/nodes/1" is accepted (4b-2 refused every {…} spelling)', v)
 }
 {
+  // A literal ref that is NOT `/nodes/<i>` is refused (behavior-pointer).
   const v = clone(visHide)
-  v.graph.nodes[1].values.n = { node: 0, socket: 'value' }
-  addBad('a socket-connected pointer index', 'behavior-pointer', v)
+  v.graph.nodes[1].configuration.pointer = { value: ['/nodes/{r}/extensions/KHR_node_visibility/visible'] }
+  delete v.graph.nodes[1].values.n
+  v.graph.nodes[1].values.r = { type: 3, value: ['/nodes/1/translation'] }
+  addBad('a {r} ref literal that is not "/nodes/<i>"', 'behavior-pointer', v)
+}
+{
+  // G1 — a `{r}` ref `/nodes/16` with a 16-entry nodeMap: out of bound.
+  const v = clone(visHide)
+  v.nodeMap = [OWN, ...Array.from({ length: 15 }, (_, i) => `${String(i + 20).padStart(8, '0')}-0000-4000-8000-000000000000`)]
+  v.targets = []
+  v.graph.nodes[1].configuration.pointer = { value: ['/nodes/{r}/extensions/KHR_node_visibility/visible'] }
+  delete v.graph.nodes[1].values.n
+  v.graph.nodes[1].values.r = { type: 3, value: ['/nodes/16'] }
+  addBad('a {r} ref "/nodes/16" with a 16-entry nodeMap', 'behavior-pointer', v)
+}
+{
+  // MOVED (4d): a WIRED index is allowed (the registry bounds it at run time).
+  const v = clone(visHide)
+  v.graph.types = [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }]
+  v.graph.declarations = [{ op: 'event/onStart' }, { op: 'math/add' }, { op: 'pointer/set' }]
+  v.graph.nodes = [
+    { declaration: 0, flows: { out: { node: 2, socket: 'in' } } },
+    { declaration: 1, values: { a: { type: 1, value: [0] }, b: { type: 1, value: [1] } } },
+    {
+      declaration: 2,
+      configuration: { pointer: { value: ['/nodes/[n]/extensions/KHR_node_visibility/visible'] }, type: { value: [0] } },
+      values: { n: { node: 1, socket: 'value' }, value: { type: 0, value: [false] } },
+    },
+  ]
+  addOk('moved: a wired [n] index is accepted (the registry bounds it at run time)', v)
 }
 {
   const v = clone(visHide)
@@ -272,39 +416,105 @@ addBad('the value is not an object', 'behavior-type', 42)
   addBad('a pointer index at nodeMap.length', 'behavior-pointer', v)
 }
 {
+  // MOVED (4d): `/nodes/<i>/matrix` is one of G-L4's read-only families now.
   const v = clone(visHide)
+  v.graph.types = [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }, { signature: 'float4x4' }]
   v.graph.nodes[1].configuration.pointer = { value: ['/nodes/[n]/matrix'] }
-  addBad('a pointer outside the allowlist', 'behavior-pointer', v)
+  v.graph.nodes[1].configuration.type = { value: [4] }
+  v.graph.nodes[1].values.value = { type: 4, value: Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)) }
+  addOk('moved: /nodes/<i>/matrix is a read-only family (G-L4)', v)
 }
 {
-  const v = clone(animPlay)
+  // A pointer OUTSIDE the families is not checked here (G-L3 (a): inert).
+  const v = clone(visHide)
+  v.graph.nodes[1].configuration.pointer = { value: ['/materials/0/pbrMetallicRoughness/baseColorFactor'] }
+  addOk('a pointer outside G-L4\'s families is stored and inert', v)
+}
+{
+  // MOVED (4d): the four op-name refusals are stored and inert now, but this
+  // one is refused for a NEW reason — a bare `event/onSelect` is the exception.
+  const v = clone(visHide)
   v.graph.declarations[0] = { op: 'flow/while' }
-  v.graph.nodes[0].declaration = 0
-  addBad('flow/while', 'behavior-op', v)
+  v.graph.nodes[0] = {
+    declaration: 0,
+    values: { condition: { type: 0, value: [false] } },
+    flows: { completed: { node: 1, socket: 'in' } },
+  }
+  addOk('moved: flow/while is executable (G-L2 (a))', v)
 }
 {
   const v = clone(animPlay)
   v.graph.declarations[0] = { op: 'event/onStart' }
   v.graph.nodes[0].declaration = 0
-  addBad('event/onStart', 'behavior-op', v)
+  addOk('moved: event/onStart is executable (G-L2 (a))', v)
 }
 {
   const v = clone(animPlay)
   v.graph.declarations[0] = { op: 'event/onTick' }
   v.graph.nodes[0].declaration = 0
-  addBad('event/onTick', 'behavior-op', v)
+  addOk('moved: event/onTick is executable (G-L2 (a))', v)
 }
 {
-  const v = clone(animPlay)
+  const v = clone(visHide)
   v.graph.declarations[0] = { op: 'flow/setDelay' }
-  v.graph.nodes[0].declaration = 0
-  addBad('flow/setDelay', 'behavior-op', v)
+  v.graph.nodes[0] = {
+    declaration: 0,
+    values: { duration: { type: 2, value: [1] } },
+    flows: { out: { node: 1, socket: 'in' } },
+  }
+  addOk('moved: flow/setDelay is executable (G-L2 (a))', v)
 }
 {
-  const v = clone(animPlay)
+  const v = clone(visHide)
+  v.graph.types = [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }, { signature: 'float3' }, { signature: 'float2' }]
   v.graph.declarations[0] = { op: 'pointer/interpolate' }
+  v.graph.nodes[0] = {
+    declaration: 0,
+    configuration: { pointer: { value: ['/nodes/1/translation'] }, type: { value: [4] } },
+    values: {
+      value: { type: 4, value: [1, 0, 0] },
+      duration: { type: 2, value: [1] },
+      p1: { type: 5, value: [0, 0] },
+      p2: { type: 5, value: [1, 1] },
+    },
+    flows: { done: { node: 1, socket: 'in' } },
+  }
+  addOk('moved: pointer/interpolate is executable (G-L2 (a))', v)
+}
+{
+  // G1 / P19 — an allowlisted op name with ANY other extension is not
+  // executable: it is stored, renamed in the loaded copy, and inert.
+  const v = clone(animPlay)
+  v.graph.declarations[0] = { op: 'flow/sequence', extension: 'EXT_probe' }
   v.graph.nodes[0].declaration = 0
-  addBad('pointer/interpolate', 'behavior-op', v)
+  addOk('flow/sequence with extension EXT_probe is stored as unsupported', v)
+}
+{
+  // ... and a node 4d RUNS may not read a value from it (P9).
+  const v = clone(animPlay)
+  v.graph.types = [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'float3' }, { signature: 'ref' }]
+  v.graph.declarations = [
+    { op: 'flow/sequence', extension: 'EXT_probe' },
+    { op: 'math/combine3' },
+    { op: 'pointer/set' },
+  ]
+  v.graph.nodes = [
+    { declaration: 0 },
+    { declaration: 1, values: { a: { node: 0, socket: 'value' }, b: { type: 2, value: [0] }, c: { type: 2, value: [0] } } },
+    {
+      declaration: 2,
+      configuration: { pointer: { value: ['/nodes/0/translation'] }, type: { value: [3] } },
+      values: { n: { type: 1, value: [0] }, value: { node: 1, socket: 'value' } },
+    },
+  ]
+  addBad('a supported node reading the value of an unsupported extension op', 'behavior-op', v)
+}
+{
+  // G1 — event/onSelect is the ONE exception to "stored and inert": it must be
+  // exactly `{ op, extension: KHR_node_selectability }`.
+  const v = clone(visHide)
+  v.graph.declarations[0] = { op: 'event/onSelect', extension: 'EXT_probe' }
+  addBad('event/onSelect with extension EXT_probe', 'behavior-op', v)
 }
 {
   const v = clone(animPlay)
@@ -428,6 +638,13 @@ addListen('a disabled select behaviour', { ...clone(visHide), enabled: false }, 
 addListen('null', null, false)
 addListen('a string', 'select-visibility', false)
 addListen('an array', [], false)
+{
+  // G1 — an event/onSelect with a different extension is not the one that runs,
+  // so a click on it is not something this world listens for.
+  const v = clone(visHide)
+  v.graph.declarations[0] = { op: 'event/onSelect', extension: 'EXT_probe' }
+  addListen('event/onSelect with extension EXT_probe', v, false)
+}
 addListen('a graph with no nodes', { ...clone(visHide), graph: { ...clone(visHide.graph), nodes: [] } }, false)
 addListen('no graph at all', { kind: 'graph', origin: 'local', enabled: true }, false)
 addListen('an undefined value', undefined, false)

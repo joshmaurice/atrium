@@ -26,9 +26,10 @@ import {
   behaviorCheck, behaviorProblem, behaviorReasonText, behaviorCountIn,
   checkBehaviorValue, checkAtriumBehavior, authorizeSend, BEHAVIOR_LEAF,
   BEHAVIOR_NODES_PER_WORLD, SEND_INVALID, SEND_INVALID_FIELD,
-  listensForSelect, withinActivateDistance, ACTIVATE_MAX_DISTANCE,
+  listensForSelect, withinActivateDistance, ACTIVATE_MAX_DISTANCE, EXECUTABLE,
 } from '../src/send-policy.js'
 import { templateGraph } from '../../behaviors/src/templates.js'
+import { EXECUTABLE as CLIENT_EXECUTABLE } from '../../behaviors/src/behavior-spec.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SPACE = resolve(__dirname, '../../../tests/fixtures/space.gltf')
@@ -52,6 +53,12 @@ test('F1: every refused vector returns exactly its named reason code', () => {
     const problem = behaviorProblem(vector.value, { ownId: VECTORS.ownId })
     assert.equal(problem, vector.code, `${vector.name}: expected ${vector.code}, got ${problem}`)
   }
+})
+
+test('G1: the server and the page hold the SAME executable set', () => {
+  // G1's "one shared constant": the server package does not depend on
+  // @atrium/behaviors, so the two lists are separate text — pinned here.
+  assert.deepEqual([...EXECUTABLE], [...CLIENT_EXECUTABLE])
 })
 
 test('F1: each reason code has plain text of its own', () => {
@@ -415,7 +422,7 @@ test('F2: a malformed value is refused INVALID_VALUE carrying F1\'s own text (si
       'kind: js',
       'variables: []',
       'nodeMap[0] is not the own id',
-      'a {n} pointer (a ref socket)',
+      'a {r} ref literal that is not "/nodes/<i>"',
       'atrium/enter declared without proximity',
       'a __proto__ key inside template.params',
     ]
