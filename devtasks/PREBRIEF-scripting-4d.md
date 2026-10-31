@@ -1,8 +1,25 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **Revision 1.2 (2026-10-30, night PT), ready for FINAL.
-Decisions G-L1–G-L12, Q3 and Q7 await the operator; each has a
-recommendation.**
+Status: **FINAL, Revision 1.3 (2026-10-30). The operator approved
+decisions G-L1–G-L12, Q3 and Q7 and made Rev 1.2 FINAL (2026-10-30 20:57
+PT), all as recommended:**
+G-L1 (a) 4d-1, one round with seven steps, and `KHR_animation_pointer`
+models as 4d-2; G-L2 (a) the core op set, as bare core declarations;
+G-L3 (a) unsupported ops stored, inert and reported, gated by executable
+identity; G-L4 (a) node transforms and visibility, read-only matrices,
+light intensity and colour, no materials; G-L5 (a) sampled motion, as a
+stated deviation; G-L6 (a) the overlay by revision; G-L7 (a) G7's limits,
+with 1 MiB per world and the 10,000-or-8 ms frame limit; G-L8 (a) one graph
+onto the selected object, mapped by hand; G-L9 (a) `scriptRunner: 3`;
+G-L10 (a) no per-behaviour distance; G-L11 (a) Claude's fixtures before
+the kickoff and the Khronos subset checked in; G-L12 (a) N1 only; Q3 the
+confirmation on every Enable of a custom graph that writes and starts on
+load or runs every frame; Q7 1 MiB, provisional, with §5's thresholds and
+method.
+- **Rev 1.3 changes only this status line and §11** (as 4c's Rev 1.3 did).
+  **4d-1's kickoff is written from the commit that carries this revision,**
+  which is its base, together with the `tests/`-only commit of Claude's
+  conformance fixtures (G-L11), which lands before the kickoff.
 - **Rev 1.2 applies the third outside review, of Rev 1.1**
   (`devtasks/REVIEW-scripting-4d-rev1.1.md`, **APPROVE WITH NITS**: no
   must-fix, 2 should-fix, 4 nits). **The reviewer cloned the repo this time**
@@ -1613,4 +1630,6 @@ As scripting-4c, with this round's specifics:
 | N4 | Test cases and log lines | Nit | `math/select` and `math/switch`; the four carriers (G6); the serialize and heal timing lines (G2) |
 | Q3 | Ask on every Enable, and for `perFrame` too | Advice | Taken (G6, §5) |
 | Q7 | Name the measurement | Advice | Taken: the A/B method and CDP heap (§5) |
-
+- **Rev 1.3** (2026-10-30): the operator approved G-L1–G-L12, Q3 and Q7 as
+  recommended and made Rev 1.2 FINAL (20:57 PT). This revision changes only
+  the status line and this log.
