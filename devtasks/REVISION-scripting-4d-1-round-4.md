@@ -1,10 +1,12 @@
 # Revision — scripting-4d-1 round 4 (round 3 is on DEV, not accepted)
 
-**Status: Rev 1, for the operator's approval (not approved).** Seven items, R18–R24, continuing round 3's
-numbering: two findings from Claude's §6.1 checks on round 3 (F5, F6); three from **the second outside review**
-(`REVIEW-scripting-4d-1-round-3-code.md`, NO-GO, source-based: its M1, S1, S2), **all three reproduced by Claude
-by running the round-3 code** (§2.5); and two process items. Decisions for the operator: **R-L6, R-L7, R-L8**
-(§2.2, §2.4, §2.5). The kickoff body is §5.
+**Status: Rev 1, approved by the operator (2026-10-31 11:40 PT), all as recommended:** R-L6 (a) the canonical
+path plus a runbook line; R-L7 (a) the finalizer's rule is what the deploy handoff can show; R-L8 (a) one kernel
+lock, through SQLite, that the server and both scripts hold for their whole run. Seven items, R18–R24,
+continuing round 3's numbering: two findings from Claude's §6.1 checks on round 3 (F5, F6); three from **the
+second outside review** (`REVIEW-scripting-4d-1-round-3-code.md`, in `devtasks/`; NO-GO, source-based: its M1,
+S1, S2), **all three reproduced by Claude by running the round-3 code** (§2.5); and two process items. The
+kickoff body is §5.
 
 - **Base:** round 3's reviewed tip `769825ce3781b5bb4de03f4d7687b37cd9f0d46a` on `workflow/scripting-4d-1`
   (published). DEV is its release merge `5eebe09fd5b000e70d50a36a9c926e6263d86e80`,
@@ -94,6 +96,8 @@ and the passdown `Atrium-Passdown-2026-10-31-scripting-4d-1-round-3-checks.md` (
   readable.
 - (c) The runbook line only; no code. The symlink gap stays.
 
+**Decided: (a).**
+
 ### R20. Pre-brief Rev 1.6 notes
 On the branch, in `PREBRIEF-scripting-4d.md`: §0.6 "Revision 1.6 (after FINAL, round 4)" with the notes below;
 the status line names Rev 1.6. **No decision changes** beyond R-L8's mechanism.
@@ -129,6 +133,8 @@ keeps only the tail of the output, so the finalizer can never see the line, and 
 - (b) Keep the rule; the operator clears the finalizer each round with the one-line command (status quo).
 - (c) Have the deployer's handoff carry `release_sha`. That needs the deploy tool to return the gate's first
   lines; it's a host change (atrium-ops), not this repository.
+
+**Decided: (a).**
 
 ### 2.5 The second outside review's findings
 The review (`REVIEW-scripting-4d-1-round-3-code.md`, range `3cfeeed9..769825ce`) could not clone the repository
@@ -205,6 +211,8 @@ Under **R-L8 (a)**:
   between two recoverers.
 - (c) Leave round 3's lock as it is and rely on the procedure (stop the service, nothing starts it during a
   reconcile). The review's M1 stays open.
+
+**Decided: (a).**
 
 #### R23. The string policy covers both declaration socket maps (its S1)
 - `graphStringProblem` in **both copies** applies the identifier rule (1–64, `[A-Za-z0-9_]`) to every key of
@@ -296,7 +304,13 @@ the front door's to make by hand (round 3's way).
    kickoff creates it, and to the DEV finalizer when the front door does. **Read the sentinel back after the
    kickoff completes, and again after the finalizer is created;** link any that's missing yourself (gate →
    sentinel, finalizer → sentinel, never the reverse). Never link it to a human gate (the guard refuses).
-7. **The finalizer's rule** (R-L7): as the operator decided in this file's status line.
+7. **The finalizer's rule** (R-L7 (a)): pass when the parent DEV deploy's handoff shows success (`DEV DEPLOY
+   SUCCESS`, or `success: true` with `exit_code: 0`), the local and public health lines ok, `reviewed_sha` equal
+   to round 4's reviewed tip, and `TARGET_SHA` a full lowercase 40-character SHA; otherwise block with
+   `kind="capability"` quoting the handoff. The body says why that suffices (`atrium-deploy-gate dev` deploys
+   exactly the release merge's `RELEASE_SHA`, and exits 70 without deploying if it has none) and names
+   `release/<reviewed 12 hex>` as the operator's cross-check. Don't ask for `RELEASE_SHA=` or `SMOKE OK:` lines:
+   the handoff never carries them.
 
 Keep in mind: round 3's acceptance card `t_b6db79eb` and round 2's `t_f56db644` stay blocked by design; round
 4's chain redeploys DEV over round 3 (`set-dev` from waiting-for-acceptance).
@@ -345,8 +359,7 @@ sha256sum /tmp/revision-r4.md   # <revision hash>
 (Fill the two `<revision …>` values from the front door's revision check above.) On any mismatch, block with
 `kind="capability"`, quote both hashes, and do not work from a different text.
 
-- **The round-4 revision is this round's contract:** its §2 (R18–R24, with R-L6–R-L8 decided as its status
-  line records) and its §3, which gives **your card's** items and handoff.
+- **The round-4 revision is this round's contract:** its §2 (R18–R24, with R-L6–R-L8 all decided (a)) and its §3, which gives **your card's** items and handoff.
 - **Also binding:** the pre-brief (FINAL Rev 1.4, with round 3's Rev 1.5 notes on the branch); the round-1
   kickoff's Settlement and its "Requirements for the implementation AND review cards (beyond the spec)", items
   1–7; the round-2 revision (R1–R5, R-L1 (a)); the round-3 revision (R6–R17, R-L2–R-L5 (a)); the GLM brief, run
