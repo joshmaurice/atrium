@@ -282,8 +282,9 @@ async function connect(port) {
 }
 
 async function hello(ws, messages, id) {
-  // scripting-4c S2 — the role needs `scriptRunner: 2`; this world owner tab
-  // declares it (the value a 4c page sends).
+  // scripting-4d G-L9 — a 4c page sends `scriptRunner: 2` and, since step 4,
+  // is NEVER the host (the election requires 3). These tests only send edits
+  // on the owner's own connection, so no session here needs the role.
   ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
@@ -612,7 +613,7 @@ test('F2: healing drops a malformed behaviour to null, with one log line naming 
     { name: 'bad', objectId: randomUUID(), behavior: { kind: 'js' } },
   ])
   const result = healDocumentBehaviors(document, { log: { log: (l) => lines.push(l) } })
-  assert.deepEqual(result, { noId: 0, malformed: 1, overLimit: 0 })
+  assert.deepEqual(result, { noId: 0, malformed: 1, overLimit: 0, overBytes: 0 })
   assert.equal(lines.length, 1)
   assert.match(lines[0], /dropped malformed behavior on node 1: behavior-kind/)
 

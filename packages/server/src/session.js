@@ -15,6 +15,8 @@ import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost,
   ANIMATION_LEAF, OBJECT_ID_TAKEN, BEHAVIOR_LEAF, BEHAVIOR_NODES_PER_WORLD, behaviorCountIn,
+  // scripting-4d G2 — the world behaviour total (Rev 1 S5).
+  BEHAVIOR_WORLD_BYTES_MAX, behaviorBytesIn, behaviorLeafBytes,
   // scripting-4c AC3 — the server's copies of the shared click rule.
   listensForSelect, withinActivateDistance,
 } from './send-policy.js'
@@ -102,7 +104,10 @@ const SESSION_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
  * carries on: this line is what tells the operator which field failed.
  */
 function logCheckFailure(session, field, error) {
-  console.error(`[session ${session?.id ?? '?'}] the check for "${field}" threw: ${error?.message ?? error}`)
+  // scripting-4d G-L12 (a) / the 4c re-review's N1 — the id goes through
+  // `logId`, the ONE way a session id reaches a log line: no control character,
+  // no escape, no whole free-text id. One line, as before.
+  console.error(`[session ${logId(session?.id)}] the check for "${field}" threw: ${error?.message ?? error}`)
 }
 
 /**
@@ -539,20 +544,20 @@ export function attachSessionHandlers({
   }
 
   /**
-   * scripting-4b-2 F-L6 / scripting-4c S2 — a session may hold the role only
-   * when it passed `canEdit` at its hello AND declared
-   * `capabilities.scriptRunner === 2`.
+   * scripting-4b-2 F-L6 / scripting-4c S2 / scripting-4d G-L9 — a session may
+   * hold the role only when it passed `canEdit` at its hello AND declared
+   * `capabilities.scriptRunner === 3`.
    *
-   * 2 means "runs behaviours AND handles a forwarded `activate`". A 4b-2 page
-   * sends 1: it still connects, still owns the world, keeps every edit right and
-   * its Edit panel — and is NEVER the host. Its client would drop a forwarded
-   * `activate` without a word (4b-2 P4).
+   * 3 means "runs 4d graphs". A 4c page sends 2 and a 4b-2 page sends 1: both
+   * still connect, still own the world, keep every edit right and their Edit
+   * panel — and are NEVER the host. Their clients would drop a forwarded
+   * `activate` or a 4d graph without a word (4b-2 P4, G-L9).
    *
    * P22: this is ONE of the two places the role is decided. The other is the
-   * inline election in the `hello` case, and both must say `=== 2`.
+   * inline election in the `hello` case, and both must say `=== 3`.
    */
   function canRunBehaviors(session) {
-    return session?.canEdit === true && session?.capabilities?.scriptRunner === 2
+    return session?.canEdit === true && session?.capabilities?.scriptRunner === 3
   }
 
   /**
@@ -807,12 +812,13 @@ export function attachSessionHandlers({
             // a new session with a new hello; it does NOT take the role while
             // another session holds it.
             //
-            // scripting-4c S2 — the capability is `=== 2` HERE TOO (P22). This is
-            // the second of the two places the role is decided; `canRunBehaviors`
-            // is the first. A `scriptRunner: 1` page (4b-2) is never the host.
+            // scripting-4c S2 / scripting-4d G-L9 — the capability is `=== 3`
+            // HERE TOO (P22). This is the second of the two places the role is
+            // decided; `canRunBehaviors` is the first. A `scriptRunner: 2` page
+            // (4c) and a `scriptRunner: 1` page (4b-2) are never the host.
             let isScriptHost = false
             let hostGen
-            if (canEdit && session.capabilities?.scriptRunner === 2 && scriptHost.sessionId === null) {
+            if (canEdit && session.capabilities?.scriptRunner === 3 && scriptHost.sessionId === null) {
               scriptHost.hostGen += 1
               scriptHost.sessionId = session.id
               // Rev 1 M1 — the grant clears readiness: the page must say
@@ -911,7 +917,15 @@ export function attachSessionHandlers({
             // while serialize() is in flight.
             if (world) {
               try {
+                // scripting-4d G2 (Rev 1.2 N4) — the serialize timing line for
+                // Q7: `[world] serialized <logId> in <ms> ms (<bytes> bytes)`.
+                // No ids beyond the world's `logId`.
+                const serializeStart = performance.now()
                 const gltf = await world.serialize()
+                const serializeMs = Math.round(performance.now() - serializeStart)
+                console.log(
+                  `[world] serialized ${logId(worldId)} in ${serializeMs} ms ` +
+                  `(${Buffer.byteLength(JSON.stringify(gltf), 'utf8')} bytes)`)
                 if (session && session.ws.readyState === 1 /* OPEN */) {
                   session.ws.send(JSON.stringify({ type: 'som-dump', seq: nextSeq(), gltf }))
                   // Emit world-done after som-dump to signal load completion
@@ -1160,6 +1174,10 @@ export function attachSessionHandlers({
                 // scripting-4b-2 F2/S1 — the 64-behaviour cap needs the world too,
                 // and it counts OTHER nodes, so the node being written is excluded.
                 behaviorCount: (node) => behaviorCountIn(world.som, node),
+                // scripting-4d G2 (Rev 1 S5) — the world behaviour total, the
+                // same way: the sum over the OTHER saved nodes' leaves, so a
+                // rewrite is judged by its NEW size.
+                behaviorBytes: (node) => behaviorBytesIn(world.som, node),
               })
             } catch (error) {
               logCheckFailure(session, msg.field, error)
@@ -1340,6 +1358,17 @@ export function attachSessionHandlers({
                   behaviorCountIn(world.som, null) >= BEHAVIOR_NODES_PER_WORLD) {
                 sendError(ws, msg.seq, 'INVALID_VALUE',
                   `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
+                break
+              }
+              // scripting-4d G2 (Rev 1 S5) — the world behaviour total on the
+              // `add` path (which Duplicate, Undo and Redo all reach): the new
+              // node is not in the SOM yet, so the whole world's existing leaves
+              // plus the added leaf's own size must stay within 1 MiB. A
+              // refusal changes nothing, as the 64-cap refusal above.
+              if (addedBehavior !== undefined && addedBehavior !== null &&
+                  behaviorBytesIn(world.som, null) + behaviorLeafBytes(addedBehavior) > BEHAVIOR_WORLD_BYTES_MAX) {
+                sendError(ws, msg.seq, 'INVALID_VALUE',
+                  "this world's behaviours would exceed 1 MiB")
                 break
               }
             }

@@ -896,6 +896,23 @@ describe('edit-undo: undo’s own structural requests (Y4)', () => {
     assert.equal(app.messages.at(-1), 'Couldn’t undo: no permission')
   })
 
+  test('(G2) a re-add refused by the world total is dropped, and the server’s own text reaches the owner', () => {
+    // scripting-4d G2 — an Undo re-add reaches the server through `add`, which
+    // now carries the 1 MiB world total. The undo engine drops the entry on the
+    // refusal, as it does for any refusal (`failEntry`), and the message the
+    // owner sees is the SERVER's, verbatim.
+    const app = makeApp()
+    const a = app.put(somNode('Pad'))
+    app.clickDelete(a)
+    app.answer(app.sent.at(-1).seq, 'accepted')          // the delete lands
+    app.undo.run('undo')                                  // the undo is a re-add
+    assert.ok(app.adds().at(-1), 'the undo sends a structural add')
+    app.answer(app.sent.at(-1).seq, 'rejected', "this world's behaviours would exceed 1 MiB")
+    assert.equal(app.undo.undoCount, 0, 'the entry is dropped, as for any refusal')
+    assert.equal(app.undo.redoCount, 0)
+    assert.equal(app.messages.at(-1), "Couldn’t undo: this world's behaviours would exceed 1 MiB")
+  })
+
   test('a re-add after an undo of a delete selects the new node (W10, R5)', () => {
     const app = makeApp()
     const a = app.put(somNode('Pad'))

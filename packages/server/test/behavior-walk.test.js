@@ -171,8 +171,9 @@ async function send(ws, messages, node, field, value) {
 }
 
 async function hello(ws, messages, id) {
-  // scripting-4c S2 — the role needs `scriptRunner: 2`. This test only sends
-  // edits, so the value is incidental; it is 2 to match a 4c page.
+  // scripting-4c S2 / scripting-4d G-L9 — a 4c page sends `scriptRunner: 2` and
+  // is never the host now. This test only sends edits, so the value is
+  // incidental; it is 2 to match a 4c page.
   ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'the hello reply arrives')
@@ -302,7 +303,7 @@ test('V9 — a 6,500-deep behaviour in a SAVED document loads, nulled, with the 
   const document = documentWithBehaviour(deep)
   const lines = []
   const result = healDocumentBehaviors(document, { log: { log: (l) => lines.push(l) } })
-  assert.deepEqual(result, { noId: 0, malformed: 1, overLimit: 0 })
+  assert.deepEqual(result, { noId: 0, malformed: 1, overLimit: 0, overBytes: 0 })
   assert.equal(document.getRoot().listNodes()[0].getExtras().atrium.behavior, null, 'the behaviour is nulled')
   assert.equal(lines.length, 1)
   assert.match(lines[0], /dropped malformed behavior on node 0: behavior-type/)
@@ -312,7 +313,7 @@ test('V9 — a load check that THROWS fails closed: the behaviour is nulled, wit
   const document = documentWithBehaviour(throwingBehaviour())
   const lines = []
   const result = healDocumentBehaviors(document, { log: { log: (l) => lines.push(l) } })
-  assert.deepEqual(result, { noId: 0, malformed: 1, overLimit: 0 })
+  assert.deepEqual(result, { noId: 0, malformed: 1, overLimit: 0, overBytes: 0 })
   assert.equal(document.getRoot().listNodes()[0].getExtras().atrium.behavior, null)
   assert.equal(lines.length, 1)
   assert.match(lines[0], /dropped malformed behavior on node 0: the value blew up \(could not be checked\)/)

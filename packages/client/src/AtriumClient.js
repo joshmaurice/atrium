@@ -747,14 +747,14 @@ export class AtriumClient extends EventEmitter {
       if (record.closing) return
       // T7: omit displayName key entirely when no name was provided
       //
-      // scripting-4c AC4 (Rev 1.2 M1, P23) — `scriptRunner` is present ONLY on a
-      // same-origin connection, and then it is 2. Its ABSENCE is the one shape
-      // every released server accepts: a pre-4b-2 server refuses any
-      // `scriptRunner` it does not know, and PROD runs one. Nothing is lost —
-      // a cross-origin connection is always anonymous (signin-sync I1), so it
-      // could never be the host anyway.
+      // scripting-4c AC4 (Rev 1.2 M1, P23) / scripting-4d G5 (G-L9) —
+      // `scriptRunner` is present ONLY on a same-origin connection, and then it
+      // is 3 ("runs 4d graphs"). Its ABSENCE is the one shape every released
+      // server accepts: a pre-4b-2 server refuses any `scriptRunner` it does not
+      // know, and PROD ran one. Nothing is lost — a cross-origin connection is
+      // always anonymous (signin-sync I1), so it could never be the host anyway.
       const capabilities = { tick: { interval: 5000 } }
-      if (scriptRunner) capabilities.scriptRunner = 2
+      if (scriptRunner) capabilities.scriptRunner = 3
       const helloMsg = {
         type: 'hello',
         id:   sessionId,
@@ -1348,6 +1348,24 @@ export class AtriumClient extends EventEmitter {
       value: id,
     })
     return seq
+  }
+
+  /**
+   * scripting-4d G5 (Rev 1.1 M1; P22) — can this tab send a field at all?
+   *
+   * True EXACTLY when the world is loaded (`_worldReady`) and the socket is
+   * OPEN — the two conditions `sendField` and `_wsSend` each depend on. The
+   * runner's total send opportunity asks this right before sending (G4): a
+   * `false`, a throw, or a non-number answer means the value was NOT sent, so
+   * the overlay falls back to the SOM instead of keeping a value no send was
+   * made for (M1). No existing method changes what it returns.
+   *
+   * @returns {boolean}
+   */
+  canSend() {
+    if (this._worldReady !== true) return false
+    const ws = this._ws
+    return ws != null && (ws.readyState === 1 || ws.readyState === WebSocket?.OPEN)
   }
 
   /**

@@ -82,7 +82,7 @@ async function connect(port, as = null) {
   return { ws, messages }
 }
 
-async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 2 }) {
+async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3 }) {
   ws.send(JSON.stringify({ type: 'hello', id, capabilities }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
@@ -291,7 +291,7 @@ class FakeSocket {
   close(code) { this.closed = true; this.readyState = 3; this._fire('close', code) }
   _fire(event, ...args) { for (const fn of this._handlers[event] ?? []) fn(...args) }
   ofType(type) { return this.sent.filter((m) => m.type === type) }
-  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 2 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
+  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
 }
 
 class FakeWss {
@@ -449,8 +449,8 @@ test('E4/N7: the handover skips a candidate the same sweep is about to terminate
 })
 
 // ===========================================================================
-// scripting-4b-2 F-L6 / scripting-4c S2 — the election needs canEdit AND
-// scriptRunner: 2
+// scripting-4b-2 F-L6 / scripting-4c S2 / scripting-4d G-L9 — the election
+// needs canEdit AND scriptRunner: 3
 // ===========================================================================
 
 test('F-L6: an owner hello without scriptRunner never holds the role, and is never handed one', async () => {
@@ -488,18 +488,26 @@ test('F-L6: an owner hello without scriptRunner never holds the role, and is nev
   }
 })
 
-test('F-L6/S2/R1: a hello whose scriptRunner is 3 is ACCEPTED by the schema, and the election still needs 2 until step 4', async () => {
+test('F-L6/S2/R1: a hello whose scriptRunner is 2 is ACCEPTED by the schema, and is NEVER the host; a 3 is the host', async () => {
   const { port } = await startHostWorld()
   const a = await connect(port, 'user-a')
+  const b = await connect(port, 'user-a')
   try {
-    // scripting-4d R1 — the schema's enum gained 3 (4d graphs), so a `3` hello
-    // is no longer refused. Step 4 flips the election to require 3; at this
-    // commit the election still requires 2, so a `3` owner is not the host.
-    const h = await hello(a.ws, a.messages, 'cap-3', { scriptRunner: 3 })
-    assert.equal(h.canEdit, true, 'a scriptRunner: 3 page still owns the world')
-    assert.equal(h.scriptHost, false, 'the election still requires 2 at this step (step 4 flips it)')
+    // scripting-4d R1/G-L9 — the schema's enum keeps 1 and 2 so an unreloaded
+    // 4c tab still connects, and step 4 flipped the election to require 3. A
+    // `2` owner connects and owns the world but is not the host.
+    const h = await hello(a.ws, a.messages, 'cap-2', { scriptRunner: 2 })
+    assert.equal(h.canEdit, true, 'a scriptRunner: 2 page still owns the world')
+    assert.equal(h.scriptHost, false, 'the election requires 3, so a 2 is never the host')
     assert.equal('hostGen' in h, false)
+
+    // The `3` owner that follows takes the role.
+    const h3 = await hello(b.ws, b.messages, 'cap-3', { scriptRunner: 3 })
+    assert.equal(h3.canEdit, true, 'a scriptRunner: 3 page owns the world')
+    assert.equal(h3.scriptHost, true, 'and the election elects it')
+    assert.equal(h3.hostGen, 1)
   } finally {
     a.ws.close(); await waitForClose(a.ws)
+    b.ws.close(); await waitForClose(b.ws)
   }
 })

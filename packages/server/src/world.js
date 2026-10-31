@@ -7,7 +7,8 @@ import { resolve as resolvePath } from 'node:path'
 import { NodeIO } from '@gltf-transform/core'
 import { KHRLightsPunctual } from '@gltf-transform/extensions'
 import { SOMDocument, pruneCandidateProperties, pruneDocumentInPlace } from '@atrium/som'
-import { objectIdProblem, behaviorCheck, BEHAVIOR_NODES_PER_WORLD } from './send-policy.js'
+import { objectIdProblem, behaviorCheck, BEHAVIOR_NODES_PER_WORLD, BEHAVIOR_WORLD_BYTES_MAX, behaviorLeafBytes } from './send-policy.js'
+import { logId } from './log-id.js'
 
 /** Typed errors L3 throws. Both write nothing. */
 export const SERIALIZE_INDEX_MISMATCH       = 'SERIALIZE_INDEX_MISMATCH'
@@ -399,17 +400,25 @@ function dropNodeBehavior(gltfNode) {
  *     dropped;
  *  3. past the 64th behaviour node the value is dropped: the world's limit is
  *     the SERVER's, and a hand-made document must not exceed it in silence.
+ *  4. scripting-4d G2 (Rev 1 S5) — the world TOTAL: past 1 MiB of behaviour
+ *     bytes the value is dropped. The count is of the leaves it KEEPS, in
+ *     document order, measured with the SAME `behaviorLeafBytes` the `send`
+ *     and `add` paths use (this runs on the raw document, before the SOM
+ *     exists, so it accumulates rather than scanning a SOM), so what a load
+ *     keeps is exactly what `behaviorBytesIn` would let a `send` keep.
  *
  * @param {object} document   glTF-Transform Document
  * @param {{log?: object|null}} [opts]
- * @returns {{noId: number, malformed: number, overLimit: number}}
+ * @returns {{noId: number, malformed: number, overLimit: number, overBytes: number}}
  */
 export function healDocumentBehaviors(document, { log = console } = {}) {
   const nodes = document.getRoot().listNodes()
   let noId = 0
   let malformed = 0
   let overLimit = 0
+  let overBytes = 0
   let behaviorsKept = 0
+  let bytesKept = 0
 
   nodes.forEach((node, index) => {
     const behavior = readNodeBehavior(node)
@@ -451,14 +460,24 @@ export function healDocumentBehaviors(document, { log = console } = {}) {
         log?.log?.(`[world] dropped behavior on node ${index}: over the world limit`)
         return
       }
+      // scripting-4d G2 — the world TOTAL, counted over the leaves KEPT, in
+      // document order, with the same leaf measure the `send`/`add` paths use.
+      const size = behaviorLeafBytes(behavior)
+      if (bytesKept + size > BEHAVIOR_WORLD_BYTES_MAX) {
+        dropNodeBehavior(node)
+        overBytes += 1
+        log?.log?.(`[world] dropped behavior on node ${index}: over the world total`)
+        return
+      }
       behaviorsKept += 1
+      bytesKept += size
     }
   })
 
-  return { noId, malformed, overLimit }
+  return { noId, malformed, overLimit, overBytes }
 }
 
-export async function createWorld(gltfPath, { baseUrl } = {}) {
+export async function createWorld(gltfPath, { baseUrl, logId: worldLogId = null } = {}) {
   const io = createIO()
   const document = await io.read(gltfPath)
 
@@ -467,7 +486,11 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
 
   // scripting-4b-2 F2 — behaviour healing, AFTER the id healing, so a behaviour
   // whose node just lost its id is dropped in the same pass.
+  // scripting-4d G2 (Rev 1.2 N4) — the heal timing line for Q7:
+  // `[world] healed <logId> in <ms> ms`. No ids beyond the world's `logId`.
+  const healStart = performance.now()
   healDocumentBehaviors(document)
+  console.log(`[world] healed ${logId(worldLogId)} in ${Math.round(performance.now() - healStart)} ms`)
 
   const som = new SOMDocument(document)
 
@@ -612,7 +635,7 @@ export async function createWorld(gltfPath, { baseUrl } = {}) {
  * @param {string|object} documentJson - serialized glTF JSON
  * @returns {Promise<object>} world object with same API as createWorld
  */
-export async function createWorldFromDocument(documentJson) {
+export async function createWorldFromDocument(documentJson, { logId: worldLogId = null } = {}) {
   const io = createIO()
   const parsed = typeof documentJson === 'string' ? JSON.parse(documentJson) : documentJson
   const document = await io.readJSON({ json: parsed, resources: {} })
@@ -624,7 +647,10 @@ export async function createWorldFromDocument(documentJson) {
   healDocumentObjectIds(document)
 
   // scripting-4b-2 F2 — behaviour healing, the same call a file world makes.
+  // scripting-4d G2 (Rev 1.2 N4) — the heal timing line for Q7.
+  const healStart = performance.now()
   healDocumentBehaviors(document)
+  console.log(`[world] healed ${logId(worldLogId)} in ${Math.round(performance.now() - healStart)} ms`)
 
   const som = new SOMDocument(document)
 

@@ -173,7 +173,7 @@ class Peer {
 
 async function open(port, id, {
   as = null,
-  capabilities = { tick: { interval: 5000 }, scriptRunner: 2 },
+  capabilities = { tick: { interval: 5000 }, scriptRunner: 3 },
 } = {}) {
   const url = as ? `ws://127.0.0.1:${port}/?as=${encodeURIComponent(as)}` : `ws://127.0.0.1:${port}`
   const ws = new WebSocket(url)
@@ -694,7 +694,7 @@ test('AC3/M1: a script-ready from a NON-host, or for an OLD generation, changes 
 })
 
 // ===========================================================================
-// Eligibility — the role needs scriptRunner: 2 (Rev 1 S2, P22)
+// Eligibility — the role needs scriptRunner: 3 (Rev 1 S2, P22; scripting-4d G-L9)
 // ===========================================================================
 
 test('AC3/S2: a scriptRunner: 1 owner is never the host, and the forward skips it', async () => {

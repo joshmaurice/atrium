@@ -125,15 +125,16 @@ test('F5: sendField refuses before the world is loaded, exactly as the leaf meth
   assert.throws(() => client.sendField('Crate', FIELD, VALUE), /World not loaded/)
 })
 
-test('F5/AC4: the hello declares scriptRunner only when the connect option asks, and then it is 2', () => {
+test('F5/AC4/G5: the hello declares scriptRunner only when the connect option asks, and then it is 3', () => {
   // scripting-4c S2/AC4 — 4b-2 hard-coded `scriptRunner: 1` into every hello.
   // 4c makes it an OPTION (default off), because a hello field older servers do
   // not know must only ride a same-origin connection (Rev 1.2 M1, P23): the
   // page sets it in the one place every connect goes through (`connectNow`).
+  // scripting-4d G5/G-L9 — the value is 3: the election requires 3.
   const asked = makeClient({ connect: { scriptRunner: true } })
   asked.mock._fire('open')
   const helloWith = asked.mock.sent.find((m) => m.type === 'hello')
-  assert.equal(helloWith.capabilities.scriptRunner, 2)
+  assert.equal(helloWith.capabilities.scriptRunner, 3)
   assert.equal(validate('client', helloWith).valid, true)
 
   const plain = makeClient()

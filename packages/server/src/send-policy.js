@@ -533,6 +533,55 @@ export const BEHAVIOR_DEPTH_MAX    = 8
 /** The whole-world behaviour limit (F2/S1): the count is of OTHER saved nodes. */
 export const BEHAVIOR_NODES_PER_WORLD = 64
 
+/**
+ * G7/G2 — the whole-world behaviour byte limit (scripting-4d, Rev 1 S5). One
+ * MiB of UTF-8 bytes over every saved node's non-null `extras.atrium.behavior`
+ * leaf. Enforced by `send`, by `add` and by healing, all through
+ * `behaviorBytesIn` / `behaviorLeafBytes` below.
+ */
+export const BEHAVIOR_WORLD_BYTES_MAX = 1024 * 1024
+
+/**
+ * G2 — the UTF-8 byte size of ONE stored behaviour leaf: `JSON.stringify`'s
+ * UTF-8 length. This is the single measure of a leaf's size, shared by
+ * `behaviorBytesIn` (the world total for `send`/`add`) and by the load
+ * healing in `world.js`, so the three can never drift. `null`/`undefined`
+ * contribute nothing.
+ *
+ * @param {*} value
+ * @returns {number}
+ */
+export function behaviorLeafBytes(value) {
+  if (value === undefined || value === null) return 0
+  const serialized = JSON.stringify(value)
+  if (serialized === undefined) return 0
+  return Buffer.byteLength(serialized, 'utf8')
+}
+
+/**
+ * G2 — the world total: the UTF-8 bytes of each non-null behaviour leaf's
+ * `JSON.stringify`, summed over every SAVED node except `excludeNode`. It
+ * iterates exactly as `behaviorCountIn` does (every node, external nodes
+ * skipped), so a `send` that rewrites a node's own leaf is judged by its NEW
+ * size (`excludeNode` is that node), a removed node stops counting, and an
+ * external node never counts.
+ *
+ * @param {object} som                  the world's SOMDocument
+ * @param {object|null} [excludeNode]
+ * @returns {number}
+ */
+export function behaviorBytesIn(som, excludeNode = null) {
+  let bytes = 0
+  for (const node of som?.allNodes ?? []) {
+    if (node === excludeNode) continue
+    if (typeof som.isExternalNode === 'function' && som.isExternalNode(node)) continue
+    const behavior = node?.extras?.atrium?.behavior
+    if (behavior === undefined || behavior === null) continue
+    bytes += behaviorLeafBytes(behavior)
+  }
+  return bytes
+}
+
 /** The exact key set of the stored value (F-L2). */
 const BEHAVIOR_KEYS = [
   'kind', 'graph', 'nodeMap', 'targets', 'animations', 'proximity', 'interval', 'template', 'enabled', 'origin',
@@ -1123,7 +1172,7 @@ export function behaviorCountIn(som, excludeNode = null) {
  * @param {((excludeNode: object) => number)|null} [behaviorCount]
  * @returns {{ok: boolean, code: string|null, message: string|null}}
  */
-export function checkBehaviorValue(node, value, behaviorCount = null) {
+export function checkBehaviorValue(node, value, behaviorCount = null, behaviorBytes = null) {
   const id = ownObjectId(node)
   if (typeof id !== 'string' || id.length === 0) {
     return deny(SEND_INVALID_FIELD, 'give the object an id before a behaviour')
@@ -1133,6 +1182,13 @@ export function checkBehaviorValue(node, value, behaviorCount = null) {
   if (check.problem) return deny(SEND_INVALID, check.message)
   if (typeof behaviorCount === 'function' && behaviorCount(node) >= BEHAVIOR_NODES_PER_WORLD) {
     return deny(SEND_INVALID, `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
+  }
+  // G2 (Rev 1 S5) — the world total: `behaviorBytes(node)` is the sum over the
+  // world's OTHER saved nodes, and the leaf being written is judged by its NEW
+  // size, so a rewrite can always keep or shrink its own leaf.
+  if (typeof behaviorBytes === 'function' &&
+      behaviorBytes(node) + behaviorLeafBytes(value) > BEHAVIOR_WORLD_BYTES_MAX) {
+    return deny(SEND_INVALID, "this world's behaviours would exceed 1 MiB")
   }
   return allow()
 }
@@ -1415,7 +1471,7 @@ function isExternallyLoaded(target, externalNames) {
  * @param {object}  [args.currentExtras]   the document's current root extras (A3)
  * @returns {{ok: boolean, code: string|null, message: string|null}}
  */
-export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null, objectIdInUse = null, behaviorCount = null } = {}) {
+export function authorizeSend({ target, nodeName, field, value, avatarNames = null, currentExtras = null, externalNames = null, objectIdInUse = null, behaviorCount = null, behaviorBytes = null } = {}) {
   if (!target) {
     return deny(SEND_NODE_MISSING, `${SEND_NODE_MISSING}: ${nodeName}`)
   }
@@ -1439,7 +1495,7 @@ export function authorizeSend({ target, nodeName, field, value, avatarNames = nu
     // RESOLVED node, not the addressed string, so a name that merely looks
     // like an avatar cannot smuggle a write through.
     const isLiveAvatar = avatarNames !== null && isLiveAvatarName(target.name, avatarNames)
-    return authorizeNodeSend({ node: target, field, value, isLiveAvatar, objectIdInUse, behaviorCount })
+    return authorizeNodeSend({ node: target, field, value, isLiveAvatar, objectIdInUse, behaviorCount, behaviorBytes })
   }
   if (target instanceof SOMCamera) {
     return authorizeCameraSend({ camera: target, nodeName, field, value })
@@ -1459,7 +1515,7 @@ export function authorizeSend({ target, nodeName, field, value, avatarNames = nu
 // SOMNode
 // ---------------------------------------------------------------------------
 
-function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = null, behaviorCount = null }) {
+function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = null, behaviorCount = null, behaviorBytes = null }) {
   // Live avatars are server-controlled: refuse every send, for everyone,
   // including the world owner, in every world mode.
   if (isLiveAvatar) {
@@ -1515,7 +1571,7 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = n
   // node must carry its own objectId, null is the "no behaviour" value, then F1,
   // then the world's 64-behaviour cap (which counts OTHER nodes).
   if (field === BEHAVIOR_LEAF) {
-    return checkBehaviorValue(node, value, behaviorCount)
+    return checkBehaviorValue(node, value, behaviorCount, behaviorBytes)
   }
 
   const materialMatch = MATERIAL_PATH_RE.exec(field)

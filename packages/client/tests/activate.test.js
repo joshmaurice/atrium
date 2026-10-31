@@ -122,11 +122,11 @@ async function loadWorld(client, mock) {
   return json
 }
 
-test('AC4: the hello carries scriptRunner: 2 only when asked, and NO key otherwise', () => {
+test('AC4/G5: the hello carries scriptRunner: 3 only when asked, and NO key otherwise', () => {
   const on = makeClient({ scriptRunner: true })
   on.mock._fire('open')
   const helloOn = on.mock.of('hello')[0]
-  assert.equal(helloOn.capabilities.scriptRunner, 2, 'a 4c page that runs behaviours says so')
+  assert.equal(helloOn.capabilities.scriptRunner, 3, 'a 4d page that runs graphs says so')
   assert.equal(validate('client', helloOn).valid, true)
 
   const off = makeClient()
@@ -402,7 +402,7 @@ test('AC4/M1: with scriptRunner: true the real server elects this client the hos
   const client = await connectReal(port, { scriptRunner: true })
   try {
     const hello = capturedOf(captured, 'hello')
-    assert.equal(hello.capabilities.scriptRunner, 2, 'the wire says 2')
+    assert.equal(hello.capabilities.scriptRunner, 3, 'the wire says 3')
     assert.equal(client.scriptHost.active, true, 'and the server made it the host')
     assert.equal(client.scriptHost.hostGen, 1)
     assert.equal(client.canEdit, true)
@@ -417,7 +417,7 @@ test('AC4/M1: with scriptRunner: true the real server elects this client the hos
   }
 })
 
-test('AC4/M1: without it the hello has NO scriptRunner key, and the two frozen server schemas accept it', async () => {
+test('AC4/M1: without it the hello has NO scriptRunner key, and the three frozen server schemas accept it', async () => {
   const { port, captured } = await startHostWorld()
   const client = await connectReal(port)
   try {
@@ -428,19 +428,19 @@ test('AC4/M1: without it the hello has NO scriptRunner key, and the two frozen s
     // Compiled the way the SERVER compiles them (Ajv, strict: false), with the
     // schemas copied byte for byte from git — see the README beside them.
     const ajv = new Ajv({ strict: false })
-    for (const name of ['hello.client.pre-4b-2.json', 'hello.client.71b6e40b.json']) {
+    for (const name of ['hello.client.pre-4b-2.json', 'hello.client.71b6e40b.json', 'hello.client.14ab0076.json']) {
       const schema = JSON.parse(readFileSync(resolve(COMPAT, name), 'utf8'))
       const check = ajv.compile(schema)
       assert.equal(check(hello), true,
         `${name} must accept the exact hello this client sends: ${JSON.stringify(check.errors)}`)
     }
 
-    // Sanity: the fixture really is a different schema — a hello carrying 2 is
-    // refused by BOTH of them (which is why the key is omitted off-origin).
-    for (const name of ['hello.client.pre-4b-2.json', 'hello.client.71b6e40b.json']) {
+    // Sanity: the fixtures really are different schemas — a hello carrying 3 is
+    // refused by ALL THREE (which is why the key is omitted off-origin).
+    for (const name of ['hello.client.pre-4b-2.json', 'hello.client.71b6e40b.json', 'hello.client.14ab0076.json']) {
       const check = ajv.compile(JSON.parse(readFileSync(resolve(COMPAT, name), 'utf8')))
-      assert.equal(check({ ...hello, capabilities: { ...hello.capabilities, scriptRunner: 2 } }), false,
-        `${name} refuses scriptRunner: 2, so a cross-origin hello must not carry it`)
+      assert.equal(check({ ...hello, capabilities: { ...hello.capabilities, scriptRunner: 3 } }), false,
+        `${name} refuses scriptRunner: 3, so a cross-origin hello must not carry it`)
     }
   } finally {
     client.disconnect()
