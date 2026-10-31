@@ -1,7 +1,17 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **DRAFT, Revision 1.1 (2026-10-30, night PT). Decisions G-L1–G-L12
-are open; each has a recommendation.**
+Status: **Revision 1.2 (2026-10-30, night PT), ready for FINAL.
+Decisions G-L1–G-L12, Q3 and Q7 await the operator; each has a
+recommendation.**
+- **Rev 1.2 applies the third outside review, of Rev 1.1**
+  (`devtasks/REVIEW-scripting-4d-rev1.1.md`, **APPROVE WITH NITS**: no
+  must-fix, 2 should-fix, 4 nits). **The reviewer cloned the repo this time**
+  and ran `r1`, `r2`, `r3` and the behaviours suite (176 pass, 1 named skip;
+  all as §2.5 says), plus a probe of their own, `x1`. They closed all nine
+  Rev 1 findings and found no breach of the overlay invariant, and they
+  advised folding S1, S2 and the nits into FINAL "without another review
+  round". Claude checked each at the code and reran `x1` (§0.3). **All are
+  taken.** No decision changes; Q3's condition widens (§5).
 - **Rev 1.1 applies the second outside review, of Rev 1**
   (`devtasks/REVIEW-scripting-4d-rev1.md`, CHANGES REQUESTED: 3 must-fix,
   4 should-fix, 2 nits; source-only again, the clone failed on DNS). The
@@ -202,6 +212,41 @@ are open; each has a recommendation.**
 - **Q3 and Q7 (§5):** Q3's recommendation becomes the reviewer's: confirm
   once, when an imported graph that starts on load and writes is first
   enabled. Q7 gets pass/fail thresholds set before MAIN.
+
+### 0.3 Revision 1.2 (the review of Rev 1.1)
+- **S1, the reconcile's third case:** confirmed (P17, amended): 4c's healing
+  nulls a leaf **in memory** at load (`world.js` L383–386, L466–470,
+  L624–628), and the `null` reaches the database only when the world is
+  saved after a mutation (`autosave.js` L84; the HTTP update, `http-routes.js`
+  L826). So any world nobody edited during a rollback still holds its 4d
+  leaf. **G10 now has three outcomes, `restore`, `unchanged` and
+  `conflict`**, an exact meaning for "the second run does nothing", caps
+  re-checked cumulatively in document order, and the restored document
+  passed through the server's own healing before it is written.
+- **S2, where the overlay is written:** confirmed: `enqueue` returns `true`
+  on a drag-rule drop without queueing (`runner.js` L345–351). **The overlay
+  entry is now written inside `enqueue`, right after `queue.set`**, and the
+  drag drop returns `false`. G4 also says how a remote `som:set` maps to an
+  overlay key (`X.light`, `extras.atrium.animation`, a rename).
+- **N1, the wrapper's timing:** a synchronous throw (a variable
+  interpolation) is recorded and rethrown, so the tick wrapper disposes it
+  in the same tick, as today; a rejection (a pointer interpolation) is
+  disposed at the start of the next tick, once. `x1` (the reviewer's probe,
+  now in `devtasks/spike-4d/`) shows an interpolation's `done` flow is
+  queued, not run inside the action (P25).
+- **N2, two wordings:** §9 says the server's *value* rules; G2 says the new
+  helper iterates as `behaviorCountIn` does and that healing uses it too.
+- **N3, the rollback procedure:** an SQLite backup instead of a file copy,
+  a second backup right before `--apply`, an exclusive-lock check in both
+  scripts, and restores split by whether the world was edited during the
+  rollback (§8, G10).
+- **N4, tests and log lines:** `math/select` and `math/switch` named in
+  G6's tests; the carriers a ref is followed through, listed; the server
+  logs its serialize and heal times so Q7 can be measured (G2).
+- **Q3:** the confirmation asks on **every** Enable in the form, for a
+  custom graph that writes and **either starts on load or runs every
+  frame**. **Q7:** the measurement method (an A/B of the same world,
+  three visitors, five runs, the median; the heap in Chromium through CDP).
 
 ## 1. What 4d delivers
 
@@ -422,7 +467,14 @@ before the setter, so a test can force a rejection there. **`r3`:** with
 `engine.setPathValue` made to throw (test-only), an interpolation's
 rejections reached the process as **unhandled rejections** and the engine
 wasn't disposed; with the action wrapped where the adapter's bus registers
-it, both were caught and none was unhandled.
+it, both were caught and none was unhandled. **`x1` (the third review's
+probe):** an interpolation's `done` flow is enqueued to the work queue
+(L5283–5285), not run inside the action, so a `done` flow over the step
+budget throws synchronously in the next tick and is disposed `over-budget`
+as today, with no unhandled rejection. **The two kinds of action differ:**
+`pointer/interpolate`'s is `async` (L8584), so its throw is a rejection;
+`variable/interpolate`'s is a plain function (L6579–6595), so its throw is
+synchronous and today reaches the adapter's tick wrapper.
 
 ### 2.3 The client and the server
 **P16. `scriptRunner`.** `hello.client.json` accepts `1` and `2` (L35).
@@ -436,10 +488,16 @@ until the page reloads (§8).
 **P17. Load healing drops what the current rule refuses.** At world load,
 a behaviour that fails F1 is replaced by `null` and logged
 (`world.js` L422–451), and the next autosave writes the `null`. **So a
-rollback from 4d to 4c deletes every behaviour that only 4d's rule accepts,
-on each world's next load.** Restoring the pre-release backup would also
-throw away every edit made since the release (the review's S6), so §8 adds
-a rehearsed export-and-restore instead.
+rollback from 4d to 4c deletes every behaviour that only 4d's rule accepts**
+in each world that 4c then saves. **The `null` is set in memory at load**
+(`dropNodeBehavior`, L383–386, called through `healDocumentBehaviors` at
+L466–470 and L624–628) and **reaches the database only when the world is
+saved**, by autosave after a mutation (`autosave.js` L84) or the HTTP
+update (`http-routes.js` L826). A world nobody edits during a rollback
+keeps its 4d leaves in `worlds.document` (the third review's S1).
+Restoring the pre-release backup would also throw away every edit made
+since the release (the review's S6), so §8 adds a rehearsed
+export-and-reconcile instead.
 
 **P18. The light fields.** `LIGHT_FIELDS` (`send-policy.js` L75) includes
 `color`, so a light-colour write needs no server change. Material writes
@@ -552,6 +610,8 @@ vendored engine (Node 22.23.4; Chromium 153 through Playwright for
 - **`r1` (the review's M1 probe, with two controls): as P19 says.**
 - **`r2` (M3 and S1): as P12 and P21 say.**
 - **`r3` (the second review's S4): as P25 says.**
+- **`x1` (the third review's probe, `x1-done-flow-rejection.mjs`): as P25
+  says.**
 
 ### 2.6 The spec
 The `KHR_interactivity` text at `KhronosGroup/glTF` `main` gives its status as
@@ -918,8 +978,10 @@ itself; the engine is the reference here.
 - **The world total** (Rev 1, S5; Rev 1.1, S2): **one pure helper,
   `behaviorBytesIn(som, excludeNode)`** (the UTF-8 bytes of each non-null
   leaf's `JSON.stringify`, summed over every saved node except
-  `excludeNode`), used by `send`, by `add` and by healing, as
-  `behaviorCountIn` is today. A `send` or `add` whose new leaf would bring
+  `excludeNode`), used by `send`, by `add` and by healing. It iterates
+  exactly as `behaviorCountIn` does (`send-policy.js` L950–959: every node,
+  external nodes skipped); healing, which counts inline today
+  (`world.js` L445–451), uses the new helper too. A `send` or `add` whose new leaf would bring
   that sum plus its own size over 1 MiB is refused (`INVALID_VALUE`, "this
   world's behaviours would exceed 1 MiB"), with nothing changed. A rewrite
   is judged by its new size, `null` adds nothing, and a removed node stops
@@ -929,6 +991,10 @@ itself; the engine is the reference here.
   owner sees is the server's text. Healing counts only the leaves it keeps,
   in document order, and drops any past the total with a log line, as it
   does past the 64th.
+- **Two timing lines for Q7** (Rev 1.2, N4): `[world] serialized <logId>
+  in <ms> ms (<bytes> bytes)` when a world is serialized for a `som-dump`,
+  and `[world] healed <logId> in <ms> ms` after healing at load. No ids
+  beyond the world's `logId`.
 - **Nothing else changes:** no new message, no new error code, `activate`
   and its check order untouched.
 
@@ -973,10 +1039,15 @@ itself; the engine is the reference here.
 - **Interpolation:** unchanged engine behaviour (one per path, P13), on the
   injected clock. **Because the callback is `async`** (P13, `r3`), the
   adapter's `NodeEventBus` wraps every pointer and variable interpolation
-  action as it is registered (P25): a throw, or a rejection of the promise
-  it returns, is caught, logged once, and marks the engine for disposal
-  (`engine-error`), which the next tick carries out, once. The adapter's
-  setters stay total as well. Disposal already clears both maps.
+  action as it is registered (P25). **A synchronous throw** (a variable
+  interpolation's plain function) is logged and **rethrown**, so the tick
+  wrapper disposes the engine in the same tick, as today. **A rejection**
+  (a pointer interpolation's `async` action) is logged and marks the engine
+  `engine-error`; the runner disposes it **at the start of the next tick,
+  before `executeEventQueueTick`**. The mark is idempotent (the failing
+  action is still registered until then and may reject once more), and a
+  rejection that arrives after disposal does nothing. The adapter's setters
+  stay total as well. Disposal already clears both maps.
 - **Events:** the adapter alone dispatches `atrium/*` (as now). A graph's
   own `event/send` reaches only its own engine (P5).
 - **The report:** a pure `graphReport(value)` returns `{ unsupported:
@@ -1022,7 +1093,12 @@ itself; the engine is the reference here.
   one line per behaviour per minute while it lasts (Q5). The per-tick
   budget (P4) still disposes a single runaway tick.
 - **The overlay (G-L6, Rev 1 M2):** per key, `{ value, revision, producer,
-  sentSeq? }`. Each accepted write gets the next revision. An opportunity
+  sentSeq? }`, where `producer` is `(behaviourId, generation)`. **The entry
+  is written inside `enqueue`, immediately after `queue.set`** (Rev 1.2,
+  S2), so nothing can create one without a queued key. The drag-rule drop
+  (`runner.js` L345–351) **returns `false`**: for the graph it is a refused
+  write, logged once per gesture as now. Each accepted write gets the next
+  revision. An opportunity
   that sends a key records `seq → (key, revision)`. **`som:set` with
   `origin: 'own'` and that `requestSeq`, or `edit:rejected` /
   `edit:unknown` for that seq, clears the entry only if its revision is
@@ -1031,7 +1107,15 @@ itself; the engine is the reference here.
   drop or disposal clears it only if the latest revision is that
   producer's. Two behaviours writing the same key share one entry: the
   latest write wins, as in the queue. **Invariant: every overlay entry has
-  either a queued entry or an unanswered seq behind it** (Rev 1.1, M1).
+  either a queued entry or an unanswered seq behind it** (Rev 1.1, M1); the
+  seq map (`sendSeqs`) is cleared in the same call as the overlay.
+- **Which key a `som:set` touches** (Rev 1.2, S2): resolve `nodeName` to its
+  node; a name ending `.light` is that host node's light (`kind: 'light'`,
+  the `path` as the field); `extras.atrium.animation` is `('animation',
+  'play')`; any other `path` is a node field. The key uses the node's
+  `objectId`. A `som:set` with `path: 'name'` touches no key (the overlay
+  is by `objectId`). **Animation reads stay on the SOM** (`clipStatus`):
+  the server stamps `startedAt`, so the overlay's copy would be wrong.
 - **Status:** "Partially supported" when `graphReport` lists anything, with
   the list; "Throttled" as above; the `onStart` and sampled-motion notes
   (G6). A `debug/log` line, a refused write, a refused value, a delay over
@@ -1080,9 +1164,12 @@ itself; the engine is the reference here.
   mapping, **or the conversion is refused naming the reference**. An
   `other` ref is left as it is **only when every consumer is a node Atrium
   doesn't run or a pointer outside G-L4's families**, and it is listed. If
-  any consumer runs (a `ref/eq` that decides a branch, a variable, an event
-  value, a supported pointer), the conversion is refused, naming the ref
-  and its consumer: its meaning can't survive the import (Rev 1.1, S3). `value` is a complete behaviour leaf (`kind: 'graph'`,
+  any consumer runs (a `ref/eq` that decides a branch, a `math/select` or
+  `math/switch`, a supported pointer), the conversion is refused, naming the
+  ref and its consumer: its meaning can't survive the import (Rev 1.1, S3).
+  **The only carriers a ref is followed through** are `variable/set`,
+  `variable/get`, `event/send` and `event/receive` (Rev 1.2, N4); every
+  other node that runs is a consumer. `value` is a complete behaviour leaf (`kind: 'graph'`,
   `origin: 'local'`, `enabled: false`, `nodeMap` own-first and unique,
   `targets` = every mapped object outside the own subtree, `animations`
   from the mapping), and it **must pass `behaviorCheck`** before the panel
@@ -1093,12 +1180,13 @@ itself; the engine is the reference here.
   report, the grants, Save. Save is one `sendField` of the leaf (the node
   gets its `objectId` first, as F9 does). After Save it is the custom-graph
   state: Enabled, Remove, the report.
-- **The first Enable of an imported graph that starts on load and writes**
-  (Rev 1.1, Q3) asks once: "This graph runs again whenever you reconnect or
+- **Enabling a custom graph that writes, and starts on load or runs every
+  frame** (Rev 1.1 Q3, widened in Rev 1.2) asks: "This graph runs again whenever you reconnect or
   your host tab changes, and it may overwrite what visitors changed. It can
   also change: <the grants outside its own subtree>. Enable it?" It asks
-  when the owner turns Enabled on in the form for such a graph (a custom
-  graph with no `template`). Nothing is stored for it, and reloads and host
+  **every time** the owner turns Enabled on in the form for such a graph (a
+  custom graph with no `template`, `graphReport` showing a write and
+  `startsOnLoad` or `perFrame`). Nothing is stored for it, and reloads and host
   changes never ask, because they don't change Enabled.
 - **The notes the owner sees, at import and beside Enable** (Rev 1, S7):
   for `startsOnLoad`, "This graph runs again whenever the owner reconnects,
@@ -1167,17 +1255,29 @@ operator. That is the authority: no owner's session is involved (P24).
   `objectId` and name, the leaf, its sha256, and the world's `updated_at`.
   Run before any rollback and kept with the database copy.
 - **`behaviors-reconcile.mjs <db> <export> [--apply]`**: dry run by
-  default. For each exported leaf, it **restores** only when the world
-  still exists, a node with that `objectId` is still in it (and only one),
-  and that node's behaviour is now `null` or absent (what 4c's healing
-  left). Before writing, it checks the leaf against the current rule (G1)
-  and the world's caps (G2). It then writes the world's `document` and
-  `updated_at` in one transaction per world. Everything else is a
-  **conflict, reported and not written**: a different leaf on the node (an
-  owner changed it during the rollback), the node gone or duplicated, the
-  world gone, a leaf the rule now refuses. Run twice, the second run does
-  nothing (**idempotent**). Its report lists every world, node, action and
-  reason.
+  default. For each exported leaf, **one of three outcomes** (Rev 1.2, S1):
+
+  | Outcome | When | Write |
+  |---|---|---|
+  | `unchanged` | the world exists, one node has that `objectId`, and its leaf has the exported sha256 (the common case: healing's `null` was never saved, P17) | none; not a conflict, counted on its own |
+  | `restore` | the world exists, one node has that `objectId`, and its behaviour is `null` or absent | the leaf, if it passes the current rule (G1) and the caps (G2) |
+  | `conflict` | anything else: a different leaf on the node (an owner changed it during the rollback), the node gone or duplicated, the world gone, a leaf the rule now refuses, a cap the restore would break | none; reported with its reason |
+
+  Per world, restores are applied in document order and the caps are
+  re-checked cumulatively. The restored document is **imported through the
+  server's own loader and healing** before it is written, so what the
+  reconcile writes is what the next load keeps; then the world's
+  `document` and `updated_at` are written in one transaction. **"The second
+  run does nothing" means exactly:** no writes, every row `unchanged` or
+  the same conflict as before. Its report lists every world, node, outcome
+  and reason, and splits restores into **world untouched since the
+  export** and **world edited during the rollback** (from `updated_at`), so
+  the operator knows which owners to ask (N3).
+- **Both scripts take an exclusive lock** (`BEGIN IMMEDIATE`) and refuse to
+  run if they can't, so "with the server stopped" is checked, not assumed
+  (N3).
+- **File-backed worlds are out of scope:** they are never autosaved
+  (`world.js` L462–470), so they never hold a healed leaf in storage.
 - **Limit, stated:** a node that had a 4d leaf, was healed to `null`, and
   that the owner then deliberately left empty during the rollback looks the
   same as one nobody touched. The reconcile restores it, and the report
@@ -1190,12 +1290,12 @@ and what is still open for the operator.
   registry kept by allowlist, no name denylist.
 - **Q2 (stepped motion):** accepted as a stated deviation (G-L5).
 - **Q3 (`onStart`):** the stronger note at import and at Enable (G6).
-  **Open for the operator:** should enabling a graph that both
-  `startsOnLoad` and writes ask for confirmation? **Recommended (changed in
-  Rev 1.1, as the second review advised): yes, once,** the first time an
-  imported graph with `startsOnLoad` and any write is enabled, naming its
-  grants outside its own subtree. Reloads and handovers never ask, and the
-  note stays (G6).
+  **Open for the operator:** should enabling such a graph ask for
+  confirmation? **Recommended (changed in Rev 1.1 and widened in Rev 1.2,
+  as the reviews advised): yes,** every time the owner turns Enabled on in
+  the form for a custom graph that writes and **either starts on load or
+  runs every frame**, naming its grants outside its own subtree. Reloads
+  and handovers never ask, and the note stays (G6).
 - **Q4 (select outputs):** flagged (`missingSelectOutputs`, G3 and G6).
 - **Q5 (fairness):** no automatic disable; a visible "Throttled" status
   (G4).
@@ -1210,8 +1310,14 @@ and what is still open for the operator.
   over the same world without behaviours; the server's serialize and heal
   of that world take at most **250 ms** together; and a visitor tab's heap
   grows by at most **50 MB**. The operator may change these numbers before
-  the kickoff. If check 10 breaks one, the cap is lowered and the boundary,
-  healing and join tests rerun before MAIN. Geometry and other world size
+  the kickoff. **How it is measured** (Rev 1.2): an A/B of the same world
+  with and without the 1 MiB of leaves, three visitors joining at once,
+  five runs, the median; the server's two timing lines (G2); the heap in
+  the Chromium harness through CDP (`HeapProfiler.collectGarbage`, then
+  `Performance.getMetrics`'s `JSHeapUsedSize`), as a delta on the same page.
+  The heap number is the harness's: Firefox, where DEV acceptance runs,
+  can't measure it. If check 10 breaks one, the cap is lowered and the
+  boundary, healing and join tests rerun before MAIN. Geometry and other world size
   are a separate pressure, not evidence against this cap.
 
 ## 6. Tests
@@ -1220,11 +1326,11 @@ and what is still open for the operator.
 |---|---|---|
 | G1 | the vectors through **both copies and the validator**; each new limit at its boundary and one past, with multi-byte strings; the string rules; `event/send` to `atrium/*`; literal and wired refs; an unknown extension op accepted; **an extension-qualified `flow/sequence` judged unsupported, and a supported node reading its value refused**; a `math/combine3` reading an `event/onHoverIn` output refused, and a hover node that only ends a flow accepted (`p3`); **`event/onSelect` with `EXT_probe` refused, and `listensForSelect` / `selectTargetFor` false for a graph whose only `onSelect` isn't the exact identity** (both copies); each 4b-2 vector that moves sides | (a) accept `event/send` to `atrium/interval` in one copy only; (a2) skip the ref bound in the server copy; (a3) judge support by op name only in one copy (the extension vector fails) |
 | G2 | server, port 0, real sockets (signin-sync §4.1): a 4d graph accepted, broadcast, saved and **re-read through healing**; a 65,537-unit one refused with nothing broadcast; **the world total, on every path** (Rev 1.1, S2): at 1 MiB minus N bytes, a `send` that replaces a leaf, an `add`, a Duplicate and an Undo re-add, each once just under and once just over, with multi-byte strings; the same outcome on each path and **no partial change** when refused; the Undo's refusal text reaches the owner; healing counts only the leaves it keeps; **an oversized and a multi-byte value over a real socket** (4c passdown §4.1); **election:** `scriptRunner: 2` never elected, `3` elected; each of the two places alone (4c's P22 pattern); N1's line has a `logId` | (b) elect on `2` in the `hello` path only; (b2) in `canRunBehaviors` only; (b3) count the world total with the leaf being replaced included twice |
-| G3 | the real engine and loader, a fake world, fake timers and a fake `now`: **the identity gate:** `r1`'s graph neither advances a flow nor ticks; the bare core op does; the exact `onSelect` declaration works; the registry's key set equals the allowlist; an unsupported flow op's downstream never runs; with `skipRules`, a running node reading an unsupported core value op disposes `engine-error` at its first tick (`p3b`); **the clock:** with the real `performance.now()` jumping between ticks, `onTick`, throttle and both interpolations follow only `now` (`r2`), and a throwing global `setTimeout` is never called; **delays:** `done` after the injected time, `cancel`, `cancelDelay` by `lastDelay`, **a stale `lastDelay` (A fired, B scheduled) cancels nothing and B completes**, the 17th `err`, 10,000 sequential delays leave one live entry, `dispose` clears every live delay with the injected `clearTimeout`; an interpolation replaced mid-way; **`r3`'s forced rejection** (`engine.setPathValue` throwing, test-only) with an `unhandledRejection` listener: none reaches it, one log line, the engine disposed once at the next tick, and nothing after disposal; `globalMatrix` of a nested node matches `worldMatrix`; light colour; a send/receive loop once per tick; a doubling fan-out `over-budget` (`p7`); `graphReport` for each flag | (c) gate by op name (the `r1` test runs `Sequence`); (c2) schedule with the global `setTimeout` (the stub throws); (c3) reuse delay ids (the stale-handle test cancels B); (c4) leave `dispose` to the engine's own `clearTimeout` (a fake timer still fires) |
-| G4 | the runner with **the real `AtriumClient`** on a fake socket, and the real adapter: **write checks, against the server's rules** (Rev 1.1, M2): `[NaN, 0, 0]`, `[null, 0, 0]`, a two-element translation, a non-boolean `visible`, rotation `[0, 0, 0, 2]` and scale `[0, 1, 1]` and `[1e-7, 1, 1]` are refused before the queue and the overlay, logged once; rotation `[0, 0, 0, 1]` and scale `[-1, 1, 1]` go; **the shared vectors give the same verdict as the server's `authorizeNodeSend`**; **a send that doesn't happen** (Rev 1.1, M1): with `canSend()` false (the socket `CLOSING`), with `sendField` throwing `World not loaded`, and with a non-numeric return, the entry is dropped, the overlay falls back to the SOM, one line is logged, no exception leaves `tick()`, and the other engines still tick; the same for a light key, an animation key and two producers; **the frame limit:** three engines each doing 6,000 steps per tick tick two per frame and all progress over three frames in rotation; with a fake clock, an engine whose tick takes 9 ms stops the frame; "Throttled" after two seconds of skips; one doing 10,001 in a tick is disposed as now; **the overlay** (the review's sequence): send `v1`, queue `v2`, receive the own echo and `edit:accepted` for `v1`, read `v2`; a remote `som:set(v3)` between those steps wins and drops the queued `v2`; an equal-valued remote write still counts as remote; answers out of order; a rejection or unknown for the older seq keeps `v2`; a drag drop; a second producer on the same key; disposal of one producer; the same for a light and an animation key; `get → add → set` on `onTick` for 30 frames with no echo advances 30 times; **an interpolation interrupted at 1.99 s by `active: false`:** nothing more is sent, and the last value sent is what the SOM shows | (d) clear the overlay on any echo for the key (the `v1`/`v2` test reads `v1`); (d2) a fixed tick order (the third engine starves); (d3) check writes after the overlay (the overlay reports a `NaN`); (d4) check only finiteness for rotation (the `[0, 0, 0, 2]` case is queued); (d5) keep the overlay when the send didn't happen (the closed-socket read returns the unsent value) |
+| G3 | the real engine and loader, a fake world, fake timers and a fake `now`: **the identity gate:** `r1`'s graph neither advances a flow nor ticks; the bare core op does; the exact `onSelect` declaration works; the registry's key set equals the allowlist; an unsupported flow op's downstream never runs; with `skipRules`, a running node reading an unsupported core value op disposes `engine-error` at its first tick (`p3b`); **the clock:** with the real `performance.now()` jumping between ticks, `onTick`, throttle and both interpolations follow only `now` (`r2`), and a throwing global `setTimeout` is never called; **delays:** `done` after the injected time, `cancel`, `cancelDelay` by `lastDelay`, **a stale `lastDelay` (A fired, B scheduled) cancels nothing and B completes**, the 17th `err`, 10,000 sequential delays leave one live entry, `dispose` clears every live delay with the injected `clearTimeout`; an interpolation replaced mid-way; **`r3`'s forced rejection** (`engine.setPathValue` throwing, test-only) with an `unhandledRejection` listener: none reaches it, one log line, the engine disposed once at the start of the next tick, and nothing after disposal; **a forced synchronous throw in a variable interpolation: one log line, disposed in the same tick** (Rev 1.2, N1); `x1`'s over-budget `done` flow disposed `over-budget` in the next tick; `globalMatrix` of a nested node matches `worldMatrix`; light colour; a send/receive loop once per tick; a doubling fan-out `over-budget` (`p7`); `graphReport` for each flag | (c) gate by op name (the `r1` test runs `Sequence`); (c2) schedule with the global `setTimeout` (the stub throws); (c3) reuse delay ids (the stale-handle test cancels B); (c4) leave `dispose` to the engine's own `clearTimeout` (a fake timer still fires) |
+| G4 | the runner with **the real `AtriumClient`** on a fake socket, and the real adapter: **write checks, against the server's rules** (Rev 1.1, M2): `[NaN, 0, 0]`, `[null, 0, 0]`, a two-element translation, a non-boolean `visible`, rotation `[0, 0, 0, 2]` and scale `[0, 1, 1]` and `[1e-7, 1, 1]` are refused before the queue and the overlay, logged once; rotation `[0, 0, 0, 1]` and scale `[-1, 1, 1]` go; **the shared vectors give the same verdict as the server's `authorizeNodeSend`**; **a send that doesn't happen** (Rev 1.1, M1): with `canSend()` false (the socket `CLOSING`), with `sendField` throwing `World not loaded`, and with a non-numeric return, the entry is dropped, the overlay falls back to the SOM, one line is logged, no exception leaves `tick()`, and the other engines still tick; the same for a light key, an animation key and two producers; **with a gesture on the target, an `onTick` write: no queue entry, no overlay entry, the next `get` reads the SOM, one line** (Rev 1.2, S2); **a remote `som:set` for `X.light` and for `extras.atrium.animation` each clear the matching entry and drop the queued write, and a remote rename clears nothing**; **the frame limit:** three engines each doing 6,000 steps per tick tick two per frame and all progress over three frames in rotation; with a fake clock, an engine whose tick takes 9 ms stops the frame; "Throttled" after two seconds of skips; one doing 10,001 in a tick is disposed as now; **the overlay** (the review's sequence): send `v1`, queue `v2`, receive the own echo and `edit:accepted` for `v1`, read `v2`; a remote `som:set(v3)` between those steps wins and drops the queued `v2`; an equal-valued remote write still counts as remote; answers out of order; a rejection or unknown for the older seq keeps `v2`; a drag drop; a second producer on the same key; disposal of one producer; the same for a light and an animation key; `get → add → set` on `onTick` for 30 frames with no echo advances 30 times; **an interpolation interrupted at 1.99 s by `active: false`:** nothing more is sent, and the last value sent is what the SOM shows | (d) clear the overlay on any echo for the key (the `v1`/`v2` test reads `v1`); (d2) a fixed tick order (the third engine starves); (d3) check writes after the overlay (the overlay reports a `NaN`); (d4) check only finiteness for rotation (the `[0, 0, 0, 2]` case is queued); (d5) keep the overlay when the send didn't happen (the closed-socket read returns the unsent value) |
 | G5 | the hello with `scriptRunner: true` carries `3`; without it no key; **the captured hello accepted by the three frozen schemas** (pre-4b-2, `71b6e40b`, `14ab0076`); **every `som:set` site's shape** (`origin`, and `requestSeq` on own echoes); `canSend()` false before `world:loaded`, true after, false once the socket is `CLOSING` | (e) send `scriptRunner` cross-origin; (e2) emit an own echo without `origin` |
-| G6 | the pure importer: each source shape; **a `.glb` with a bad magic, a total length that doesn't match, a JSON chunk length past the end, an unaligned chunk and two JSON chunks, each refused**; a source of 4 MiB + 1 byte (multi-byte text) refused before decoding; depth 65 and 17 graphs refused; references found in pointer indices, `{ref}` literals, **a variable's initial ref, an event value default** and `nodeIndex`; **an unmapped node reference refused, naming where it is**; a wired index refused; two `onSelect` nodes refused; **a `/materials/3` ref literal feeding only an unsupported pointer kept and listed, and the same literal feeding a `ref/eq` that decides a supported `pointer/set` refused, naming both** (Rev 1.1, S3); duplicate file names; a survey asset that fits converts, **passes `behaviorCheck`** and keeps its write log under the mapping (`nodeMap` permuted, results equal); `enabled: false`; the grants list; the three notes; **the panel through the strict DOM fake:** a file name, an op name and a problem text of `<img src=x onerror=…>` all show as text | (f) leave a variable's ref literal unmapped (the write log differs); (f2) render op names as HTML (the guard fails); (f3) skip the GLB length check (the truncated file parses) |
-| G10 | the two scripts on a scratch database built by the server's own code: export lists every non-null leaf with its hash; reconcile's dry run writes nothing; `--apply` restores exactly the untouched lost leaf, and reports a conflict for a leaf changed during the rollback, a node deleted and recreated with a new `objectId`, a duplicated `objectId` and a world deleted; a second `--apply` does nothing; a restored world loads in the server and its leaf passes G1 | (h) restore whenever the node exists (the changed leaf is overwritten) |
+| G6 | the pure importer: each source shape; **a `.glb` with a bad magic, a total length that doesn't match, a JSON chunk length past the end, an unaligned chunk and two JSON chunks, each refused**; a source of 4 MiB + 1 byte (multi-byte text) refused before decoding; depth 65 and 17 graphs refused; references found in pointer indices, `{ref}` literals, **a variable's initial ref, an event value default** and `nodeIndex`; **an unmapped node reference refused, naming where it is**; a wired index refused; two `onSelect` nodes refused; **a `/materials/3` ref literal feeding only an unsupported pointer kept and listed, and the same literal feeding a `ref/eq` that decides a supported `pointer/set` refused, naming both** (Rev 1.1, S3); **the same through `math/select` and through `math/switch`, refused; through `variable/set` → `variable/get` into an unsupported pointer, kept** (Rev 1.2, N4); the confirmation shown for the four combinations of `startsOnLoad` and `perFrame` with a write, and never for a template; duplicate file names; a survey asset that fits converts, **passes `behaviorCheck`** and keeps its write log under the mapping (`nodeMap` permuted, results equal); `enabled: false`; the grants list; the three notes; **the panel through the strict DOM fake:** a file name, an op name and a problem text of `<img src=x onerror=…>` all show as text | (f) leave a variable's ref literal unmapped (the write log differs); (f2) render op names as HTML (the guard fails); (f3) skip the GLB length check (the truncated file parses) |
+| G10 | the two scripts on a scratch database built by the server's own code: export lists every non-null leaf with its hash; reconcile's dry run writes nothing; **a world the rollback never touched (the 4d leaf intact) is `unchanged` in the dry run and in `--apply`, with no write**; `--apply` restores exactly the untouched lost leaf, and reports a conflict for a leaf changed during the rollback, a node deleted and recreated with a new `objectId`, a duplicated `objectId` and a world deleted; a second `--apply` reports zero writes and zero new conflicts; caps re-checked cumulatively; a restored world loads in the server and its leaf passes G1; both scripts refuse while another connection holds the database | (h) restore whenever the node exists (the changed leaf is overwritten); (h2) treat an equal leaf as a conflict (the untouched world is reported) |
 | G8 | every fixture's write log matches exactly; the Khronos subset's results match the regenerated list exactly, **on the build host**, and the manifest's hashes match the files | (g) widen the allowlist by one op in the adapter only (a fixture's log changes) |
 
 **Proofs:** commit first; break the file, run, record the failing test
@@ -1339,15 +1445,17 @@ As scripting-4c, with this round's specifics:
   rollback to 4c deletes every 4d-only behaviour at each world's next load,
   and restoring the pre-release backup would lose every edit made since.
   So, **if a rollback is ever needed:**
-  1. stop the world server; copy the database and verify the copy (its
+  1. stop the world server; back the database up with SQLite's own backup
+     (`sqlite3 <db> ".backup <copy>"` or `VACUUM INTO`, never a file copy,
+     so no write-ahead log is left behind), and verify the copy (its
      sha256, and that it opens);
   2. run `behaviors-export.mjs` (G10) against it, and keep the export with
      the copy;
   3. roll back, and tell owners to reload every tab (a 4d page's `hello` is
      refused by the 4c server, P16);
-  4. once the fix is deployed, stop the server again, run
-     `behaviors-reconcile.mjs` as a dry run, read its conflicts, then run it
-     with `--apply`, then start the server;
+  4. once the fix is deployed, stop the server again, take a second backup
+     the same way, run `behaviors-reconcile.mjs` as a dry run, read its
+     conflicts, then run it with `--apply`, then start the server;
   5. tell each owner whose world had a conflict what wasn't restored, from
      the report.
   **The rehearsal** (§6.1 check 11) is part of the release gate: its
@@ -1385,8 +1493,10 @@ As scripting-4c, with this round's specifics:
   remote set) and test exactly that, with the real client's events.
 - **`NaN` is a normal value inside a graph** (P21: missing pointers, the
   first tick, `math/NaN`). The runner checks only what leaves, and it
-  checks it **with the server's rules** (P23), so the overlay never holds a
-  value the server will refuse.
+  checks it **with the server's value rules** (P23), so the overlay never
+  holds a value those rules refuse. The server can still refuse a write for
+  authority or target reasons (a live avatar, an external node, a missing
+  node); its `edit:rejected` clears the entry.
 - **The overlay's invariant** (Rev 1.1, M1): every entry has either a
   queued entry or an unanswered seq behind it. Every path that can break
   that (a send that didn't happen, a throw, a drop, a disposal, a
@@ -1481,3 +1591,26 @@ As scripting-4c, with this round's specifics:
 | S4 | The interpolation rejection test doesn't prove containment | Should-fix | **Reproduced** (`r3`: unhandled rejections, engine not disposed). The bus wraps every action (P25, G3); `r3`'s forced rejection as the test |
 | N1 | "Verified" overstated | Nit | Status, §0.1 and the Rev 1 table now say *reproduced* or *confirmed in the source*; fixes are verified by the round's tests |
 | N2 | The rotation demo | Nit | Quaternion multiplication, two minutes without `INVALID_VALUE` (§6.1 check 2, §7 step 2) |
+
+- **Rev 1.2** (2026-10-30, night PT): the third outside review, of Rev 1.1
+  (`devtasks/REVIEW-scripting-4d-rev1.1.md`, **APPROVE WITH NITS**). **The
+  reviewer cloned and ran** `pnpm install`, `r1`, `r2`, `r3` and the
+  behaviours suite at `3a689eb4`, all matching §2.5, and their own probe
+  `x1` (now `devtasks/spike-4d/x1-done-flow-rejection.mjs`). All nine Rev 1
+  findings closed; no breach of the overlay invariant found; "with those
+  folded in, this pre-brief can go FINAL". Claude checked S1 and S2 at the
+  code (`world.js` L383–386, L466–470, L624–628; `autosave.js` L84;
+  `http-routes.js` L826; `runner.js` L345–351) and reran `x1`. **All are
+  taken.** No decision changes; Q3's condition widens.
+
+| # | Finding | Severity | Where it went |
+|---|---|---|---|
+| S1 | G10 says nothing of a leaf that already equals the export | Should-fix | **Confirmed** (P17 amended: healing's `null` isn't saved without a mutation). Three outcomes with `unchanged` (G10's table), the exact idempotence rule, cumulative caps, the restored document through the server's own healing; tests and proof (h2) |
+| S2 | The overlay write's place, and the remote `som:set` key mapping | Should-fix | **Confirmed** (`enqueue` returns `true` on a drag drop). Written inside `enqueue` after `queue.set`; the drag drop returns `false`; the key mapping for `X.light`, animation and rename; animation reads stay on the SOM (G4); tests |
+| N1 | The wrapper's sync and async timing | Nit | A sync throw is rethrown (same-tick disposal), a rejection disposes at the start of the next tick, idempotent (G3); `x1` in P25; tests |
+| N2 | Two overstated wordings | Nit | §9 says *value rules*; G2's helper iterates as `behaviorCountIn` and healing uses it |
+| N3 | §8's procedure | Nit | SQLite backup, a second backup before `--apply`, the exclusive lock, restores split by `updated_at` (§8, G10) |
+| N4 | Test cases and log lines | Nit | `math/select` and `math/switch`; the four carriers (G6); the serialize and heal timing lines (G2) |
+| Q3 | Ask on every Enable, and for `perFrame` too | Advice | Taken (G6, §5) |
+| Q7 | Name the measurement | Advice | Taken: the A/B method and CDP heap (§5) |
+
