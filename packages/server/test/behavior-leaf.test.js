@@ -27,9 +27,16 @@ import {
   checkBehaviorValue, checkAtriumBehavior, authorizeSend, BEHAVIOR_LEAF,
   BEHAVIOR_NODES_PER_WORLD, SEND_INVALID, SEND_INVALID_FIELD,
   listensForSelect, withinActivateDistance, ACTIVATE_MAX_DISTANCE, EXECUTABLE,
+  BEHAVIOR_IDENTIFIER_RE, BEHAVIOR_POINTER_RE, BEHAVIOR_PROSE_MAX, BEHAVIOR_PROSE_CTRL_RE,
 } from '../src/send-policy.js'
 import { templateGraph } from '../../behaviors/src/templates.js'
-import { EXECUTABLE as CLIENT_EXECUTABLE } from '../../behaviors/src/behavior-spec.js'
+import {
+  EXECUTABLE as CLIENT_EXECUTABLE,
+  BEHAVIOR_IDENTIFIER_RE as CLIENT_IDENTIFIER_RE,
+  BEHAVIOR_POINTER_RE as CLIENT_POINTER_RE,
+  BEHAVIOR_PROSE_MAX as CLIENT_PROSE_MAX,
+  BEHAVIOR_PROSE_CTRL_RE as CLIENT_PROSE_CTRL_RE,
+} from '../../behaviors/src/behavior-spec.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SPACE = resolve(__dirname, '../../../tests/fixtures/space.gltf')
@@ -59,6 +66,14 @@ test('G1: the server and the page hold the SAME executable set', () => {
   // G1's "one shared constant": the server package does not depend on
   // @atrium/behaviors, so the two lists are separate text — pinned here.
   assert.deepEqual([...EXECUTABLE], [...CLIENT_EXECUTABLE])
+})
+
+test('R9: the server and the page hold the SAME string policy', () => {
+  // The same pin as the executable set's: four separate constants, one policy.
+  assert.equal(BEHAVIOR_IDENTIFIER_RE.source, CLIENT_IDENTIFIER_RE.source)
+  assert.equal(BEHAVIOR_POINTER_RE.source, CLIENT_POINTER_RE.source)
+  assert.equal(BEHAVIOR_PROSE_MAX, CLIENT_PROSE_MAX)
+  assert.equal(BEHAVIOR_PROSE_CTRL_RE.source, CLIENT_PROSE_CTRL_RE.source)
 })
 
 test('F1: each reason code has plain text of its own', () => {

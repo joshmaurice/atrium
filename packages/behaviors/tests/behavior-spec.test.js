@@ -24,6 +24,7 @@ import {
   BEHAVIOR_NODES_MAX, BEHAVIOR_BYTES_MAX, BEHAVIOR_CLIP_MAX, BEHAVIOR_PROX_MIN, BEHAVIOR_PROX_MAX,
   BEHAVIOR_INTERVAL_MIN, BEHAVIOR_INTERVAL_MAX, BEHAVIOR_SPEED_MIN, BEHAVIOR_SPEED_MAX,
   BEHAVIOR_DECLS_MAX, BEHAVIOR_TYPES_MAX, BEHAVIOR_VARIABLES_MAX, BEHAVIOR_EVENTS_MAX, BEHAVIOR_STRING_MAX,
+  BEHAVIOR_IDENTIFIER_RE, BEHAVIOR_POINTER_RE, BEHAVIOR_PROSE_MAX, BEHAVIOR_PROSE_CTRL_RE,
 } from '../src/behavior-spec.js'
 import { templateGraph, TEMPLATE_IDS, TEMPLATE_LABELS, TEMPLATE_FIELDS } from '../src/templates.js'
 
@@ -145,6 +146,21 @@ describe('F1 (client copy) — the rules the vectors pin', () => {
     assert.deepEqual([BEHAVIOR_PROX_MIN, BEHAVIOR_PROX_MAX], [0.5, 50])
     assert.deepEqual([BEHAVIOR_INTERVAL_MIN, BEHAVIOR_INTERVAL_MAX], [1, 3600])
     assert.deepEqual([BEHAVIOR_SPEED_MIN, BEHAVIOR_SPEED_MAX], [0.1, 10])
+  })
+
+  test('R9 / R-L3 (a) — the string policy is these four constants, at these boundaries', () => {
+    assert.equal(BEHAVIOR_PROSE_MAX, 256)
+    assert.equal(BEHAVIOR_IDENTIFIER_RE.test('a'.repeat(64)), true, 'an identifier is at most 64 characters')
+    assert.equal(BEHAVIOR_IDENTIFIER_RE.test('a'.repeat(65)), false)
+    assert.equal(BEHAVIOR_IDENTIFIER_RE.test('a-b'), false, 'and its character set is [A-Za-z0-9_]')
+    assert.equal(BEHAVIOR_IDENTIFIER_RE.test(''), false, 'and it is at least one character')
+    assert.equal(BEHAVIOR_POINTER_RE.test('a'.repeat(256)), true, 'a pointer is at most 256 characters')
+    assert.equal(BEHAVIOR_POINTER_RE.test('a'.repeat(257)), false)
+    assert.equal(BEHAVIOR_POINTER_RE.test('/nodes/0/extensions/KHR_node_visibility/visible'), true)
+    assert.equal(BEHAVIOR_POINTER_RE.test('/materials/0/not a pointer'), false, 'and its character set is the pointer set')
+    assert.equal(BEHAVIOR_PROSE_CTRL_RE.test('a\nb\tc'), false, 'prose may carry a newline and a tab')
+    assert.equal(BEHAVIOR_PROSE_CTRL_RE.test('a\u0007b'), true)
+    assert.equal(BEHAVIOR_PROSE_CTRL_RE.test('a\u2028b'), true)
   })
 })
 

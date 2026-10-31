@@ -655,7 +655,10 @@ export function createWorldRegistry(opts = {}) {
     }
 
     const documentJson = worldRow.document || '{"asset":{"version":"2.0","generator":"Atrium"}}'
-    const world = await createWorldFromDocument(documentJson)
+    // R14 (round 3) — the world's own id goes to the loader as its `logId`, so
+    // the load line reads `[world] healed <8 hex> in <ms> ms` on the database
+    // path too, and carries no id beyond that one.
+    const world = await createWorldFromDocument(documentJson, { logId: worldId })
 
     // Home worlds typically have no external refs, but resolve if present
     await world.resolveExternalReferences()

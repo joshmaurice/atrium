@@ -131,33 +131,25 @@ addBad('the value is not an object', 'behavior-type', 42)
   addBad('bytes past 65,536', 'behavior-bytes', v)
 }
 {
-  // G1/N1 — the size boundary is UTF-16 code units, so a multi-byte character
-  // counts once: exactly 65,536 units is accepted...
+  // G1/N1 — the size boundary is UTF-16 code units of `JSON.stringify`, so a
+  // multi-byte character counts once: exactly 65,536 units is accepted.
+  // scripting-4d-1 round 3, R9 / R-L3 (a) — the pad rides an extra GRAPH key
+  // (the Khronos JSON schema allows additional properties, and the validator
+  // accepts them) rather than one giant `debug/log` literal, because a string
+  // literal is now prose and bounded at 256 characters.
   const v = clone(animPlay)
-  v.graph.declarations.push({ op: 'debug/log' })
-  v.graph.nodes.push({
-    declaration: v.graph.declarations.length - 1,
-    configuration: { message: { value: [''] }, severity: { value: [0] } },
-  })
-  const filler = v.graph.nodes[v.graph.nodes.length - 1].configuration.message.value
-  filler[0] = ''
+  v.graph.pad = ''
   const empty = JSON.stringify(v).length
-  filler[0] = 'é'.repeat(65536 - empty)
+  v.graph.pad = 'é'.repeat(65536 - empty)
   if (JSON.stringify(v).length === 65536) addOk('boundary: exactly 65,536 code units, multi-byte text', v)
   else addBad('boundary: 65,536 code units (built wrong)', 'behavior-bytes', v)
 }
 {
   // ... and one unit past it is refused.
   const v = clone(animPlay)
-  v.graph.declarations.push({ op: 'debug/log' })
-  v.graph.nodes.push({
-    declaration: v.graph.declarations.length - 1,
-    configuration: { message: { value: [''] }, severity: { value: [0] } },
-  })
-  const filler = v.graph.nodes[v.graph.nodes.length - 1].configuration.message.value
-  filler[0] = ''
+  v.graph.pad = ''
   const empty = JSON.stringify(v).length
-  filler[0] = 'é'.repeat(65536 - empty + 1)
+  v.graph.pad = 'é'.repeat(65536 - empty + 1)
   addBad('65,537 code units, multi-byte text', 'behavior-bytes', v)
 }
 {
@@ -288,6 +280,116 @@ addBad('the value is not an object', 'behavior-type', 42)
   }
   addBad('R3: an event/send whose event literal is null (left to the validator, both copies)',
     'behavior-graph', v)
+}
+// ---------------------------------------------------------------------------
+// R9 / R-L3 (a) — every stored graph string has a bound and a character set
+// (round-3 revision §2). Identifiers (the socket maps' keys and a
+// `{ node, socket }` reference's name) are 1–64 characters of `[A-Za-z0-9_]`;
+// a pointer is 1–256 characters of the pointer set; every other string LITERAL
+// is prose — at most 256 characters, no control character but `\n` and `\t`,
+// no U+2028/U+2029. Each boundary below is paired with the case one past it, and
+// the prose ones carry multi-byte text.
+// ---------------------------------------------------------------------------
+
+/** A `debug/log` node appended to a copy of `value`, carrying `message` as its literal. */
+function withLogLiteral(value, message) {
+  const v = clone(value)
+  v.graph.declarations.push({ op: 'debug/log' })
+  v.graph.nodes.push({
+    declaration: v.graph.declarations.length - 1,
+    configuration: { message: { value: [message] }, severity: { value: [0] } },
+  })
+  return v
+}
+
+{
+  // The identifier boundary, at exactly 64 characters. A declared event's
+  // `values` is a socket map the validator does not bound, so the boundary is
+  // reachable through a graph that still validates.
+  const v = clone(prox)
+  v.graph.events = [
+    { id: 'atrium/enter' }, { id: 'atrium/exit' },
+    { id: 'toolkit/step', values: { ['a'.repeat(64)]: { type: 2, value: [1] } } },
+  ]
+  addOk('R9: a socket-map key of exactly 64 characters', v)
+}
+{
+  const v = clone(prox)
+  v.graph.events = [
+    { id: 'atrium/enter' }, { id: 'atrium/exit' },
+    { id: 'toolkit/step', values: { ['a'.repeat(65)]: { type: 2, value: [1] } } },
+  ]
+  addBad('R9: a socket-map key of 65 characters', 'behavior-type', v)
+}
+{
+  // The outside review's S1 case, exactly: a node `values` key of 1,000 `Z`s.
+  // The bogus key rides BESIDE the two the declaration really has, so the only
+  // rule that can refuse it is the string rule — the code proves which one did.
+  const v = clone(animPlay)
+  v.graph.nodes[1].values = {
+    animation: { type: 3, value: ['/animations/0'] },
+    speed: { type: 2, value: [1] },
+    ['Z'.repeat(1000)]: { type: 1, value: [0] },
+  }
+  addBad('R9: a node `values` key of 1,000 Zs', 'behavior-type', v)
+}
+{
+  // S1's other case: a key with a C0 control character (and an HTML tag).
+  const v = clone(animPlay)
+  v.graph.nodes[1].values = {
+    animation: { type: 3, value: ['/animations/0'] },
+    speed: { type: 2, value: [1] },
+    ['\u0007\n<b>']: { type: 1, value: [0] },
+  }
+  addBad('R9: a socket-map key with a control character', 'behavior-type', v)
+}
+{
+  // A `{ node, socket }` reference's NAME is an identifier too.
+  const v = clone(visHide)
+  v.graph.nodes[1].values.n = { node: 0, socket: 'b'.repeat(65) }
+  addBad('R9: a `{ node, socket }` name of 65 characters', 'behavior-type', v)
+}
+{
+  // Prose at its boundary: exactly 256 characters, multi-byte...
+  addOk('R9: a prose literal of exactly 256 characters, multi-byte', withLogLiteral(animPlay, 'é'.repeat(256)))
+}
+{
+  // ... with a newline and a tab, the two control characters prose may carry...
+  addOk('R9: a prose literal with a newline and a tab', withLogLiteral(animPlay, 'line one\ntwo\tthree'))
+}
+{
+  // ... and one character past it is refused.
+  addBad('R9: a prose literal of 257 characters', 'behavior-literal', withLogLiteral(animPlay, 'é'.repeat(257)))
+}
+{
+  addBad('R9: a prose literal with a C0 control character', 'behavior-literal', withLogLiteral(animPlay, '\u0007\n<b>'))
+}
+{
+  addBad('R9: a prose literal with U+2028', 'behavior-literal', withLogLiteral(animPlay, 'a\u2028b'))
+}
+{
+  // A variable's initial value is a string literal too.
+  const v = clone(animPlay)
+  v.graph.variables = [{ type: 3, value: ['é'.repeat(257)] }]
+  addBad('R9: a variable value literal of 257 characters', 'behavior-literal', v)
+}
+{
+  // A pointer at its boundary, outside G-L4's families (stored and inert)...
+  const v = clone(visHide)
+  const head = '/materials/0/'
+  v.graph.nodes[1].configuration.pointer = { value: [head + 'a'.repeat(256 - head.length)] }
+  addOk('R9: a pointer of exactly 256 characters outside the families', v)
+}
+{
+  const v = clone(visHide)
+  const head = '/materials/0/'
+  v.graph.nodes[1].configuration.pointer = { value: [head + 'a'.repeat(257 - head.length)] }
+  addBad('R9: a pointer of 257 characters', 'behavior-pointer', v)
+}
+{
+  const v = clone(visHide)
+  v.graph.nodes[1].configuration.pointer = { value: ['/materials/0/not a pointer'] }
+  addBad('R9: a pointer with a character outside the pointer set', 'behavior-pointer', v)
 }
 {
   // G-L3 (a) — a BARE unknown core op is refused, by the VALIDATOR (the rule
@@ -751,7 +853,12 @@ const fixture = {
     'check to the same predicate in both copies. ' +
     'scripting-4c AC2 adds `listensForSelect` (a stored leaf, and whether a click on ' +
     'it is something this world listens for) and `withinActivateDistance` (the 10 m ' +
-    'rule); both copies of each rule read these two arrays.',
+    'rule); both copies of each rule read these two arrays. scripting-4d round-3 R9 / ' +
+    'R-L3 (a) adds the string policy: an identifier (a socket map\'s key, or a ' +
+    '`{ node, socket }` reference\'s name) is 1-64 characters of [A-Za-z0-9_], a ' +
+    'pointer is 1-256 characters of the pointer set, and every other string literal ' +
+    'is prose of at most 256 characters with no control character but \\n and \\t and ' +
+    'no U+2028/U+2029.',
   ownId: OWN,
   targetId: TGT,
   accepted,

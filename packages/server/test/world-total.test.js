@@ -32,6 +32,7 @@ import { Document } from '@gltf-transform/core'
 import WebSocket, { WebSocketServer } from 'ws'
 import { createWorld, createWorldFromDocument, healDocumentBehaviors } from '../src/world.js'
 import { attachSessionHandlers } from '../src/session.js'
+import { createWorldRegistry } from '../src/world-registry.js'
 import {
   BEHAVIOR_LEAF, BEHAVIOR_WORLD_BYTES_MAX, BEHAVIOR_BYTES_MAX,
   behaviorBytesIn, behaviorLeafBytes, checkBehaviorValue,
@@ -46,7 +47,13 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const closers = []
 const children = []
+// R13 (round 3) — every socket a test opens, so a FAILING assert tears down too.
+// The proof of failure for `canRunBehaviors` (b2) leaves the sockets a test
+// opened open when an assert throws; without this the file ran to its 180 s
+// timeout instead of failing in seconds.
+const sockets = []
 after(async () => {
+  for (const ws of sockets) { try { ws.terminate() } catch { /* gone */ } }
   for (const child of children) { try { child.kill('SIGKILL') } catch { /* gone */ } }
   for (const close of closers.reverse()) { try { await close() } catch { /* best effort */ } }
 })
@@ -61,7 +68,13 @@ async function waitFor(messages, pred, timeoutMs = 3000) {
   while (Date.now() < deadline) { const f = messages.find(pred); if (f) return f; await delay(10) }
   return null
 }
-async function connect(port) { const ws = new WebSocket(`ws://127.0.0.1:${port}`); const messages = collect(ws); await waitForOpen(ws); return { ws, messages } }
+async function connect(port) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const messages = collect(ws)
+  sockets.push(ws)
+  await waitForOpen(ws)
+  return { ws, messages }
+}
 function waitForClose(ws) {
   return new Promise((res) => { if (ws.readyState === WebSocket.CLOSED) return res(); ws.once('close', res) })
 }
@@ -225,6 +238,36 @@ test('G2: a `send` that replaces a leaf is judged by its NEW size — exactly at
     await delay(40)
     assert.equal(owner.messages.slice(seen).some((m) => m.type === 'set'), false, 'nothing was broadcast')
     assert.equal(world.som.getNodeByName('Total-A').extras.atrium.behavior, before, 'and no partial change')
+  } finally {
+    owner.ws.close()
+  }
+})
+
+test('G2/R12 (b3): a `send` that REPLACES a leaf of its own size at exactly 1 MiB is accepted — the leaf it replaces is not counted twice', async () => {
+  // R12 (b3) — the coverage gap the passdown recorded: the test above writes to
+  // a node that carries NO leaf, so it never proves the node being replaced is
+  // EXCLUDED. Here the node already holds a leaf of the same size as the one
+  // that replaces it: with the others at `1 MiB - L`, counting the leaf being
+  // replaced as well would make the total `1 MiB + L` and the send would be
+  // refused. Proof (b3) breaks exactly that (see the handoff).
+  const { world, a } = await worldWithOthers(0)
+  const leaf = templateGraph('select-animation', { target: randomUUID(), clip: 'Idle', action: 'play', loop: true }, { ownId: a })
+  const L = behaviorLeafBytes(leaf)
+  world.setField('Total-A', BEHAVIOR_LEAF, leaf)
+  fillOthers(world, BEHAVIOR_WORLD_BYTES_MAX - L)
+  assert.equal(behaviorBytesIn(world.som, world.som.getNodeByName('Total-A')), BEHAVIOR_WORLD_BYTES_MAX - L,
+    'the others hold 1 MiB - L; the node\'s OWN leaf is not counted against itself')
+  assert.equal(behaviorBytesIn(world.som, null), BEHAVIOR_WORLD_BYTES_MAX,
+    'and the world as a whole is exactly at the cap')
+
+  const { port } = await startHostWorld({ world })
+  const owner = await connect(port)
+  try {
+    await hello(owner.ws, owner.messages, 'owner-replace')
+
+    const accepted = await send(owner.ws, owner.messages, 'Total-A', BEHAVIOR_LEAF, leaf)
+    assert.equal(accepted?.type, 'set', 'replacing a leaf with one of its own size, at the cap, is accepted')
+    assert.equal(behaviorBytesIn(world.som, null), BEHAVIOR_WORLD_BYTES_MAX, 'and the world still holds exactly 1 MiB')
   } finally {
     owner.ws.close()
   }
@@ -404,6 +447,44 @@ test('G2: the load emits `[world] healed <logId> in <ms> ms`, and a som-dump emi
   assert.ok(line, `the serialize line is logged: ${serialized.join(' | ')}`)
   assert.match(line, /^\[world\] serialized total-te in \d+ ms \(\d+ bytes\)$/,
     'the som-dump’s logId and its byte count, and no other id')
+})
+
+// ===========================================================================
+// R14 (round 3) — the DATABASE path's heal line carries the world's logId
+// ===========================================================================
+
+test('G2/R14: the registry loads a document world with the world id as its `logId` — `[world] healed <8 hex> in <ms> ms`', async () => {
+  // R14 — `world-registry.js` registers a home/public world from its database
+  // `document` column. Until round 3 it called `createWorldFromDocument`
+  // without a `logId`, so the load line read `[world] healed - in N ms`. The
+  // world's own id goes in now, and nothing else from it does.
+  const worldId = '4f3a9c21-9d7e-4a55-8b6e-2c1f0d9e7a33'
+  const http = createServer()
+  await listen(http)
+  const registry = createWorldRegistry({ httpServer: http })
+  const captured = []
+  const original = console.log
+  let host
+  try {
+    console.log = (...args) => { captured.push(args.join(' ')) }
+    try {
+      host = await registry.registerWorldFromDocument({
+        id: worldId,
+        document: JSON.stringify({ asset: { version: '2.0', generator: 'Atrium' }, scenes: [{}], nodes: [] }),
+        owner_user_id: OWNER,
+      })
+    } finally {
+      console.log = original
+    }
+    assert.ok(host, 'the document world is registered')
+    const healed = captured.find((l) => l.startsWith('[world] healed'))
+    assert.ok(healed, `the heal line is logged: ${captured.join(' | ')}`)
+    assert.match(healed, /^\[world\] healed 4f3a9c21 in \d+ ms$/,
+      'the world id goes through logId, and nothing else — not the pre-R14 `[world] healed - in N ms`')
+  } finally {
+    registry.close()
+    http.close()
+  }
 })
 
 // ===========================================================================

@@ -52,6 +52,33 @@ export const BEHAVIOR_SPEED_MAX   = 10
 export const BEHAVIOR_LIGHT_MIN   = 0.01
 export const BEHAVIOR_DEPTH_MAX   = 8
 
+/**
+ * R9 / R-L3 (a) — the string policy: every string in a stored graph this round
+ * bounds has a bound and a character set.
+ *
+ *   - **identifiers** — every key of a socket map (`values`, `configuration`,
+ *     `flows`, and a declared event's `values`) and every `{ node, socket }`
+ *     reference's socket name: 1–64 characters of `[A-Za-z0-9_]`;
+ *   - **pointers** — `configuration.pointer`'s literal: 1–256 characters of
+ *     `[A-Za-z0-9_/{}\[\]\.:-]` (the pointer families bound the index too);
+ *   - **prose** — every other string LITERAL (`{ type, value: [ … ] }`), such
+ *     as `debug/log`'s `message`: at most 256 characters, with no C0 control
+ *     character other than `\n` and `\t` and no U+2028/U+2029.
+ *
+ * The three G7 strings (`op`, `extension`, an event id) keep their own rules, in
+ * this file, and the engine's validator still runs last, so a shape these rules
+ * don't cover is the validator's to refuse. An extra, non-schema key on a graph
+ * (the Khronos JSON schema permits additional properties) is not one of these
+ * places: it is bounded only by the leaf cap, as `graph.pad` is.
+ *
+ * Both rule copies carry the same four constants and the same walk; the shared
+ * vectors pin them.
+ */
+export const BEHAVIOR_IDENTIFIER_RE  = /^[A-Za-z0-9_]{1,64}$/
+export const BEHAVIOR_POINTER_RE     = /^[A-Za-z0-9_/{}\[\]\.:-]{1,256}$/
+export const BEHAVIOR_PROSE_MAX      = 256
+export const BEHAVIOR_PROSE_CTRL_RE  = /[\u0000-\u0008\u000b-\u001f\u2028\u2029]/
+
 /** E1 — the object id form, duplicated here as the client's model-spec duplicates A1. */
 export const OBJECT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -306,6 +333,103 @@ function* graphNodes(graph) {
 }
 
 // ---------------------------------------------------------------------------
+// R9 / R-L3 (a) — the string walk
+// ---------------------------------------------------------------------------
+
+/** True when `text` is prose this round stores: at most 256 characters, no control characters. */
+function proseProblem(text) {
+  return text.length > BEHAVIOR_PROSE_MAX || BEHAVIOR_PROSE_CTRL_RE.test(text)
+}
+
+/** R9 — the prose of a literal `{ type, value: [ … ] }`: the reason code, or null. */
+function literalProseProblem(input) {
+  if (!isPlainObject(input)) return null
+  const values = Array.isArray(input.value) ? input.value : null
+  if (!values) return null
+  for (const v of values) if (typeof v === 'string' && proseProblem(v)) return 'behavior-literal'
+  return null
+}
+
+/** R9 — the one-line detail each string-rule code carries, the same text in both copies. */
+const STRING_DETAIL = Object.freeze({
+  'behavior-type':    'a graph key or socket name is not 1-64 characters of [A-Za-z0-9_]',
+  'behavior-pointer': 'a pointer is not 1-256 characters of the allowed set',
+  'behavior-literal': 'a graph string is over 256 characters or carries a control character',
+})
+
+/**
+ * R9 — the one `configuration` entry bounded by the pointer rule rather than by
+ * prose, so a 257-character pointer is a `behavior-pointer` and not a
+ * `behavior-literal`.
+ */
+const POINTER_KEYS = new Set(['pointer'])
+
+/**
+ * R9 — a socket map (`values`, `configuration`, `flows`, an event's `values`):
+ * every key is an identifier, every `{ node, socket }` reference's name is one,
+ * and every string literal in it is prose. `proseExcept` names entries whose
+ * string is bounded by another rule (the pointer). Returns the reason code, or
+ * null; anything that isn't a socket map is left to the validator.
+ */
+function socketMapProblem(map, proseExcept = null) {
+  if (!isPlainObject(map)) return null
+  for (const key of Object.keys(map)) if (!BEHAVIOR_IDENTIFIER_RE.test(key)) return 'behavior-type'
+  for (const [key, entry] of Object.entries(map)) {
+    if (!isPlainObject(entry)) continue
+    if (Object.hasOwn(entry, 'socket') &&
+      (typeof entry.socket !== 'string' || !BEHAVIOR_IDENTIFIER_RE.test(entry.socket))) {
+      return 'behavior-type'
+    }
+    if (proseExcept && proseExcept.has(key)) continue
+    const problem = literalProseProblem(entry)
+    if (problem) return problem
+  }
+  return null
+}
+
+/**
+ * R9 — the string policy over a stored graph. Returns the reason code of the
+ * FIRST string that is out of bounds, or null. It walks exactly R-L3 (a)'s
+ * places: the socket maps (`values`, `configuration`, `flows`, an event's
+ * `values`), their `{ node, socket }` names, `configuration.pointer`, and the
+ * prose of every string literal in a node's values, a variable's value and an
+ * event's values.
+ *
+ * @param {object} graph
+ * @returns {string|null}
+ */
+function graphStringProblem(graph) {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : []
+  for (const node of nodes) {
+    if (!isPlainObject(node)) continue
+    const problem = socketMapProblem(node.values) ??
+      socketMapProblem(node.configuration, POINTER_KEYS) ??
+      socketMapProblem(node.flows)
+    if (problem) return problem
+    const configuration = isPlainObject(node.configuration) ? node.configuration : null
+    if (configuration && Object.hasOwn(configuration, 'pointer')) {
+      // The pointer literal's bound and character set (R-L3 (a)); the families
+      // below still bound its index. A wired pointer is not a literal and is
+      // left to the family rule and the validator.
+      const pointer = literalOf(configuration.pointer)
+      if (typeof pointer === 'string' && !BEHAVIOR_POINTER_RE.test(pointer)) return 'behavior-pointer'
+    }
+  }
+  const variables = Array.isArray(graph.variables) ? graph.variables : []
+  for (const entry of variables) {
+    const problem = literalProseProblem(entry)
+    if (problem) return problem
+  }
+  const events = Array.isArray(graph.events) ? graph.events : []
+  for (const entry of events) {
+    if (!isPlainObject(entry)) continue
+    const problem = socketMapProblem(entry.values)
+    if (problem) return problem
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // template.params (Rev 2 S5) — one rule per template, no other keys
 // ---------------------------------------------------------------------------
 
@@ -475,6 +599,13 @@ export function behaviorCheck(value, { ownId } = {}) {
 
   const graph = value.graph
   if (!isPlainObject(graph)) return fail('behavior-graph')
+
+  // R9 / R-L3 (a) — every graph string this round bounds: the socket maps and
+  // their `{ node, socket }` names (identifiers), `configuration.pointer`, and
+  // the prose of every string literal. It runs before the size rules so a
+  // vector's code is this rule's.
+  const stringProblem = graphStringProblem(graph)
+  if (stringProblem) return fail(stringProblem, `${behaviorReasonText(stringProblem)}: ${STRING_DETAIL[stringProblem]}`)
 
   const nodes = Array.isArray(graph.nodes) ? graph.nodes : null
   const declarations = Array.isArray(graph.declarations) ? graph.declarations : null
