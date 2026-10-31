@@ -488,14 +488,17 @@ test('F-L6: an owner hello without scriptRunner never holds the role, and is nev
   }
 })
 
-test('F-L6/S2: a hello whose scriptRunner is 3 is refused by the schema', async () => {
+test('F-L6/S2/R1: a hello whose scriptRunner is 3 is ACCEPTED by the schema, and the election still needs 2 until step 4', async () => {
   const { port } = await startHostWorld()
   const a = await connect(port, 'user-a')
   try {
-    a.ws.send(JSON.stringify({ type: 'hello', id: 'bad-cap', capabilities: { scriptRunner: 3 } }))
-    const err = await waitFor(a.messages, (m) => m.type === 'error')
-    assert.ok(err, 'the message is refused')
-    assert.equal(err.code, 'UNKNOWN_MESSAGE')
+    // scripting-4d R1 — the schema's enum gained 3 (4d graphs), so a `3` hello
+    // is no longer refused. Step 4 flips the election to require 3; at this
+    // commit the election still requires 2, so a `3` owner is not the host.
+    const h = await hello(a.ws, a.messages, 'cap-3', { scriptRunner: 3 })
+    assert.equal(h.canEdit, true, 'a scriptRunner: 3 page still owns the world')
+    assert.equal(h.scriptHost, false, 'the election still requires 2 at this step (step 4 flips it)')
+    assert.equal('hostGen' in h, false)
   } finally {
     a.ws.close(); await waitForClose(a.ws)
   }

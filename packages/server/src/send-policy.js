@@ -811,6 +811,15 @@ export function behaviorCheck(value, { ownId } = {}) {
   if (Object.hasOwn(graph, 'variables')) {
     if (!Array.isArray(graph.variables)) return fail('behavior-size')
     if (graph.variables.length === 0 || graph.variables.length > BEHAVIOR_VARIABLES_MAX) return fail('behavior-size')
+    // R-L1 (a) — a variable entry's keys are `type` (required) and `value`
+    // (optional), and nothing else (the Khronos graphs' `name` labels are
+    // dropped by the importer, never stored). This list's existing code is
+    // `behavior-size`.
+    for (const entry of graph.variables) {
+      if (!isPlainObject(entry)) return fail('behavior-size')
+      if (!Object.hasOwn(entry, 'type')) return fail('behavior-size')
+      if (Object.keys(entry).some((k) => k !== 'type' && k !== 'value')) return fail('behavior-size')
+    }
   }
   if (Object.hasOwn(graph, 'events')) {
     if (!Array.isArray(graph.events)) return fail('behavior-event')
@@ -879,24 +888,33 @@ export function behaviorCheck(value, { ownId } = {}) {
 
   // G1 — the declared events. An id is 1–64 characters of `[A-Za-z0-9_./:-]` and
   // unique; the `atrium/` prefix is reserved for the three Atrium ids (which
-  // keep their own rules); an event/send may not target an atrium/* event.
+  // keep their own rules); **R2/R-L1 (a):** any other entry's keys are `id`
+  // (required) and `values` (optional), and nothing else. An event/send may not
+  // target an atrium/* event.
   const events = Array.isArray(graph.events) ? graph.events : []
   const seenEventIds = new Set()
   for (const entry of events) {
     if (!isPlainObject(entry)) return fail('behavior-event')
-    const keys = Object.keys(entry)
-    if (keys.length !== 1 || keys[0] !== 'id') return fail('behavior-event')
     const id = entry.id
     if (typeof id !== 'string' || id.length < 1 || id.length > BEHAVIOR_STRING_MAX) return fail('behavior-event')
     if (!BEHAVIOR_EVENT_ID_RE.test(id)) return fail('behavior-event')
     if (seenEventIds.has(id)) return fail('behavior-event')
     seenEventIds.add(id)
-    if (id.startsWith('atrium/') && !BEHAVIOR_EVENT_IDS.includes(id)) return fail('behavior-event')
+    const keys = Object.keys(entry)
+    if (id.startsWith('atrium/')) {
+      if (!BEHAVIOR_EVENT_IDS.includes(id)) return fail('behavior-event')
+      if (keys.length !== 1 || keys[0] !== 'id') return fail('behavior-event')
+    } else if (keys.some((k) => k !== 'id' && k !== 'values')) {
+      return fail('behavior-event')
+    }
   }
+  // R3 — the same predicate as the client copy: ONLY an integer index in range
+  // is checked for an `atrium/*` target; anything else is the validator's.
   for (const { node, op } of behaviorNodes(graph)) {
     if (op !== 'event/send') continue
     const configuration = isPlainObject(node) ? node.configuration : null
     const index = isPlainObject(configuration) ? behaviorLiteral(configuration.event) : null
+    if (!Number.isInteger(index) || index < 0 || index >= events.length) continue
     const target = events[index]
     if (isPlainObject(target) && typeof target.id === 'string' && target.id.startsWith('atrium/')) {
       return fail('behavior-event', 'an event/send may not target an Atrium event')

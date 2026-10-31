@@ -8,7 +8,8 @@
 //   - `activate.server.json`  the same plus `from` and `hostGen`
 //   - `script-ready.client.json` { type, hostGen }, DIRECTIONAL (Rev 1.2 N1):
 //     compiled `:client` only, so the server direction finds no schema
-//   - `hello.capabilities.scriptRunner` is `enum: [1, 2]` (was `const: 1`)
+//   - `hello.capabilities.scriptRunner` is `enum: [1, 2, 3]` (was `const: 1`,
+//     then `[1, 2]`; 4d R1/G-L9 adds 3, and the election requires 3)
 //   - `error.code` gains `NO_SCRIPT_HOST`
 //
 // The direction list is hard-coded (protocol P2), so a message with both forms

@@ -478,6 +478,16 @@ export function behaviorCheck(value, { ownId } = {}) {
   if (Object.hasOwn(graph, 'variables')) {
     if (!Array.isArray(graph.variables)) return fail('behavior-size')
     if (graph.variables.length === 0 || graph.variables.length > BEHAVIOR_VARIABLES_MAX) return fail('behavior-size')
+    // R-L1 (a) — a variable entry's keys are `type` (required) and `value`
+    // (optional), and nothing else. The Khronos graphs name their variables
+    // (names run to 361 characters of test prose), but a label never runs, so
+    // the rule stays key-exact and the importer drops `name`. The reason code
+    // is this list's existing one (`behavior-size`).
+    for (const entry of graph.variables) {
+      if (!isPlainObject(entry)) return fail('behavior-size')
+      if (!Object.hasOwn(entry, 'type')) return fail('behavior-size')
+      if (Object.keys(entry).some((k) => k !== 'type' && k !== 'value')) return fail('behavior-size')
+    }
   }
   if (Object.hasOwn(graph, 'events')) {
     if (!Array.isArray(graph.events)) return fail('behavior-event')
@@ -550,8 +560,10 @@ export function behaviorCheck(value, { ownId } = {}) {
 
   // G1 — the declared events. An id is 1–64 characters of
   // `[A-Za-z0-9_./:-]` and unique. The prefix `atrium/` is reserved for the
-  // three Atrium ids, which keep F-L7's rules (exactly `{ id }`); any other id
-  // may carry `values` (the validator types them).
+  // three Atrium ids, which keep F-L7's rules (exactly `{ id }`); **R2/R-L1
+  // (a):** every other entry's keys are `id` (required) and `values` (optional),
+  // and nothing else — the Khronos graphs' `name` labels are dropped by the
+  // importer, never stored.
   const events = Array.isArray(graph.events) ? graph.events : []
   const seenEvents = new Set()
   for (const entry of events) {
@@ -561,22 +573,26 @@ export function behaviorCheck(value, { ownId } = {}) {
     if (!BEHAVIOR_EVENT_ID_RE.test(id)) return fail('behavior-event')
     if (seenEvents.has(id)) return fail('behavior-event')
     seenEvents.add(id)
+    const keys = Object.keys(entry)
     if (id.startsWith('atrium/')) {
       if (!BEHAVIOR_EVENTS.includes(id)) return fail('behavior-event')
-      const keys = Object.keys(entry)
       if (keys.length !== 1 || keys[0] !== 'id') return fail('behavior-event')
+    } else if (keys.some((k) => k !== 'id' && k !== 'values')) {
+      return fail('behavior-event')
     }
   }
   const declared = declaredEvents(graph)
 
   // G1 — an `event/send` may not target an `atrium/*` event (`behavior-event`):
   // those are the adapter's to dispatch. The target is the declaration's
-  // `configuration.event` literal index into `graph.events`.
+  // `configuration.event` literal index into `graph.events`. **R3:** both copies
+  // run this check ONLY when that literal is an integer in range, and leave
+  // anything else to the validator.
   for (const { node, op } of graphNodes(graph)) {
     if (op !== 'event/send') continue
     const configuration = isPlainObject(node) ? node.configuration : null
     const index = isPlainObject(configuration) ? literalOf(configuration.event) : null
-    if (!Number.isInteger(index)) continue
+    if (!Number.isInteger(index) || index < 0 || index >= events.length) continue
     const target = events[index]
     if (isPlainObject(target) && typeof target.id === 'string' && target.id.startsWith('atrium/')) {
       return fail('behavior-event', 'an event/send may not target an Atrium event')

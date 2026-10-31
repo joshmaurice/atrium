@@ -225,6 +225,70 @@ addBad('the value is not an object', 'behavior-type', 42)
   }
   addBad('an event/send that targets atrium/enter', 'behavior-event', v)
 }
+// ---------------------------------------------------------------------------
+// R2 / R-L1 (a) — one event-entry rule and one variable-entry rule, in BOTH
+// copies (round-2 revision §2). An event entry's keys are `id` (required) and
+// `values` (optional), and nothing else; an `atrium/*` entry is exactly
+// `{ id }`. A variable entry's keys are `type` (required) and `value`
+// (optional), and nothing else. The Khronos graphs name their events and
+// variables, but a label never runs: the importer drops `name` and the rule
+// refuses it.
+// ---------------------------------------------------------------------------
+{
+  const v = clone(prox)
+  v.graph.events = [
+    { id: 'atrium/enter' }, { id: 'atrium/exit' },
+    { id: 'toolkit/step', values: { a: { type: 2, value: [1] } } },
+  ]
+  addOk('R2: a custom event entry that carries values is accepted', v)
+}
+{
+  const v = clone(prox)
+  v.graph.events = [
+    { id: 'atrium/enter' }, { id: 'atrium/exit' },
+    { id: 'toolkit/step', name: 'toolkit/step' },
+  ]
+  addBad('R2/R-L1: a custom event entry that carries name', 'behavior-event', v)
+}
+{
+  const v = clone(prox)
+  v.graph.events = [
+    { id: 'atrium/enter' }, { id: 'atrium/exit' },
+    { id: 'toolkit/step', extras: { x: 1 } },
+  ]
+  addBad('R2: a custom event entry with an extras key', 'behavior-event', v)
+}
+{
+  const v = clone(interval)
+  v.graph.events = [{ id: 'atrium/interval', values: { a: { type: 2, value: [1] } } }]
+  addBad('R2: an atrium/interval entry that carries values', 'behavior-event', v)
+}
+{
+  const v = clone(animPlay)
+  v.graph.variables = [{ type: 2, value: [1], name: 'a test description' }]
+  addBad('R-L1: a variable entry that carries name', 'behavior-size', v)
+}
+{
+  // R-L1 (a) — `value` is optional: `type` alone is accepted when the
+  // validator accepts it (it does: `variable`'s schema requires only `type`).
+  const v = clone(animPlay)
+  v.graph.variables = [{ type: 2 }]
+  addOk('R-L1: a variable entry with type only is accepted', v)
+}
+{
+  // R3 — an event/send whose `event` configuration is `{ value: [null] }`. The
+  // rule refuses and checks nothing (the literal is not an integer), so the
+  // verdict is the VALIDATOR's — and both copies must return the same code.
+  const v = clone(animPlay)
+  v.graph = {
+    types: [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'ref' }],
+    declarations: [{ op: 'event/send' }],
+    nodes: [{ declaration: 0, configuration: { event: { value: [null] } } }],
+    events: [{ id: 'toolkit/step' }],
+  }
+  addBad('R3: an event/send whose event literal is null (left to the validator, both copies)',
+    'behavior-graph', v)
+}
 {
   // G-L3 (a) — a BARE unknown core op is refused, by the VALIDATOR (the rule
   // stores it): "the validator is the gate, not the loader".
@@ -681,6 +745,10 @@ const fixture = {
     '(packages/server/src/send-policy.js), so the two cannot drift. `ownId` is the ' +
     'behaviour node\'s own object id; every accepted value must pass the rule AND ' +
     'validateInteractivityGraph, and every refused value must return the named code. ' +
+    'scripting-4d round-2 R2 and R-L1 (a) add one event-entry rule (keys are `id` and ' +
+    'optional `values`; an `atrium/*` entry is exactly `{ id }`) and one variable-entry ' +
+    'rule (keys are `type` and optional `value`), and R3 pins `event/send`\'s target ' +
+    'check to the same predicate in both copies. ' +
     'scripting-4c AC2 adds `listensForSelect` (a stored leaf, and whether a click on ' +
     'it is something this world listens for) and `withinActivateDistance` (the 10 m ' +
     'rule); both copies of each rule read these two arrays.',

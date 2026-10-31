@@ -48,26 +48,32 @@ describe('F3 — the Khronos invalid-graph index', () => {
     assert.equal(typeof SUBSET.skipped.opOutsideAllowlist, 'number', 'the skip histogram is recorded')
   })
 
-  test('100% of the invalid index\'s readable graphs are REFUSED by the server\'s rule', () => {
+  test('100% of the invalid index\'s readable graphs are REFUSED by the server\'s rule, EXCEPT A2c', () => {
     assert.ok(CASES.cases.length >= 150, `the checked-in set is the whole index (${CASES.cases.length})`)
-    // 4d (G-L3 (a)): the server stores ANY declaration the engine's validator
-    // accepts, so an invalid case whose fault is OUTSIDE the KHR_interactivity
-    // graph cannot be judged here. A2c's "default graph index is the string
-    // \"0\"" is an extension-object fault; its graph is valid.
-    const outsideTheGraph = new Set(['A2c'])
+    // R4 (F3) — A2c's graph is WELL FORMED. Its fault is the glTF extension
+    // OBJECT's `graph: "0"`, a wrapper Atrium never stores; 4b-2 refused it only
+    // because its ops weren't allowlisted, and 4d (G-L3 (a)) stores any
+    // declaration the engine's validator accepts. The accepted set is therefore
+    // asserted to be EXACTLY `['A2c']`: no case is excluded from the loop and
+    // none is marked a `node:test` skip, so a future widening cannot hide
+    // inside the loop.
     const accepted = []
     for (const entry of CASES.cases) {
-      if (outsideTheGraph.has(entry.id)) continue
       const check = behaviorCheck(asValue(entry.graph), { ownId: OWN })
-      if (check.problem === null) accepted.push(`${entry.id} ${entry.title}`)
+      if (check.problem === null) accepted.push(entry.id)
     }
-    assert.deepEqual(accepted, [], 'the server would never store an invalid graph')
+    assert.deepEqual(accepted, ['A2c'], 'exactly A2c is accepted (its fault is outside the graph)')
   })
 
   test('every refusal carries a named reason code and a message', () => {
     for (const entry of CASES.cases) {
-      if (entry.id === 'A2c') continue   // its fault is in the extension object, not the graph
       const check = behaviorCheck(asValue(entry.graph), { ownId: OWN })
+      if (check.problem === null) {
+        // The ONE graph the rule stores is A2c (see the test above); every
+        // other case in the index is a refusal.
+        assert.equal(entry.id, 'A2c', `${entry.id} is accepted and is not A2c`)
+        continue
+      }
       assert.equal(typeof check.problem, 'string', `${entry.id} has a code`)
       assert.equal(typeof check.message, 'string', `${entry.id} has a message`)
     }

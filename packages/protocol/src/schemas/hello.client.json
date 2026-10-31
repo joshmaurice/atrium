@@ -32,7 +32,7 @@
         },
         "physics": { "type": "boolean" },
         "chat": { "type": "boolean" },
-        "scriptRunner": { "type": "integer", "enum": [1, 2], "description": "scripting-4b-2 F-L6 / scripting-4c S2: 1 declares this tab runs behaviour graphs (4b-2); 2 also handles forwarded `activate` (4c). Election and handover require 2." }
+        "scriptRunner": { "type": "integer", "enum": [1, 2, 3], "description": "scripting-4b-2 F-L6 / scripting-4c S2 / scripting-4d G-L9: 1 declares this tab runs behaviour graphs (4b-2); 2 also handles forwarded `activate` (4c); 3 runs 4d graphs. Election and handover require 3. The enum keeps 1 and 2 so an unreloaded 4c tab still connects and is simply never the host." }
       },
       "additionalProperties": false
     }
