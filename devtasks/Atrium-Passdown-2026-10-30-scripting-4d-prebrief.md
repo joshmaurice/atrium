@@ -8,10 +8,9 @@ otherwise.
 1. Clone the repo and read `devtasks/`, newest first (this file first).
 2. Use the `atrium-ops` connector for board, release, log and git state. It
    is read-only.
-3. **Next: 4d-1's kickoff** (`devtasks/KICKOFF-scripting-4d-1.md`), if the
-   operator hasn't run it yet. The front door creates the sentinel first,
-   fills the body's three placeholders, then creates the card (§3). After
-   the round's review gate approves: Claude's §6.1 browser checks (eleven,
+3. **Next: 4d-1 is running.** The kickoff ran (§1); the operator's brief
+   review of `t_255de53b` is next, after the stray branch is reset (§4.6).
+   After the round's review gate approves: Claude's §6.1 browser checks (eleven,
    two of them measured gates, one a rollback rehearsal), then the outside
    review of the whole round, then DEV acceptance.
 4. **The repo's code runs in this environment.** The first session's
@@ -32,8 +31,8 @@ otherwise.
 | Decisions | G-L1–G-L12, Q3 and Q7 approved by the operator, all as recommended (2026-10-30 20:57 PT) |
 | Reviews | Three outside reviews of the pre-brief: Rev 0 CHANGES REQUESTED (4/7/2), Rev 1 CHANGES REQUESTED (3/4/2), Rev 1.1 **APPROVE WITH NITS** (0/2/4). The third reviewer **cloned and ran code** for the first time (§4.3) |
 | Fixtures | `tests/fixtures/behavior-conformance-4d/` (21 graphs) and `tests/fixtures/behavior-conformance-khronos/` (143 graphs, CC-BY-4.0, manifest), at `e600905e`. Read-only for the round |
-| Kickoff | `devtasks/KICKOFF-scripting-4d-1.md` at `1a26d8fa`, drafted, not yet run |
-| Board | Nothing running |
+| Kickoff | `devtasks/KICKOFF-scripting-4d-1.md` at `1a26d8fa`, **run 2026-10-30 ~21:20 PT** |
+| Board | Kickoff done; sentinel `t_adf3ee2b`; GLM brief `t_255de53b` **done** (two runs, §4.6); brief-review gate `t_e0f3e8d7` blocked for the operator; Implement `t_70443b8b` (cap 14,400 s), GLM review `t_64414bde`, review gate `t_d0639e09` waiting |
 
 ## 2. What the pre-brief settled
 4d-1 is one round of seven steps: the runtime for graphs beyond the five
@@ -122,6 +121,29 @@ until the round's own tests run.
 the database keeps the old leaf until the world is saved after an edit
 (the third review's S1). Anything that reasons about rollback or migration
 should start from that.
+
+### 4.6 The brief worker implemented instead of briefing
+The GLM brief card's first run (1147) didn't write the brief: it created
+the worktree, committed step 1 to a local `workflow/scripting-4d-1`
+(`c2d2153`, 10 files) and ran out of iterations (300/300) mid-step 2. Its
+retry wrote the brief, which is faithful to the spec, but left more
+uncommitted work behind and still said "No implementation was performed".
+Nothing was pushed. **The operator chose to reset** (2026-10-30 21:49 PT): the
+front door bundles the branch and saves the worktree's diff and untracked
+files outside the repo, then removes the worktree and the local branch, so
+the Implement card's `worktree add -b` runs as written from the base.
+- **The cause was the kickoff, not the worker.** 4c's brief card *referred*
+  to the requirements; 4d-1's kickoff told the brief card to carry them
+  **whole**, including the step list ("one commit per step"), the worktree
+  command and the implementer's worker-card rules. A brief writer handed a
+  card full of implementation instructions implemented.
+- **Next kickoff:** the brief card carries the spec check, the Settlement and
+  the list of what the brief must contain, plus a first line that says
+  "Write the brief only: no worktree, no commits, no code". It **refers** to
+  the implementation requirements and the canonical worker-card text by
+  where they are; it does not carry them.
+- **A worker's summary is a claim, not a fact:** check the branch and the
+  worktree after a brief run, as the front door did here.
 
 ## 5. Recipes
 The same as the scripting-4c passdown §5, plus:
