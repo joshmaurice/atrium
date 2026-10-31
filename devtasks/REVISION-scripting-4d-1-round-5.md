@@ -1,10 +1,10 @@
 # Revision — scripting-4d-1 round 5 (round 4 is on DEV, not accepted)
 
-**Status: Rev 0, for the operator's approval (not approved).** Five items, R25–R29, continuing round 4's
+**Status: Rev 0, approved by the operator (2026-10-31 15:47 PT): R-L9 (a), the lock database's journal in memory.** Five items, R25–R29, continuing round 4's
 numbering: the two findings of **the outside review of round 4** (`REVIEW-scripting-4d-1-round-4-code.md`, in
 `devtasks/`; NO-GO; its M1 and M2), **both reproduced by Claude with the round-4 code**; Claude's F7 from the
 round-4 browser checks, which the review assessed and agreed with; and the stale comment Hermes noted. One
-decision for the operator: **R-L9** (§2). The kickoff body is §5. Everything else in round 4 held: the review
+decision, **R-L9** (§2), decided (a). The kickoff body is §5. Everything else in round 4 held: the review
 judged R18, R20, R23 and R24 delivered, and R19 and R22 delivered except for these two findings.
 
 - **Base:** round 4's reviewed tip `85669db0f8a9c97f98a1c3b54293f7d7105cf642` on `workflow/scripting-4d-1`
@@ -101,6 +101,8 @@ Under **R-L9 (a)**:
   starts at once), and a journal can still appear if anything ever writes there.
 - (c) Keep `DELETE` and `chown` the journal to the database's owner after acquiring. It doesn't help after a
   crash between creation and `chown`, which is the failing case.
+
+**Decided: (a).**
 
 ### R27. The server ends by the signal, so systemd records a clean stop (F7)
 - `packages/server/src/index.js` **drops the SIGINT and SIGTERM handlers** (`process.exit(130)` /
@@ -242,8 +244,7 @@ sha256sum /tmp/revision-r5.md   # <revision hash>
 (Fill the two `<revision …>` values from the front door's revision check above.) On any mismatch, block with
 `kind="capability"`, quote both hashes, and do not work from a different text.
 
-- **The round-5 revision is this round's contract:** its §2 (R25–R29, with R-L9 decided as its status line
-  records) and its §3, which gives **your card's** items and handoff.
+- **The round-5 revision is this round's contract:** its §2 (R25–R29, with R-L9 decided (a)) and its §3, which gives **your card's** items and handoff.
 - **Also binding:** the pre-brief (FINAL Rev 1.4, with the Rev 1.5 and 1.6 notes on the branch); the round-1
   kickoff's Settlement and its "Requirements for the implementation AND review cards (beyond the spec)", items
   1–7; the round-2 revision (R1–R5, R-L1 (a)); the round-3 revision (R6–R17, R-L2–R-L5 (a)); the round-4 revision
