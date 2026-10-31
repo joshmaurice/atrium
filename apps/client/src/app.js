@@ -21,6 +21,7 @@ import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from 
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
 import { createGraphImportPanel } from './graph-import-panel.js'
 import { clipsFor, clipsForNode } from './behavior-clips.js'
+import { objectNameOf } from './object-name.js'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
 import { worldPosition, subtreeSome } from './world-position.js'
@@ -3215,11 +3216,11 @@ behaviorForm = createBehaviorForm({
     nodes: () => client.som?.allNodes ?? [],
     status: () => runnerStatus(),
     // G6 / Q3 — the Enable confirmation asks the page's own `confirm`, and the
-    // grants are named through the SOM.
+    // grants are named through the SOM (R18, through objectNameOf).
     confirm: (prompt) => (typeof window === 'undefined' || typeof window.confirm !== 'function'
       ? false
       : window.confirm(prompt)),
-    nodeName: (id) => (client.som?.resolveObjectId?.(id)?.name ?? id),
+    nodeName: (id) => objectNameOf(client.som, id),
     write: {
       setObjectId: (name, id) => client.setObjectId(name, id),
       sendField: (name, field, value) => client.sendField(name, field, value),
@@ -3264,8 +3265,8 @@ importPanel = createGraphImportPanel({
     selected: () => selected,
     nodes: () => client.som?.allNodes ?? [],
     // R16 — the grants line names the objects through the SAME `nameOf` the
-    // Behaviour form hands the Q3 confirmation.
-    nodeName: (id) => (client.som?.resolveObjectId?.(id)?.name ?? id),
+    // Behaviour form hands the Q3 confirmation (R18, through objectNameOf).
+    nodeName: (id) => objectNameOf(client.som, id),
     write: {
       setObjectId: (name, id) => client.setObjectId(name, id),
       sendField: (name, field, value) => client.sendField(name, field, value),

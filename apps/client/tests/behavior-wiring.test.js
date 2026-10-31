@@ -222,8 +222,13 @@ describe('scripting-4d-1 (G6) — the importer\'s panel', () => {
     assert.match(code, /sendField: \(name, field, value\) => client\.sendField\(name, field, value\)/)
     assert.match(code, /newObjectId,/)
     // R16 — the grants line names objects through the SAME `nameOf` the form
-    // hands the Q3 confirmation.
-    assert.match(code, /importPanel = createGraphImportPanel\(\{[\s\S]{0,1200}?nodeName: \(id\) => \(client\.som\?\.resolveObjectId\?\.\(id\)\?\.name \?\? id\)/)
+    // hands the Q3 confirmation. R18 — that nameOf is `objectNameOf`, the one
+    // helper that reads the SOM's real `{ node } | { problem }` shape.
+    assert.match(code, /import \{ objectNameOf \} from '\.\/object-name\.js'/)
+    assert.match(code, /importPanel = createGraphImportPanel\(\{[\s\S]{0,1200}?nodeName: \(id\) => objectNameOf\(client\.som, id\)/)
+    assert.doesNotMatch(code, /resolveObjectId\?\.\(id\)\?\.name \?\? id/, 'F5\u2019s wrong shape is gone')
+    assert.match(readSrc('behavior-form.js') + '\n' + readSrc('graph-import.js'), /nameOf/,
+      'the two texts still take the nameOf they are given')
   })
 
   test('the answers route to the panel, and it closes with the section', () => {

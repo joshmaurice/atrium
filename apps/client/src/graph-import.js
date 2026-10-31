@@ -261,14 +261,21 @@ export function parseGraphSource(bytes, { name = '' } = {}) {
     && Array.isArray(doc.extensions.KHR_lights_punctual.lights)
     ? doc.extensions.KHR_lights_punctual.lights
     : []
+  // R24 — ONE pass over `nodes` builds `Map<lightIndex, hostNodeIndices[]>`;
+  // the light-table walk below applies the same zero-host and many-host
+  // refusals with the same texts. O(nodes + lights), not O(lights × nodes).
+  const hostsByLight = new Map()
+  for (const [nodeIndex, node] of nodes.entries()) {
+    const host = node?.extensions?.KHR_lights_punctual?.light
+    if (!Number.isInteger(host) || host < 0) continue
+    const list = hostsByLight.get(host)
+    if (list) list.push(nodeIndex)
+    else hostsByLight.set(host, [nodeIndex])
+  }
   const fileLights = []
   for (const [index, light] of lightTable.entries()) {
     const name = lightName(light, index)
-    const hosts = []
-    for (const [nodeIndex, node] of nodes.entries()) {
-      const host = node?.extensions?.KHR_lights_punctual?.light
-      if (Number.isInteger(host) && host === index) hosts.push(nodeIndex)
-    }
+    const hosts = hostsByLight.get(index) ?? []
     // A light a graph could reference must be reachable through exactly one
     // object: with no host there is nothing to map it onto, and with two the
     // graph's single reference would retarget silently.

@@ -702,6 +702,41 @@ describe('G6 / R7 — a light is a row of the LIGHT TABLE, and its host is a nod
 })
 
 // ---------------------------------------------------------------------------
+// R24 — the light-host match is one pass: a scale test
+// ---------------------------------------------------------------------------
+
+describe('G6/R24 — the light-host match is one pass over the nodes', () => {
+  test('20,000 nodes and 20,000 lights, one host each, parse in under 2 s (1.36 MiB)', () => {
+    const graph = graphOf({ declarations: [{ op: 'debug/log' }], nodes: [] })
+    const doc = {
+      asset: { version: '2.0' },
+      extensions: { KHR_interactivity: { graphs: [graph] } },
+      nodes: [],
+    }
+    const N = 20000
+    for (let i = 0; i < N; i += 1) {
+      doc.nodes.push({ name: `n${i}`, extensions: { KHR_lights_punctual: { light: i } } })
+    }
+    doc.extensions.KHR_lights_punctual = { lights: [] }
+    const lights = []
+    for (let i = 0; i < N; i += 1) lights.push({ name: `l${i}` })
+    doc.extensions.KHR_lights_punctual.lights = lights
+    const bytes = bytesOf(doc)
+    assert.equal(bytes.length < IMPORT_BYTES_MAX, true, `${bytes.length} bytes is under the cap`)
+
+    const started = performance.now()
+    const parsed = parseGraphSource(bytes, { name: 'many-lights.gltf' })
+    const elapsed = performance.now() - started
+    assert.equal(parsed.problem, undefined, parsed.problem)
+    assert.equal(parsed.fileLights.length, N)
+    assert.deepEqual(parsed.fileLights[N - 1].hosts, [N - 1])
+    // The round-3 nested loop took 4.9 s for this shape on this host; the
+    // one-pass match leaves room for a slower host under the 2 s limit.
+    assert.equal(elapsed < 2000, true, `parsed in ${elapsed.toFixed(0)} ms; the limit is 2000 ms`)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // R12 (f) — a variable's initial reference is rewritten, and the run follows it
 // ---------------------------------------------------------------------------
 

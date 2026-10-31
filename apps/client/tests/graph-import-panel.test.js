@@ -14,6 +14,9 @@ import {
 } from '../src/graph-import-panel.js'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
 import { IMPORT_BYTES_MAX } from '../src/graph-import.js'
+import { Document } from '../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js'
+import { SOMDocument } from '../../../packages/som/src/SOMDocument.js'
+import { objectNameOf } from '../src/object-name.js'
 import { el } from './strict-element.mjs'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
@@ -396,11 +399,17 @@ test('G6/R16 — the grants line names the objects through the same nameOf the Q
   const own = { name: 'Cube', extras: { atrium: { objectId: OWN } } }
   const lamp = { name: 'Lamp', light: { intensity: 1 }, extras: { atrium: { objectId: THIRD } } }
   const target = { name: 'Quad', extras: { atrium: { objectId: TGT } } }
+  // R18 — the nameOf is built from the real helper over a REAL SOMDocument,
+  // the same way app.js builds it (`(id) => objectNameOf(client.som, id)`).
+  const doc = new Document()
+  const scene = doc.createScene('Scene')
+  scene.addChild(doc.createNode('Pass').setExtras({ atrium: { objectId: TGT } }))
+  scene.addChild(doc.createNode('NoId'))
+  const som = new SOMDocument(doc)
   const { panel, elements } = setup({
     nodes: [own, lamp, target],
     selected: own,
-    // The same shape app.js passes: an object's name, or its id.
-    nodeName: (id) => (id === TGT ? 'Pass' : ''),
+    nodeName: (id) => objectNameOf(som, id),
   })
   panel.open()
   panel.chooseSource(bytesOf(lightDocument()), 'lights.gltf')
@@ -408,6 +417,7 @@ test('G6/R16 — the grants line names the objects through the same nameOf the Q
   panel.setTarget('light', 0, THIRD)
 
   assert.deepEqual(panel.state.conversion.report.grants, [TGT, THIRD])
-  // TGT is named; THIRD has no name, so it shows its id.
+  // TGT is named through the real SOM; THIRD resolves to nothing, so it shows
+  // its id.
   assert.equal(elements.grants.textContent, `It can change: Pass, ${THIRD}`)
 })
