@@ -15,7 +15,8 @@
 // the lock is now a KERNEL lock, taken through SQLite:
 //
 //   * beside the database sits a small LOCK DATABASE, `<canonical db>.lock.db`
-//     (`journal_mode = DELETE`). The holder opens a connection with
+//     (`journal_mode = MEMORY` — R26, so SQLite never writes a
+//     `<db>.lock.db-journal` beside it). The holder opens a connection with
 //     `timeout: 0` and runs `BEGIN EXCLUSIVE`, and KEEPS THE TRANSACTION OPEN
 //     for the whole of its run. Anyone else gets `SQLITE_BUSY` at once.
 //   * the OS releases the lock when the holder exits for ANY reason, `kill -9`
@@ -29,7 +30,9 @@
 //     db>.lock.json`, written after acquiring. THE SIDECAR IS NEVER THE LOCK: a
 //     missing, empty or stale sidecar changes no decision.
 //   * the lock is keyed on the database's CANONICAL path (R19), so a symlink to
-//     the database — or to its directory — reaches the same lock. (A hard link,
+//     the database — or to its directory — reaches the same lock. A dangling
+//     symlink follows to its missing target (R25), so first boot through an
+//     alias and the database's own path are still ONE lock. (A hard link,
 //     or the same file through another mount, is a different path after
 //     `realpath`; out of scope under R-L6 (a).)
 //   * whoever creates the lock database or the sidecar gives them the main
@@ -38,7 +41,9 @@
 //   * the pre-R8 `<db>.lock` FILE is no longer read or written. A leftover one
 //     is IGNORED; the server's start logs one line naming it.
 
-import { chmodSync, chownSync, existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync, chownSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync,
+} from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { hostname } from 'node:os'
 import Database from 'better-sqlite3'
@@ -56,7 +61,18 @@ import Database from 'better-sqlite3'
  *   * it doesn't (the server's first start) → `realpathSync(dirname)` + the
  *     basename, so a symlinked directory still collapses;
  *   * the directory doesn't exist either → the `resolve()`d path, as before.
+ *
+ * R25 — a DANGLING symlink in the LAST component resolves to its target. Round
+ * 4 fell straight to the directory rule, so `alias.db → real.db` with `real.db`
+ * missing gave the alias one lock at first boot and the target a different lock
+ * once the database existed: ONE DATABASE, TWO LOCKS. So while the path is a
+ * symlink whose target isn't there yet, `readlink` it — a relative target
+ * resolves against the LINK's directory — and carry on, at most
+ * MAX_SYMLINK_HOPS hops; a chain that never lands (a loop) is an error, not a
+ * hang.
  */
+const MAX_SYMLINK_HOPS = 40
+
 export function canonicalDbPath(dbPath) {
   const resolved = resolve(dbPath)
   try {
@@ -64,12 +80,39 @@ export function canonicalDbPath(dbPath) {
   } catch {
     // The database file isn't there yet; canonicalise its directory instead.
   }
+
+  let path = resolved
+  for (let hops = 0; ; hops++) {
+    let stats
+    try {
+      stats = lstatSync(path)
+    } catch {
+      break                                       // nothing there: not a symlink
+    }
+    if (!stats.isSymbolicLink()) break            // a real file: nothing to follow
+    if (hops >= MAX_SYMLINK_HOPS) {
+      throw new Error(`could not resolve ${resolved}: too many levels of symbolic links`)
+    }
+    let target
+    try {
+      target = readlinkSync(path)
+    } catch {
+      break                                       // raced away under us
+    }
+    path = resolve(dirname(path), target)
+    try {
+      return realpathSync(path)                   // the target exists: collapse it
+    } catch {
+      // Still dangling; keep following the chain.
+    }
+  }
+
   try {
-    return join(realpathSync(dirname(resolved)), basename(resolved))
+    return join(realpathSync(dirname(path)), basename(path))
   } catch {
     // Neither is there: nothing to resolve against.
   }
-  return resolved
+  return path
 }
 
 /** The lock database beside a database file: `<canonical db>.lock.db`. */
@@ -204,7 +247,10 @@ export function testLockHoldHook() {
  * @param {string} dbPath
  * @param {{role?: string, log?: (line: string) => void}} [opts]  `role` names
  *        the holder in the others' messages ('server', 'export', 'reconcile').
- * @returns {{ lockPath: string, sidecarPath: string, release: () => void }}
+ * @returns {{ lockPath: string, sidecarPath: string, journalMode: string,
+ *            release: () => void }}  `journalMode` is the mode the kernel lock
+ *        was taken with, as the holder's own connection read it back (R26:
+ *        always `'memory'`, or the acquire refused).
  */
 export function acquireLock(dbPath, { role = 'server', log = () => {} } = {}) {
   const lockPath = lockPathFor(dbPath)
@@ -217,8 +263,18 @@ export function acquireLock(dbPath, { role = 'server', log = () => {} } = {}) {
     throw new Error(`could not open ${lockPath}: ${error.message}`)
   }
 
+  let journalMode
   try {
-    lockDb.pragma('journal_mode = DELETE')
+    // R26 (as R-L9 (a)) — the lock database holds no data and nothing is ever
+    // written in it, so its journal lives in MEMORY: SQLite creates no
+    // `<db>.lock.db-journal` file at all, and so none can be left behind —
+    // owned by root, in a sticky directory — to stop the service user's next
+    // acquire with a disk I/O error. Refuse if the mode we get back isn't the
+    // one we asked for, rather than trust it.
+    journalMode = String(lockDb.pragma('journal_mode = MEMORY', { simple: true }) ?? '').toLowerCase()
+    if (journalMode !== 'memory') {
+      throw new Error(`journal_mode is ${journalMode || 'unknown'}, not memory`)
+    }
     lockDb.pragma('busy_timeout = 0')
     lockDb.exec('BEGIN EXCLUSIVE')          // the kernel lock; SQLITE_BUSY at once
   } catch (error) {
@@ -247,5 +303,5 @@ export function acquireLock(dbPath, { role = 'server', log = () => {} } = {}) {
     try { lockDb.close() } catch { /* already closed */ }
   }
 
-  return { lockPath, sidecarPath, release }
+  return { lockPath, sidecarPath, journalMode, release }
 }

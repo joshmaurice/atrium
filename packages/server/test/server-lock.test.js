@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 //
-// server-lock.test.js — scripting-4d-1 round 4, card 3 (R22 as R-L8 (a), R19).
+// server-lock.test.js — scripting-4d-1 round 4, card 3 (R22 as R-L8 (a), R19);
+// round 5, card 1 (R25, R26 as R-L9 (a), R27).
 //
 // The server's START/STOP test: the real `src/index.js`, in its own process,
 // against a scratch database, with the two rollback scripts pointed at the same
@@ -21,12 +22,24 @@
 //   * the lock database wears the main database's owner, group and mode;
 //   * the lock is keyed on the database's CANONICAL path (R19), so a symlink to
 //     the file — or to its directory — reaches the same lock;
+//   * R25: a DANGLING symlink resolves to its target, so ONE database has ONE
+//     lock from its first boot on (round 4's M1: the alias was locked, and the
+//     target was locked separately as soon as the database existed); a chain
+//     that never lands (a loop) refuses with a clear message instead of hanging;
+//   * R26 (as R-L9 (a)): the lock database's journal is in MEMORY, so SQLite
+//     never creates a `<db>.lock.db-journal` beside it — not while a holder is
+//     running, not after `kill -9` — and a 512-byte journal left by a round-4
+//     holder does not stop the next acquire;
+//   * R27: the server ends by the SIGNAL (SIGTERM/SIGINT), which is what systemd
+//     records as a clean stop, and the lock is free at once afterwards;
 //   * the pre-R8 `<db>.lock` FILE is ignored (one log line at start).
 
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import {
   mkdtempSync, writeFileSync, readFileSync, existsSync, symlinkSync, mkdirSync, chmodSync, chownSync, statSync,
+  realpathSync,
 } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir, hostname } from 'node:os'
@@ -133,6 +146,40 @@ function liveChildPid() {
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })
   children.push(child)
   return child.pid
+}
+
+const require_ = createRequire(import.meta.url)
+const BETTER_SQLITE3 = require_.resolve('better-sqlite3')
+
+/**
+ * Start a holder that takes the lock database the ROUND-4 way — a raw
+ * `better-sqlite3` connection with `journal_mode = DELETE`, `BEGIN EXCLUSIVE` —
+ * and wait, so the test can `kill -9` it and leave its 512-byte journal behind
+ * (R26, round 4's M2). It bypasses `acquireLock` on purpose: round 5's
+ * `acquireLock` can no longer make that journal.
+ */
+async function startRound4JournalHolder(lockPath, signal) {
+  const script = [
+    `const Database = require(${JSON.stringify(BETTER_SQLITE3)})`,
+    `const fs = require('node:fs')`,
+    `const db = new Database(${JSON.stringify(lockPath)}, { timeout: 0 })`,
+    `db.pragma('journal_mode = DELETE')`,
+    `db.pragma('busy_timeout = 0')`,
+    `db.exec('BEGIN EXCLUSIVE')`,
+    `fs.writeFileSync(${JSON.stringify(signal)}, String(process.pid))`,
+    `setInterval(() => {}, 1000)`,
+  ].join('\n')
+  const child = spawn(process.execPath, ['-e', script], { cwd: SERVER, stdio: ['ignore', 'pipe', 'pipe'] })
+  children.push(child)
+  const out = []
+  child.stdout.on('data', (b) => out.push(String(b)))
+  child.stderr.on('data', (b) => out.push(String(b)))
+  const deadline = Date.now() + 20000
+  while (!existsSync(signal)) {
+    if (Date.now() > deadline) throw new Error(`the round-4 holder never took the lock: ${out.join('')}`)
+    await sleep(25)
+  }
+  return { child, out }
 }
 
 // ===========================================================================
@@ -407,6 +454,33 @@ test('R19: canonicalDbPath collapses a symlinked file and a symlinked directory,
     'a database that does not exist yet still collapses its directory')
   assert.equal(canonicalDbPath(join(dir, 'nothing', 'at', 'all.db')), resolve(join(dir, 'nothing', 'at', 'all.db')),
     'with no directory either, the resolved path stands')
+
+  // R25 — a symlink whose TARGET doesn't exist yet: the last component follows
+  // the link, so the alias and the target are one path (and one lock) from the
+  // very first boot.
+  const danglingTarget = join(realDir, 'not-yet.db')
+  const danglingAlias = join(realDir, 'dangling.db')
+  symlinkSync(danglingTarget, danglingAlias)
+  assert.equal(canonicalDbPath(danglingAlias), danglingTarget, 'a dangling symlink resolves to its target')
+  assert.equal(lockPathFor(danglingAlias), lockPathFor(danglingTarget), 'so an alias and its target share one lock')
+
+  // A RELATIVE target resolves against the LINK's directory, not the cwd.
+  const relativeAlias = join(realDir, 'relative.db')
+  symlinkSync('not-yet.db', relativeAlias)
+  assert.equal(canonicalDbPath(relativeAlias), danglingTarget, 'a relative target resolves against the link\'s directory')
+
+  // A CHAIN follows to its final target while that target is still missing.
+  const chainEnd = join(realDir, 'chain-end.db')
+  const chainMiddle = join(realDir, 'chain-middle.db')
+  const chainStart = join(realDir, 'chain-start.db')
+  symlinkSync(chainEnd, chainMiddle)
+  symlinkSync('chain-middle.db', chainStart)
+  assert.equal(canonicalDbPath(chainStart), chainEnd, 'a whole chain of dangling links resolves to its end')
+  assert.equal(lockPathFor(chainStart), lockPathFor(chainEnd), 'and shares its lock')
+
+  // A missing path that is NOT a symlink keeps the round-4 rule.
+  assert.equal(canonicalDbPath(join(realDir, 'plain-missing.db')), join(realpathSync(realDir), 'plain-missing.db'),
+    'a missing path that is not a symlink still collapses its directory')
 })
 
 test('R19: a server on the real path refuses both scripts through a symlink to the file, and a second server through the symlink', async () => {
@@ -513,4 +587,216 @@ test('R22: a leftover pre-R8 <db>.lock file is ignored — one log line at start
   const afterStop = await runScript(EXPORT, [dbPath, outPath])
   assert.equal(afterStop.code, 0, `the leftover file does not stop the export: ${afterStop.stderr}`)
   assert.equal(existsSync(legacy), true, 'the leftover file is still there: nothing deletes it')
+})
+
+// ===========================================================================
+// R25: a dangling symlink resolves to its target (round 4's M1)
+// ===========================================================================
+
+test('R25: a server started through a DANGLING symlink locks the target, so a second server through the alias and one on the target both refuse', async () => {
+  const dir = scratchDir()
+  const realDb = join(dir, 'real.db')            // deliberately MISSING: the review's sequence
+  const alias = join(dir, 'alias.db')
+  symlinkSync(realDb, alias)
+  const outPath = join(dir, 'dangling-export.json')
+
+  assert.equal(existsSync(realDb), false, 'the symlink target does not exist yet')
+
+  // First boot THROUGH the alias: the server creates the database by opening the
+  // alias. Round 4 canonicalised the LINK's directory and kept the link's name,
+  // so the alias took `alias.db.lock.db` and the target took nothing.
+  const { child, listening } = startServer(alias)
+  await listening
+
+  assert.equal(existsSync(realDb), true, 'the database exists at the symlink\'s target')
+  assert.equal(existsSync(`${realDb}.lock.db`), true, 'the lock database is the TARGET\'s')
+  assert.equal(existsSync(`${alias}.lock.db`), false, 'and NOT the alias\'s own path')
+
+  // A second server through the ALIAS refuses...
+  const throughAlias = await runServer(alias)
+  assert.equal(throughAlias.code, 1, `the second start through the alias refuses: ${throughAlias.stdout}${throughAlias.stderr}`)
+  assert.match(throughAlias.stderr, new RegExp(`another process holds .*real\\.db\\.lock\\.db \\(pid ${child.pid}, server\\)`))
+
+  // ...and so does one on the target's OWN path. This is round 4's M1: one
+  // database, two locks, and the second server ran.
+  const onTarget = await runServer(realDb)
+  assert.equal(onTarget.code, 1, `the second start on the target's own path refuses: ${onTarget.stdout}${onTarget.stderr}`)
+  assert.match(onTarget.stderr, new RegExp(`another process holds .*real\\.db\\.lock\\.db \\(pid ${child.pid}, server\\)`))
+
+  // Both scripts refuse through EITHER spelling, and write nothing.
+  for (const spelling of [alias, realDb]) {
+    const exported = await runScript(EXPORT, [spelling, outPath])
+    assert.notEqual(exported.code, 0, `the export through ${spelling} refuses`)
+    assert.match(exported.stderr, new RegExp(`the world server is running \\(pid ${child.pid} on ${hostname()}\\)`))
+  }
+  assert.equal(existsSync(outPath), false, 'the refused exports wrote nothing')
+
+  writeFileSync(outPath, JSON.stringify({ version: 1, worlds: [] }))
+  for (const spelling of [alias, realDb]) {
+    const reconciled = await runScript(RECONCILE, [spelling, outPath])
+    assert.notEqual(reconciled.code, 0, `the reconcile through ${spelling} refuses`)
+    assert.match(reconciled.stderr, new RegExp(`the world server is running \\(pid ${child.pid} on ${hostname()}\\)`))
+  }
+
+  // The holder goes; then the scripts run through either spelling.
+  child.kill('SIGTERM')
+  await once(child, 'exit')
+  const afterStop = await runScript(EXPORT, [alias, outPath])
+  assert.equal(afterStop.code, 0, `the export runs once the server is stopped: ${afterStop.stderr}`)
+})
+
+test('R25: a relative dangling symlink and a two-hop chain of dangling links both lock the target they end at', async () => {
+  const dir = scratchDir()
+
+  // A RELATIVE target (`rel-alias.db -> rel-real.db`, no directory in the link):
+  // it resolves against the LINK's directory, not the process's cwd.
+  const relReal = join(dir, 'rel-real.db')
+  const relAlias = join(dir, 'rel-alias.db')
+  symlinkSync('rel-real.db', relAlias)
+  assert.equal(canonicalDbPath(relAlias), relReal, 'the relative target resolves against the link\'s directory')
+  assert.equal(lockPathFor(relAlias), `${relReal}.lock.db`, 'and reaches the target\'s lock')
+
+  const relative = startServer(relAlias)
+  await relative.listening
+  assert.equal(existsSync(`${relReal}.lock.db`), true, 'the server locked the target the relative link names')
+  assert.equal((await runServer(relReal)).code, 1, 'a server on that target refuses')
+  relative.child.kill('SIGTERM')
+  await once(relative.child, 'exit')
+
+  // A TWO-HOP chain: `a.db -> b.db -> chain-real.db`, with the end missing.
+  const chainReal = join(dir, 'chain-real.db')
+  const chainB = join(dir, 'b.db')
+  const chainA = join(dir, 'a.db')
+  symlinkSync(chainReal, chainB)
+  symlinkSync('b.db', chainA)
+  assert.equal(canonicalDbPath(chainA), chainReal, 'the whole chain resolves to the path it ends at')
+  assert.equal(lockPathFor(chainA), `${chainReal}.lock.db`, 'and reaches that path\'s lock')
+
+  const chained = startServer(chainA)
+  await chained.listening
+  assert.equal(existsSync(`${chainReal}.lock.db`), true, 'the chain locks the path it ends at')
+  const chainedRefusal = await runServer(chainReal)
+  assert.equal(chainedRefusal.code, 1, `a server on the chain's target refuses: ${chainedRefusal.stdout}${chainedRefusal.stderr}`)
+  chained.child.kill('SIGTERM')
+  await once(chained.child, 'exit')
+
+  // With the server gone, the chain resolves through to a REAL file and the
+  // scripts still agree on the lock.
+  const afterStop = await runScript(EXPORT, [chainA, join(dir, 'chain-export.json')])
+  assert.equal(afterStop.code, 0, `the export through the chain runs once the server is stopped: ${afterStop.stderr}`)
+})
+
+test('R25: a symlink loop refuses with a clear message instead of hanging', async () => {
+  const dir = scratchDir()
+  const a = join(dir, 'a.db')
+  const b = join(dir, 'b.db')
+  symlinkSync('b.db', a)
+  symlinkSync('a.db', b)
+
+  assert.throws(() => canonicalDbPath(a), /too many levels of symbolic links/,
+    'the path loop is an error, not a hang')
+  assert.throws(() => lockPathFor(b), /too many levels of symbolic links/)
+
+  const started = Date.now()
+  const refused = await runServer(a)
+  assert.equal(refused.code, 1, `the server refuses on a looping database path: ${refused.stdout}${refused.stderr}`)
+  assert.match(refused.stderr, /could not resolve .*a\.db: too many levels of symbolic links/)
+  assert.ok(Date.now() - started < 20000, 'and it refused at once, not by the test\'s timeout')
+})
+
+// ===========================================================================
+// R26: the lock database keeps no journal on disk (as R-L9 (a))
+// ===========================================================================
+
+test('R26: no <lock db>-journal file exists while the server or either script holds the lock, and none after kill -9', async () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'journal.db')
+  const outPath = join(dir, 'journal-export.json')
+  createScratchDb(dbPath)
+  const lockPath = lockPathFor(dbPath)
+  const journalPath = `${lockPath}-journal`
+
+  // The SERVER.
+  const { child, listening } = startServer(dbPath)
+  await listening
+  assert.equal(existsSync(journalPath), false, 'the server holds the lock with no journal file')
+  child.kill('SIGKILL')
+  await once(child, 'exit')
+  assert.equal(existsSync(journalPath), false, 'and kill -9 of the server leaves none')
+
+  // Each SCRIPT.
+  for (const [name, script] of [['export', EXPORT], ['reconcile', RECONCILE]]) {
+    writeFileSync(outPath, JSON.stringify({ version: 1, worlds: [] }))
+    const signal = join(dir, `${name}.signal`)
+    const held = await startHeldScript(script, [dbPath, outPath], signal)
+    assert.equal(existsSync(journalPath), false, `the ${name} holds the lock with no journal file`)
+    held.child.kill('SIGKILL')
+    await once(held.child, 'exit')
+    assert.equal(existsSync(journalPath), false, `and kill -9 of the ${name} leaves none`)
+  }
+})
+
+test('R26: the lock database\'s journal_mode reads back memory', () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'journal-mode.db')
+  createScratchDb(dbPath)
+
+  const lock = acquireLock(dbPath, { role: 'server' })
+  assert.equal(lock.journalMode, 'memory', 'the holder\'s connection reports the in-memory journal')
+  lock.release()
+})
+
+test('R26: a 512-byte journal left by a round-4 holder (journal_mode = DELETE, kill -9) does not stop the next acquire', async () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'leftover.db')
+  createScratchDb(dbPath)
+  const lockPath = lockPathFor(dbPath)
+  const journalPath = `${lockPath}-journal`
+  const signal = join(dir, 'round4.signal')
+
+  const holder = await startRound4JournalHolder(lockPath, signal)
+  assert.equal(existsSync(journalPath), true, 'the round-4 way does leave a journal while it holds')
+  assert.equal(statSync(journalPath).size, 512, '512 bytes, as the host\'s journal was')
+
+  holder.child.kill('SIGKILL')
+  await once(holder.child, 'exit')
+  assert.equal(existsSync(journalPath), true, 'and the crash leaves it behind — round 4\'s M2')
+
+  // The next acquire, round 5's way, is not stopped by it: SQLite rolls the
+  // leftover journal away on open, and nothing new is created.
+  const lock = acquireLock(dbPath, { role: 'server' })
+  assert.equal(readLockSidecar(dbPath).role, 'server', 'the lock was taken with the leftover journal beside it')
+  assert.equal(lock.journalMode, 'memory')
+  lock.release()
+  assert.equal(existsSync(journalPath), false, 'and the leftover journal is gone')
+})
+
+// ===========================================================================
+// R27: the server ends by the signal, so systemd records a clean stop
+// ===========================================================================
+
+test('R27: the server ends by SIGTERM and by SIGINT — code null, the signal named — and the lock is free at once', async () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'signals.db')
+  const outPath = join(dir, 'signals-export.json')
+  createScratchDb(dbPath)
+
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    const { child, listening } = startServer(dbPath)
+    await listening
+    assert.equal(readLockSidecar(dbPath).pid, child.pid, `the server holds the lock before ${signal}`)
+
+    const exited = once(child, 'exit')
+    child.kill(signal)
+    const [code, killedBy] = await exited
+
+    // What systemd records: `Deactivated successfully` needs the SIGNAL, not a
+    // process exit code. Round 4's handler turned this into `status=143`.
+    assert.equal(code, null, `the ${signal} stop is a signal, not an exit code (got ${code})`)
+    assert.equal(killedBy, signal, `and it is named as ${signal}`)
+
+    // The OS released the kernel lock with the process.
+    const exported = await runScript(EXPORT, [dbPath, outPath])
+    assert.equal(exported.code, 0, `a script takes the lock straight after the ${signal} stop: ${exported.stderr}`)
+  }
 })

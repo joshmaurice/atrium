@@ -17,8 +17,9 @@ export const DEFAULT_DB_PATH = resolve('./atrium.db')
 
 /**
  * The database file the server (or a scratch test) will open, resolved to an
- * absolute path. The rollback scripts and the lifetime lock file (R-L2 (a))
- * key off this, so both sides agree on `<db>.lock`.
+ * absolute path. The rollback scripts and the lifetime lock (R-L2 (a), R22)
+ * key off this, so both sides agree on the CANONICAL path (R19) and on the
+ * lock database `<canonical db>.lock.db` beside it.
  */
 export function resolveDbPath(dbPath) {
   return resolve(dbPath || process.env.ATRIUM_DB_PATH || DEFAULT_DB_PATH)

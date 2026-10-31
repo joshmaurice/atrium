@@ -87,9 +87,12 @@ const releaseServerLock = () => {
   lockReleased = true
   serverLock.release()
 }
+// R27 — the process ends by the SIGNAL, and systemd records a clean stop. The
+// SIGINT/SIGTERM handlers that called `process.exit(130)` / `process.exit(143)`
+// are GONE: under R22 the OS releases the kernel lock on any exit, so all they
+// did was turn a clean stop into `status=143 … Failed with result 'exit-code'`
+// in the journal. The `exit` hook stays for the paths Node does run it on.
 process.on('exit', releaseServerLock)
-process.on('SIGINT', () => { releaseServerLock(); process.exit(130) })
-process.on('SIGTERM', () => { releaseServerLock(); process.exit(143) })
 
 const db = createDb(dbPath)
 console.log(`Atrium database: ${dbPath}`)
