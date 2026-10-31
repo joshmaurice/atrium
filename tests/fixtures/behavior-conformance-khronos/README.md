@@ -21,6 +21,13 @@ build, not only where `KHRONOS_ASSETS` points at a checkout.
   (`math:math/random`, `over-budget`). The round regenerates the results with
   its own adapter; a fail that becomes a pass needs its reason in the
   handoff, and a pass that becomes a fail is a finding.
+- **`expected-4d.json`** (scripting-4d-1 step 6, G8): the same 143 assets
+  through the round's adapter, on the **injected clock and timers** (a
+  deterministic simulated time, so the run is the same on every host and the
+  build host no longer skips), regenerated with
+  `node packages/behaviors/scripts/conformance.mjs --write` and compared with
+  the baseline above. Every entry in `changes` carries its reason in `note`; a
+  change that is a regression is a finding in that round's handoff.
 - **Regenerate** (Claude's tooling, not the round's):
   ```bash
   KHRONOS_ASSETS=<assets>/Tests/Interactivity P6_JSON=/tmp/p6.json node devtasks/spike-4d/p6.mjs

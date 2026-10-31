@@ -1,0 +1,612 @@
+{
+  "description": "G8 — the Khronos subset of PREBRIEF-scripting-4d, run through the scripting-4d-1 adapter on the injected clock and timers (a deterministic simulated time). Regenerate with `node packages/behaviors/scripts/conformance.mjs --write`; every change against the manifest's p6 baseline carries its reason in `note`.",
+  "source": "KhronosGroup/glTF-Test-Assets-Interactivity @ 926bec45dfbe052bad4013ab5852ed2f4042bff5",
+  "adapter": "scripting-4d-1 (workflow/scripting-4d-1)",
+  "baselineCounts": {
+    "pass": 134,
+    "fail": 8,
+    "disposed": 1
+  },
+  "counts": {
+    "pass": 135,
+    "fail": 6,
+    "no result": 1,
+    "disposed": 1
+  },
+  "changes": [
+    {
+      "asset": "core:Extras/Matrix_Updates",
+      "baseline": "fail",
+      "result": "pass",
+      "note": "G-L4 (a)'s read-only matrix pointers — the pre-brief's expected flip. The asset only READS matrices (`/nodes/{nodeRef}/matrix`, `/nodes/3/matrix`, `/nodes/4/globalMatrix`, `/nodes/5/globalMatrix`; every matrix node in it is a `pointer/get`) and writes translations, then asserts that a matrix reflects the translation it just wrote. The p6 run had no matrix pointer registered at all (they are G-L4 (a)'s, added by this round) and its fake world had no `matrix`/`globalMatrix` to read, so every read came back invalid and its five sub-checks logged `Test Failed`. The round registers both pointers read-only, and its harness both seeds the fake world from the asset's own nodes and recomputes each matrix from the world's CURRENT values, so a write the graph made is visible in the matrix it reads next."
+    },
+    {
+      "asset": "core:flow/setDelay_and_cancelDelay",
+      "baseline": "pass",
+      "result": "no result",
+      "note": "FINDING — a pass that no longer reproduces. This asset holds more pending delays than G7 allows: 16 are live from tick 1 (measured on the adapter's own table, `engine.delays.size`, which never drops below 16 before tick 13), and the graph has 23 `flow/setDelay` nodes, so at least one of them takes `err`. The one it loses is the final 2.5 s delay whose `done` flow is the graph's ONLY test verdict (nodes 239–243), so the asset reports nothing at all under the round's adapter. Two independent changes are behind it: (1) G7's 16-pending-delay cap, which the shipped adapter did not have; (2) with the cap raised to 64 the asset reaches its verdict and reports `test/onFailed` — its `lastDelayref isValid` check fails, because that check reads a delay's `lastDelay` through `pointer/get` on `/extensions/KHR_interactivity/delays/<n>` and the round's delay subclasses schedule with the injected timers instead of the engine's `pushScheduledDelay`, which is what registers that trie path (`packages/gltf-interactivity-engine/build/index.js` L8358). The `p6` baseline passed because the shipped adapter's `SetDelay` ran the engine's own real-timer path. For the operator; nothing in the round was changed for it."
+    },
+    {
+      "asset": "math:math/matDecomp-Shear",
+      "baseline": "fail",
+      "result": "pass",
+      "note": "G-L4 (a)'s read-only matrix pointers. The asset reads `/nodes/[nodeIndex]/globalMatrix` and writes the decomposed translation. The p6 run had no matrix pointer registered at all — the pointers are G-L4 (a)'s, added by this round — and its fake world had no `matrix`/`globalMatrix` to read, so a read of one could not resolve. The round's harness seeds the fake world from the asset's own nodes (a node's local matrix, and `globalMatrix` composed through its parents), so the read resolves and the asset's own assertions pass, because the harness also recomputes a node's matrix from the world's CURRENT values. The pre-brief's other expected flip, `core:Extras/Matrix_Updates`, flips too (see its own note)."
+    }
+  ],
+  "results": [
+    {
+      "asset": "core:Extras/Loop_in_Loop_Tests",
+      "result": "pass"
+    },
+    {
+      "asset": "core:Extras/Matrix_Updates",
+      "result": "pass"
+    },
+    {
+      "asset": "core:animation/start",
+      "result": "fail"
+    },
+    {
+      "asset": "core:animation/state",
+      "result": "fail"
+    },
+    {
+      "asset": "core:animation/stop",
+      "result": "fail"
+    },
+    {
+      "asset": "core:event/Event_Refs",
+      "result": "pass"
+    },
+    {
+      "asset": "core:event/activation_order_and_onTick",
+      "result": "pass"
+    },
+    {
+      "asset": "core:event/send_and_receive",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/branch",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/doN",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/for",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/multiGate",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/sequence",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/setDelay_and_cancelDelay",
+      "result": "no result",
+      "reason": "after 375 ticks"
+    },
+    {
+      "asset": "core:flow/switch",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/throttle",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/waitAll",
+      "result": "pass"
+    },
+    {
+      "asset": "core:flow/while",
+      "result": "pass"
+    },
+    {
+      "asset": "core:graph/extra_and_unknown_sockets",
+      "result": "pass"
+    },
+    {
+      "asset": "core:graph/ignored_configuration",
+      "result": "pass"
+    },
+    {
+      "asset": "core:graph/json_syntax",
+      "result": "pass"
+    },
+    {
+      "asset": "core:pointer/get_set_morphtargets",
+      "result": "fail"
+    },
+    {
+      "asset": "core:pointer/set_edge_cases",
+      "result": "fail"
+    },
+    {
+      "asset": "core:prerequisites/Tests_required_operations",
+      "result": "pass"
+    },
+    {
+      "asset": "core:ref/eq",
+      "result": "fail"
+    },
+    {
+      "asset": "core:type/conversions",
+      "result": "pass"
+    },
+    {
+      "asset": "core:variable/setMultiple",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/abs",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/acos",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/acosh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/add",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/and",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/asin",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/asinh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/asr",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/atan",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/atan2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/atanh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/cbrt",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/ceil",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/clamp",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/clz",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/combine2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/combine2x2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/combine3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/combine3x3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/combine4",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/combine4x4",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/cos",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/cosh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/cross",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/ctz",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/deg",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/determinant",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/determinant2x2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/determinant3x3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/div",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/dot",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/E",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/eq",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/exp",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/extract2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/extract2x2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/extract3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/extract3x3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/extract4",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/extract4x4",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/floor",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/fract",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/ge",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/gt",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/Inf",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/inverse",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/inverse2x2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/inverse3x3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/isInf",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/isNaN",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/le",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/length",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/log",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/log10",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/log2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/lsl",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/lt",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matComp-Dec-Comp",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matCompose",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matDecompose",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matDecomp-Shear",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matMul",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matMul2x2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matMul3x3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/matMul-nonCommutative",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/max",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/min",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/mix",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/mul",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/NaN",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/neg",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/normalize",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/not",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/or",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/Pi",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/popcnt",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/pow",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatAngleBetween",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatConjugate",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatFromAngles",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatFromAxisAngle",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatFromDirections",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatFromDirections-edge",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatFromUpForward",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatFromUpForward-degenerate",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatMul",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatSlerp",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatToAxisAngle",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/quatToAxisAngle-identity",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/rad",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/random",
+      "result": "disposed",
+      "reason": "over-budget"
+    },
+    {
+      "asset": "math:math/rem",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/rgbFromOkLCh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/rgbToOkLCh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/rotate2D",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/rotate3D",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/round",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/saturate",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/select",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/sign",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/sin",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/sinh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/slerp",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/smoothStep",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/sqrt",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/sub",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/switch",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/tan",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/tanh",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/Tau",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/transform",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/transpose",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/transpose2x2",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/transpose3x3",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/trunc",
+      "result": "pass"
+    },
+    {
+      "asset": "math:math/xor",
+      "result": "pass"
+    }
+  ]
+}
