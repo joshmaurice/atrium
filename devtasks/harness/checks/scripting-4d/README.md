@@ -38,6 +38,49 @@ HARNESS_ROOT=/tmp/atrium-harness BASE_ROOT=/tmp/ah-base python3 c11.py  # ≈ 2 
 | `probe_r24.py` | R24 | a ~3 MiB many-light `.gltf` through the panel: time to the mapping rows, the longest main-thread stall |
 | `probe_c3.py` | (diagnosis) | check 3's click and interpolation outside c2's sequence, with and without the spinner |
 
+## Results on DEV `ddef0a31` (round 5: `e5369130` + main `627cc497`, devtasks/ only), 2026-10-31
+**R25, R26 and R27 hold; checks 1, 4–8 and 11 pass.** `probe_r5.sh`, which reproduces all three bugs on round 4's
+`1d4ccf17` (a second server through a dangling alias; a root-owned journal that stops the service user with `disk
+I/O error`; exit code 143), passes 11/11 here.
+
+| Check | Result | Seen |
+|---|---|---|
+| R25, `probe_r5.sh` | **PASS** | `alias.db → real.db` (missing): server A through the alias creates the database; a second server through the alias and one on `real.db` both **refuse**; export through either spelling refuses; one lock file, `real.db.lock.db` (round 4: two, `alias.db.lock.db` and `real.db.lock.db`, both held) |
+| R26, `probe_r5.sh` | **PASS** | no `a.db.lock.db-journal` while a server holds the lock, nor after its `kill -9`; **the review's crash:** a root export holding the lock (paused) in a `1777` directory, `kill -9`'d, leaves only `nobody:a.db.lock.db` and `nobody:a.db.lock.json`, and the service user's server **starts** (round 4: a root journal and `disk I/O error`) |
+| R27, `probe_r5.sh` | **PASS** | a SIGTERM'd server exits `{"code":null,"signal":"SIGTERM"}` (round 4: `{"code":143,"signal":null}`); the lock is free at once after |
+| 11 (`c11.py`) | **PASS** 27/27 | unchanged from round 4, on the new code |
+| 1, 4, 7, 8 (`c1.py`) | **PASS** 34/34 | |
+| 5, 6 (`c5.py`) | **PASS** | host p95 frame time 96.5 ms (p50 77.0), skips 51.9/frame, nothing disabled, Throttled on all 64; the 4c tab never elected |
+| DEV's journal | as predicted | the deploy that installed round 5 stopped round 4's server at 23:39 UTC: `status=143 … Failed with result 'exit-code'` — the last such stop. Round 5's server is pid 3148398 |
+
+Checks 2, 3, 9 and 10 were not rerun: round 5 changed only `server-lock.js`, `index.js`, `db.js` and the lock tests.
+**Noted, not fixed (N4, from card 1's handoff):** a symlink loop as the database path makes the server exit 1 with
+Node's uncaught-error trace (through `index.js`'s legacy-lock check) instead of `Atrium server refuses to start: …`;
+no hang. A later round.
+
+### Check 11 on the host, round 5 (the operator)
+As round 4's, plus R26 and R27 on the host. Reads PROD's and DEV's live databases, writes only under
+`/root/rh4d-r5`, and **restarts DEV once** (seconds; DEV sessions reconnect). Expected: both copies `integrity
+ok`; PROD 0 worlds / 0 leaves, all zeros; DEV 4 worlds / 9 leaves, `unchanged 9 … writes 0` three times; DEV's
+lock files are `atrium.db.lock.db` and `atrium.db.lock.json` with **no `-journal`**; the export against DEV's live
+database refuses (`the world server is running (pid N …)`), exit 1; after the restart, DEV's journal shows
+**`Deactivated successfully`** and DEV is `active` again.
+```bash
+set -euo pipefail
+R=/srv/atrium-dev; S=$R/packages/server/scripts; W=/root/rh4d-r5; B=$R/packages/server/node_modules/better-sqlite3
+[ "$(git -C $R rev-parse HEAD)" = ddef0a31f3a484453d0ed5dd28353ffff35a4842 ] || { echo "DEV's checkout is not ddef0a31: stop"; exit 1; }
+mkdir -p -m 700 $W && cd $W
+for pair in prod:/var/lib/atrium/atrium.db dev:/var/lib/atrium-dev/atrium.db; do n=${pair%%:*}; db=${pair#*:}; echo "== $n ($db)"
+  node -e 'const D=require(process.argv[1]); const s=new D(process.argv[2],{readonly:true,fileMustExist:true}); s.backup(process.argv[3]).then(()=>{const c=new D(process.argv[3],{readonly:true}); console.log("integrity", c.pragma("integrity_check",{simple:true}))})' "$B" "$db" $W/$n-copy.db
+  node $S/behaviors-export.mjs $W/$n-copy.db $W/$n-export.json | tail -1
+  for a in "" --apply --apply; do node $S/behaviors-reconcile.mjs $W/$n-copy.db $W/$n-export.json $a | grep -v '^REPORT_JSON' | tail -2 | head -1; done
+done
+echo "== DEV's lock files"; ls -la /var/lib/atrium-dev/ | grep 'atrium.db.lock' || echo 'NO LOCK FILES (unexpected)'
+set +e; node $S/behaviors-export.mjs /var/lib/atrium-dev/atrium.db $W/should-not-exist.json; echo "exit $? (expect 1)"; ls $W/should-not-exist.json 2>/dev/null && echo "UNEXPECTED: an export was written"
+echo "== one restart of DEV: the stop should be clean now"; systemctl restart atrium-dev; sleep 3
+journalctl -u atrium-dev --since '-1 min' --no-pager | grep -E 'Deactivated|status=|Failed|listening' ; systemctl is-active atrium-dev
+```
+
 ## Results on DEV `1d4ccf17` (round 4: `85669db0` + main `c4b87111`, devtasks/ only), 2026-10-31
 **Every round-4 item holds in the browser and on a real database; one new finding (F7).** Checks 9 and 10 were not
 rerun: no round-4 card touched their areas (R23 adds declaration-map checks that check 10's leaves don't use).

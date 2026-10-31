@@ -84,3 +84,15 @@ and MAIN.
 - **Harness lesson:** c2's 30 s form could click check 3's cube before the visitor's view resolved it; c2 now
   waits for the visitor's own pick. Don't edit the pre-brief on `main` while rounds edit it on the branch: the
   release merge would conflict (it lives at Rev 1.4 on `main`, Rev 1.6 on the branch).
+
+## 7. Update, 16:50 PT: round 5 on DEV (`ddef0a31`)
+- **Round 4's outside review** (`REVIEW-scripting-4d-1-round-4-code.md`): NO-GO on two lock flaws, both reproduced
+  by Claude (a dangling symlink gives one database two locks; a root holder's crash leaves a journal that stops
+  the service user). **Round 5** (`REVISION-scripting-4d-1-round-5.md`, approved 15:47 PT, R-L9 (a)): R25 the
+  dangling symlink, R26 the journal in memory, R27 exit by the signal (F7), R28, R29. Tip `e5369130`, on DEV as
+  `ddef0a31` (devtasks-only over the tip). Cards: kickoff `t_d365902a`; steps `t_34652692`, `t_bdb742d4`; GLM
+  review `t_2436e620`; gate `t_4dae5352`; sentinel `t_e7a9ca2c` (title typo "4d1", cosmetic; the guard linked it).
+- **Claude's checks on `ddef0a31`:** `probe_r5.sh` 11/11 (it fails 5 ways on round 4), c11 27/27, c1 34/34, c5
+  pass. Results and the round-5 host block: the checks README.
+- **Next:** the operator's round-5 host block (one DEV restart, to see the first clean stop); a short outside
+  review of `85669db0..e5369130`; DEV acceptance. N4 (a symlink loop exits with a trace) is for a later round.
