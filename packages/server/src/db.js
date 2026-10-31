@@ -13,7 +13,16 @@ import { resolve } from 'node:path'
 // All timestamps are generated with `new Date().toISOString()`.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DB_PATH = resolve('./atrium.db')
+export const DEFAULT_DB_PATH = resolve('./atrium.db')
+
+/**
+ * The database file the server (or a scratch test) will open, resolved to an
+ * absolute path. The rollback scripts and the lifetime lock file (R-L2 (a))
+ * key off this, so both sides agree on `<db>.lock`.
+ */
+export function resolveDbPath(dbPath) {
+  return resolve(dbPath || process.env.ATRIUM_DB_PATH || DEFAULT_DB_PATH)
+}
 
 // ---------------------------------------------------------------------------
 // Schema migrations — versioned, ordered, idempotent.
@@ -162,7 +171,7 @@ const MIGRATIONS = [
 // ---------------------------------------------------------------------------
 
 export function createDb(dbPath) {
-  const resolvedPath = resolve(dbPath || process.env.ATRIUM_DB_PATH || DEFAULT_DB_PATH)
+  const resolvedPath = resolveDbPath(dbPath)
 
   const database = new Database(resolvedPath)
 

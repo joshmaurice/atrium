@@ -33,13 +33,21 @@
 //
 // Usage: node behaviors-reconcile.mjs <db> <export> [--apply]
 //
+// "The world server is stopped" is CHECKED, not assumed (N3): the server holds
+// a LIFETIME lock file beside the database, and this refuses while its pid is
+// alive (R-L2 (a), round 3); a stale lock is warned about and removed.
+// `BEGIN IMMEDIATE` is taken for ATOMICITY of the write, not as the offline
+// check (round 2's M2).
+//
 // File-backed worlds are out of scope: they are never autosaved, so they never
 // hold a healed leaf in storage.
 
 import Database from 'better-sqlite3'
+import { resolve } from 'node:path'
 import { createWorldFromDocument } from '../src/world.js'
 import { behaviorCheck } from '../src/send-policy.js'
-import { sha256Json } from './behaviors-export.mjs'
+import { assertServerStopped } from '../src/server-lock.js'
+import { sha256Json, quoteName } from './behaviors-export.mjs'
 
 /** objectId → the indices of the nodes carrying it. */
 export function objectIdIndex(documentJson) {
@@ -115,6 +123,7 @@ export async function reconcile(database, exported, { apply = false, log = () =>
     const entry = {
       worldId: world.worldId,
       ownerId: world.ownerId,
+      name: world.name ?? '',
       sinceExport: row ? (row.updated_at === world.updatedAt ? 'untouched' : 'edited') : 'gone',
       unchanged: 0, restores: [], conflicts: [], leaves: [], wrote: false,
     }
@@ -216,14 +225,25 @@ function main() {
       process.exit(1)
     }
 
-    let db
+    const resolvedDbPath = resolve(dbPath)
+
+    // The offline check (R-L2 (a)): a live server's lifetime lock refuses.
     try {
-      db = new Database(dbPath)
+      assertServerStopped(resolvedDbPath, { log: (line) => console.error(`[reconcile] ${line}`) })
     } catch (error) {
-      console.error(`[reconcile] cannot open ${dbPath}: ${error.message}`)
+      console.error(`[reconcile] ${error.message}`)
       process.exit(1)
     }
 
+    let db
+    try {
+      db = new Database(resolvedDbPath)
+    } catch (error) {
+      console.error(`[reconcile] cannot open ${resolvedDbPath}: ${error.message}`)
+      process.exit(1)
+    }
+
+    // Atomicity, NOT the offline check (round 2's M2).
     try {
       db.exec('BEGIN IMMEDIATE')
     } catch (error) {
@@ -237,10 +257,10 @@ function main() {
 
       const byReason = {}
       for (const world of report.worlds) {
-        console.log(`[reconcile] world ${world.worldId} (owner ${world.ownerId}, ${world.sinceExport} since the export): ` +
+        console.log(`[reconcile] world ${world.worldId} ${quoteName(world.name)} (owner ${world.ownerId}, ${world.sinceExport} since the export): ` +
           `unchanged ${world.unchanged}, restore ${world.restores.length}, conflict ${world.conflicts.length}`)
         for (const leaf of world.leaves) {
-          console.log(`  node ${leaf.objectId ?? '(no id)'} "${leaf.name ?? ''}": ${leaf.outcome}` +
+          console.log(`  node ${leaf.objectId ?? '(no id)'} ${quoteName(leaf.name)}: ${leaf.outcome}` +
             (leaf.reason ? ` — ${leaf.reason}` : ''))
         }
         for (const conflict of world.conflicts) byReason[conflict.reason] = (byReason[conflict.reason] ?? 0) + 1

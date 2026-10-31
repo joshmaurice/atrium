@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 //
-// behaviors-rollback.test.js — scripting-4d-1 round 2, step 4 (G10). The two
+// behaviors-rollback.test.js — scripting-4d-1 round 2, step 4 (G10); round 3,
+// card 4 adds the offline check (R8, R-L2 (a)) and R11's escaping. The two
 // rollback scripts on a scratch database built by the SERVER's own code
-// (`createDb`), driven as real processes so the CLI, the exclusive lock and
-// `--apply` are all exercised.
+// (`createDb`), driven as real processes so the CLI, the two locks
+// (`BEGIN IMMEDIATE` for atomicity; the server's lifetime lock file for the
+// offline check) and `--apply` are all exercised.
 //
 // The three outcomes of `behaviors-reconcile.mjs`:
 //   unchanged | the world exists, one node has that objectId, its leaf's sha256
@@ -21,7 +23,7 @@
 
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
@@ -79,7 +81,7 @@ function buildDb(dbPath, worlds) {
   for (const [id, world] of Object.entries(worlds)) {
     database.prepare(
       'INSERT INTO worlds (id, owner_user_id, slug, name, document, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'u-owner', id, id, JSON.stringify(world.document), 'private', now, world.updatedAt ?? now)
+    ).run(id, 'u-owner', id, world.name ?? id, JSON.stringify(world.document), 'private', now, world.updatedAt ?? now)
   }
   close()
 }
@@ -281,7 +283,7 @@ test('G10: the caps are re-checked cumulatively — a restore that would break t
 })
 
 // ===========================================================================
-// The exclusive lock
+// The atomicity lock (`BEGIN IMMEDIATE`) — NOT the offline check (round 2 M2)
 // ===========================================================================
 
 test('G10: both scripts refuse while another connection holds the database', async () => {
@@ -292,7 +294,7 @@ test('G10: both scripts refuse while another connection holds the database', asy
   buildDb(dbPath, { WL: { document: documentWithNodes([{ name: 'n', atrium: { objectId: id, behavior: leafFor(id) } }]) } })
 
   const holder = new Database(dbPath)
-  holder.exec('BEGIN IMMEDIATE')   // hold the write lock, as a running server would
+  holder.exec('BEGIN IMMEDIATE')   // the ATOMICITY lock (R8) — not the offline check
   try {
     const exported = await run(EXPORT, [dbPath, outPath])
     assert.notEqual(exported.code, 0, 'the export refuses')
@@ -308,4 +310,121 @@ test('G10: both scripts refuse while another connection holds the database', asy
     holder.exec('ROLLBACK')
     holder.close()
   }
+})
+
+// ===========================================================================
+// R8 / R-L2 (a) — the offline check: the server's LIFETIME lock file
+// ===========================================================================
+
+/** A pid that is certainly dead: a child that has exited and been reaped. */
+const deadPid = () => new Promise((res) => {
+  const child = execFile(process.execPath, ['-e', 'process.exit(0)'], () => res(child.pid))
+})
+
+const writeLock = (dbPath, pid) => writeFileSync(
+  `${dbPath}.lock`, JSON.stringify({ pid, host: 'test-host', startedAt: new Date().toISOString() }) + '\n'
+)
+
+test('G10/R8: both scripts refuse while the server lifetime lock names a LIVE pid', async () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'live.db')
+  const outPath = join(dir, 'live-export.json')
+  const id = randomUUID()
+  buildDb(dbPath, { WL: { document: documentWithNodes([{ name: 'n', atrium: { objectId: id, behavior: leafFor(id) } }]) } })
+
+  // The lock file exactly as `acquireServerLock` writes it, naming a live pid
+  // (this test's own process — alive, and never the child script's pid).
+  writeLock(dbPath, process.pid)
+
+  const exported = await run(EXPORT, [dbPath, outPath])
+  assert.notEqual(exported.code, 0, 'the export refuses')
+  assert.match(exported.stderr, /the world server is running \(pid \d+ on test-host\)/)
+  assert.equal(existsSync(outPath), false, 'nothing was written')
+
+  writeFileSync(outPath, JSON.stringify({ version: 1, worlds: [] }))
+  const reconciled = await run(RECONCILE, [dbPath, outPath])
+  assert.notEqual(reconciled.code, 0, 'the reconcile refuses')
+  assert.match(reconciled.stderr, /the world server is running \(pid \d+ on test-host\)/)
+
+  // A refusal does NOT remove the server's lock: it is still held.
+  assert.equal(existsSync(`${dbPath}.lock`), true, 'the live lock file survives the refusal')
+})
+
+test('G10/R8: a STALE server lifetime lock is warned about and removed, and both scripts proceed', async () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'stale.db')
+  const outPath = join(dir, 'stale-export.json')
+  const id = randomUUID()
+  buildDb(dbPath, { WS: { document: documentWithNodes([{ name: 'n', atrium: { objectId: id, behavior: leafFor(id) } }]) } })
+
+  const dead = await deadPid()
+  writeLock(dbPath, dead)
+
+  const exported = await run(EXPORT, [dbPath, outPath])
+  assert.equal(exported.code, 0, exported.stderr)
+  assert.match(exported.stderr, new RegExp(`stale lock from pid ${dead}, removed`))
+  assert.equal(existsSync(`${dbPath}.lock`), false, 'the stale lock file was removed')
+  assert.equal(JSON.parse(readFileSync(outPath, 'utf8')).worlds.length, 1, 'the export proceeded')
+
+  // Stale again, for the reconcile.
+  writeLock(dbPath, dead)
+  const reconciled = await run(RECONCILE, [dbPath, outPath])
+  assert.equal(reconciled.code, 0, reconciled.stderr)
+  assert.match(reconciled.stderr, new RegExp(`stale lock from pid ${dead}, removed`))
+  assert.equal(existsSync(`${dbPath}.lock`), false, 'the stale lock file was removed again')
+  assert.equal(reportOf(reconciled.stdout).totals.writes, 0, 'a dry run still writes nothing')
+})
+
+// ===========================================================================
+// R11 — names are printed through JSON.stringify
+// ===========================================================================
+
+test('G10/R11: a name with a newline cannot forge a record line — one line per node, one per world', async () => {
+  const dir = scratchDir()
+  const dbPath = join(dir, 'names.db')
+  const outPath = join(dir, 'names-export.json')
+  const idA = randomUUID(); const idB = randomUUID()
+  const leafA = leafFor(idA); const leafB = leafFor(idB)
+  const forgedNode = 'crate\n[reconcile] APPLIED: unchanged 0, restore 0, conflict 0'
+  const forgedWorld = 'My World\n[export] wrote /etc/passwd: 9 world(s)'
+  buildDb(dbPath, {
+    WN: {
+      name: forgedWorld,
+      document: documentWithNodes([
+        { name: forgedNode, atrium: { objectId: idA, behavior: leafA } },
+        { name: 'plain', atrium: { objectId: idB, behavior: leafB } },
+      ]),
+    },
+  })
+
+  const result = await run(EXPORT, [dbPath, outPath])
+  assert.equal(result.code, 0, result.stderr)
+  const lines = result.stdout.split('\n')
+
+  assert.equal(lines.filter((l) => l.startsWith('  node ')).length, 2,
+    `one record line per node, not per newline: ${result.stdout}`)
+  assert.equal(lines.filter((l) => l.startsWith('[export] world ')).length, 1,
+    'one world line, not per newline in the world name')
+  assert.equal(lines.filter((l) => l.startsWith('[export] wrote ')).length, 1,
+    'the forged `[export] wrote` line never starts a line')
+  assert.equal(lines.some((l) => l.startsWith('[reconcile] APPLIED')), false,
+    'the forged `[reconcile] APPLIED` line never starts a line')
+
+  const crypto = await import('node:crypto')
+  const expectedNode = `  node ${idA} ${JSON.stringify(forgedNode)} sha256 ` +
+    crypto.createHash('sha256').update(JSON.stringify(leafA)).digest('hex')
+  assert.ok(result.stdout.includes(expectedNode), `the node name is JSON-quoted: ${result.stdout}`)
+  assert.ok(result.stdout.includes(JSON.stringify(forgedWorld)), 'the world name is JSON-quoted')
+
+  // The reconcile prints the same names, escaped, from the same export.
+  const reconciled = await run(RECONCILE, [dbPath, outPath])
+  assert.equal(reconciled.code, 0, reconciled.stderr)
+  const rLines = reconciled.stdout.split('\n')
+  assert.equal(rLines.filter((l) => l.startsWith('  node ')).length, 2,
+    `one leaf line per node: ${reconciled.stdout}`)
+  assert.equal(rLines.filter((l) => l.startsWith('[reconcile] world ')).length, 1)
+  assert.equal(rLines.some((l) => l.startsWith('[reconcile] APPLIED:')), false,
+    'the forged `[reconcile] APPLIED` line never starts a line')
+  assert.ok(reconciled.stdout.includes(JSON.stringify(forgedNode)), 'the node name is JSON-quoted here too')
+  assert.ok(reconciled.stdout.includes(JSON.stringify(forgedWorld)), 'the world name is JSON-quoted here too')
 })

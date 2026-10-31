@@ -12,16 +12,28 @@
 //
 // Usage: node behaviors-export.mjs <db> <out>
 //
-// The exclusive lock (`BEGIN IMMEDIATE`) means "the server is stopped" is
-// CHECKED, not assumed (N3): a running server holds the database and this
-// refuses instead of reading a half-written state.
+// "The world server is stopped" is CHECKED, not assumed (N3): the server holds
+// a LIFETIME lock file beside the database, and this script refuses while that
+// file's pid is alive (R-L2 (a), round 3). A stale lock (a dead pid) is warned
+// about and removed. `BEGIN IMMEDIATE` is taken as well, but for ATOMICITY
+// against a concurrent writer — it is not the offline check: an idle server
+// between transactions holds no write lock (round 2's M2).
 
 import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import Database from 'better-sqlite3'
+import { assertServerStopped } from '../src/server-lock.js'
 
 const sha256Json = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export { sha256Json }
+
+/**
+ * R11 — every name a script prints goes through `JSON.stringify`: a node or
+ * world name carrying LF, CR or a `[reconcile] …` prefix must not be able to
+ * forge a record line in the operator's report.
+ */
+export const quoteName = (name) => JSON.stringify(typeof name === 'string' ? name : '')
 
 /** Every node of a serialized glTF document that carries a non-null behaviour. */
 export function behaviorNodesInDocument(documentJson) {
@@ -53,20 +65,21 @@ export function behaviorNodesInDocument(documentJson) {
 /** The whole export value for an open database. Exported so a test can read it. */
 export function buildExport(database) {
   const worlds = database.prepare(
-    'SELECT id, owner_user_id, document, updated_at FROM worlds ORDER BY id'
+    'SELECT id, owner_user_id, name, document, updated_at FROM worlds ORDER BY id'
   ).all()
 
   const out = { version: 1, generatedAt: new Date().toISOString(), worlds: [] }
   for (const row of worlds) {
     const result = behaviorNodesInDocument(row.document)
     if (result.problem) {
-      out.worlds.push({ worldId: row.id, ownerId: row.owner_user_id, updatedAt: row.updated_at, problem: result.problem, nodes: [] })
+      out.worlds.push({ worldId: row.id, ownerId: row.owner_user_id, name: row.name ?? '', updatedAt: row.updated_at, problem: result.problem, nodes: [] })
       continue
     }
     if (result.nodes.length === 0) continue
     out.worlds.push({
       worldId: row.id,
       ownerId: row.owner_user_id,
+      name: row.name ?? '',
       updatedAt: row.updated_at,
       nodes: result.nodes,
     })
@@ -79,10 +92,20 @@ export function buildExport(database) {
 // ---------------------------------------------------------------------------
 
 function main() {
-  const [dbPath, outPath] = process.argv.slice(2)
-  if (!dbPath || !outPath) {
+  const [dbArg, outPath] = process.argv.slice(2)
+  if (!dbArg || !outPath) {
     console.error('usage: node behaviors-export.mjs <db> <out>')
     process.exit(2)
+  }
+  const dbPath = resolve(dbArg)
+  const warn = (line) => console.error(`[export] ${line}`)
+
+  // The offline check (R-L2 (a)): a live server's lifetime lock refuses.
+  try {
+    assertServerStopped(dbPath, { log: warn })
+  } catch (error) {
+    console.error(`[export] ${error.message}`)
+    process.exit(1)
   }
 
   let db
@@ -93,8 +116,8 @@ function main() {
     process.exit(1)
   }
 
-  // The exclusive lock: refuse when another connection holds the database, so
-  // "with the world server stopped" is checked.
+  // Atomicity, NOT the offline check: it keeps the read consistent against a
+  // concurrent writer for the moment it runs.
   try {
     db.exec('BEGIN IMMEDIATE')
   } catch (error) {
@@ -109,9 +132,9 @@ function main() {
 
     const nodeCount = exported.worlds.reduce((sum, w) => sum + w.nodes.length, 0)
     for (const world of exported.worlds) {
-      console.log(`[export] world ${world.worldId} (owner ${world.ownerId}, updated ${world.updatedAt}): ${world.nodes.length} behaviour leaf(s)`)
+      console.log(`[export] world ${world.worldId} ${quoteName(world.name)} (owner ${world.ownerId}, updated ${world.updatedAt}): ${world.nodes.length} behaviour leaf(s)`)
       for (const node of world.nodes) {
-        console.log(`  node ${node.objectId ?? '(no id)'} "${node.name ?? ''}" sha256 ${node.behaviorSha256}`)
+        console.log(`  node ${node.objectId ?? '(no id)'} ${quoteName(node.name)} sha256 ${node.behaviorSha256}`)
       }
     }
     console.log(`[export] wrote ${outPath}: ${exported.worlds.length} world(s), ${nodeCount} behaviour leaf(s)`)

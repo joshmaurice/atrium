@@ -5,7 +5,8 @@ import { readFile } from 'node:fs/promises'
 import { resolve as resolvePath, dirname } from 'node:path'
 import { createServer } from 'node:http'
 import { createRequestHandler } from './http-routes.js'
-import { createDb } from './db.js'
+import { createDb, resolveDbPath } from './db.js'
+import { acquireServerLock } from './server-lock.js'
 import { createWorldRegistry } from './world-registry.js'
 import * as auth from './auth.js'
 import { setupCommons } from './commons.js'
@@ -55,8 +56,33 @@ port ??= 3000
 // Database
 // ---------------------------------------------------------------------------
 
-const db = createDb(process.env.ATRIUM_DB_PATH)
-console.log(`Atrium database: ${process.env.ATRIUM_DB_PATH || '(default)'}`)
+// R-L2 (a) — the server's LIFETIME lock, beside the database. It is what makes
+// "the world server is stopped" CHECKED by the rollback scripts rather than
+// assumed (round 2's M2: `BEGIN IMMEDIATE` is an atomicity lock, not an
+// offline check). A live pid in `<db>.lock` refuses a second server, and
+// refuses the scripts. Removed on a clean exit below.
+const dbPath = resolveDbPath(process.env.ATRIUM_DB_PATH)
+
+let serverLock
+try {
+  serverLock = acquireServerLock(dbPath, { log: (line) => console.error(`[lock] ${line}`) })
+} catch (error) {
+  console.error(`Atrium server refuses to start: ${error.message}`)
+  process.exit(1)
+}
+
+let lockReleased = false
+const releaseServerLock = () => {
+  if (lockReleased || !serverLock) return
+  lockReleased = true
+  serverLock.release()
+}
+process.on('exit', releaseServerLock)
+process.on('SIGINT', () => { releaseServerLock(); process.exit(130) })
+process.on('SIGTERM', () => { releaseServerLock(); process.exit(143) })
+
+const db = createDb(dbPath)
+console.log(`Atrium database: ${dbPath}`)
 
 // ---------------------------------------------------------------------------
 // HTTP server with route dispatch
