@@ -23,6 +23,8 @@ timeout 60  node devtasks/spike-4d/p7.mjs    # loops through event/send
 # Added for Rev 1 (the review of Rev 0):
 timeout 30  node devtasks/spike-4d/r1-extension-collision.mjs   # M1: an extension declaration borrowing a core op name
 timeout 30  node devtasks/spike-4d/r2-clock-and-defaults.mjs    # M3: the tick's own performance.now(); S1: NaN defaults reaching writes
+# Added for Rev 1.1 (the review of Rev 1):
+timeout 30  node devtasks/spike-4d/r3-interpolation-rejection.mjs   # S4: an async interpolation's rejection, and the bus wrapper
 ```
 
 The static survey of §2.4 is in `survey/` (Python 3, reads the assets' JSON only):
@@ -51,3 +53,4 @@ git fetch --depth 1 origin 926bec45dfbe052bad4013ab5852ed2f4042bff5 && git check
 | `p7` | send → receive loop: 2 steps a tick for 30 ticks; doubling fan-out: 2 … 8,192, disposed on tick 14 |
 | `r1` | bare `flow/sequence` and `flow/sequence` with `extension: 'EXT_probe'` both build `Sequence` and write; an extension `event/onTick` builds `OnTickNode` and is ticked |
 | `r2` | a throwing `performance.now` disposes the engine (`engine-error`); with the real clock jumping, `timeSinceStart` follows the injected clock (0, 0.25); a get of an unregistered float3 writes `[NaN, NaN, NaN]`; the first `timeSinceLastTick` writes `[NaN, 0, 0]` |
+| `r3` | with `engine.setPathValue` forced to throw, an interpolation's rejections are unhandled and the engine isn't disposed; wrapped on the adapter's bus, both are caught and none is unhandled |
