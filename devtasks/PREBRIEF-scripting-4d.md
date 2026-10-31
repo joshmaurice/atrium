@@ -1,6 +1,6 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **FINAL, Revision 1.6 (2026-10-31; FINAL since Rev 1.3). The operator approved
+Status: **FINAL, Revision 1.7 (2026-10-31; FINAL since Rev 1.3). The operator approved
 decisions G-L1–G-L12, Q3 and Q7 and made Rev 1.2 FINAL (2026-10-30 20:57
 PT), all as recommended:**
 G-L1 (a) 4d-1, one round with seven steps, and `KHR_animation_pointer`
@@ -325,7 +325,9 @@ scripts check.
    now says: "The 4c server you roll back to holds no lifetime lock (it
    predates R8), so the scripts can't detect it. Don't run either script until
    step 4, after the fixed server has been deployed and stopped again; check
-   `systemctl is-active atrium` reports `inactive` first."
+   `systemctl is-active atrium` reports anything but `active` (`inactive` after
+   a clean stop; `failed` only if it crashed) first." (Rev 1.7 amends the
+   `systemctl` line of both copies.)
 2. **G10, the offline check (R22, R19; the outside review's M1, F6 (b)).**
    Under R-L8 (a) the lock is not a lock file: it is a **kernel lock, through
    SQLite**. The server, and both scripts, hold an exclusive transaction on a
@@ -358,6 +360,29 @@ scripts check.
 
 §0.6, §8's step 3, G10, G7, G6 and §5's Q3 change; the status line names Rev
 1.6. Nothing else.
+
+### 0.7 Revision 1.7 (after FINAL, round 5)
+Round 5's revision (`devtasks/REVISION-scripting-4d-1-round-5.md`, R25–R29)
+recorded the two notes below. **No decision changes**, with one exception:
+R-L9 (a) replaces the *mechanism* of R26 — the lock database's journal is held
+in memory, so no journal file exists on disk — and keeps R22's lock itself
+unchanged.
+
+1. **§8, step 3,** and §0.6's copy of it: "…check `systemctl is-active atrium`
+   reports anything but `active` (`inactive` after a clean stop; `failed` only
+   if it crashed) first." The stop check no longer reads only `inactive`,
+   because until round 5's server a clean stop was recorded as `failed` (R27,
+   F7).
+2. **G10, the offline check (R25, R26, R27):** a **dangling symlink resolves
+   to its target** (R25), so an alias and the file it will create are one lock
+   from the first boot; the **lock database's journal is in memory**
+   (`journal_mode = MEMORY`, R26 as R-L9 (a)), so no
+   `<canonical db>.lock.db-journal` file is ever created, and none can be left
+   behind owned by anyone; and the **server ends by the signal** (R27), so
+   `systemd` records a clean stop.
+
+§0.7, §8's step 3, its copy in §0.6 and G10 change; the status line names Rev
+1.7. Nothing else.
 
 ## 1. What 4d delivers
 
@@ -1455,6 +1480,12 @@ operator. That is the authority: no owner's session is involved (P24).
   to the database, or the same file reached through another mount, is a
   different path after `realpath`, and so a different lock. `BEGIN IMMEDIATE`
   on the main database stays, for atomicity only; it is not the offline check.
+  **Rev 1.7:** a **dangling symlink resolves to its target** (R25), so an alias
+  and the file it creates are one lock from the first boot; the lock
+  database's **journal is in memory** (`journal_mode = MEMORY`, R26 as R-L9
+  (a)), so no `<canonical db>.lock.db-journal` file is ever created and none
+  can be left behind, owned by anyone; and the **server ends by the signal**
+  (R27), so systemd records a clean stop.
 - **File-backed worlds are out of scope:** they are never autosaved
   (`world.js` L462–470), so they never hold a healed leaf in storage.
 - **Limit, stated:** a node that had a 4d leaf, was healed to `null`, and
@@ -1644,8 +1675,9 @@ As scripting-4c, with this round's specifics:
      refused by the 4c server, P16); **the 4c server you roll back to holds no
      lifetime lock (it predates R8), so the scripts can't detect it. Don't run
      either script until step 4, after the fixed server has been deployed and
-     stopped again; check `systemctl is-active atrium` reports `inactive`
-     first** (Rev 1.6, F6 (a));
+     stopped again; check `systemctl is-active atrium` reports anything but
+     `active` (`inactive` after a clean stop; `failed` only if it crashed)
+     first** (Rev 1.7, F6 (a) / F7);
   4. once the fix is deployed, stop the server again, take a second backup
      the same way, run `behaviors-reconcile.mjs` as a dry run, read its
      conflicts, then run it with `--apply`, then start the server;
