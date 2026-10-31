@@ -41,10 +41,15 @@ const encoder = new TextEncoder()
 function documentOf(graph, { nodes = [], lights = [], animations } = {}) {
   return {
     asset: { version: '2.0' },
-    extensions: { KHR_interactivity: { graphs: [graph] } },
+    extensions: {
+      KHR_interactivity: { graphs: [graph] },
+      // R7 — a light is a row of the LIGHT TABLE; each one gets exactly one
+      // host node, which names it through `KHR_lights_punctual.light`.
+      ...(lights.length > 0 ? { KHR_lights_punctual: { lights } } : {}),
+    },
     nodes: [
       ...nodes,
-      ...lights.map(() => ({ extensions: { KHR_lights_punctual: { light: 0 } } })),
+      ...lights.map((_light, index) => ({ extensions: { KHR_lights_punctual: { light: index } } })),
     ],
     ...(animations ? { animations } : {}),
   }
@@ -124,7 +129,9 @@ describe('G6 — parseGraphSource: the source shapes', () => {
     assert.equal(parsed.graphs.length, 1)
     assert.equal(parsed.graphIndex, 0)
     assert.deepEqual(parsed.fileNodes, [{ index: 0, name: 'Quad' }, { index: 1, name: 'Pass' }, { index: 2, name: 'node 2' }])
-    assert.deepEqual(parsed.fileLights, [{ index: 2, name: 'node 2' }])
+    // R7 — `fileLights` is the LIGHT TABLE, with the host resolved through the
+    // node that names the light; it is not a second view of the host nodes.
+    assert.deepEqual(parsed.fileLights, [{ index: 0, name: 'Key light', hosts: [2] }])
     assert.deepEqual(parsed.fileAnimations, [{ index: 0, name: 'spin' }, { index: 1, name: 'animation 1' }])
   })
 
@@ -476,48 +483,57 @@ describe('G6 — convertGraph rewrites or refuses, never silently', () => {
 // Item 5 / R-L1's test — a survey asset converts and RUNS, under two mappings
 // ---------------------------------------------------------------------------
 
+/**
+ * Run a converted leaf through the REAL adapter on a fake world.
+ *
+ * Module scope: every conversion in this file runs through it (the seam rule —
+ * the real adapter, a fake world, an injected clock). `lights` are the nodeMap
+ * indices that are light hosts (R7); `fields` seeds the world's reads.
+ */
+function runValue(leaf, { ticks = 40, lights = [], fields: initial = {} } = {}) {
+  const writes = []
+  const fields = new Map(Object.entries(initial))
+  const lightValues = new Map()
+  let clock = 0
+  const world = {
+    resolve: (i) => (i >= 0 && i < leaf.nodeMap.length ? { objectId: leaf.nodeMap[i], name: `node-${i}` } : { problem: 'not-found' }),
+    isOwnOrDescendant: () => true,
+    isGranted: () => true,
+    // R7 — a light host is a nodeMap index, and the adapter registers the light
+    // family at the highest one.
+    hasLight: (i) => lights.includes(i),
+    get: (i, field) => fields.get(`${i}:${field}`),
+    set: (i, field, next) => { fields.set(`${i}:${field}`, next); writes.push([i, field, next]); return true },
+    lightIntensity: (i) => lightValues.get(i),
+    setLightIntensity: (i, next) => { lightValues.set(i, next); writes.push([i, 'intensity', next]); return true },
+    lightColor: (i) => lightValues.get(i),
+    setLightColor: (i, next) => { lightValues.set(i, next); writes.push([i, 'color', next]); return true },
+    matrix: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    worldMatrix: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    clipStatus: () => ({ status: 'none' }),
+    play: () => true,
+    stop: () => true,
+    worldPosition: () => [0, 0, 0],
+    parentIndex: () => null,
+  }
+  const engine = createBehaviorEngine({
+    graph: leaf.graph,
+    nodeMap: leaf.nodeMap,
+    animations: leaf.animations,
+    world,
+    now: () => clock,
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    log: () => {},
+  })
+  assert.equal(engine.problem, null, engine.message ?? '')
+  for (let k = 0; k < ticks; k += 1) { clock += 100; engine.tick() }
+  engine.dispose()
+  return writes
+}
+
 describe('G6 — a survey asset that fits converts, passes behaviorCheck and runs', () => {
   const fixture = JSON.parse(readFileSync(resolve(KHRONOS, 'graphs/math--math_select.json'), 'utf8'))
-
-  /** Run a converted leaf through the REAL adapter on a fake world. */
-  function runValue(leaf, { ticks = 40 } = {}) {
-    const writes = []
-    const fields = new Map()
-    let clock = 0
-    const world = {
-      resolve: (i) => (i >= 0 && i < leaf.nodeMap.length ? { objectId: leaf.nodeMap[i], name: `node-${i}` } : { problem: 'not-found' }),
-      isOwnOrDescendant: () => true,
-      isGranted: () => true,
-      hasLight: () => false,
-      get: (i, field) => fields.get(`${i}:${field}`),
-      set: (i, field, next) => { fields.set(`${i}:${field}`, next); writes.push([i, field, next]); return true },
-      lightIntensity: () => undefined,
-      setLightIntensity: () => true,
-      lightColor: () => undefined,
-      setLightColor: () => true,
-      matrix: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-      worldMatrix: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-      clipStatus: () => ({ status: 'none' }),
-      play: () => true,
-      stop: () => true,
-      worldPosition: () => [0, 0, 0],
-      parentIndex: () => null,
-    }
-    const engine = createBehaviorEngine({
-      graph: leaf.graph,
-      nodeMap: leaf.nodeMap,
-      animations: leaf.animations,
-      world,
-      now: () => clock,
-      setTimeout: () => 0,
-      clearTimeout: () => {},
-      log: () => {},
-    })
-    assert.equal(engine.problem, null, engine.message ?? '')
-    for (let k = 0; k < ticks; k += 1) { clock += 100; engine.tick() }
-    engine.dispose()
-    return writes
-  }
 
   const doc = {
     extensions: { KHR_interactivity: { graphs: [fixture.graph] } },
@@ -553,6 +569,251 @@ describe('G6 — a survey asset that fits converts, passes behaviorCheck and run
     // Where the file named node 5 and node 11, under each mapping.
     assert.deepEqual([first.value.nodeMap[1], first.value.nodeMap[2]], [TGT, THIRD])
     assert.deepEqual([second.value.nodeMap[1], second.value.nodeMap[2]], [THIRD, TGT])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// R7 — the light namespace: the light table, its hosts, and two objects
+// ---------------------------------------------------------------------------
+
+describe('G6 / R7 — a light is a row of the LIGHT TABLE, and its host is a node', () => {
+  test('lights[0] on nodes[1]: a node reference and a light reference are two different objects, through the real adapter', () => {
+    const graph = graphOf({
+      declarations: [
+        { op: 'event/onStart' }, { op: 'flow/sequence' }, { op: 'pointer/get' }, { op: 'pointer/set' },
+      ],
+      nodes: [
+        { declaration: 0, flows: { out: { node: 1, socket: 'in' } } },
+        { declaration: 1, flows: { a: { node: 2, socket: 'in' }, b: { node: 3, socket: 'in' }, c: { node: 4, socket: 'in' } } },
+        // Reads the file's node 0 ...
+        { declaration: 2, configuration: { pointer: lit(T.ref, '/nodes/0/translation'), type: lit(T.int, T.float3) } },
+        // ... and writes the file's light 0, which lives on the file's node 1.
+        {
+          declaration: 3,
+          configuration: { pointer: lit(T.ref, '/extensions/KHR_lights_punctual/lights/0/color'), type: lit(T.int, T.float3) },
+          values: { value: { node: 2, socket: 'value' } },
+        },
+        setter('/nodes/0/scale', T.float3, [7, 7, 7], { declaration: 3 }),
+      ],
+    })
+    const doc = documentOf(graph, { nodes: [{ name: 'Quad' }], lights: [{ name: 'Sun' }] })
+    const parsed = parseGraphSource(bytesOf(doc), { name: 'lights.gltf' })
+    assert.equal(parsed.problem, undefined)
+    assert.deepEqual(parsed.fileNodes, [{ index: 0, name: 'Quad' }, { index: 1, name: 'node 1' }])
+    assert.deepEqual(parsed.fileLights, [{ index: 0, name: 'Sun', hosts: [1] }])
+
+    // The two namespaces map to two DIFFERENT objects, and the nodeMap holds
+    // three: own, the file's node 0, and the light's host.
+    const out = convertGraph(parsed.graphs[0], {
+      own: OWN, nodes: { 0: TGT, 1: THIRD }, lights: { 0: THIRD },
+    })
+    assert.equal(out.problem, undefined, out.problem)
+    assert.deepEqual(out.value.nodeMap, [OWN, TGT, THIRD])
+    assert.deepEqual(out.value.targets, [TGT, THIRD])
+    assert.equal(out.value.graph.nodes[2].configuration.pointer.value[0], '/nodes/1/translation')
+    assert.equal(out.value.graph.nodes[3].configuration.pointer.value[0], '/extensions/KHR_lights_punctual/lights/2/color')
+    assert.equal(out.value.graph.nodes[4].configuration.pointer.value[0], '/nodes/1/scale')
+    assert.equal(behaviorCheck(out.value, { ownId: OWN }).problem, null)
+
+    // The light write lands on the LIGHT object and the node write on the NODE
+    // object, and the value the light gets was read from the node's object.
+    const writes = runValue(out.value, { lights: [2], fields: { '1:translation': [0.25, 0.5, 0.75] } })
+    assert.deepEqual(writes, [
+      [2, 'color', [0.25, 0.5, 0.75]],
+      [1, 'scale', [7, 7, 7]],
+    ])
+  })
+
+  test('two distinct lights on two nodes: each light is its own row and its own object', () => {
+    const graph = graphOf({
+      declarations: [{ op: 'event/onStart' }, { op: 'flow/sequence' }, { op: 'pointer/set' }],
+      nodes: [
+        { declaration: 0, flows: { out: { node: 1, socket: 'in' } } },
+        { declaration: 1, flows: { a: { node: 2, socket: 'in' }, b: { node: 3, socket: 'in' } } },
+        setter('/extensions/KHR_lights_punctual/lights/0/intensity', T.float, 0.5, { declaration: 2 }),
+        setter('/extensions/KHR_lights_punctual/lights/1/intensity', T.float, 0.75, { declaration: 2 }),
+      ],
+    })
+    const doc = documentOf(graph, { nodes: [{ name: 'Quad' }], lights: [{ name: 'Sun' }, { name: 'Lamp' }] })
+    const parsed = parseGraphSource(bytesOf(doc), { name: 'two-lights.gltf' })
+    assert.equal(parsed.problem, undefined)
+    assert.deepEqual(parsed.fileLights, [
+      { index: 0, name: 'Sun', hosts: [1] },
+      { index: 1, name: 'Lamp', hosts: [2] },
+    ])
+
+    const out = convertGraph(parsed.graphs[0], {
+      own: OWN, nodes: { 1: TGT, 2: THIRD }, lights: { 0: TGT, 1: THIRD },
+    })
+    assert.equal(out.problem, undefined, out.problem)
+    assert.deepEqual(out.value.nodeMap, [OWN, TGT, THIRD])
+    assert.equal(out.value.graph.nodes[2].configuration.pointer.value[0], '/extensions/KHR_lights_punctual/lights/1/intensity')
+    assert.equal(out.value.graph.nodes[3].configuration.pointer.value[0], '/extensions/KHR_lights_punctual/lights/2/intensity')
+    assert.equal(behaviorCheck(out.value, { ownId: OWN }).problem, null)
+
+    // Each light reaches its own host's light.
+    assert.deepEqual(runValue(out.value, { lights: [1, 2] }), [[1, 'intensity', 0.5], [2, 'intensity', 0.75]])
+  })
+
+  test('a light with no host, and a light with two hosts, are refused at parse time, naming the light', () => {
+    const graph = graphOf({ declarations: [{ op: 'debug/log' }], nodes: [] })
+    const table = { KHR_lights_punctual: { lights: [{ name: 'Sun' }] } }
+
+    const orphan = {
+      asset: { version: '2.0' },
+      extensions: { KHR_interactivity: { graphs: [graph] }, ...table },
+      nodes: [{ name: 'Quad' }],
+    }
+    assert.match(parseGraphSource(bytesOf(orphan), { name: 'orphan.gltf' }).problem,
+      /the light 0 \(Sun\) has no host node; the import needs exactly one node naming it/)
+
+    const twoHosts = {
+      asset: { version: '2.0' },
+      extensions: { KHR_interactivity: { graphs: [graph] }, ...table },
+      nodes: [
+        { name: 'Quad', extensions: { KHR_lights_punctual: { light: 0 } } },
+        { name: 'Pass', extensions: { KHR_lights_punctual: { light: 0 } } },
+      ],
+    }
+    assert.match(parseGraphSource(bytesOf(twoHosts), { name: 'two-hosts.gltf' }).problem,
+      /the light 0 \(Sun\) has 2 host nodes \(0, 1\); the import needs exactly one node naming it/)
+  })
+
+  test('the old fixture — one node that is also the light\u2019s host — still converts with nodeMap: [own]', () => {
+    const graph = graphOf({
+      declarations: [{ op: 'pointer/set' }],
+      nodes: [setter('/extensions/KHR_lights_punctual/lights/0/intensity', T.float, 0.5)],
+    })
+    const doc = documentOf(graph, { nodes: [{ name: 'Quad' }, { name: 'Pass' }], lights: [{ name: 'Key light' }] })
+    const parsed = parseGraphSource(bytesOf(doc), { name: 'old.gltf' })
+    assert.equal(parsed.problem, undefined)
+    assert.deepEqual(parsed.fileNodes, [{ index: 0, name: 'Quad' }, { index: 1, name: 'Pass' }, { index: 2, name: 'node 2' }])
+    assert.deepEqual(parsed.fileLights, [{ index: 0, name: 'Key light', hosts: [2] }])
+
+    // The host IS the object the graph is imported onto: own-first, so the
+    // light's rewritten index is 0 and there is nothing to grant.
+    const out = convertGraph(parsed.graphs[0], { own: OWN, nodes: { 2: OWN }, lights: { 0: OWN } })
+    assert.equal(out.problem, undefined, out.problem)
+    assert.deepEqual(out.value.nodeMap, [OWN])
+    assert.deepEqual(out.value.targets, [])
+    assert.equal(out.value.graph.nodes[0].configuration.pointer.value[0], '/extensions/KHR_lights_punctual/lights/0/intensity')
+    assert.equal(behaviorCheck(out.value, { ownId: OWN }).problem, null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// R12 (f) — a variable's initial reference is rewritten, and the run follows it
+// ---------------------------------------------------------------------------
+
+describe('G6 / R12 (f) — a variable whose initial value is a reference', () => {
+  /** The file's node 0 is TGT (nodeMap index 1) and its node 1 is OWN (index 0). */
+  const convert = () => {
+    const graph = graphOf({
+      declarations: [
+        { op: 'event/onStart' }, { op: 'variable/get' },
+        { op: 'ref/eq' }, { op: 'flow/branch' }, { op: 'pointer/set' },
+      ],
+      nodes: [
+        // onStart drives the branch; the variable and the comparison are READ
+        // as values (a value node has no input flow socket).
+        { declaration: 0, flows: { out: { node: 3, socket: 'in' } } },
+        { declaration: 1, configuration: { variable: lit(T.int, 0) } },
+        // The variable's value, compared with a literal reference to the SAME
+        // file node: both must be rewritten, or the branch decides differently.
+        { declaration: 2, values: { a: { node: 1, socket: 'value' }, b: lit(T.ref, '/nodes/1') } },
+        { declaration: 3, values: { condition: { node: 2, socket: 'value' } }, flows: { true: { node: 4, socket: 'in' } } },
+        setter('/nodes/0/translation', T.float3, [1, 1, 1], { declaration: 4 }),
+      ],
+      variables: [{ type: T.ref, value: ['/nodes/1'] }],
+    })
+    return convertGraph(graph, { own: OWN, nodes: { 0: TGT, 1: OWN } })
+  }
+
+  test('the variable\u2019s initial literal is rewritten, like the node\u2019s own literal', () => {
+    const out = convert()
+    assert.equal(out.problem, undefined, out.problem)
+    assert.deepEqual(out.value.nodeMap, [OWN, TGT])
+    // The variable's initial literal, the node's own literal, and the pointer.
+    assert.equal(out.value.graph.variables[0].value[0], '/nodes/0')
+    assert.equal(out.value.graph.nodes[2].values.b.value[0], '/nodes/0')
+    assert.equal(out.value.graph.nodes[4].configuration.pointer.value[0], '/nodes/1/translation')
+    assert.equal(behaviorCheck(out.value, { ownId: OWN }).problem, null)
+  })
+
+  test('the branch the rewritten literal decides is the write log', () => {
+    const out = convert()
+    assert.equal(out.problem, undefined, out.problem)
+    // Both sides are rewritten, so the comparison holds and the branch is taken
+    // — the write happens, at the object the rewritten literal names. Leaving
+    // the variable's literal unmapped makes the comparison false and the log
+    // empty.
+    assert.deepEqual(runValue(out.value), [[1, 'translation', [1, 1, 1]]])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// R-L4's import test — check 4's graph, and the material read it refuses
+// ---------------------------------------------------------------------------
+
+describe('G6 / R-L4 — a hover declaration with its extension, and a material reference', () => {
+  test('a /materials/… pointer/set nothing reads: the report lists it, the rest runs, the write is inert', () => {
+    const graph = graphOf({
+      declarations: [
+        { op: 'event/onHoverIn', extension: 'KHR_node_hoverability' },
+        { op: 'event/onStart' },
+        { op: 'flow/sequence' },
+        { op: 'pointer/set' },
+      ],
+      nodes: [
+        { declaration: 0 },
+        { declaration: 1, flows: { out: { node: 2, socket: 'in' } } },
+        { declaration: 2, flows: { a: { node: 3, socket: 'in' }, b: { node: 4, socket: 'in' } } },
+        setter('/materials/0/pbrMetallicRoughness/baseColorFactor', T.float4, [1, 0, 0, 1], { declaration: 3 }),
+        setter('/nodes/1/translation', T.float3, [1, 2, 3], { declaration: 3 }),
+      ],
+    })
+    const doc = documentOf(graph, { nodes: [{ name: 'Quad' }, { name: 'Pass' }] })
+    const parsed = parseGraphSource(bytesOf(doc), { name: 'hover.gltf' })
+    assert.equal(parsed.problem, undefined)
+    const out = convertGraph(parsed.graphs[0], { own: OWN, nodes: { 1: TGT } })
+    assert.equal(out.problem, undefined, out.problem)
+
+    // The list the runner's "Partially supported" line is built from: the op
+    // WITH its extension, then the pointer, each with its node count.
+    assert.deepEqual(out.report.unsupported,
+      [{ op: 'event/onHoverIn', extension: 'KHR_node_hoverability', count: 1 }])
+    assert.deepEqual(out.report.unsupportedPointers,
+      [{ pointer: '/materials/0/pbrMetallicRoughness/baseColorFactor', count: 1 }])
+
+    // The material reference is KEPT (nothing that runs reads it), named.
+    const kept = referencesOf(parsed.graphs[0]).other
+    assert.deepEqual(kept.map((entry) => entry.ref), ['/materials/0/pbrMetallicRoughness/baseColorFactor'])
+    assert.deepEqual(kept[0].consumers, [])
+    assert.equal(out.value.graph.nodes[3].configuration.pointer.value[0],
+      '/materials/0/pbrMetallicRoughness/baseColorFactor')
+
+    // The rest runs; the material write is inert (nothing reaches the world).
+    assert.deepEqual(runValue(out.value), [[1, 'translation', [1, 2, 3]]])
+  })
+
+  test('the same material pointer read by a running node is refused at import, naming the reference and its consumer', () => {
+    const graph = graphOf({
+      declarations: [{ op: 'pointer/get' }, { op: 'pointer/set' }],
+      nodes: [
+        {
+          declaration: 0,
+          configuration: { pointer: lit(T.ref, '/materials/0/pbrMetallicRoughness/baseColorFactor'), type: lit(T.int, T.float4) },
+        },
+        {
+          declaration: 1,
+          configuration: { pointer: lit(T.ref, '/nodes/0/scale'), type: lit(T.int, T.float3) },
+          values: { value: { node: 0, socket: 'value' } },
+        },
+      ],
+    })
+    const out = convertGraph(graph, { own: OWN, nodes: { 0: OWN } })
+    assert.match(out.problem,
+      /the reference \/materials\/0\/pbrMetallicRoughness\/baseColorFactor \(node 0's pointer\) is read by pointer\/set at node 1; its meaning can't survive the import/)
   })
 })
 

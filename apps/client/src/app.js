@@ -3263,6 +3263,9 @@ importPanel = createGraphImportPanel({
   deps: {
     selected: () => selected,
     nodes: () => client.som?.allNodes ?? [],
+    // R16 — the grants line names the objects through the SAME `nameOf` the
+    // Behaviour form hands the Q3 confirmation.
+    nodeName: (id) => (client.som?.resolveObjectId?.(id)?.name ?? id),
     write: {
       setObjectId: (name, id) => client.setObjectId(name, id),
       sendField: (name, field, value) => client.sendField(name, field, value),

@@ -13,6 +13,7 @@ import {
   createGraphImportPanel, IMPORT_OPEN_LABEL, CHOOSE_TARGET, SAVED, NO_GRAPH_YET,
 } from '../src/graph-import-panel.js'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
+import { IMPORT_BYTES_MAX } from '../src/graph-import.js'
 import { el } from './strict-element.mjs'
 
 const OWN = '11111111-1111-4111-8111-111111111111'
@@ -65,7 +66,48 @@ function panelElements() {
   }
 }
 
-function setup({ nodes, selected = null, answers = 'accept' } = {}) {
+/**
+ * R7 — a source whose graph reads the file's node 0 and writes the file's light
+ * 0, which is hosted on the file's node 1. The two namespaces are two objects.
+ */
+function lightDocument() {
+  return {
+    asset: { version: '2.0' },
+    extensions: {
+      KHR_interactivity: {
+        graphs: [{
+          types: [
+            { signature: 'bool' }, { signature: 'int' }, { signature: 'float' },
+            { signature: 'float3' }, { signature: 'float4' }, { signature: 'ref' },
+          ],
+          declarations: [{ op: 'event/onStart' }, { op: 'pointer/get' }, { op: 'pointer/set' }],
+          nodes: [
+            { declaration: 0, flows: { out: { node: 1, socket: 'in' } } },
+            {
+              declaration: 1,
+              configuration: { pointer: lit(T.ref, '/nodes/0/translation'), type: lit(T.int, T.float3) },
+            },
+            {
+              declaration: 2,
+              configuration: {
+                pointer: lit(T.ref, '/extensions/KHR_lights_punctual/lights/0/color'),
+                type: lit(T.int, T.float3),
+              },
+              values: { value: { node: 1, socket: 'value' } },
+            },
+          ],
+        }],
+      },
+      KHR_lights_punctual: { lights: [{ name: 'Sun', type: 'directional' }] },
+    },
+    nodes: [
+      { name: 'Cube' },
+      { name: 'Lamp', extensions: { KHR_lights_punctual: { light: 0 } } },
+    ],
+  }
+}
+
+function setup({ nodes, selected = null, answers = 'accept', nodeName = null } = {}) {
   const elements = panelElements()
   const calls = { setObjectId: [], sendField: [] }
   let seq = 0
@@ -82,6 +124,8 @@ function setup({ nodes, selected = null, answers = 'accept' } = {}) {
     clearError: () => {},
     onSaved: () => { deps.saved = (deps.saved ?? 0) + 1 },
     createElement: (tag) => el(tag),
+    // R16 — the same `nameOf` the Q3 confirmation gets, when a test wants it.
+    ...(nodeName ? { nodeName } : {}),
   }
   const panel = createGraphImportPanel({ elements, deps })
   panel.wire()
@@ -261,4 +305,109 @@ test('G6 — a file name and a problem text that carry HTML all reach the DOM as
   assert.match(elements.status.textContent, new RegExp(hostile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.equal(panel.state.problem?.includes(hostile), true)
   assert.equal(elements.save.disabled, true)
+})
+
+// ---------------------------------------------------------------------------
+// R7 — a light row: the light table's index, its host's name, its own object
+// ---------------------------------------------------------------------------
+
+test('G6/R7 — a light row is keyed by the LIGHT TABLE, labelled by its host, and mapped to its own object', () => {
+  const own = { name: 'Cube', extras: { atrium: { objectId: OWN } } }
+  const lamp = { name: 'Lamp', light: { intensity: 1 }, extras: { atrium: { objectId: THIRD } } }
+  const target = { name: 'Quad', extras: { atrium: { objectId: TGT } } }
+  const { panel, elements } = setup({ nodes: [own, lamp, target], selected: own })
+  panel.open()
+  panel.chooseSource(bytesOf(lightDocument()), 'lights.gltf')
+
+  const rows = rowsOf(elements)
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].children[0].textContent, 'Cube (node)')
+  // R7 — `<host node name> → light <lightIndex> (light)`.
+  assert.equal(rows[1].children[0].textContent, 'Lamp → light 0 (light)')
+  // The light row offers the light hosts only.
+  assert.deepEqual(controlsOf(rows[1]).children.map((option) => option.textContent), [CHOOSE_TARGET, 'Lamp'])
+
+  // Each pick is retained, and the two references stay two different objects.
+  panel.setTarget('node', 0, TGT)
+  assert.equal(panel.state.mapping['node:0'], TGT)
+  assert.equal(panel.state.mapping['light:0'], undefined)
+  assert.equal(controlsOf(rowsOf(elements)[1]).children.find((option) => option.selected)?.value ?? '', '',
+    'the light row is still unmapped')
+
+  panel.setTarget('light', 0, THIRD)
+  assert.equal(panel.state.mapping['light:0'], THIRD)
+  assert.equal(panel.state.mapping['node:0'], TGT, 'the node pick is retained')
+  assert.equal(controlsOf(rowsOf(elements)[0]).children.find((option) => option.selected)?.value, TGT,
+    'the node row still holds its pick')
+
+  const value = panel.state.conversion.value
+  assert.deepEqual(value.nodeMap, [OWN, TGT, THIRD])
+  assert.equal(value.graph.nodes[1].configuration.pointer.value[0], '/nodes/1/translation')
+  assert.equal(value.graph.nodes[2].configuration.pointer.value[0], '/extensions/KHR_lights_punctual/lights/2/color')
+  assert.equal(behaviorCheck(value, { ownId: OWN }).problem, null)
+  // The labels survive the re-render a pick triggers.
+  assert.equal(rowsOf(elements)[1].children[0].textContent, 'Lamp → light 0 (light)')
+})
+
+// ---------------------------------------------------------------------------
+// R10 — the panel refuses an oversized file before reading it
+// ---------------------------------------------------------------------------
+
+test('G6/R10 — an oversized file is refused BEFORE it is read; exactly 4 MiB is read', async () => {
+  const own = { name: 'Cube', extras: { atrium: { objectId: OWN } } }
+  const { panel, elements } = setup({ nodes: [own], selected: own })
+  panel.open()
+
+  let reads = 0
+  const tooBig = {
+    name: 'big.gltf',
+    size: IMPORT_BYTES_MAX + 1,
+    arrayBuffer: () => { reads += 1; throw new Error('the file was read') },
+  }
+  elements.file.files = [tooBig]
+  elements.file.dispatch('change', { target: elements.file })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(reads, 0, 'not one byte was read')
+  // The same text `parseGraphSource` would give it.
+  assert.equal(elements.status.textContent,
+    `the source is ${IMPORT_BYTES_MAX + 1} bytes; the limit is ${IMPORT_BYTES_MAX} (4 MiB)`)
+  assert.equal(rowsOf(elements).length, 0)
+  assert.equal(elements.save.disabled, true)
+
+  // Exactly 4 MiB IS read: the guard is `>`, and the parser's own guard agrees.
+  const json = bytesOf(sourceDocument())
+  const exact = new Uint8Array(IMPORT_BYTES_MAX)
+  exact.set(json, 0)
+  exact.fill(0x20, json.length)                 // trailing spaces are JSON whitespace
+  const atLimit = { name: 'exact.gltf', size: IMPORT_BYTES_MAX, arrayBuffer: async () => exact.buffer }
+  elements.file.files = [atLimit]
+  elements.file.dispatch('change', { target: elements.file })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(elements.fileName.textContent, 'exact.gltf')
+  assert.equal(rowsOf(elements).length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// R16 — the grants line names the objects
+// ---------------------------------------------------------------------------
+
+test('G6/R16 — the grants line names the objects through the same nameOf the Q3 prompt uses', () => {
+  const own = { name: 'Cube', extras: { atrium: { objectId: OWN } } }
+  const lamp = { name: 'Lamp', light: { intensity: 1 }, extras: { atrium: { objectId: THIRD } } }
+  const target = { name: 'Quad', extras: { atrium: { objectId: TGT } } }
+  const { panel, elements } = setup({
+    nodes: [own, lamp, target],
+    selected: own,
+    // The same shape app.js passes: an object's name, or its id.
+    nodeName: (id) => (id === TGT ? 'Pass' : ''),
+  })
+  panel.open()
+  panel.chooseSource(bytesOf(lightDocument()), 'lights.gltf')
+  panel.setTarget('node', 0, TGT)
+  panel.setTarget('light', 0, THIRD)
+
+  assert.deepEqual(panel.state.conversion.report.grants, [TGT, THIRD])
+  // TGT is named; THIRD has no name, so it shows its id.
+  assert.equal(elements.grants.textContent, `It can change: Pass, ${THIRD}`)
 })

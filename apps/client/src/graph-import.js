@@ -54,6 +54,16 @@ export const IMPORT_GRAPHS_MAX = 16
 /** G7 — `nodeMap` holds at most 16 objects (one behaviour, one object tree). */
 export const IMPORT_OBJECTS_MAX = 16
 
+/**
+ * G7 / R10 — the refusal an oversized source gets, from EITHER side: the panel
+ * checks a `File`'s `size` before it reads a byte, and `parseGraphSource` keeps
+ * its own byte guard for a source that arrives without one. One text, so the
+ * two cannot drift.
+ */
+export function importBytesProblem(bytes) {
+  return `the source is ${bytes} bytes; the limit is ${IMPORT_BYTES_MAX} (4 MiB)`
+}
+
 const GLB_MAGIC = 0x46546c67            // 'glTF', little-endian
 const GLB_JSON_CHUNK = 0x4e4f534a       // 'JSON', little-endian
 const GLB_VERSION = 2
@@ -181,13 +191,17 @@ const nodeName = (node, index) => (isObject(node) && typeof node.name === 'strin
   ? node.name
   : `node ${index}`)
 
+const lightName = (light, index) => (isObject(light) && typeof light.name === 'string' && light.name !== ''
+  ? light.name
+  : `light ${index}`)
+
 /**
  * G6 — read a source's bytes.
  *
  * @param {Uint8Array|ArrayBuffer} bytes
  * @param {{name?: string}} [options]  the file name, which decides the GLB path
  * @returns {{graphs: Array<object>, graphIndex: number, fileNodes: Array<{index: number, name: string}>,
- *            fileLights: Array<{index: number, name: string}>,
+ *            fileLights: Array<{index: number, name: string, hosts: number[]}>,
  *            fileAnimations: Array<{index: number, name: string}>} | {problem: string}}
  */
 export function parseGraphSource(bytes, { name = '' } = {}) {
@@ -195,9 +209,7 @@ export function parseGraphSource(bytes, { name = '' } = {}) {
   if (data === null) return { problem: 'the source is not bytes' }
   // G7 / Rev 1 S4 — the size is checked BEFORE decoding, so a hostile source is
   // never decoded to find out how big it is.
-  if (data.length > IMPORT_BYTES_MAX) {
-    return { problem: `the source is ${data.length} bytes; the limit is ${IMPORT_BYTES_MAX} (4 MiB)` }
-  }
+  if (data.length > IMPORT_BYTES_MAX) return { problem: importBytesProblem(data.length) }
 
   const isGlb = /\.glb$/i.test(String(name)) || (data.length >= 4 && readU32(data, 0) === GLB_MAGIC)
   let text
@@ -238,14 +250,43 @@ export function parseGraphSource(bytes, { name = '' } = {}) {
   const nodes = Array.isArray(doc.nodes) ? doc.nodes : []
   const animations = Array.isArray(doc.animations) ? doc.animations : []
 
+  // R7 (M1) — a light is a row of the LIGHT TABLE, never a host node. The old
+  // shape built `fileLights` from the node that HOSTS a light, so a light's
+  // index and a node's index were the same namespace and the panel stored both
+  // into one `mapping.nodes` slot: a graph referencing `/nodes/0/…` and
+  // `/lights/0/…` could convert with both writes on one object and no conflict
+  // reported. The hosts are the nodes that NAME the light, through
+  // `node.extensions.KHR_lights_punctual.light`.
+  const lightTable = isObject(doc.extensions) && isObject(doc.extensions.KHR_lights_punctual)
+    && Array.isArray(doc.extensions.KHR_lights_punctual.lights)
+    ? doc.extensions.KHR_lights_punctual.lights
+    : []
+  const fileLights = []
+  for (const [index, light] of lightTable.entries()) {
+    const name = lightName(light, index)
+    const hosts = []
+    for (const [nodeIndex, node] of nodes.entries()) {
+      const host = node?.extensions?.KHR_lights_punctual?.light
+      if (Number.isInteger(host) && host === index) hosts.push(nodeIndex)
+    }
+    // A light a graph could reference must be reachable through exactly one
+    // object: with no host there is nothing to map it onto, and with two the
+    // graph's single reference would retarget silently.
+    if (hosts.length !== 1) {
+      return {
+        problem: hosts.length === 0
+          ? `the light ${index} (${name}) has no host node; the import needs exactly one node naming it`
+          : `the light ${index} (${name}) has ${hosts.length} host nodes (${hosts.join(', ')}); the import needs exactly one node naming it`,
+      }
+    }
+    fileLights.push({ index, name, hosts })
+  }
+
   return {
     graphs,
     graphIndex: active,
     fileNodes: nodes.map((node, index) => ({ index, name: nodeName(node, index) })),
-    fileLights: nodes
-      .map((node, index) => ({ node, index }))
-      .filter(({ node }) => isObject(node?.extensions?.KHR_lights_punctual))
-      .map(({ node, index }) => ({ index, name: nodeName(node, index) })),
+    fileLights,
     fileAnimations: animations.map((animation, index) => ({
       index,
       name: isObject(animation) && typeof animation.name === 'string' && animation.name !== ''
@@ -519,8 +560,8 @@ export function importNotes(report) {
  * G6 — rewrite a graph into a behaviour leaf.
  *
  * @param {object} graph    a KHR_interactivity graph from a file
- * @param {{own: string, nodes?: Record<string, string>, subtree?: string[],
- *          animations?: Array<{index: number, object: string, clip: string, loop: boolean}>}} mapping
+ * @param {{own: string, nodes?: Record<string, string>, lights?: Record<string, string>,
+ *          subtree?: string[], animations?: Array<{index: number, object: string, clip: string, loop: boolean}>}} mapping
  * @returns {{value: object, report: object} | {problem: string}}
  */
 export function convertGraph(graph, mapping = {}) {
@@ -573,11 +614,17 @@ export function convertGraph(graph, mapping = {}) {
     if (Object.hasOwn(entry, 'name')) { namesDropped += 1; delete entry.name }
   }
 
-  // 5. The nodeMap: own-first and unique, in file-index order.
+  // 5. The nodeMap: own-first and unique, over EVERY mapped object — the mapped
+  //    nodes in file-index order, then the mapped light hosts in light-index
+  //    order (R7). Both namespaces resolve before the map is built, so a node
+  //    reference and a light reference can never share a slot.
   const mapped = Object.entries(mapping.nodes ?? {})
     .filter(([, id]) => typeof id === 'string' && id !== '')
     .map(([fileIndex, id]) => ({ fileIndex: Number(fileIndex), id }))
     .sort((a, b) => a.fileIndex - b.fileIndex)
+  for (const [lightIndex, id] of Object.entries(mapping.lights ?? {})) {
+    if (typeof id === 'string' && id !== '') mapped.push({ fileIndex: Number(lightIndex), id })
+  }
   const nodeMap = [mapping.own]
   for (const { id } of mapped) if (!nodeMap.includes(id)) nodeMap.push(id)
   if (nodeMap.length > IMPORT_OBJECTS_MAX) {
@@ -604,7 +651,9 @@ export function convertGraph(graph, mapping = {}) {
     }
     match = LIGHT_RE.exec(ref)
     if (match) {
-      const id = mapping.nodes?.[match[1]]
+      // R7 — a light resolves through `mapping.lights`, NEVER through
+      // `mapping.nodes`: the two namespaces share no index.
+      const id = mapping.lights?.[match[1]]
       if (typeof id !== 'string' || id === '') {
         return { problem: `the light reference ${ref} (${describeWhere(where)}) is not mapped` }
       }

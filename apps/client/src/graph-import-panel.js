@@ -27,6 +27,7 @@
 
 import {
   parseGraphSource, referencesOf, convertGraph, importNotes,
+  IMPORT_BYTES_MAX, importBytesProblem,
 } from './graph-import.js'
 
 export const IMPORT_OPEN_LABEL = 'Import a graph…'
@@ -61,6 +62,10 @@ const isAvatar = (node) => node?.extras?.atrium?.ephemeral === true
 export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   const doc = deps.document ?? (typeof document === 'undefined' ? null : document)
   const create = deps.createElement ?? ((tag) => doc?.createElement?.(tag) ?? null)
+  // R16 — the SAME `nameOf` the Q3 Enable confirmation names its grants with
+  // (`behavior-form.js` passes `deps.nodeName`): the grants line and the prompt
+  // cannot disagree about what an object is called.
+  const nameOf = typeof deps.nodeName === 'function' ? deps.nodeName : null
 
   const state = {
     open: false,
@@ -82,6 +87,15 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
   const text = (element, value) => { if (element) element.textContent = value ?? '' }
   const clear = (element) => { while (element?.firstChild) element.removeChild(element.firstChild) }
+
+  /** R16 — an object's name through `nameOf`, or its id when it has none. */
+  function grantName(id) {
+    if (!nameOf) return id
+    try {
+      const name = nameOf(id)
+      return (typeof name === 'string' && name !== '') ? name : id
+    } catch { return id }
+  }
 
   // -------------------------------------------------------------------------
   // The SOM, as the picker sees it
@@ -108,12 +122,32 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   async function chooseFile(file) {
     if (!file) return
     const name = typeof file.name === 'string' ? file.name : ''
+    // G7 / R10 (S2) — the size is checked BEFORE the file is read, so a 4 MiB +
+    // 1 source is refused without `arrayBuffer()` ever being called and without
+    // one byte of it in memory. The text is the parser's own.
+    if (typeof file.size === 'number' && file.size > IMPORT_BYTES_MAX) {
+      return refuseOversized(name, file.size)
+    }
     let bytes = file.bytes
     if (!(bytes instanceof Uint8Array)) {
       if (typeof file.arrayBuffer === 'function') bytes = new Uint8Array(await file.arrayBuffer())
       else bytes = file
     }
     return chooseSource(bytes, name)
+  }
+
+  /** G7 / R10 — the oversized refusal, before a single byte is read. */
+  function refuseOversized(name, size) {
+    state.problem = importBytesProblem(size)
+    state.fileName = String(name ?? '')
+    state.parsed = null
+    state.references = null
+    state.conversion = null
+    state.mapping = {}
+    state.animations = []
+    state.status = ''
+    render()
+    return null
   }
 
   function chooseSource(bytes, name = '') {
@@ -193,6 +227,17 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   }
 
   /**
+   * R7 — a light row is named by its HOST node and the light table's index:
+   * `<host node name> → light <lightIndex>`. The host is the object the light
+   * is mapped onto, so the label says which object the row will change.
+   */
+  function lightRowLabel(parsed, lightIndex) {
+    const host = parsed.fileLights.find((entry) => entry.index === lightIndex)?.hosts?.[0]
+    const name = parsed.fileNodes.find((node) => node.index === host)?.name ?? `node ${host}`
+    return `${name} → light ${lightIndex}`
+  }
+
+  /**
    * X3's pattern (behavior-form.js) — before Save has given the node an
    * `objectId`, the conversion still has to be shown, so it is built with a
    * STAND-IN own id: it is in `OBJECT_ID_RE`'s form and it never reaches a
@@ -202,12 +247,16 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
 
   /** The `mapping` `convertGraph` takes, or null while a row is unmapped. */
   function mappingFor() {
-    const mapping = { own: state.ownId ?? OWN_STAND_IN, nodes: {}, subtree: [] }
+    // R7 — the two namespaces are separate: a node row keys `mapping.nodes` by
+    // its FILE index, a light row keys `mapping.lights` by its LIGHT index, so
+    // `/nodes/0` and `/lights/0` can never land in one slot.
+    const mapping = { own: state.ownId ?? OWN_STAND_IN, nodes: {}, lights: {}, subtree: [] }
     for (const row of mappingRows()) {
       if (row.kind === 'animation') continue
       const held = state.mapping[`${row.kind}:${row.fileIndex}`]
       if (!held) return null
-      mapping.nodes[row.fileIndex] = held
+      if (row.kind === 'light') mapping.lights[row.fileIndex] = held
+      else mapping.nodes[row.fileIndex] = held
     }
     // The own node is not a "reference"; the mapping still names it, so a graph
     // that points at the object it was imported onto converts.
@@ -314,9 +363,12 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
       line.classList.add('ep-row')
       const label = create('span')
       // G6 — the reference's FILE name, and the op that holds it, as text.
+      // R7 — a light row names its HOST node and the light table's index.
       const file = row.kind === 'animation'
         ? (parsed.fileAnimations.find((a) => a.index === row.fileIndex)?.name ?? `animation ${row.fileIndex}`)
-        : (parsed.fileNodes.find((n) => n.index === row.fileIndex)?.name ?? `node ${row.fileIndex}`)
+        : row.kind === 'light'
+          ? lightRowLabel(parsed, row.fileIndex)
+          : (parsed.fileNodes.find((n) => n.index === row.fileIndex)?.name ?? `node ${row.fileIndex}`)
       label.textContent = `${file} (${row.kind})`
       line.appendChild(label)
 
@@ -384,7 +436,11 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
       lines.push(report.namesDropped > 0 ? `names dropped: ${report.namesDropped}` : 'names dropped: 0')
     }
     text(elements.report, lines.join('\n'))
-    text(elements.grants, state.conversion ? `It can change: ${report.grants.join(', ')}` : '')
+    // R16 (F4) — the grant line names the objects, through the same `nameOf`
+    // the Q3 confirmation uses; an object with no name shows its id.
+    text(elements.grants, state.conversion
+      ? `It can change: ${report.grants.map((id) => grantName(id)).join(', ')}`
+      : '')
     text(elements.notes, state.saving ? '' : importNotes(report).join('\n'))
     text(elements.status, state.problem ?? (state.status || (state.parsed
       ? (state.conversion ? MAPPED : CHOOSE_TARGET)

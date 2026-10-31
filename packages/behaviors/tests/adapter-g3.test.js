@@ -894,4 +894,30 @@ describe('G3/G-L4 — matrix and globalMatrix are read-only, and read the inject
     assert.deepEqual(engine.engine.getPathValue('/extensions/KHR_lights_punctual/lights/0/color'),
       [0.25, 0.5, 0.75])
   })
+
+  /**
+   * R7 — the shape the importer emits: a light's reference is the nodeMap index
+   * of its HOST, and the host need not be the last mapped object. The family is
+   * registered at the highest light host (G3's P26 rule), so a light reference
+   * above it is a missing pointer.
+   */
+  test('R7: a light reference is its HOST\u2019s nodeMap index, not the nodeMap top', () => {
+    const g = graph([
+      { op: 'event/onStart', flows: { out: to(1) } },
+      { op: 'flow/sequence', flows: { a: to(2), b: to(3) } },
+      setter('/extensions/KHR_lights_punctual/lights/1/intensity', T.float, 0.25),
+      setter('/extensions/KHR_lights_punctual/lights/2/intensity', T.float, 0.5, { flows: { err: to(4) } }),
+      setter('/nodes/2/translation', T.float3, [4, 5, 6]),
+    ])
+    // nodeMap [own, lightHost, plainNode]: the light lives on index 1, and
+    // index 2 is not a light host.
+    const world = makeWorld({ ids: [OWN, TGT, THIRD], lights: [1], descendants: [1, 2] })
+    const engine = engineFor(g, world)
+    engine.tick()
+    assert.deepEqual(world.state.setCalls, [
+      [1, 'intensity', 0.25],
+      [2, 'translation', [4, 5, 6]],       // the err flow ran: index 2 is not a light host
+    ])
+    assert.equal(world.state.lightValues.get(2), undefined, 'nothing was written to index 2')
+  })
 })

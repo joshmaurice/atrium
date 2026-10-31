@@ -221,6 +221,9 @@ describe('scripting-4d-1 (G6) — the importer\'s panel', () => {
     assert.match(code, /setObjectId: \(name, id\) => client\.setObjectId\(name, id\)/)
     assert.match(code, /sendField: \(name, field, value\) => client\.sendField\(name, field, value\)/)
     assert.match(code, /newObjectId,/)
+    // R16 — the grants line names objects through the SAME `nameOf` the form
+    // hands the Q3 confirmation.
+    assert.match(code, /importPanel = createGraphImportPanel\(\{[\s\S]{0,1200}?nodeName: \(id\) => \(client\.som\?\.resolveObjectId\?\.\(id\)\?\.name \?\? id\)/)
   })
 
   test('the answers route to the panel, and it closes with the section', () => {
