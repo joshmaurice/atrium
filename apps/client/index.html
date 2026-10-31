@@ -453,6 +453,17 @@
     overscroll-behavior: contain;
   }
   #edit-panel .ep-title { color: #a78bfa; font-weight: 600; margin-bottom: 8px; }
+  /* scripting-4d-1 (G6) — the importer's panel, inside the Behaviour section:
+     a bounded block with its own scroll, so a long mapping table never pushes
+     Enabled/Save out of the (already scrolling) edit panel. */
+  #edit-panel #ep-import-panel {
+    border-left: 2px solid #7c3aed;
+    padding-left: 6px;
+    margin-bottom: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  #edit-panel #ep-import-panel .ep-status { white-space: pre-line; }
   #edit-panel .ep-buttons { display: flex; gap: 4px; margin-bottom: 6px; }
   #edit-panel .ep-buttons button { padding: 3px 8px; font-size: 11px; }
   #edit-panel .ep-buttons button.active { background: #5b21b6; border-color: #7c3aed; }
@@ -787,6 +798,32 @@
            the one-time Undo note and the node's own log lines. -->
       <div class="ep-row" id="ep-behavior-row" style="display:none"><span>Behaviour</span>
         <select id="ep-behavior-template" aria-label="Behaviour template"></select>
+        <!-- scripting-4d-1 (G6) — "Import a graph…" beside the template list.
+             It opens the import panel below; `graph-import-panel.js` is the
+             one writer of everything inside it. -->
+        <button type="button" id="ep-import-open" title="Import a KHR_interactivity graph from a file">Import a graph…</button>
+      </div>
+      <!-- scripting-4d-1 (G6) — the importer's panel. Every string it shows
+           (file names, node names, op names, problem texts) is written with
+           `textContent`: nothing from a graph or a file is ever parsed as
+           HTML. -->
+      <div id="ep-import-panel" style="display:none">
+        <div class="ep-row"><span>Graph file</span>
+          <input type="file" id="ep-import-file" accept=".gltf,.glb,.json,model/gltf+json,model/gltf-binary" aria-label="Graph file" />
+        </div>
+        <div class="ep-status" id="ep-import-file-name" style="color:#94a3b8"></div>
+        <div class="ep-row" id="ep-import-graph-row" style="display:none"><span>Graph</span>
+          <select id="ep-import-graph" aria-label="Graph"></select>
+        </div>
+        <div id="ep-import-mapping"></div>
+        <div class="ep-status" id="ep-import-report" style="color:#94a3b8;white-space:pre-line"></div>
+        <div class="ep-status" id="ep-import-grants" style="color:#94a3b8"></div>
+        <div class="ep-status" id="ep-import-notes" style="color:#f0ad4e;white-space:pre-line"></div>
+        <div class="ep-status" id="ep-import-status"></div>
+        <div class="ep-buttons ep-actions">
+          <button type="button" id="ep-import-save" title="Save the imported graph">Save</button>
+          <button type="button" id="ep-import-close" class="ep-danger" title="Close the importer">Close</button>
+        </div>
       </div>
       <div id="ep-behavior-params" style="display:none"></div>
       <!-- scripting-4b-2 r3 (T1) — the Behaviour section's ONE help element,
@@ -800,6 +837,12 @@
         <button type="button" id="ep-behavior-remove" class="ep-danger" title="Remove the behaviour">Remove</button>
       </div>
       <div class="ep-status" id="ep-behavior-status"></div>
+      <!-- scripting-4d-1 (G4/G6) — the runner's own status lines ("Partially
+           supported: …", "Throttled: …") and the notes the owner sees beside
+           Enable. `behavior-form.js` is the one writer of both, and every
+           string in them comes from a graph, so both are rendered as text. -->
+      <div class="ep-status" id="ep-behavior-lines" style="display:none;color:#94a3b8"></div>
+      <div class="ep-status" id="ep-behavior-notes" style="display:none;color:#f0ad4e"></div>
       <div class="ep-status" id="ep-behavior-note" style="color:#94a3b8"></div>
       <details id="ep-behavior-log" style="display:none">
         <summary style="cursor:pointer;font-size:11px;color:#94a3b8">Log</summary>

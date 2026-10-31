@@ -202,3 +202,82 @@ describe('scripting-4b-2 r5 (V5, V6) — the clip ids and the own capsule', () =
       'the reset on disconnect')
   })
 })
+
+// ── 4d-1 (G6): the importer's panel is wired ─────────────────────────────
+
+describe('scripting-4d-1 (G6) — the importer\'s panel', () => {
+  /** Code only: a mention of a bug inside a comment is not the bug. */
+  const strip = (text) => text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+  const code = strip(source)
+  const readSrc = (file) => strip(readFileSync(resolve(__dirname, '../src', file), 'utf-8'))
+
+  test('the panel is created, wired, and handed the page\'s own write seam', () => {
+    assert.match(code, /import \{ createGraphImportPanel \} from '\.\/graph-import-panel\.js'/)
+    assert.match(code, /importPanel = createGraphImportPanel\(\{/)
+    assert.match(code, /importPanel\.wire\(\)/)
+    // The SAME seam F9's Behaviour form uses: the node gets its objectId first.
+    assert.match(code, /setObjectId: \(name, id\) => client\.setObjectId\(name, id\)/)
+    assert.match(code, /sendField: \(name, field, value\) => client\.sendField\(name, field, value\)/)
+    assert.match(code, /newObjectId,/)
+  })
+
+  test('the answers route to the panel, and it closes with the section', () => {
+    for (const kind of ['edit:accepted', 'edit:rejected', 'edit:unknown']) {
+      assert.match(code, new RegExp(`importPanel\\?\\.onAnswer\\('${kind}'`), `${kind} reaches the panel`)
+    }
+    // Edit off closes it with the Behaviour section.
+    assert.match(code, /behaviorForm\?\.close\(\)[\s\S]{0,600}?importPanel\?\.close\(\)/)
+    // And a world change does too.
+    assert.match(code, /behaviorForm\?\.reset\(\)[\s\S]{0,200}?importPanel\?\.close\(\)/)
+    // A selection change closes it: it is bound to the object it was opened for.
+    assert.match(code, /const action = behaviorRowAction\(\{[\s\S]{0,300}?\}\)[\s\S]{0,300}?if \(action === 'open'\) importPanel\?\.close\(\)/)
+  })
+
+  test('the panel\'s elements are in index.html, the button beside the template list', () => {
+    const ids = [
+      'ep-import-open', 'ep-import-panel', 'ep-import-file', 'ep-import-file-name',
+      'ep-import-graph', 'ep-import-mapping', 'ep-import-report', 'ep-import-grants',
+      'ep-import-notes', 'ep-import-status', 'ep-import-save', 'ep-import-close',
+    ]
+    for (const id of ids) assert.match(html, new RegExp(`id="${id}"`), `#${id}`)
+    assert.match(html, /<button type="button" id="ep-import-open"[^>]*>Import a graph…<\/button>/)
+    const row = html.indexOf('id="ep-behavior-row"')
+    const open = html.indexOf('id="ep-import-open"')
+    const panel = html.indexOf('id="ep-import-panel"')
+    const params = html.indexOf('id="ep-behavior-params"')
+    assert.ok(row !== -1 && row < open && open < panel && panel < params,
+      `the button is in the row, the panel below it: ${row} < ${open} < ${panel} < ${params}`)
+    // And app.js finds them.
+    for (const id of ids) {
+      assert.match(source, new RegExp(`getElementById\\('${id}'\\)`), `app.js reads #${id}`)
+    }
+  })
+
+  test('the form renders the runner\'s lines and the G6 notes', () => {
+    const form = readSrc('behavior-form.js')
+    assert.match(form, /renderList\(elements\.lines, reported\.lines\)/)
+    assert.match(form, /renderList\(elements\.notes, reported\.notes\)/)
+    assert.match(form, /shouldPromptEnable\(state\.saved\)/)
+    assert.match(form, /enablePromptText\(state\.saved, \{ nameOf: deps\.nodeName \}\)/)
+    assert.match(source, /lines: epBehaviorLines, notes: epBehaviorNotes,/)
+  })
+
+  test('G6 — nothing from a graph or a file is written as HTML', () => {
+    for (const file of ['graph-import.js', 'graph-import-panel.js', 'behavior-form.js']) {
+      const text = readSrc(file)
+      assert.doesNotMatch(text, /innerHTML/, `${file} writes no HTML`)
+      assert.doesNotMatch(text, /insertAdjacentHTML|outerHTML|document\.write|\.innerText\s*=/, `${file}`)
+    }
+    // The log view (behavior-form.js) builds created nodes and sets textContent,
+    // exactly as the panel's rows do.
+    const form = readSrc('behavior-form.js')
+    assert.match(form, /row\.textContent = line/)
+    assert.match(form, /row\.textContent = value/)
+    // The panel's rows too.
+    const panel = readSrc('graph-import-panel.js')
+    assert.match(panel, /label\.textContent = `\$\{file\} \(\$\{row\.kind\}\)`/)
+    assert.match(panel, /text\(elements\.status, state\.problem/)
+  })
+})

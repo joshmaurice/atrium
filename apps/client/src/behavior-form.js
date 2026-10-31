@@ -23,6 +23,9 @@ import {
   behaviorReasonText, behaviorCheck,
   BEHAVIOR_PROX_MIN, BEHAVIOR_PROX_MAX, BEHAVIOR_INTERVAL_MIN, BEHAVIOR_INTERVAL_MAX,
 } from '@atrium/behaviors/behavior-spec'
+// G6 / Q3 — turning Enabled ON for a custom graph that writes and starts on
+// load or runs every frame asks first, and the text is the importer's.
+import { shouldPromptEnable, enablePromptText } from './graph-import.js'
 
 export const NONE_LABEL = 'None'
 export const CUSTOM_LABEL = 'Custom graph'
@@ -57,6 +60,9 @@ export const CANT_SAVE = "Can't save: "
 
 /** D4 — the one line under the status, shown once. */
 export const UNDO_NOTE = 'Behaviour changes are saved with the world and aren’t undone by Undo.'
+
+/** G6 / Q3 — the owner declined the Enable confirmation. */
+export const ENABLE_DECLINED = 'Not enabled'
 
 /** R1 — the generic hint, shown under the picker for every template. */
 export const HINT_TEXT = 'Behaviour changes are saved with the world.'
@@ -685,6 +691,17 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   }
 
   /**
+   * G6 / Q3 — the confirmation's asker. The page's own `window.confirm` by
+   * default (`deps.confirm` in tests); a run with NO asker available declines,
+   * so a graph that writes is never enabled silently.
+   */
+  function askEnable() {
+    const asker = deps.confirm ?? (typeof globalThis === 'undefined' ? null : globalThis.confirm)
+    if (typeof asker !== 'function') return false
+    try { return asker(enablePromptText(state.saved, { nameOf: deps.nodeName })) === true } catch { return false }
+  }
+
+  /**
    * V2 (M6, S1) — Enabled is a real `<button>`, so its listener is `click`
    * (see `wire`), it never carries `.checked`, and the label is the state.
    *
@@ -692,11 +709,22 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
    * ("Enabled and Remove only"): the stored value is REWRITTEN with `enabled`
    * changed and nothing else — a Custom graph is never regenerated. It is
    * disabled only while a write is in flight; "None" has no Enabled at all.
+   *
+   * G6 / Q3 — turning it ON for a custom graph that writes and either starts
+   * on load or runs every frame asks FIRST, every time, naming the grants
+   * outside its own subtree. Reloads and host changes never ask (they don't
+   * change Enabled).
    */
   function setEnabled(enabled) {
     if (!state.saved) return null
     if (!state.custom && state.template === NONE_LABEL) return null
-    state.enabled = enabled !== false
+    const next = enabled !== false
+    if (next && shouldPromptEnable(state.saved) && !askEnable()) {
+      state.status = ENABLE_DECLINED
+      render()
+      return null
+    }
+    state.enabled = next
     const value = { ...state.saved, enabled: state.enabled }
     let seq
     try { seq = deps.write?.sendField?.(state.node.name, 'extras.atrium.behavior', value) } catch (error) {
@@ -1018,6 +1046,20 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     return lines.join(' ')
   }
 
+  /** Render a list of strings, one `div` each, through `textContent` (G6). */
+  function renderList(element, values) {
+    if (!element) return
+    while (element.firstChild) element.removeChild(element.firstChild)
+    const list = Array.isArray(values) ? values : []
+    for (const value of list) {
+      const row = create('div')
+      if (!row) break
+      row.textContent = value
+      element.appendChild(row)
+    }
+    show(element, list.length > 0)
+  }
+
   function render() {
     const open = state.open
     show(elements.row, open)
@@ -1026,6 +1068,8 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       show(elements.params, false)
       show(elements.actions, false)
       text(elements.status, '')
+      renderList(elements.lines, [])
+      renderList(elements.notes, [])
       elements.hintText = ''
       renderHint('')
       return
@@ -1070,6 +1114,12 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     // X3 — the status line's precedence lives in `statusLine`.
     text(elements.status, statusLine())
     text(elements.note, UNDO_NOTE)
+    // G4/G6 — the runner's own lines ("Partially supported: …", "Throttled:
+    // …") and the notes the owner sees beside Enable, exactly as the spec
+    // writes them. Both are lists of graph-derived strings, written as text.
+    const reported = deps.status?.() ?? {}
+    renderList(elements.lines, reported.lines)
+    renderList(elements.notes, reported.notes)
     if (elements.logLines) {
       const lines = deps.logLines?.(state.node?.name) ?? []
       while (elements.logLines.firstChild) elements.logLines.removeChild(elements.logLines.firstChild)

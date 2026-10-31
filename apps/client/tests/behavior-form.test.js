@@ -10,10 +10,18 @@ import assert from 'node:assert/strict'
 import {
   createBehaviorForm, NONE_LABEL, CUSTOM_LABEL, BEHAVIOR_STATUS, matchesTemplate, targetKindFor,
   HINT_TEXT, HINT_LIGHT_ON, HINT_ONE_CLICK, HINT_CLIP_END, NO_LIGHTS, UNDO_NOTE, CHOOSE_TARGET,
+  ENABLE_DECLINED,
 } from '../src/behavior-form.js'
 import { createFormGate } from '../src/model-form.js'
 import { templateGraph, TEMPLATE_IDS } from '@atrium/behaviors/templates'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
+// 4d G4/G6 — the note texts the runner writes and the form renders.
+import {
+  STARTS_ON_LOAD_NOTE, SAMPLED_MOTION_NOTE, MISSING_SELECT_NOTE, THROTTLED_TEXT, PARTIAL_TEXT,
+} from '@atrium/behaviors/runner'
+// 4d G6 — the confirmation's text builder, so the prompt is pinned to the same
+// string the importer writes.
+import { enablePromptText } from '../src/graph-import.js'
 // V12 — ONE strict element fake, shared by the form and panel tests.
 import { el, elementsFor, isCheckable, shownEqualsHeld } from './strict-element.mjs'
 import { clipsForNode } from '../src/behavior-clips.js'
@@ -793,4 +801,122 @@ test('V5 — a loaded model shows its clips as a `<select>`', () => {
   f2.render()
   const clip2 = e2.params.children.map((row) => row.children[1]).find((f) => f.dataset.field === 'clip')
   assert.equal(clip2.tagName, 'input', 'no ids, no select')
+})
+
+// ── 4d G4/G6: the runner's lines, the notes, and the Enable confirmation ────
+
+const litD = (type, value) => ({ type, value: Array.isArray(value) ? value : [value] })
+
+/** A custom (template-less) graph that writes on `event/onStart`. */
+function customLeaf({ onStart = true, onTick = false, targets = [] } = {}) {
+  const declarations = [
+    ...(onStart ? [{ op: 'event/onStart' }] : []),
+    ...(onTick ? [{ op: 'event/onTick' }] : []),
+    { op: 'pointer/set' },
+  ]
+  const setterIndex = declarations.length - 1
+  return {
+    kind: 'graph', origin: 'local', enabled: false,
+    graph: {
+      types: [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'float3' }, { signature: 'ref' }],
+      declarations,
+      nodes: [
+        ...(onStart ? [{ declaration: 0, flows: { out: { node: setterIndex, socket: 'in' } } }] : []),
+        ...(onTick ? [{ declaration: onStart ? 1 : 0, flows: { out: { node: setterIndex, socket: 'in' } } }] : []),
+        {
+          declaration: setterIndex,
+          configuration: { pointer: litD(4, '/nodes/0/translation'), type: litD(1, 3) },
+          values: { value: litD(3, [0, 0, 0.8]) },
+        },
+      ],
+    },
+    nodeMap: [OWN], targets, animations: [],
+  }
+}
+
+test('4d G4 — the runner\'s status lines and the notes reach the form, as text', () => {
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements, deps } = setup({ nodes: [node], selected: node })
+  deps.status = () => ({
+    state: 'running',
+    lines: [THROTTLED_TEXT, `${PARTIAL_TEXT}: event/onHoverIn`],
+    notes: [STARTS_ON_LOAD_NOTE, MISSING_SELECT_NOTE],
+  })
+  form.open(node)
+  form.render()
+
+  assert.deepEqual(elements.lines.children.map((row) => row.textContent), [THROTTLED_TEXT, `${PARTIAL_TEXT}: event/onHoverIn`])
+  assert.deepEqual(elements.notes.children.map((row) => row.textContent), [STARTS_ON_LOAD_NOTE, MISSING_SELECT_NOTE])
+  assert.equal(elements.lines.style.display, '', 'the lines are shown when there are any')
+  assert.equal(elements.notes.style.display, '')
+  for (const row of [...elements.lines.children, ...elements.notes.children]) {
+    assert.equal(row.children.length, 0, 'text, never markup')
+  }
+})
+
+test('4d G4 — with no lines and no notes, both elements are emptied and hidden', () => {
+  const node = makeNode({ name: 'crate', id: OWN })
+  const { form, elements } = setup({ nodes: [node], selected: node })
+  form.open(node)
+  form.render()
+  assert.equal(elements.lines.children.length, 0)
+  assert.equal(elements.notes.children.length, 0)
+  assert.equal(elements.lines.style.display, 'none')
+  assert.equal(elements.notes.style.display, 'none')
+})
+
+test('4d G6/Q3 — enabling a custom graph that writes and starts on load asks first', () => {
+  const leaf = customLeaf({ onStart: true, targets: [TGT] })
+  const node = makeNode({ name: 'crate', id: OWN, behavior: leaf })
+  const target = makeNode({ name: 'Fox', id: TGT })
+  const { form, deps } = setup({ nodes: [node, target], selected: node })
+  const prompts = []
+  deps.confirm = (prompt) => { prompts.push(prompt); return true }
+  form.open(node)
+  assert.equal(form.state.custom, true, 'a template-less leaf opens as Custom graph')
+
+  form.setEnabled(true)
+  assert.deepEqual(prompts, [enablePromptText(leaf, { nameOf: null })])
+  assert.match(prompts[0], /It can also change: /)
+  assert.equal(form.state.enabled, true)
+})
+
+test('4d G6/Q3 — declining leaves it disabled and says so; a template never asks', () => {
+  const leaf = customLeaf({ onStart: true, targets: [TGT] })
+  const node = makeNode({ name: 'crate', id: OWN, behavior: leaf })
+  const { form, elements, deps, calls } = setup({ nodes: [node], selected: node })
+  let asked = 0
+  deps.confirm = () => { asked += 1; return false }
+  form.open(node)
+  form.setEnabled(true)
+  assert.equal(asked, 1)
+  assert.equal(form.state.enabled, false, 'the graph was not enabled')
+  assert.equal(elements.status.textContent, ENABLE_DECLINED)
+  assert.equal(calls.sendField.length, 0, 'nothing was sent')
+
+  // A TEMPLATE's Enable never asks (Q3: a custom graph only).
+  const tNode = makeNode({ name: 'cube', id: OWN })
+  const tTarget = makeNode({ name: 'Fox', id: TGT })
+  const templated = setup({ nodes: [tNode, tTarget], selected: tNode })
+  templated.form.open(tNode)
+  templated.form.onTemplateChange('select-visibility')
+  templated.form.onParamChange('target', TGT)
+  templated.form.save()
+  templated.accept(1)
+  templated.form.setEnabled(false)
+  templated.accept(templated.seq())
+  let askedAgain = 0
+  templated.deps.confirm = () => { askedAgain += 1; return false }
+  templated.form.setEnabled(true)
+  assert.equal(askedAgain, 0, 'a template does not ask')
+  assert.equal(templated.form.state.enabled, true)
+})
+
+test('4d G6/Q3 — with no asker available the form declines rather than enabling silently', () => {
+  const leaf = customLeaf({ onStart: true })
+  const node = makeNode({ name: 'crate', id: OWN, behavior: leaf })
+  const { form } = setup({ nodes: [node], selected: node })
+  form.open(node)
+  form.setEnabled(true)
+  assert.equal(form.state.enabled, false, 'no window.confirm in this run: declined')
 })

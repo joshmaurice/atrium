@@ -153,6 +153,8 @@ export function elementsFor() {
     row: el(), select: el('select'), params: el(), actions: el(),
     enabled: el('button'), save: el('button'), remove: el('button'),
     status: el(), note: el(), hint: el(), logLines: el(), log: el(),
+    // 4d G4/G6 — the runner's status lines and the notes beside Enable.
+    lines: el(), notes: el(),
   }
 }
 

@@ -18,6 +18,8 @@ import { createEditModes } from './edit-modes.js'
 import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
+// scripting-4d-1 (G6) — the importer's panel, beside the template list.
+import { createGraphImportPanel } from './graph-import-panel.js'
 import { clipsFor, clipsForNode } from './behavior-clips.js'
 import { createBehaviorRunner } from '@atrium/behaviors/runner'
 import { TEMPLATE_IDS, TEMPLATE_LABELS } from '@atrium/behaviors/templates'
@@ -1664,9 +1666,26 @@ const epBehaviorEnabled  = document.getElementById('ep-behavior-enabled')
 const epBehaviorSave     = document.getElementById('ep-behavior-save')
 const epBehaviorRemove   = document.getElementById('ep-behavior-remove')
 const epBehaviorStatus   = document.getElementById('ep-behavior-status')
+const epBehaviorLines    = document.getElementById('ep-behavior-lines')   // 4d G4/G6
+const epBehaviorNotes    = document.getElementById('ep-behavior-notes')   // 4d G6
 const epBehaviorNote     = document.getElementById('ep-behavior-note')
 const epBehaviorLog      = document.getElementById('ep-behavior-log')
 const epBehaviorLogLines = document.getElementById('ep-behavior-log-lines')
+// scripting-4d-1 (G6) — the importer's panel's elements. `graph-import-panel.js`
+// is the one writer of everything inside them.
+const epImportOpen      = document.getElementById('ep-import-open')
+const epImportPanel     = document.getElementById('ep-import-panel')
+const epImportFile      = document.getElementById('ep-import-file')
+const epImportFileName  = document.getElementById('ep-import-file-name')
+const epImportGraph     = document.getElementById('ep-import-graph')
+const epImportGraphRow  = document.getElementById('ep-import-graph-row')
+const epImportMapping   = document.getElementById('ep-import-mapping')
+const epImportReport    = document.getElementById('ep-import-report')
+const epImportGrants    = document.getElementById('ep-import-grants')
+const epImportNotes     = document.getElementById('ep-import-notes')
+const epImportStatus    = document.getElementById('ep-import-status')
+const epImportSave      = document.getElementById('ep-import-save')
+const epImportClose     = document.getElementById('ep-import-close')
 
 /** F9 — the picker's options: "None", the five display names, and "Custom graph". */
 if (epBehaviorTemplate) {
@@ -1904,6 +1923,9 @@ function setEditMode(on) {
     // drift apart: the next `refreshBehaviorRow` re-opens and re-reads even if
     // the same object is still selected.
     lastBehaviorNode = null
+    // G6 — the importer's panel is part of the Behaviour section too, so Edit
+    // off closes it with it.
+    importPanel?.close()
     // Z2 — and Edit off discards the Model form's draft (`reset()` clears the
     // URL, the Check result and the pin, and forgets any wait). The destination
     // form starts empty on its next fresh opening, and the grid has no draft.
@@ -2874,18 +2896,22 @@ client.on('edit:accepted', ({ seq }) => {
   animationControls?.onAccepted(seq)
   // F9 — the Behaviour form's own wait.
   behaviorForm?.onAnswer('edit:accepted', { seq })
+  // G6 — and the importer's panel's own wait.
+  importPanel?.onAnswer('edit:accepted', { seq })
   onStructureAnswer(seq, 'accepted')
 })
 client.on('edit:rejected', ({ seq, code, message }) => {
   skyPicker?.onRejected(seq, message || code)
   animationControls?.onRejected(seq, message || code)
   behaviorForm?.onAnswer('edit:rejected', { seq, code, message: message || code })
+  importPanel?.onAnswer('edit:rejected', { seq, code, message: message || code })
   onStructureAnswer(seq, 'rejected', message || code)
 })
 client.on('edit:unknown',  ({ seq }) => {
   skyPicker?.onUnknown(seq)
   animationControls?.onUnknown(seq)
   behaviorForm?.onAnswer('edit:unknown', { seq })
+  importPanel?.onAnswer('edit:unknown', { seq })
   onStructureAnswer(seq, 'unknown')
 })
 
@@ -3180,6 +3206,7 @@ behaviorForm = createBehaviorForm({
     hint: epBehaviorHint,
     actions: epBehaviorActions, enabled: epBehaviorEnabled, save: epBehaviorSave,
     remove: epBehaviorRemove, status: epBehaviorStatus, note: epBehaviorNote,
+    lines: epBehaviorLines, notes: epBehaviorNotes,
     log: epBehaviorLog, logLines: epBehaviorLogLines,
   },
   gate: modelGate,
@@ -3187,6 +3214,12 @@ behaviorForm = createBehaviorForm({
     selected: () => selected,
     nodes: () => client.som?.allNodes ?? [],
     status: () => runnerStatus(),
+    // G6 / Q3 — the Enable confirmation asks the page's own `confirm`, and the
+    // grants are named through the SOM.
+    confirm: (prompt) => (typeof window === 'undefined' || typeof window.confirm !== 'function'
+      ? false
+      : window.confirm(prompt)),
+    nodeName: (id) => (client.som?.resolveObjectId?.(id)?.name ?? id),
     write: {
       setObjectId: (name, id) => client.setObjectId(name, id),
       sendField: (name, field, value) => client.sendField(name, field, value),
@@ -3208,6 +3241,43 @@ behaviorForm = createBehaviorForm({
   },
 })
 behaviorForm.wire()
+
+// ---------------------------------------------------------------------------
+// scripting-4d-1 (G6) — the importer's panel
+//
+// One graph onto the selected object, mapped by hand (G-L8). The panel reads
+// the file's bytes, converts through the pure importer and sends the leaf
+// through the SAME `write` seam the Behaviour form uses, so the node's
+// `objectId` is given first exactly as F9 does.
+// ---------------------------------------------------------------------------
+
+let importPanel = null
+
+importPanel = createGraphImportPanel({
+  elements: {
+    open: epImportOpen, panel: epImportPanel, file: epImportFile, fileName: epImportFileName,
+    graphs: epImportGraph, source: epImportGraphRow, mapping: epImportMapping,
+    report: epImportReport, grants: epImportGrants, notes: epImportNotes,
+    status: epImportStatus, save: epImportSave, close: epImportClose,
+  },
+  deps: {
+    selected: () => selected,
+    nodes: () => client.som?.allNodes ?? [],
+    write: {
+      setObjectId: (name, id) => client.setObjectId(name, id),
+      sendField: (name, field, value) => client.sendField(name, field, value),
+    },
+    newObjectId,
+    showError: (text) => showEditError(text),
+    clearError: () => clearEditError(),
+    document,
+    createElement: (tag) => document.createElement(tag),
+    // After Save the panel closes itself; the form re-reads the stored leaf and
+    // shows the custom-graph state (Enabled, Remove, the report).
+    onSaved: () => { refreshBehaviorRow({ reread: true }) },
+  },
+})
+importPanel.wire()
 
 runner = createBehaviorRunner({
   client,
@@ -3244,6 +3314,9 @@ function refreshBehaviorRow({ reread = false } = {}) {
   const action = behaviorRowAction({
     open: behaviorForm.openState, lastNode: lastBehaviorNode, selected, reread,
   })
+  // G6 — the importer's panel is bound to the object it was opened for, so a
+  // selection change (and the re-open that follows it) closes it.
+  if (action === 'open') importPanel?.close()
   if (action === 'open') {
     lastBehaviorNode = selected
     behaviorForm.open(selected)
@@ -3721,6 +3794,7 @@ function beginNewWorld() {
   animationControls?.reset()
   refreshModelRow()
   behaviorForm?.reset()       // F9 — the Behaviour form goes with the world
+  importPanel?.close()        // G6 — and the importer's panel with it
 }
 
 // ---------------------------------------------------------------------------
