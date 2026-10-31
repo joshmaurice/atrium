@@ -81,6 +81,15 @@ echo "== one restart of DEV: the stop should be clean now"; systemctl restart at
 journalctl -u atrium-dev --since '-1 min' --no-pager | grep -E 'Deactivated|status=|Failed|listening' ; systemctl is-active atrium-dev
 ```
 
+**Host result, round 5 (operator, 2026-10-31 16:49 PT): PASS.** PROD's copy: `integrity ok`, 0 worlds / 0 leaves,
+all zeros. DEV's copy: `integrity ok`, 4 worlds / **10** leaves (one more than at round 4's check; added on DEV
+since), `unchanged 10 … writes 0` three times. DEV's lock files: `atrium.db.lock.db` (0 B) and
+`atrium.db.lock.json` (97 B), both `atrium-dev`, `-rw-------`; **no `-journal`** (round 4 had a 512 B one).
+Against DEV's live database: `the world server is running (pid 3148398 on ubuntu-4gb-hil-1)…`, exit 1, nothing
+written. **`systemctl restart atrium-dev`: `atrium-dev.service: Deactivated successfully.`** (23:49:35 UTC), then
+pid 3150504 listening and `active`: the first clean stop of a 4d server (round 3's and round 4's ended `status=143
+… Failed`).
+
 ## Results on DEV `1d4ccf17` (round 4: `85669db0` + main `c4b87111`, devtasks/ only), 2026-10-31
 **Every round-4 item holds in the browser and on a real database; one new finding (F7).** Checks 9 and 10 were not
 rerun: no round-4 card touched their areas (R23 adds declaration-map checks that check 10's leaves don't use).

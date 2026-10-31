@@ -94,5 +94,6 @@ and MAIN.
   review `t_2436e620`; gate `t_4dae5352`; sentinel `t_e7a9ca2c` (title typo "4d1", cosmetic; the guard linked it).
 - **Claude's checks on `ddef0a31`:** `probe_r5.sh` 11/11 (it fails 5 ways on round 4), c11 27/27, c1 34/34, c5
   pass. Results and the round-5 host block: the checks README.
-- **Next:** the operator's round-5 host block (one DEV restart, to see the first clean stop); a short outside
+- **Host block, round 5: PASS** (16:49 PT): no lock journal; the restart logged `Deactivated successfully`.
+- **Next:** a short outside
   review of `85669db0..e5369130`; DEV acceptance. N4 (a symlink loop exits with a trace) is for a later round.
