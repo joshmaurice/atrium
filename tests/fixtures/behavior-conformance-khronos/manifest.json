@@ -1,0 +1,872 @@
+{
+  "description": "G8: the Khronos conformance subset that fits PREBRIEF-scripting-4d G-L2 (a) and G7, with each asset's p6 baseline result (today's adapter, only the op filter widened). The round regenerates the results with its own adapter; every change from the baseline is explained in its handoff.",
+  "source": "KhronosGroup/glTF-Test-Assets-Interactivity @ 926bec45dfbe052bad4013ab5852ed2f4042bff5",
+  "surveyScripts": "devtasks/spike-4d/survey/, p6.mjs, khronos-extract.mjs",
+  "license": "CC-BY-4.0 (LICENSE-CC-BY-4.0.txt); the graphs are extracted unchanged from the assets' glTF-Binary JSON chunks",
+  "count": 143,
+  "baselineCounts": {
+    "pass": 134,
+    "fail": 8,
+    "disposed": 1
+  },
+  "entries": [
+    {
+      "asset": "core:Extras/Loop_in_Loop_Tests",
+      "file": "graphs/core--Extras_Loop_in_Loop_Tests.json",
+      "sha256": "4afc4e353e7e066cc72d1c402400aff5a17b4791f8e551f40a0ff74e18431dce",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:Extras/Matrix_Updates",
+      "file": "graphs/core--Extras_Matrix_Updates.json",
+      "sha256": "8ce5c1366c6844f991d51600a235620908f7e543c55727d0843b020258d31fde",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:animation/start",
+      "file": "graphs/core--animation_start.json",
+      "sha256": "ce0c1ee6670812d2ce1b509d515826fa5de10572dec7e2686c0e52d6ceeafccc",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:animation/state",
+      "file": "graphs/core--animation_state.json",
+      "sha256": "82f3e827f14d4e8cfdb6faf9a73a04ccc4df243bc91676bcbf95a1e95dd8e04d",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:animation/stop",
+      "file": "graphs/core--animation_stop.json",
+      "sha256": "fb6157d3b6c4347ca9743952a22fa4c9eef179d620d73422b555d9ed9fa2eac6",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:event/Event_Refs",
+      "file": "graphs/core--event_Event_Refs.json",
+      "sha256": "5b4bf195fa59bf012f3df6380d66d9043ec4bd3d50fd020138cb915fc173c2b3",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:event/activation_order_and_onTick",
+      "file": "graphs/core--event_activation_order_and_onTick.json",
+      "sha256": "dfd6a7754f82d6191bcabec7977afba442b8261a5a0f2740d1ca80c550a5d78c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:event/send_and_receive",
+      "file": "graphs/core--event_send_and_receive.json",
+      "sha256": "a64167cc2173e0af490864924737bcce2c1897c1c3cb7697e35c50d623c0c281",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/branch",
+      "file": "graphs/core--flow_branch.json",
+      "sha256": "2829b62cea38c35f0563553d4ab03e42253e88145193bf90bdf4a03648e893f1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/doN",
+      "file": "graphs/core--flow_doN.json",
+      "sha256": "3d53445187290e18238601180c71c51e1720c389b9775420a6bd6c35a87d7365",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/for",
+      "file": "graphs/core--flow_for.json",
+      "sha256": "4a5d2911d0ad2ff2079a411370a70143e2c50e57514e23207faf819cbe8f79b4",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/multiGate",
+      "file": "graphs/core--flow_multiGate.json",
+      "sha256": "659f76ba4e4cbaf23d28e0053a12e7b99ddaa4c51f9ae9920f65bfe49cd1045e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/sequence",
+      "file": "graphs/core--flow_sequence.json",
+      "sha256": "51189cdc297f5802f3d156294e45d4f70dd9c527c3a833835813f575bba95383",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/setDelay_and_cancelDelay",
+      "file": "graphs/core--flow_setDelay_and_cancelDelay.json",
+      "sha256": "a055ede724374368fbb25e08d19cec0b291e8d849e6d2c666f8408b968a77515",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/switch",
+      "file": "graphs/core--flow_switch.json",
+      "sha256": "0fb036fa4856eb78a0f6946d1755a0c7fd5eddcc8988ead22b488fd82ddfb774",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/throttle",
+      "file": "graphs/core--flow_throttle.json",
+      "sha256": "4aa97651db82b5dd3a8b4c62b7d499f7924b5bc6e45537527ddc4d3b9874c373",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/waitAll",
+      "file": "graphs/core--flow_waitAll.json",
+      "sha256": "1261d46b3cf86e8229abc4364212c5c1243e473043417b9a10e85fbb2d676941",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:flow/while",
+      "file": "graphs/core--flow_while.json",
+      "sha256": "084c1486d69ae0ba813f8e4f96be05b88073c1e310cc58ffe9146b830b5a201b",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:graph/extra_and_unknown_sockets",
+      "file": "graphs/core--graph_extra_and_unknown_sockets.json",
+      "sha256": "f12cf13484692be729b3cf6380e43506493a235578be1afa38e31bde21dc83ba",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:graph/ignored_configuration",
+      "file": "graphs/core--graph_ignored_configuration.json",
+      "sha256": "ad2a8a17dbe35370997318541147e3a5389dc53e6a5b4b8114c5b7dde9b32653",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:graph/json_syntax",
+      "file": "graphs/core--graph_json_syntax.json",
+      "sha256": "9cead8033f405f4cb0c9fafc513e508f16653cca188ead66cbaca0bc196ddb20",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:pointer/get_set_morphtargets",
+      "file": "graphs/core--pointer_get_set_morphtargets.json",
+      "sha256": "da2047352b8e1d1eb41d5c7b27c7ff42c7fb2903cab1f4a67b2d6971fe0b36bd",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:pointer/set_edge_cases",
+      "file": "graphs/core--pointer_set_edge_cases.json",
+      "sha256": "e85958d9de4c20b8a35e0d8f65f0fc465a49bcf8b04a13c53533de8b6fe05456",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:prerequisites/Tests_required_operations",
+      "file": "graphs/core--prerequisites_Tests_required_operations.json",
+      "sha256": "1af391cd3071026662a8044d8b0f33a8369f441de0fdce0c3e9fea093eaecf14",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:ref/eq",
+      "file": "graphs/core--ref_eq.json",
+      "sha256": "652b7a5b57503df157e590087389992f95de887f6ce07d2d5ee541644763498b",
+      "baseline": "fail"
+    },
+    {
+      "asset": "core:type/conversions",
+      "file": "graphs/core--type_conversions.json",
+      "sha256": "60b247c26a1c1b26073ea4fa2a7bdaf5b74dd1178ebf2e08d16f27f2fca2e4df",
+      "baseline": "pass"
+    },
+    {
+      "asset": "core:variable/setMultiple",
+      "file": "graphs/core--variable_setMultiple.json",
+      "sha256": "3de4a816be1c3f1dd9877fdd5e9da446e624f46f434dace84dc38303c4d08ff1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/abs",
+      "file": "graphs/math--math_abs.json",
+      "sha256": "b1419005bd152716f064dbcf86472d54f3980b79dbffaf9d79bd6cbc0ea5f82e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/acos",
+      "file": "graphs/math--math_acos.json",
+      "sha256": "0dca63e3f3244fa838502bab5c0806a3d161f82108983b1f593eb4e76b3e5c62",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/acosh",
+      "file": "graphs/math--math_acosh.json",
+      "sha256": "d800b89d35d3d86aa9b2373968f8f732205a366ea02f2d209ad518db344023f9",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/add",
+      "file": "graphs/math--math_add.json",
+      "sha256": "8ca93eb365b9368aeb99b21a34405f31a94ee53316076944b0c3de060f23ccf6",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/and",
+      "file": "graphs/math--math_and.json",
+      "sha256": "7eec3bfcae0c89791081e7b5c4f2b94bc8bc94130cb58fcb192b299d95a8c0d0",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/asin",
+      "file": "graphs/math--math_asin.json",
+      "sha256": "c72c3381e9908a1488c73e57bd76ca41a7b12dd9a07dcda40df0ed8d625d6221",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/asinh",
+      "file": "graphs/math--math_asinh.json",
+      "sha256": "bec14b8ca3a868df6fd2c9fa87283f528a4c29c2ad0e98c32bf87830c5d7f85c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/asr",
+      "file": "graphs/math--math_asr.json",
+      "sha256": "36cc89aebc28a48d82337d03cb189100e1639e814fde4d28f6d67cae290918c0",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/atan",
+      "file": "graphs/math--math_atan.json",
+      "sha256": "d1501390c6e69ac54c4c60e894db14c745c840e16ea06daf1d26e766ec558ba7",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/atan2",
+      "file": "graphs/math--math_atan2.json",
+      "sha256": "63aeb295717276d17af62799158afb8f45f393496656c8c8911d07c8a6c1a0a6",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/atanh",
+      "file": "graphs/math--math_atanh.json",
+      "sha256": "f0f4fffd41d5d839050c9eed89a75b2bd5c7f60424de12181b7921231b6d2720",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/cbrt",
+      "file": "graphs/math--math_cbrt.json",
+      "sha256": "f7b107a3c34a29030f5797697b07b1302e8d56ed6b2553449c02caf3ec63d9cf",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/ceil",
+      "file": "graphs/math--math_ceil.json",
+      "sha256": "f72b12b9ba0b74fe93cb8c60472ba8171bc45988e8738b8ea710385c9a427f23",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/clamp",
+      "file": "graphs/math--math_clamp.json",
+      "sha256": "29f41b65013783604a349ab73d04cacc80f77eeecdf5948a348fd80b5cf354d6",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/clz",
+      "file": "graphs/math--math_clz.json",
+      "sha256": "9930cc62e1196cfc41f985fbe83bfe8db4e2a04f9dfdfe4b39b66ab2ea57c504",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/combine2",
+      "file": "graphs/math--math_combine2.json",
+      "sha256": "666be302cb7285dc6abc4530180daf3828d88dcf889e69341cf1350d9cce8e85",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/combine2x2",
+      "file": "graphs/math--math_combine2x2.json",
+      "sha256": "15f30c75841fd35ae849baf9868a7581efbea5f88422f0c512edec983045a52c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/combine3",
+      "file": "graphs/math--math_combine3.json",
+      "sha256": "52ec0afcc9434ae2a42e259baa64d703ba50b9808cf8d7c639e531b07a38ba39",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/combine3x3",
+      "file": "graphs/math--math_combine3x3.json",
+      "sha256": "f5c5c5975485a70020db2cf89fae17d38c8909f33829fcd001ef1ab96d300214",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/combine4",
+      "file": "graphs/math--math_combine4.json",
+      "sha256": "f7e8f13dd387ba21c5e6f325f0887ffd77b3a1225926e24d5a21bddcc1bf1503",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/combine4x4",
+      "file": "graphs/math--math_combine4x4.json",
+      "sha256": "51b2a4ebffa372187d55525bb69759ccbc82f21000a79d930114efd39726de92",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/cos",
+      "file": "graphs/math--math_cos.json",
+      "sha256": "919a4d7840540cb327c0ab199dc7f8736a1d6dba796ebf978a7480ed594b4ca1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/cosh",
+      "file": "graphs/math--math_cosh.json",
+      "sha256": "4795580a1d35268c63b6fff8e52eeed7ed60a88baa440335968ddf8bedb6a69a",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/cross",
+      "file": "graphs/math--math_cross.json",
+      "sha256": "235ba35dd9195cbba158a73ac41e71ebbda26432a650c1656916150be1cbd07e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/ctz",
+      "file": "graphs/math--math_ctz.json",
+      "sha256": "cfc2e8e4e9f4b52352c79f251d9d96596cbc7e337567f84e32e499b23168a95b",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/deg",
+      "file": "graphs/math--math_deg.json",
+      "sha256": "7254a6a380aab8329df01a4d27fe29a4f4f4f16d7ce52ed547bbdaf84a0cdfe5",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/determinant",
+      "file": "graphs/math--math_determinant.json",
+      "sha256": "53bc7a0a69d99131c6e312275ea4a01dff35350a74b486298104fce70afa86a0",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/determinant2x2",
+      "file": "graphs/math--math_determinant2x2.json",
+      "sha256": "f8827b3e516850fdf63e37912ebd3ec042afad81e035c8989a300e83fa1639b1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/determinant3x3",
+      "file": "graphs/math--math_determinant3x3.json",
+      "sha256": "f8aded7b64a5abe1e49661322ecd0bb2f4d2233132bda2ab1180a444078057ef",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/div",
+      "file": "graphs/math--math_div.json",
+      "sha256": "6d21eb9519b181c613fdd16f9acb99b051f3c0751203a188aa22177c472806f7",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/dot",
+      "file": "graphs/math--math_dot.json",
+      "sha256": "98c4b926889e435ea53837916e6e7cca24c701ff70651d00ca8f8f386061a5e1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/E",
+      "file": "graphs/math--math_E.json",
+      "sha256": "a52db01084787c0caf2f8236854c7cb5ccd7e94584d25d79789ffa78af60fef8",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/eq",
+      "file": "graphs/math--math_eq.json",
+      "sha256": "46560de312b9c3c0c6edacfc4fa8965434c6d8c594d24c9588d4f8fce7cf3be5",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/exp",
+      "file": "graphs/math--math_exp.json",
+      "sha256": "13e6a40a78f52026ec1cd4beefc04e9aea075fb6b9dbe492f1c6bd5dcbb50ae1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/extract2",
+      "file": "graphs/math--math_extract2.json",
+      "sha256": "e516aa4f42a22bd874e10f5f9decbbd841c04440c0a1469f6e68c26a22373e3e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/extract2x2",
+      "file": "graphs/math--math_extract2x2.json",
+      "sha256": "4590657794eac00105be586e4369780d3cdf33b50e81675c03aa0524801498f9",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/extract3",
+      "file": "graphs/math--math_extract3.json",
+      "sha256": "2384fe5b7aec82b39afb53b6720420f151ed2f8a3722b8c7de714cfca2b27bec",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/extract3x3",
+      "file": "graphs/math--math_extract3x3.json",
+      "sha256": "059d460f063d80f7a6bad25e2253bc029af74d7ee4360f2d274b67ed94a75e6c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/extract4",
+      "file": "graphs/math--math_extract4.json",
+      "sha256": "58d6b59db6df3705bfc4c14dae22838015500dbfc5b061f6abfc40cd395fab31",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/extract4x4",
+      "file": "graphs/math--math_extract4x4.json",
+      "sha256": "6b13a8567c5a8f0e40be73b08f8a8129c25a39f1f9ce5a1a56c74f01fc586ff4",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/floor",
+      "file": "graphs/math--math_floor.json",
+      "sha256": "e70438faac82320e0609115f6580274ace7434c242e62998374c72fb0d93c59f",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/fract",
+      "file": "graphs/math--math_fract.json",
+      "sha256": "43cc0aa8c1efbecf027ee72331090197679e94f565d56a11e72a0dfe92b379e0",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/ge",
+      "file": "graphs/math--math_ge.json",
+      "sha256": "10128e1487224dcd8ba85e51198c3cd46195abd40ca7a9167bcd0516bb2a7f2f",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/gt",
+      "file": "graphs/math--math_gt.json",
+      "sha256": "35d88b6c6f00b81c50eb337856fd8a48eea9fc922e4be0fcbdb5c6d4a8c5f311",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/Inf",
+      "file": "graphs/math--math_Inf.json",
+      "sha256": "6268996e9f2358aa3608e05d511736e85f0e880861afc6f0bec923b48841c11b",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/inverse",
+      "file": "graphs/math--math_inverse.json",
+      "sha256": "0fcc5d7e926a4e36742a02b7662fef466050411eb4ae1957583d62510401cc1c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/inverse2x2",
+      "file": "graphs/math--math_inverse2x2.json",
+      "sha256": "3ccdf2d43eb11f0827883342e23c9dd3054d5854d91867ff7ac659215abe3d76",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/inverse3x3",
+      "file": "graphs/math--math_inverse3x3.json",
+      "sha256": "d9a3f062c3bf0cde7a1d3fb82e39299f55269b6786702ee185fbf0ea81061a90",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/isInf",
+      "file": "graphs/math--math_isInf.json",
+      "sha256": "e1c0136de1e514c7f1f3ba6e89a6bfce07aefcd44febd2a064ddff691d7e4360",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/isNaN",
+      "file": "graphs/math--math_isNaN.json",
+      "sha256": "a133e0e72700db32263ece496d815fa6dae5513e97bf123979015e84f9aa6d8e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/le",
+      "file": "graphs/math--math_le.json",
+      "sha256": "5281aa28e647f4b04c2bd13442166fc558d600d33f78a2e4e95f9c1b7f0dc4dc",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/length",
+      "file": "graphs/math--math_length.json",
+      "sha256": "dea6ffae1536c6088d3375353058284a530e998f610b289387d321c300b3f72d",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/log",
+      "file": "graphs/math--math_log.json",
+      "sha256": "37ba874aa32ad9c48822c0f131bb2e43bfee635f58a295a239020cb6cf83cc7c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/log10",
+      "file": "graphs/math--math_log10.json",
+      "sha256": "4363709382252fdaf9abc6ed06e7435177819a030e4870b53141398a5b9ec433",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/log2",
+      "file": "graphs/math--math_log2.json",
+      "sha256": "5a5358107fa83e44acf217277c091e3ac34d803d3dd837ce01e61fe58f0f1e70",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/lsl",
+      "file": "graphs/math--math_lsl.json",
+      "sha256": "b2ed7232bf71bcb70867cd64a28a212152ccbe8a0edbdd76eda685489f298a99",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/lt",
+      "file": "graphs/math--math_lt.json",
+      "sha256": "1680272773e4daefedf0576e85a288f186e6917db49ed327f166218a97c3e2ae",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matComp-Dec-Comp",
+      "file": "graphs/math--math_matComp-Dec-Comp.json",
+      "sha256": "046dd614cb705e00cc0fcf9ead351c11cb575fabe83dafeed4cce94cf66417dd",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matCompose",
+      "file": "graphs/math--math_matCompose.json",
+      "sha256": "04c27a3a67c4be69a30cf9624c722248d076067573c1814b0f8cd48981df9cf0",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matDecompose",
+      "file": "graphs/math--math_matDecompose.json",
+      "sha256": "93053e550f787af34f081920db411853a84297348f1c63a64da41e134eef2115",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matDecomp-Shear",
+      "file": "graphs/math--math_matDecomp-Shear.json",
+      "sha256": "8fda9b82d49ed45debd34dacb22e5638f0ba9669240d6e766cd658108c9f0cc2",
+      "baseline": "fail"
+    },
+    {
+      "asset": "math:math/matMul",
+      "file": "graphs/math--math_matMul.json",
+      "sha256": "4f3925f758b6709c62f4a7087b8b2f65ddfd7bfc0dc45da9b99ea49bac232752",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matMul2x2",
+      "file": "graphs/math--math_matMul2x2.json",
+      "sha256": "35c07978c6f9a011703ae0f9b26a07dcaa6a050cc2c1442c8fa1f39525b2a643",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matMul3x3",
+      "file": "graphs/math--math_matMul3x3.json",
+      "sha256": "20c51f454a119b656309437dd96b6e2e4e5c5d5153ea1e68e13ee0bd7d334e2b",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/matMul-nonCommutative",
+      "file": "graphs/math--math_matMul-nonCommutative.json",
+      "sha256": "a3300b7d803b2b34d2d64ebb6688c31a7b8b9047742c12e4e6cf5cf4a872f81a",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/max",
+      "file": "graphs/math--math_max.json",
+      "sha256": "359c7ead96e786fe0cdc3fd4e24aedd96751a7b12c946f491eb427e2d8ea011e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/min",
+      "file": "graphs/math--math_min.json",
+      "sha256": "722c188668326366c315c10d4ae13e40cc995242ea68caccac9e8a1e2aad9b0d",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/mix",
+      "file": "graphs/math--math_mix.json",
+      "sha256": "2db727fc2d9865e97c1b04bb12f2f4e7f8f6fbf36e21addfa6381f78cf680b57",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/mul",
+      "file": "graphs/math--math_mul.json",
+      "sha256": "136edf3a3bc072ed8f9c89a238095462b39309d1ce23b36bf4ceb7d6ae67435c",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/NaN",
+      "file": "graphs/math--math_NaN.json",
+      "sha256": "a4aaa842a8b7a270986f04a9dee89fd7bd7fab726724082a60ee52629cd6dbe0",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/neg",
+      "file": "graphs/math--math_neg.json",
+      "sha256": "bd64754e23fe67ec4e39805b1f379cc3a439284a3bdcf443c8805b73b5962b59",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/normalize",
+      "file": "graphs/math--math_normalize.json",
+      "sha256": "1c0f01f1d63d165e821e2b0b17fb9fc06ed916234566aa1e0cce1c3a307048a7",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/not",
+      "file": "graphs/math--math_not.json",
+      "sha256": "ffefd2ea116fb7dacb63e22224e1e4eecdddb53ddd8ad1650f512ec2290104be",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/or",
+      "file": "graphs/math--math_or.json",
+      "sha256": "975c939e59c50f51b36f94f9ee6f54d2f39980d3885a7537f48d31762acbef81",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/Pi",
+      "file": "graphs/math--math_Pi.json",
+      "sha256": "2f704ec28e1588c249edbd2c448e8bbe23d1ac67922be5c96f0cfc13a24149db",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/popcnt",
+      "file": "graphs/math--math_popcnt.json",
+      "sha256": "104017a3f9e17263c997054240b74b308607f7ff61fb41153489c0295d07a98f",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/pow",
+      "file": "graphs/math--math_pow.json",
+      "sha256": "926902717b94521f6d0c83f72307524463be1ee663c4b3ef5a748ee2aa44998d",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatAngleBetween",
+      "file": "graphs/math--math_quatAngleBetween.json",
+      "sha256": "f249a3e42fd093708ea45843c4638da54c8d01b79af06337d1d5958e2e34ed61",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatConjugate",
+      "file": "graphs/math--math_quatConjugate.json",
+      "sha256": "699d8849f29438c5cb4a4ef991c8bf38997adf924fa15c05341684f575e14319",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatFromAngles",
+      "file": "graphs/math--math_quatFromAngles.json",
+      "sha256": "597f46bcbf5b7e092e97c6a54a22fd6b9373d109e837f3f7e03c4444f09d5613",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatFromAxisAngle",
+      "file": "graphs/math--math_quatFromAxisAngle.json",
+      "sha256": "37e5006ea107e547bf256482478240a60ce55880515c5490ecb34e9a30ad91b1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatFromDirections",
+      "file": "graphs/math--math_quatFromDirections.json",
+      "sha256": "0d86bada50394f8d09d68b8ff50efab1593864ce29ad09aceca5a29a1b46f008",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatFromDirections-edge",
+      "file": "graphs/math--math_quatFromDirections-edge.json",
+      "sha256": "66098bc98caa7f6d975be294089afc8d2e0ab5bcecd5aeb31e938cbe4dc177b9",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatFromUpForward",
+      "file": "graphs/math--math_quatFromUpForward.json",
+      "sha256": "abd04d39c1ce71ef51b58aa6559124f8fd32aa56883e1a1c5fe744d98b10f9e1",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatFromUpForward-degenerate",
+      "file": "graphs/math--math_quatFromUpForward-degenerate.json",
+      "sha256": "209fd5b24dc2114044daa375164fa30254ffbce256d89ee6db8c20ab6a7dbda4",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatMul",
+      "file": "graphs/math--math_quatMul.json",
+      "sha256": "ff73acf00ce96c23cd7641bf13f98e0fd1f4c50046448937f2e78937d737c4e6",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatSlerp",
+      "file": "graphs/math--math_quatSlerp.json",
+      "sha256": "c773845379310354942847bef17ca8c74650e76d4319f254eb34db93d12542b7",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatToAxisAngle",
+      "file": "graphs/math--math_quatToAxisAngle.json",
+      "sha256": "6266f0dc24092086bc0a247fc2ec8cc12f7d7bae51c8160863d4dce98c86ad9e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/quatToAxisAngle-identity",
+      "file": "graphs/math--math_quatToAxisAngle-identity.json",
+      "sha256": "29d203fb1a34d5886d70ee873a96ca63224cd53295349dae5397c0a9c370f609",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/rad",
+      "file": "graphs/math--math_rad.json",
+      "sha256": "e7c527205a37841fd3476bb6b3da711c3574e2bceec9961b09a1fd385f06fcd4",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/random",
+      "file": "graphs/math--math_random.json",
+      "sha256": "76d2097a082a4e1ba5846f1524056cf7266aa0da15d3abe4ba0b770764b95793",
+      "baseline": "disposed"
+    },
+    {
+      "asset": "math:math/rem",
+      "file": "graphs/math--math_rem.json",
+      "sha256": "a4869520069437ed083ee9716e1335b5bba573fcd177981ab6a067438fe2fd29",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/rgbFromOkLCh",
+      "file": "graphs/math--math_rgbFromOkLCh.json",
+      "sha256": "fa336967c099055e1ddb6484ad9aa47a28c3af46b792ebf776ba6bb4712f078d",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/rgbToOkLCh",
+      "file": "graphs/math--math_rgbToOkLCh.json",
+      "sha256": "e23e0e5da335c12725dbe9983b67c7e6a79fc92e99d3be7d5d229674f5fecfc7",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/rotate2D",
+      "file": "graphs/math--math_rotate2D.json",
+      "sha256": "e260ba2060e70183edbf684cabcf328ec1ce72d09459a1cdb2a6a6346abdc653",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/rotate3D",
+      "file": "graphs/math--math_rotate3D.json",
+      "sha256": "ca2ddb525ade0d15528391fe3340ab48c90c6a025711fe32944dbde6a10a08cd",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/round",
+      "file": "graphs/math--math_round.json",
+      "sha256": "23978f44d60d06b9380e25fabf202588e87faf95aff3e9c47fb3853b05f0f294",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/saturate",
+      "file": "graphs/math--math_saturate.json",
+      "sha256": "402a1b95b4f5d42678c4b70de977135be0385ca6beea25b3aadd0dc14e184c89",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/select",
+      "file": "graphs/math--math_select.json",
+      "sha256": "9736b6a122ad93d09aab9eca8155d55baec0d66c7564c81c9dd4f54672a13736",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/sign",
+      "file": "graphs/math--math_sign.json",
+      "sha256": "3a9dbb7799502434d37dd5fa97493a366e6968a49a4537db38bf8a3a7f4cce4e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/sin",
+      "file": "graphs/math--math_sin.json",
+      "sha256": "3c314c85cf90cf53eb8a057c98cdcf98b0508f48a2cdaeddb144b928c7c94a67",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/sinh",
+      "file": "graphs/math--math_sinh.json",
+      "sha256": "d1e1f86a0ab80b6afb9ec1eef7d73d52364ee95a5246df8e38661b6e8be62276",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/slerp",
+      "file": "graphs/math--math_slerp.json",
+      "sha256": "5ba8a1d784aa87ea6f8b01bf24dfaca258c7e94843fa0843017127a11c87b190",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/smoothStep",
+      "file": "graphs/math--math_smoothStep.json",
+      "sha256": "5c5a3fe0f0f584746b5c237757add842c3389971ea93d2842a441b61a72858ae",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/sqrt",
+      "file": "graphs/math--math_sqrt.json",
+      "sha256": "bc87e98ca4d15a1ac464ab4401bf48d38f125038b034e2e4ded0003aaf59793e",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/sub",
+      "file": "graphs/math--math_sub.json",
+      "sha256": "87beba857a9b3faacd86b8ec6b26e4cba6990c18f1283e1dadac69cc861384e5",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/switch",
+      "file": "graphs/math--math_switch.json",
+      "sha256": "266a3b2880617fbe407f9ba7d2c27fee0fc3ba1581d8be4fa9bcec755f17f173",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/tan",
+      "file": "graphs/math--math_tan.json",
+      "sha256": "c57ba84aa5f1903696459c75056d80c09d8061c28e109e06402ad396bd62d51a",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/tanh",
+      "file": "graphs/math--math_tanh.json",
+      "sha256": "33e39451692649ef430c933b803145718cac73e701ddf07ae0e4f7661bc29bcb",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/Tau",
+      "file": "graphs/math--math_Tau.json",
+      "sha256": "6ab87ab7bd7111454902fa0a86bd0b75304b97b5feba947aebc5ea72bb28278a",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/transform",
+      "file": "graphs/math--math_transform.json",
+      "sha256": "b2e249c4b67eea26512d061dfde823ff40656845f03d41d46ad915545b1a02de",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/transpose",
+      "file": "graphs/math--math_transpose.json",
+      "sha256": "c9b0b3f5fc2068a4ab727d27db8a669c5081eb2a45f1ee94a6d9cc0bcca38d16",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/transpose2x2",
+      "file": "graphs/math--math_transpose2x2.json",
+      "sha256": "936fca9e02b326d00a0e69de3d5131cc2f25c0578f6b603e6c43467f9f6ba856",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/transpose3x3",
+      "file": "graphs/math--math_transpose3x3.json",
+      "sha256": "cbaec312173bb12ba4c43eb3ca7ac8214f1d7296ef71b83ec984477d512560b9",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/trunc",
+      "file": "graphs/math--math_trunc.json",
+      "sha256": "b5921ca7e0d0140103ce29d4af23c35ce828afb9978c9a74d407561a0da6d4a7",
+      "baseline": "pass"
+    },
+    {
+      "asset": "math:math/xor",
+      "file": "graphs/math--math_xor.json",
+      "sha256": "c87d3c4130e87cabebf24c0c6566643610f6b79689c682a2252c080cb1cffb7f",
+      "baseline": "pass"
+    }
+  ]
+}

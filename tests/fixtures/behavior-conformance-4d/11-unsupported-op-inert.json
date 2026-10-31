@@ -1,0 +1,179 @@
+{
+  "id": "11-unsupported-op-inert",
+  "description": "event/stopPropagation is a core op Atrium does not run (G-L2). A sequence calls it, then writes translation. The unsupported node is inert: its own out flow (scale [2,2,2]) never runs, and the sequence's next branch still does.",
+  "contract": [
+    "G-L3 (a) stored, inert, reported",
+    "G3 the identity gate"
+  ],
+  "requires4d": [
+    "the identity gate: the engine as shipped runs event/stopPropagation"
+  ],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {},
+  "clock": {
+    "startMs": 0,
+    "stepMs": 100
+  },
+  "ticks": 2,
+  "events": [],
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onStart"
+      },
+      {
+        "op": "flow/sequence"
+      },
+      {
+        "op": "event/stopPropagation"
+      },
+      {
+        "op": "pointer/set"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 1,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "flows": {
+          "a": {
+            "node": 2,
+            "socket": "in"
+          },
+          "b": {
+            "node": 3,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "values": {
+          "stopImmediate": {
+            "type": 0,
+            "value": [
+              false
+            ]
+          },
+          "event": {
+            "type": 5,
+            "value": [
+              "/extensions/KHR_interactivity/events/0"
+            ]
+          }
+        },
+        "flows": {
+          "out": {
+            "node": 4,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              1,
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/scale"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              2,
+              2,
+              2
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 1,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          1,
+          0,
+          0
+        ]
+      }
+    ],
+    "refused": [],
+    "disposed": false,
+    "unsupported": [
+      {
+        "op": "event/stopPropagation",
+        "extension": null
+      }
+    ]
+  }
+}

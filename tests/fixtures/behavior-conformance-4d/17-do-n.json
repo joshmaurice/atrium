@@ -1,0 +1,175 @@
+{
+  "id": "17-do-n",
+  "description": "onTick through flow/doN with n = 3 writes its currentCount: x = 1, 2, 3, then nothing.",
+  "contract": [
+    "G-L2 flow/doN"
+  ],
+  "requires4d": [],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {},
+  "clock": {
+    "startMs": 0,
+    "stepMs": 100
+  },
+  "ticks": 5,
+  "events": [],
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onTick"
+      },
+      {
+        "op": "flow/doN"
+      },
+      {
+        "op": "type/intToFloat"
+      },
+      {
+        "op": "math/combine3"
+      },
+      {
+        "op": "pointer/set"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 1,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "values": {
+          "n": {
+            "type": 1,
+            "value": [
+              3
+            ]
+          }
+        },
+        "flows": {
+          "out": {
+            "node": 4,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "values": {
+          "a": {
+            "node": 1,
+            "socket": "currentCount"
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "values": {
+          "a": {
+            "node": 2,
+            "socket": "value"
+          },
+          "b": {
+            "type": 2,
+            "value": [
+              0
+            ]
+          },
+          "c": {
+            "type": 2,
+            "value": [
+              0
+            ]
+          }
+        }
+      },
+      {
+        "declaration": 4,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "node": 3,
+            "socket": "value"
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 1,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          1,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 2,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          2,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 3,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          3,
+          0,
+          0
+        ]
+      }
+    ],
+    "refused": [],
+    "disposed": false
+  }
+}

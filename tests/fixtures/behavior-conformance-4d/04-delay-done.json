@@ -1,0 +1,117 @@
+{
+  "id": "04-delay-done",
+  "description": "onStart sets a 0.35 s delay; its done hides the own node. Scheduled at 0 ms, due at 350 ms, so it fires before the tick at 400 ms (tick 5) and the write happens in that tick.",
+  "contract": [
+    "G3 delays (injected timers, done on the next tick)"
+  ],
+  "requires4d": [],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {},
+  "clock": {
+    "startMs": 0,
+    "stepMs": 100
+  },
+  "ticks": 6,
+  "events": [],
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onStart"
+      },
+      {
+        "op": "flow/setDelay"
+      },
+      {
+        "op": "pointer/set"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 1,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "values": {
+          "duration": {
+            "type": 2,
+            "value": [
+              0.35
+            ]
+          }
+        },
+        "flows": {
+          "done": {
+            "node": 2,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/extensions/KHR_node_visibility/visible"
+            ]
+          },
+          "type": {
+            "value": [
+              0
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 0,
+            "value": [
+              false
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 5,
+        "index": 0,
+        "field": "visible",
+        "value": false
+      }
+    ],
+    "refused": [],
+    "disposed": false
+  }
+}

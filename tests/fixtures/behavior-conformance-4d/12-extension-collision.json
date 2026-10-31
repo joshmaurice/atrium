@@ -1,0 +1,209 @@
+{
+  "id": "12-extension-collision",
+  "description": "Rev 0 review M1. flow/sequence and event/onTick are declared a second time WITH extension EXT_probe. Those declarations are not executable identities: the extension sequence never runs its branch (scale [2,2,2]) and the extension onTick never ticks (scale [3,3,3]). The bare sequence runs as normal (translation [1,0,0]).",
+  "contract": [
+    "G1 EXECUTABLE identities",
+    "G3 the identity gate",
+    "P19"
+  ],
+  "requires4d": [
+    "the identity gate: the engine as shipped builds both by op name (r1)"
+  ],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {},
+  "clock": {
+    "startMs": 0,
+    "stepMs": 100
+  },
+  "ticks": 3,
+  "events": [],
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onStart"
+      },
+      {
+        "op": "flow/sequence"
+      },
+      {
+        "op": "flow/sequence",
+        "extension": "EXT_probe"
+      },
+      {
+        "op": "pointer/set"
+      },
+      {
+        "op": "event/onTick",
+        "extension": "EXT_probe"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 1,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "flows": {
+          "a": {
+            "node": 2,
+            "socket": "in"
+          },
+          "b": {
+            "node": 4,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "flows": {
+          "a": {
+            "node": 3,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/scale"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              2,
+              2,
+              2
+            ]
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              1,
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "declaration": 4,
+        "flows": {
+          "out": {
+            "node": 6,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/scale"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              3,
+              3,
+              3
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 1,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          1,
+          0,
+          0
+        ]
+      }
+    ],
+    "refused": [],
+    "disposed": false,
+    "unsupported": [
+      {
+        "op": "flow/sequence",
+        "extension": "EXT_probe"
+      },
+      {
+        "op": "event/onTick",
+        "extension": "EXT_probe"
+      }
+    ]
+  }
+}

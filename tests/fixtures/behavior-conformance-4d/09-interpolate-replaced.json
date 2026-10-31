@@ -1,0 +1,341 @@
+{
+  "id": "09-interpolate-replaced",
+  "description": "An interpolation to x = 10 over 1 s is replaced at 500 ms (a delay's done) by one to x = 0 over 0.5 s on the same pointer. The second starts from the value last written (2.5, read back through the host's own writes, G-L6). The first one's done (scale [2,2,2]) must never run; the second's (scale [3,3,3]) runs on the tick after it ends.",
+  "contract": [
+    "P13 one interpolation per pointer",
+    "G-L6 reads see the host's own writes"
+  ],
+  "requires4d": [],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {
+    "initial": {
+      "0": {
+        "translation": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "clock": {
+    "startMs": 0,
+    "stepMs": 250
+  },
+  "ticks": 7,
+  "events": [],
+  "tolerance": 0.000001,
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onStart"
+      },
+      {
+        "op": "flow/sequence"
+      },
+      {
+        "op": "pointer/interpolate"
+      },
+      {
+        "op": "flow/setDelay"
+      },
+      {
+        "op": "pointer/set"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 1,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "flows": {
+          "a": {
+            "node": 2,
+            "socket": "in"
+          },
+          "b": {
+            "node": 3,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              10,
+              0,
+              0
+            ]
+          },
+          "duration": {
+            "type": 2,
+            "value": [
+              1
+            ]
+          },
+          "p1": {
+            "type": 6,
+            "value": [
+              0,
+              0
+            ]
+          },
+          "p2": {
+            "type": 6,
+            "value": [
+              1,
+              1
+            ]
+          }
+        },
+        "flows": {
+          "done": {
+            "node": 6,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 3,
+        "values": {
+          "duration": {
+            "type": 2,
+            "value": [
+              0.5
+            ]
+          }
+        },
+        "flows": {
+          "done": {
+            "node": 4,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              0,
+              0,
+              0
+            ]
+          },
+          "duration": {
+            "type": 2,
+            "value": [
+              0.5
+            ]
+          },
+          "p1": {
+            "type": 6,
+            "value": [
+              0,
+              0
+            ]
+          },
+          "p2": {
+            "type": 6,
+            "value": [
+              1,
+              1
+            ]
+          }
+        },
+        "flows": {
+          "done": {
+            "node": 5,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 4,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/scale"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              3,
+              3,
+              3
+            ]
+          }
+        }
+      },
+      {
+        "declaration": 4,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/scale"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              2,
+              2,
+              2
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 1,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 2,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          2.5,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 3,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          2.5,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 4,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          1.25,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 5,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 5,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 6,
+        "index": 0,
+        "field": "scale",
+        "value": [
+          3,
+          3,
+          3
+        ]
+      }
+    ],
+    "refused": [],
+    "disposed": false
+  }
+}

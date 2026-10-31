@@ -1,0 +1,230 @@
+{
+  "id": "08-interpolate-linear",
+  "description": "onStart interpolates translation from [0,0,0] to [10,0,0] over 1 s with a linear easing (p1 [0,0], p2 [1,1]), 250 ms steps. The engine writes the eased value each tick and, on the last, the value then the target; done runs on the next tick and writes scale [2,2,2].",
+  "contract": [
+    "G-L2 pointer/interpolate",
+    "G3 the clock",
+    "P13"
+  ],
+  "requires4d": [],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {
+    "initial": {
+      "0": {
+        "translation": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "clock": {
+    "startMs": 0,
+    "stepMs": 250
+  },
+  "ticks": 6,
+  "events": [],
+  "tolerance": 0.000001,
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onStart"
+      },
+      {
+        "op": "pointer/interpolate"
+      },
+      {
+        "op": "pointer/set"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 1,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              10,
+              0,
+              0
+            ]
+          },
+          "duration": {
+            "type": 2,
+            "value": [
+              1
+            ]
+          },
+          "p1": {
+            "type": 6,
+            "value": [
+              0,
+              0
+            ]
+          },
+          "p2": {
+            "type": 6,
+            "value": [
+              1,
+              1
+            ]
+          }
+        },
+        "flows": {
+          "done": {
+            "node": 2,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/scale"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "type": 3,
+            "value": [
+              2,
+              2,
+              2
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 1,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 2,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          2.5,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 3,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          5,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 4,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          7.5,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 5,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          10,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 5,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          10,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 6,
+        "index": 0,
+        "field": "scale",
+        "value": [
+          2,
+          2,
+          2
+        ]
+      }
+    ],
+    "refused": [],
+    "disposed": false
+  }
+}

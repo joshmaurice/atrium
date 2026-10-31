@@ -1,0 +1,145 @@
+{
+  "id": "13-nan-not-written",
+  "description": "Rev 0 review S1. onTick writes timeSinceLastTick into x. On the first tick it is NaN: the write is refused at the boundary (G4) and never queued. From the second tick it is 0.1.",
+  "contract": [
+    "G4 write checks",
+    "P21"
+  ],
+  "requires4d": [],
+  "nodeMap": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "world": {},
+  "clock": {
+    "startMs": 0,
+    "stepMs": 100
+  },
+  "ticks": 3,
+  "events": [],
+  "graph": {
+    "types": [
+      {
+        "signature": "bool"
+      },
+      {
+        "signature": "int"
+      },
+      {
+        "signature": "float"
+      },
+      {
+        "signature": "float3"
+      },
+      {
+        "signature": "float4"
+      },
+      {
+        "signature": "ref"
+      },
+      {
+        "signature": "float2"
+      }
+    ],
+    "declarations": [
+      {
+        "op": "event/onTick"
+      },
+      {
+        "op": "math/combine3"
+      },
+      {
+        "op": "pointer/set"
+      }
+    ],
+    "nodes": [
+      {
+        "declaration": 0,
+        "flows": {
+          "out": {
+            "node": 2,
+            "socket": "in"
+          }
+        }
+      },
+      {
+        "declaration": 1,
+        "values": {
+          "a": {
+            "node": 0,
+            "socket": "timeSinceLastTick"
+          },
+          "b": {
+            "type": 2,
+            "value": [
+              0
+            ]
+          },
+          "c": {
+            "type": 2,
+            "value": [
+              0
+            ]
+          }
+        }
+      },
+      {
+        "declaration": 2,
+        "configuration": {
+          "pointer": {
+            "value": [
+              "/nodes/0/translation"
+            ]
+          },
+          "type": {
+            "value": [
+              3
+            ]
+          }
+        },
+        "values": {
+          "value": {
+            "node": 1,
+            "socket": "value"
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "writes": [
+      {
+        "tick": 2,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          0.1,
+          0,
+          0
+        ]
+      },
+      {
+        "tick": 3,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          0.1,
+          0,
+          0
+        ]
+      }
+    ],
+    "refused": [
+      {
+        "tick": 1,
+        "index": 0,
+        "field": "translation",
+        "value": [
+          "NaN",
+          0,
+          0
+        ]
+      }
+    ],
+    "disposed": false
+  }
+}
