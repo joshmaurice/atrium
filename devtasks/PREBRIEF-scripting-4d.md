@@ -1,6 +1,6 @@
 # Pre-brief: Phase 3 step 4d — graphs beyond the templates: the wider runtime and the graph importer
 
-Status: **FINAL, Revision 1.7 (2026-10-31; FINAL since Rev 1.3). The operator approved
+Status: **FINAL, Revision 1.8 (2026-10-31; FINAL since Rev 1.3). The operator approved
 decisions G-L1–G-L12, Q3 and Q7 and made Rev 1.2 FINAL (2026-10-30 20:57
 PT), all as recommended:**
 G-L1 (a) 4d-1, one round with seven steps, and `KHR_animation_pointer`
@@ -383,6 +383,31 @@ unchanged.
 
 §0.7, §8's step 3, its copy in §0.6 and G10 change; the status line names Rev
 1.7. Nothing else.
+
+### 0.8 Revision 1.8 (after FINAL, round 6)
+Round 6's revision (`devtasks/REVISION-scripting-4d-1-round-6.md`, R30–R32)
+recorded the one note below, from the outside review of round 5
+(`devtasks/REVIEW-scripting-4d-1-round-5-code.md`, NO-GO, its M1) and the
+sibling layout the review did not find. **No decision changes.**
+
+1. **G10, the offline check (R30, R31).** The lock path follows **link targets
+   the way the kernel does**: `realpathSync.native` (libc `realpath`), never
+   Node's JavaScript `realpathSync`, whose first step is `path.resolve` and so
+   folds a `..` as text; and a dangling link's next path is built by string
+   concatenation, never `resolve`/`join`. Round 5 did both, and split one
+   database into two locks through a symlinked directory whose link target
+   carried a `..` — the first server took `<root>/target.db.lock.db` while
+   SQLite created `<root>/real/target.db`, and a second server through the same
+   alias took the target's lock and ran. **The invariant is the test of it:**
+   the same lock path before the database is created and after it is created
+   through the same configured path, over six layouts (a plain dangling link,
+   the review's, its absolute-target sibling, `..` in the configured path
+   itself, a two-hop chain, no link). R31: a symlink loop refuses with
+   `Atrium server refuses to start: …`, the server's own message, not Node's
+   uncaught-error trace — the legacy-lock diagnostic now sits inside the
+   guarded start.
+
+§0.8 and G10 change; the status line names Rev 1.8. Nothing else.
 
 ## 1. What 4d delivers
 
@@ -1486,6 +1511,15 @@ operator. That is the authority: no owner's session is involved (P24).
   (a)), so no `<canonical db>.lock.db-journal` file is ever created and none
   can be left behind, owned by anyone; and the **server ends by the signal**
   (R27), so systemd records a clean stop.
+  **Rev 1.8:** the lock path follows **link targets the way the kernel does**
+  (R30) — `realpathSync.native`, and a dangling link's next path built by
+  string concatenation, so no `..` is ever folded as text after a symlink —
+  because round 5 folded one and split a database into two locks through a
+  symlinked directory whose link target carried a `..`. Its test is the
+  invariant: the same lock before the database exists and after it is created
+  through the same configured path, over six layouts. And a symlink **loop**
+  refuses with `Atrium server refuses to start: …` (R31), the server's own
+  message, not Node's uncaught-error trace.
 - **File-backed worlds are out of scope:** they are never autosaved
   (`world.js` L462–470), so they never hold a healed leaf in storage.
 - **Limit, stated:** a node that had a 4d leaf, was healed to `null`, and

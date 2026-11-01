@@ -35,6 +35,15 @@
 //     alias and the database's own path are still ONE lock. (A hard link,
 //     or the same file through another mount, is a different path after
 //     `realpath`; out of scope under R-L6 (a).)
+//   * R30 (round 6, round 5's M1) — link TARGETS are resolved the way the KERNEL
+//     resolves them: `realpathSync.native` (libc `realpath`), never the
+//     JavaScript `realpathSync`, whose first step is `path.resolve` and so folds
+//     `..` as TEXT. And a dangling link's next path is built by string
+//     concatenation, never `resolve`/`join`, for the same reason. Round 5 did
+//     both and split one database into two locks through a symlinked directory
+//     whose link target carried a `..`. The test of it is the invariant: the
+//     lock path computed BEFORE the database exists equals the one computed
+//     AFTER Atrium has created the database through the same configured path.
 //   * whoever creates the lock database or the sidecar gives them the main
 //     database's owner, group and mode, so a lock database root's script made
 //     first never stops the service from opening it later.
@@ -44,7 +53,7 @@
 import {
   chmodSync, chownSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { hostname } from 'node:os'
 import Database from 'better-sqlite3'
 
@@ -56,10 +65,10 @@ import Database from 'better-sqlite3'
  * R19 — the database's CANONICAL path: the lock must be one lock for one
  * database, whatever spelling reached it.
  *
- *   * the file exists → `realpathSync(dbPath)` (a symlink to the file collapses
- *     to its target, as does a symlinked directory above it);
- *   * it doesn't (the server's first start) → `realpathSync(dirname)` + the
- *     basename, so a symlinked directory still collapses;
+ *   * the file exists → `realpathSync.native(dbPath)` (a symlink to the file
+ *     collapses to its target, as does a symlinked directory above it);
+ *   * it doesn't (the server's first start) → `realpathSync.native(dirname)` +
+ *     the basename, so a symlinked directory still collapses;
  *   * the directory doesn't exist either → the `resolve()`d path, as before.
  *
  * R25 — a DANGLING symlink in the LAST component resolves to its target. Round
@@ -70,13 +79,32 @@ import Database from 'better-sqlite3'
  * resolves against the LINK's directory — and carry on, at most
  * MAX_SYMLINK_HOPS hops; a chain that never lands (a loop) is an error, not a
  * hang.
+ *
+ * R30 (round 6) — every resolution here is the KERNEL's, not Node's textual
+ * one. `resolve(dbPath)` starts the path, exactly as `db.js` opens it, and after
+ * that `..` is never folded as text:
+ *
+ *   * existence is tested with `realpathSync.native` (libc `realpath`). Node's
+ *     JavaScript `realpathSync` begins with `path.resolve`, so it folds a `..`
+ *     in a link target as text — before the kernel has followed a symlinked
+ *     directory on the way — and computes the lock for a different file than
+ *     the one SQLite then creates;
+ *   * a dangling link's next path is built by STRING CONCATENATION: an absolute
+ *     target as it is, a relative one as `dirname(path) + '/' + target`. Never
+ *     `resolve` or `join` on a path that may still hold `..` after a symlink;
+ *   * the last step, `join(realpathSync.native(dirname(path)), basename(path))`,
+ *     hands the `..` to the kernel, which resolves it after the links.
+ *
+ * The invariant this buys: the lock path computed BEFORE the database exists
+ * equals the one computed AFTER Atrium has created it through the same
+ * configured path. That is the test (server-lock.test.js).
  */
 const MAX_SYMLINK_HOPS = 40
 
 export function canonicalDbPath(dbPath) {
   const resolved = resolve(dbPath)
   try {
-    return realpathSync(resolved)
+    return realpathSync.native(resolved)
   } catch {
     // The database file isn't there yet; canonicalise its directory instead.
   }
@@ -99,16 +127,19 @@ export function canonicalDbPath(dbPath) {
     } catch {
       break                                       // raced away under us
     }
-    path = resolve(dirname(path), target)
+    // R30: concatenation, not `resolve`. `resolve` would fold a `..` in the
+    // target as text, before the kernel has followed a symlinked directory on
+    // the way to it, and land on a different file than SQLite opens.
+    path = isAbsolute(target) ? target : `${dirname(path)}/${target}`
     try {
-      return realpathSync(path)                   // the target exists: collapse it
+      return realpathSync.native(path)            // the target exists: collapse it
     } catch {
       // Still dangling; keep following the chain.
     }
   }
 
   try {
-    return join(realpathSync(dirname(path)), basename(path))
+    return join(realpathSync.native(dirname(path)), basename(path))
   } catch {
     // Neither is there: nothing to resolve against.
   }

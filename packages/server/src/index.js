@@ -67,14 +67,17 @@ const dbPath = resolveDbPath(process.env.ATRIUM_DB_PATH)
 
 const lockLog = (line) => console.error(`[lock] ${line}`)
 
-// The pre-R8 lock FILE is ignored now (R22). Say so once, so an operator who
-// kept one knows it can go.
-if (legacyLockExists(dbPath)) {
-  lockLog(`leftover ${legacyLockPathFor(dbPath)} from an earlier release is ignored; you may delete it`)
-}
-
 let serverLock
 try {
+  // R31 — the pre-R8 lock FILE diagnostic is INSIDE the guarded start. It reads
+  // the canonical path too, so on a looping path it throws like the acquire
+  // does; unguarded (round 5) that escaped as Node's uncaught-error trace
+  // instead of the server's own refusal. Every path error now prints
+  // `Atrium server refuses to start: …` and exits 1, before anything is opened.
+  // Say the leftover once, so an operator who kept one knows it can go.
+  if (legacyLockExists(dbPath)) {
+    lockLog(`leftover ${legacyLockPathFor(dbPath)} from an earlier release is ignored; you may delete it`)
+  }
   serverLock = acquireLock(dbPath, { role: 'server', log: lockLog })
 } catch (error) {
   console.error(`Atrium server refuses to start: ${error.message}`)

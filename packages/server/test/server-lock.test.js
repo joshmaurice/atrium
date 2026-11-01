@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 //
 // server-lock.test.js — scripting-4d-1 round 4, card 3 (R22 as R-L8 (a), R19);
-// round 5, card 1 (R25, R26 as R-L9 (a), R27).
+// round 5, card 1 (R25, R26 as R-L9 (a), R27); round 6, card 1 (R30, R31).
 //
 // The server's START/STOP test: the real `src/index.js`, in its own process,
 // against a scratch database, with the two rollback scripts pointed at the same
@@ -32,6 +32,13 @@
 //     holder does not stop the next acquire;
 //   * R27: the server ends by the SIGNAL (SIGTERM/SIGINT), which is what systemd
 //     records as a clean stop, and the lock is free at once afterwards;
+//   * R30 (round 6, round 5's M1): link TARGETS are resolved the way the KERNEL
+//     resolves them (`realpathSync.native`, and a dangling link's next path built
+//     by concatenation), so the lock path computed BEFORE the database exists is
+//     the one computed AFTER creation — over all six layouts, the review's and
+//     its absolute-target sibling included. Round 5 split the last two;
+//   * R31: a symlink loop refuses with `Atrium server refuses to start: …`, the
+//     server's own message, not Node's uncaught-error trace;
 //   * the pre-R8 `<db>.lock` FILE is ignored (one log line at start).
 
 import { test, after } from 'node:test'
@@ -702,6 +709,184 @@ test('R25: a symlink loop refuses with a clear message instead of hanging', asyn
   assert.equal(refused.code, 1, `the server refuses on a looping database path: ${refused.stdout}${refused.stderr}`)
   assert.match(refused.stderr, /could not resolve .*a\.db: too many levels of symbolic links/)
   assert.ok(Date.now() - started < 20000, 'and it refused at once, not by the test\'s timeout')
+})
+
+// ===========================================================================
+// R30 (round 6): link targets resolve the way the KERNEL resolves them
+// (round 5's M1, and the sibling layout the review did not find)
+// ===========================================================================
+
+/**
+ * The two layouts round 5 SPLIT: a symlinked directory whose link TARGET carries
+ * a `..`. Round 5 folded the `..` as text (`path.resolve`/`realpathSync`) before
+ * the kernel had followed `linkdir`, and computed `<root>/target.db.lock.db`; the
+ * kernel — and SQLite, through the alias — made `<root>/real/child/../target.db`
+ * = `<root>/real/target.db`. The second server then took the other lock and RAN.
+ *
+ * Every path here is built by CONCATENATION, not `join`: `join` would fold the
+ * `..` for us and hand the test the very bug it pins.
+ */
+function splitLayouts(dir) {
+  const build = (name, makeTarget, linkName) => {
+    const root = join(dir, name)
+    mkdirSync(root)
+    mkdirSync(join(root, 'real', 'child'), { recursive: true })
+    symlinkSync(join(root, 'real', 'child'), join(root, 'linkdir'))
+    symlinkSync(makeTarget(root), join(root, linkName))
+    return { name, configured: join(root, linkName), createdFile: join(root, 'real', 'target.db') }
+  }
+  return [
+    // (1) the review's: a RELATIVE `../` target through a symlinked directory.
+    //     The alias sits in `real/child`, so `../target.db` is `real/target.db`.
+    build('review', () => '../target.db', join('real', 'child', 'alias.db')),
+    // (2) the sibling: an ABSOLUTE target carrying `..` through the same link,
+    //     where the textual fold (`<root>/target.db`) is a different file.
+    build('absolute', (root) => `${root}/linkdir/../target.db`, join('real', 'child', 'alias.db')),
+  ]
+}
+
+test('R30: the lock path before the database exists equals the one after it is created, over the six layouts', () => {
+  const layouts = [
+    {
+      name: 'a plain dangling link',
+      make(root) { symlinkSync('real.db', join(root, 'a.db')); return join(root, 'a.db') },
+    },
+    {
+      name: "the review's: a symlinked directory and a relative ../ target",
+      make(root) {
+        mkdirSync(join(root, 'real', 'child'), { recursive: true })
+        symlinkSync(join(root, 'real', 'child'), join(root, 'linkdir'))
+        symlinkSync('../target.db', join(root, 'real', 'child', 'alias.db'))
+        return `${root}/linkdir/alias.db`
+      },
+    },
+    {
+      name: 'an absolute target through a symlinked directory and ..',
+      make(root) {
+        mkdirSync(join(root, 'real', 'child'), { recursive: true })
+        symlinkSync(join(root, 'real', 'child'), join(root, 'linkdir'))
+        symlinkSync(`${root}/linkdir/../t.db`, join(root, 'a.db'))
+        return join(root, 'a.db')
+      },
+    },
+    {
+      name: '.. in the configured path itself',
+      make(root) {
+        mkdirSync(join(root, 'real', 'child'), { recursive: true })
+        symlinkSync(join(root, 'real', 'child'), join(root, 'linkdir'))
+        return `${root}/linkdir/../x.db`
+      },
+    },
+    {
+      name: 'a two-hop relative chain',
+      make(root) {
+        symlinkSync('chain-real.db', join(root, 'b.db'))
+        symlinkSync('b.db', join(root, 'a.db'))
+        return join(root, 'a.db')
+      },
+    },
+    {
+      name: 'no link, a missing file',
+      make(root) { return join(root, 'plain.db') },
+    },
+  ]
+
+  for (const layout of layouts) {
+    const root = join(scratchDir(), 'layout')
+    mkdirSync(root)
+    const configured = layout.make(root)
+
+    // BEFORE: nothing exists at, or through, the configured path.
+    const before = lockPathFor(configured)
+    assert.equal(existsSync(before), false, `${layout.name}: no lock database yet`)
+
+    // Create the database exactly as Atrium does — by opening the configured
+    // path — so the KERNEL decides where the file lands.
+    writeFileSync(resolve(configured), '')
+    const createdFile = realpathSync.native(resolve(configured))
+    assert.equal(existsSync(createdFile), true, `${layout.name}: the database exists`)
+
+    const after = lockPathFor(configured)
+    assert.equal(after, before, `${layout.name}: the lock path is the same before and after creation`)
+    assert.equal(before, `${createdFile}.lock.db`, `${layout.name}: and it is the created file's own lock`)
+  }
+})
+
+test('R30: a server through a split alias creates the database, and a second server and both scripts refuse through either spelling', async () => {
+  const dir = scratchDir()
+
+  for (const layout of splitLayouts(dir)) {
+    const { configured, createdFile } = layout
+    const outPath = join(dirname(configured), 'r30-export.json')
+
+    assert.equal(existsSync(createdFile), false, `${layout.name}: the database is missing at first (a first boot)`)
+
+    // First boot THROUGH the alias: the server creates the database at the
+    // link's target, and must take the TARGET's lock — not the alias's.
+    const { child, listening } = startServer(configured)
+    await listening
+
+    assert.equal(existsSync(createdFile), true, `${layout.name}: the server created the database at the target`)
+    const lockPath = `${realpathSync.native(createdFile)}.lock.db`
+    assert.equal(existsSync(lockPath), true, `${layout.name}: the lock database is the target's (${lockPath})`)
+
+    // Round 5's split: this second server through the SAME alias took a
+    // different lock and ran.
+    const throughAlias = await runServer(configured)
+    assert.equal(throughAlias.code, 1,
+      `${layout.name}: the second start through the alias refuses: ${throughAlias.stdout}${throughAlias.stderr}`)
+    assert.match(throughAlias.stderr, /another process holds .*target\.db\.lock\.db \(pid \d+, server\)/)
+
+    // ...and one on the target's own path refuses too.
+    const onTarget = await runServer(createdFile)
+    assert.equal(onTarget.code, 1,
+      `${layout.name}: the second start on the target's own path refuses: ${onTarget.stdout}${onTarget.stderr}`)
+    assert.match(onTarget.stderr, /another process holds .*target\.db\.lock\.db \(pid \d+, server\)/)
+
+    // Both scripts refuse through EITHER spelling, and write nothing.
+    for (const spelling of [configured, createdFile]) {
+      const exported = await runScript(EXPORT, [spelling, outPath])
+      assert.notEqual(exported.code, 0, `${layout.name}: the export through ${spelling} refuses`)
+      assert.match(exported.stderr, new RegExp(`the world server is running \\(pid ${child.pid} on ${hostname()}\\)`))
+    }
+    assert.equal(existsSync(outPath), false, `${layout.name}: the refused exports wrote nothing`)
+
+    writeFileSync(outPath, JSON.stringify({ version: 1, worlds: [] }))
+    for (const spelling of [configured, createdFile]) {
+      const reconciled = await runScript(RECONCILE, [spelling, outPath])
+      assert.notEqual(reconciled.code, 0, `${layout.name}: the reconcile through ${spelling} refuses`)
+      assert.match(reconciled.stderr, new RegExp(`the world server is running \\(pid ${child.pid} on ${hostname()}\\)`))
+    }
+
+    // The holder goes; then a script through the alias runs.
+    child.kill('SIGTERM')
+    await once(child, 'exit')
+    const afterStop = await runScript(EXPORT, [configured, outPath])
+    assert.equal(afterStop.code, 0, `${layout.name}: the export runs once the server is stopped: ${afterStop.stderr}`)
+  }
+})
+
+// ===========================================================================
+// R31 (round 6): a loop refuses with the server's own message
+// ===========================================================================
+
+test('R31: a looping database path refuses with `Atrium server refuses to start: …`, names the loop, and carries no stack trace', async () => {
+  const dir = scratchDir()
+  const a = join(dir, 'a.db')
+  const b = join(dir, 'b.db')
+  symlinkSync('b.db', a)
+  symlinkSync('a.db', b)
+
+  const refused = await runServer(a)
+  assert.equal(refused.code, 1, `the server refuses on a looping database path: ${refused.stdout}${refused.stderr}`)
+
+  const output = `${refused.stdout}${refused.stderr}`
+  // Round 5 read the canonical path once BEFORE the guarded start (the legacy
+  // lock-file diagnostic), so the error escaped as Node's uncaught-error trace.
+  assert.match(output, /^Atrium server refuses to start: /, 'the refusal is the server\'s own message')
+  assert.match(output, /too many levels of symbolic links/, 'and it names the loop')
+  assert.doesNotMatch(output, /\n\s+at /, 'no stack trace')
+  assert.doesNotMatch(output, /^Error: /m, 'and no bare Node error heading')
 })
 
 // ===========================================================================
