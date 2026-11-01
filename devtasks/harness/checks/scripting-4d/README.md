@@ -38,6 +38,40 @@ HARNESS_ROOT=/tmp/atrium-harness BASE_ROOT=/tmp/ah-base python3 c11.py  # ≈ 2 
 | `probe_r24.py` | R24 | a ~3 MiB many-light `.gltf` through the panel: time to the mapping rows, the longest main-thread stall |
 | `probe_c3.py` | (diagnosis) | check 3's click and interpolation outside c2's sequence, with and without the spinner |
 
+## Results on DEV `7ad49f57` (round 6: `fe4dcbb3` + main `b0dd79bf`, devtasks/ only), 2026-10-31
+**R30 and R31 hold; round 5's probe, check 11 and check 1 still pass.**
+
+| Check | Result | Seen |
+|---|---|---|
+| R30, `probe_r30.mjs` | **PASS** 6/6 | the lock path before the database exists equals the file Atrium then creates, in all six layouts (round 5: two split, the review's and the absolute-target one) |
+| R30, two real holders | **PASS** | the review's layout: the first holder takes `real/target.db.lock.db`, creates the database through the alias; a second through the same alias and a third on `real/target.db` both **refuse** (`another process holds …/real/target.db.lock.db (pid N, first)`); one lock file. The absolute-target layout: the same, one lock file |
+| R31 | **PASS** | `a.db → b.db → a.db` as `ATRIUM_DB_PATH`: exit 1, `Atrium server refuses to start: could not resolve …/a.db: too many levels of symbolic links`, no stack trace |
+| R25–R27, `probe_r5.sh` | **PASS** 10/10 | (its R25 block, R26 journal and cross-user crash, R27 exit by signal) |
+| 11 (`c11.py`) | **PASS** 27/27 | |
+| 1, 4, 7, 8 (`c1.py`) | **PASS** 34/34 | |
+
+**Harness lesson:** `c1.py`'s check 8 restarts the server with `pkill -f signin-sync/authserver.mjs`; if the Bash
+command that runs `c1.py` also contains that string (a stop command appended), the pkill kills the shell and the
+check with it (exit 144). Run `c1.py` alone, and stop servers by pid in a separate command.
+
+### Check 11 on the host, round 6 (the operator)
+Round 5's block on the new SHA, without the restart. Expected: as round 5's (PROD all zeros; DEV's 10 leaves
+`unchanged`, no writes; DEV's two lock files and no `-journal`; the export against DEV's live database refuses,
+exit 1).
+```bash
+set -euo pipefail
+R=/srv/atrium-dev; S=$R/packages/server/scripts; W=/root/rh4d-r6; B=$R/packages/server/node_modules/better-sqlite3
+[ "$(git -C $R rev-parse HEAD)" = 7ad49f57811fc0068be5e90055e5f057ea381711 ] || { echo "DEV's checkout is not 7ad49f57: stop"; exit 1; }
+mkdir -p -m 700 $W && cd $W
+for pair in prod:/var/lib/atrium/atrium.db dev:/var/lib/atrium-dev/atrium.db; do n=${pair%%:*}; db=${pair#*:}; echo "== $n ($db)"
+  node -e 'const D=require(process.argv[1]); const s=new D(process.argv[2],{readonly:true,fileMustExist:true}); s.backup(process.argv[3]).then(()=>{const c=new D(process.argv[3],{readonly:true}); console.log("integrity", c.pragma("integrity_check",{simple:true}))})' "$B" "$db" $W/$n-copy.db
+  node $S/behaviors-export.mjs $W/$n-copy.db $W/$n-export.json | tail -1
+  for a in "" --apply --apply; do node $S/behaviors-reconcile.mjs $W/$n-copy.db $W/$n-export.json $a | grep -v '^REPORT_JSON' | tail -2 | head -1; done
+done
+echo "== DEV's lock files"; ls -la /var/lib/atrium-dev/ | grep 'atrium.db.lock' || echo 'NO LOCK FILES (unexpected)'
+set +e; node $S/behaviors-export.mjs /var/lib/atrium-dev/atrium.db $W/should-not-exist.json; echo "exit $? (expect 1)"; ls $W/should-not-exist.json 2>/dev/null && echo "UNEXPECTED: an export was written"
+```
+
 ## Results on DEV `ddef0a31` (round 5: `e5369130` + main `627cc497`, devtasks/ only), 2026-10-31
 **R25, R26 and R27 hold; checks 1, 4–8 and 11 pass.** `probe_r5.sh`, which reproduces all three bugs on round 4's
 `1d4ccf17` (a second server through a dangling alias; a root-owned journal that stops the service user with `disk
