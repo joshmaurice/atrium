@@ -109,3 +109,31 @@ and MAIN.
 - **Host block, round 6: PASS** (18:01 PT).
 - **Next:** a short outside review of `e5369130..fe4dcbb3`; the operator's DEV
   acceptance (§7, with the three `.gltf` files Claude built from checks 1, 2 and 4) on round 6's DEV; MAIN.
+
+## 9. Shipped, 19:44 PT: scripting-4d-1 is on PROD (`84542c73`)
+- **Round 6's outside review** (`REVIEW-scripting-4d-1-round-6-code.md`): **GO WITH NITS**, no must-fix or
+  should-fix; it recommends accepting round 6.
+- **The operator's DEV acceptance** (pre-brief §7, Firefox, the three `.gltf` files Claude built from checks 1, 2
+  and 4): steps 1–5 pass. The visitor's "visible steps" in step 2 weren't noticeable (15–17 updates a second look
+  nearly smooth); not a failure.
+- **MAIN moved after round 6's release merge** (Claude pushed `36c7471` and `e584804`, devtasks/ only, during
+  acceptance), so `7ad49f57` was no longer a fast-forward of `main`. Recovered by the documented host remedy
+  (models-hardening pre-brief, H2's residual): `atrium-release-merge fe4dcbb3…` stacked `84542c73` (`7ad49f57` +
+  `main` `e5848049`, devtasks/ only; same code), `atrium-deploy dev 84542c73…` (1366/1366 and the other suites,
+  SMOKE OK, no restart needed), then acceptance `t_12ea047f`, `atrium-main-approve`/`atrium-main-push`, the
+  guarded PROD block (gate `t_845a7ca1`, deploy `t_a24ee502`). **Lesson, the rule restated: no pushes to `main`
+  from a round's release merge until PROD, not even `devtasks/` notes; hold the records and push after.**
+- **PROD:** `84542c73`, healthy; the 4c server stopped `Deactivated successfully` at 02:38 UTC and the 4d server
+  started (pid 3200799). `atrium-release-status`: `COMPLETE`, DEV = MAIN = PROD = `84542c73`.
+
+### Follow-ups for a later round
+1. **The Behaviour form's on/off button shows the state, not the action** (operator, acceptance step 1): a button
+   reading "Disabled" reads as "click to disable". A switch, or a button naming the action ("Enable"/"Disable").
+2. **Round 6 review N1:** the end-to-end R30 test helper starts the server through `real/child/alias.db`, which
+   never split; use `linkdir/alias.db` so it independently catches round 5's two-server failure
+   (`server-lock.test.js` L729–745, L815–838). The six-layout invariant test already covers it.
+3. Carried: the 4c server a rollback runs holds no lock (§8 step 3 says to stop the service; R-L6 (a)); hard links
+   and other mounts aren't covered by the lock; `realpathSync.native` needs `/proc` on musl Linux (not this host).
+4. Board cleanup (operator): the superseded acceptance cards `t_f56db644`, `t_b6db79eb`, `t_80abe650`,
+   `t_52cc4953` can be archived; the merged branches (`workflow/scripting-4d-1`, `release/*` for 4d-1's rounds) can
+   be deleted once nothing needs them.
