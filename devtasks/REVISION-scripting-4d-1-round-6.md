@@ -1,6 +1,6 @@
 # Revision — scripting-4d-1 round 6 (round 5 is on DEV, not accepted)
 
-**Status: Rev 0, for the operator's approval (not approved).** Three items, R30–R32, continuing round 5's
+**Status: Rev 0, approved by the operator (2026-10-31 17:05 PT).** Three items, R30–R32, continuing round 5's
 numbering: the must-fix of **the outside review of round 5** (`REVIEW-scripting-4d-1-round-5-code.md`, in
 `devtasks/`; NO-GO; its M1), **reproduced by Claude with the round-5 code, together with a sibling layout the
 review didn't find**; the review's nit N1 (Claude's N4); and the suites and handoff. **No decision**: the fix is
