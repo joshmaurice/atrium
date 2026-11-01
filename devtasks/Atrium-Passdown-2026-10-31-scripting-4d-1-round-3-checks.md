@@ -106,5 +106,6 @@ and MAIN.
   Tip `fe4dcbb3`, on DEV as `7ad49f57`. Round 5's acceptance card `t_52cc4953` is superseded.
 - **Claude's checks on `7ad49f57`:** probe_r30 6/6, both split layouts one lock, the loop message, probe_r5
   10/10, c11 27/27, c1 34/34.
-- **Next:** the operator's round-6 host block; a short outside review of `e5369130..fe4dcbb3`; the operator's DEV
+- **Host block, round 6: PASS** (18:01 PT).
+- **Next:** a short outside review of `e5369130..fe4dcbb3`; the operator's DEV
   acceptance (§7, with the three `.gltf` files Claude built from checks 1, 2 and 4) on round 6's DEV; MAIN.

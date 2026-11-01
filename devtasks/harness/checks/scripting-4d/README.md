@@ -72,6 +72,11 @@ echo "== DEV's lock files"; ls -la /var/lib/atrium-dev/ | grep 'atrium.db.lock' 
 set +e; node $S/behaviors-export.mjs /var/lib/atrium-dev/atrium.db $W/should-not-exist.json; echo "exit $? (expect 1)"; ls $W/should-not-exist.json 2>/dev/null && echo "UNEXPECTED: an export was written"
 ```
 
+**Host result, round 6 (operator, 2026-10-31 18:01 PT): PASS.** PROD's copy: `integrity ok`, 0 / 0, all zeros.
+DEV's copy: `integrity ok`, 4 worlds / 10 leaves, `unchanged 10 … writes 0` three times. DEV's lock files:
+`atrium.db.lock.db` and `atrium.db.lock.json` (written 00:43 UTC, round 6's start), both `atrium-dev`, no
+`-journal`. Against DEV's live database: `the world server is running (pid 3185940 on ubuntu-4gb-hil-1)…`, exit 1.
+
 ## Results on DEV `ddef0a31` (round 5: `e5369130` + main `627cc497`, devtasks/ only), 2026-10-31
 **R25, R26 and R27 hold; checks 1, 4–8 and 11 pass.** `probe_r5.sh`, which reproduces all three bugs on round 4's
 `1d4ccf17` (a second server through a dangling alias; a root-owned journal that stops the service user with `disk
