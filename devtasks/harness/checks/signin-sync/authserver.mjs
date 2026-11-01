@@ -19,7 +19,7 @@
 //
 // Usage (after devtasks/harness/setup.sh <sha>):
 //   HARNESS_ROOT=/tmp/ah node devtasks/harness/checks/signin-sync/authserver.mjs
-// Env: AUTH_DB (default $HARNESS_ROOT/auth.db, deleted at start), PORT_A, PORT_B.
+// Env: AUTH_DB (default $HARNESS_ROOT/auth.db, deleted at start unless KEEP_DB=1), PORT_A, PORT_B.
 import https from 'node:https'
 import http from 'node:http'
 import net from 'node:net'
@@ -44,7 +44,8 @@ const REAL = await new Promise((res, rej) => {
   const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)) })
   s.on('error', rej)
 })
-for (const f of [DB, DB + '-wal', DB + '-shm']) rmSync(f, { force: true })
+// scripting-4d check 8: KEEP_DB=1 keeps the database across a restart (a server restart from the saved document).
+if (process.env.KEEP_DB !== '1') for (const f of [DB, DB + '-wal', DB + '-shm']) rmSync(f, { force: true })
 let log = ''
 const child = spawn(process.execPath, [join(WT, 'packages/server/src/index.js')], {
   cwd: ROOT,
@@ -115,7 +116,7 @@ function handler(req, res) {
       s = s.replace('const sky = createSkyLoader({ scene: threeScene, fetchImage })', 'const sky = window.__sky = createSkyLoader({ scene: threeScene, fetchImage })')
       s += '\nwindow.__lib = () => ({ libraryGrid, skyPicker, libraryCatalog, undo })\n'
       s += '\nwindow.__anim = () => ({ modelAnimations, animationControls, get selected() { return selected } })\n'
-      s += '\nwindow.__beh = () => ({ get runner() { return runner }, get behaviorForm() { return typeof behaviorForm === "undefined" ? null : behaviorForm }, pick: (x, y) => { const h = pickBehaviorTarget({ clientX: x, clientY: y }); return h ? { hit: h.name, target: activateClickTarget(h)?.name ?? null } : null }, get avatarPos() { const n = avatar?.localNode; return n ? worldPosition(n) : null } })\n'
+      s += '\nwindow.__beh = () => ({ get runner() { return runner }, get behaviorForm() { return typeof behaviorForm === "undefined" ? null : behaviorForm }, pick: (x, y) => { const h = pickBehaviorTarget({ clientX: x, clientY: y }); return h ? { hit: h.name, target: activateClickTarget(h)?.name ?? null } : null }, get avatarPos() { const n = avatar?.localNode; return n ? worldPosition(n) : null }, get importPanel() { return typeof importPanel === "undefined" ? null : importPanel } })\n'
       s += '\nwindow.__ep = () => ({ modelForm, teleporterForm, modelGate, get selected() { return selected }, get selectedObj() { return selectedObj }, get gizmo() { return gizmo }, selectForEdit, modes })\n'
       return send(res, 200, s, 'text/javascript')
     }
