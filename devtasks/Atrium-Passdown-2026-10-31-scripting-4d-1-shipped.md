@@ -86,3 +86,25 @@ vendoring it the way the engine was, and the panel's "has animations, none playa
 The others listed there: material pointers (with an authority rule for shared materials), a synced transition
 (smooth interpolations for every client), embedded graphs in placed models (a design question first), healing
 that keeps what it drops, automatic mapping by name, a per-behaviour distance, whole-world import.
+
+### 5.1 Why 4d-2 isn't urgent, and material pointers may matter more (survey, 2026-10-31)
+Claude counted Khronos's reference content (blob-less clones; each asset's glTF JSON read, `.glb` JSON chunks too):
+- **`glTF-Sample-Assets`** (`8f49239`, 2026-10-23): 150 models, 26 animated, **5 use `KHR_animation_pointer`**,
+  all of them tests of that extension (AnimatedColorsCube, AnimationPointerUVs, CubeVisibility, LightVisibility,
+  PotOfCoalsAnimationPointer). The most-used extensions are material ones (transmission 33, volume 25, IOR 17,
+  texture transform 15).
+- **`glTF-Test-Assets-Interactivity`** (`f99d9b6`, 2026-10-27): 187 assets with a graph (17 sample models, 170
+  tests); **2 sample models use `KHR_animation_pointer`** (Ghost, WhackAMole), no test does.
+
+So 4d-2 would make about seven reference files play correctly. Its real-world case is Unity content: Needle and
+UnityGLTF export pointer animation by default (Godot imports and exports it; Blender only behind an experimental
+export option; three.js core still lacks it, which is the gap Needle's plugin fills). It's worth doing when that
+content is expected, not before. Atrium has no users besides the operator yet, so there's no real-world mix to
+measure.
+
+**Material pointers are the bigger gap for interactive content.** The 4d pre-brief's survey (§2.4) found that
+all 17 interactive sample models have their *graphs* address more than node transforms: material colours,
+texture transforms, morph weights, the active camera, animations' `maxTime`. That is what keeps today's
+interactive sample models from running in Atrium (beside their driving their own inner nodes, §2.4). The pre-brief
+lists it in §10 in one line (G-L4 (b)); the design question is authority over a material that several objects
+share. If interoperating with interactive glTF is the goal, it is the step to scope next.
