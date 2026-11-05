@@ -156,6 +156,11 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
      **`PREBRIEF-add-check.md` FINAL Rev 1.1** (base `25f6b083`), with
      **`KICKOFF-add-check.md`** ready for the front door. The combined
      pre-brief stays a draft for `richer-add` and `copy-objects`.
+   - **`p6` rerun at `6980e24` (operator, 2026-11-05 14:26 PT), with the
+     Rev 1.1 counters:** 23 worlds, none unreadable; **nothing saved that
+     `add-check` or the new `send` ranges would refuse**, including the cases
+     the first run didn't check (`PREBRIEF-add-check.md` §2.6). The spec's §6
+     rerun before the PROD deploy still applies, in case worlds change.
 2. **The Behaviour panel shows only "Custom graph"** for an imported graph:
    no file name (none is stored) and no targets, though they are stored.
    UH-L2 put the targets display in the copy round. The file name needs a
