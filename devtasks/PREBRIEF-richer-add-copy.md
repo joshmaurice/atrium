@@ -3,7 +3,7 @@
 Status: **DRAFT, Revision 0.2 (2026-11-05), after two outside reviews of Rev 0.1,
 both CHANGES REQUESTED. Decided (operator, 2026-11-05): RA-L1 (a), RA-L4 (a),
 RA-L7 (a), RA-L8 (a), and RA-L5 (a) as recommended, which settle `add-check`'s
-round; its contract is now `PREBRIEF-add-check.md` FINAL Rev 1 (§4). Still open
+round; its contract is now `PREBRIEF-add-check.md` FINAL Rev 1.1 (§4). Still open
 here: RA-L2, RA-L3, RA-L6 and CP-L1–CP-L7.** Each has a recommendation.
 - **The reviews:** `REVIEW-richer-add-copy-rev0.1-claude.md` (a runtime review:
   cloned, ran every suite and `p1`–`p5`, wrote probes `q1`–`q4`) and
@@ -657,7 +657,7 @@ can see and copy anything in this world."
 - **Reviews:** both (a).
 
 ## 4. The contract for `add-check`: moved
-**`add-check`'s contract is now `devtasks/PREBRIEF-add-check.md`, FINAL Rev 1
+**`add-check`'s contract is now `devtasks/PREBRIEF-add-check.md`, FINAL Rev 1.1
 (2026-11-05).** It was carved out of this file's Rev 0.2 §4, with the operator's
 decisions (RA-L1, L4, L5, L7, L8), so that its round can be kicked off while
 `richer-add`'s and `copy-objects`' decisions stay open here. Read that file, not
@@ -761,7 +761,7 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
 
 ## 9. Review log
 - **Rev 0.2, `add-check` split out** (2026-11-05): §4 moved to
-  `PREBRIEF-add-check.md` FINAL Rev 1, with RA-L5 (a) confirmed; that file adds
+  `PREBRIEF-add-check.md` FINAL Rev 1 (then 1.1), with RA-L5 (a) confirmed; that file adds
   the `format` rule and `WORLD_UNREADABLE`. This file stays a draft for
   `richer-add` and `copy-objects`.
 - **Rev 0.2, PROD survey** (2026-11-05): the operator ran `p6` at `1e36f42`.

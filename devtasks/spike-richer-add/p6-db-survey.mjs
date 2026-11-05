@@ -63,20 +63,32 @@ for (const row of db.rows('SELECT document FROM worlds')) {
   // working where they are; Duplicate and Undo would refuse them.
   for (const n of doc.getRoot().listNodes()) {
     if (n.listExtensions().length) bump(checks, 'node has extensions')
-    if (JSON.stringify(n.getExtras() ?? {}).length > 16384) bump(checks, 'node extras over 16 KiB')
+    const { atrium: _a, ...rest } = n.getExtras() ?? {}
+    if (Buffer.byteLength(JSON.stringify(rest), 'utf8') > 16384) bump(checks, 'node extras (not atrium) over 16 KiB')
     if (n.getTranslation().some((v) => !Number.isFinite(v))) bump(checks, 'translation not finite')
     const mesh = n.getMesh(); if (!mesh) continue
     if (mesh.listPrimitives().length > 64) bump(checks, 'mesh over 64 primitives')
+    if (mesh.listPrimitives().length === 0) bump(checks, 'mesh with no primitives')
+    if (mesh.getName().length > 256) bump(checks, 'mesh name over 256 characters')
     for (const prim of mesh.listPrimitives()) {
       const pos = prim.getAttribute('POSITION')
       if (!pos || pos.getCount() < 3) bump(checks, 'POSITION under 3 vertices')
-      if (pos && pos.getCount() > 65535 && prim.getIndices()) bump(checks, 'indexed, over 65,535 vertices')
+      if (pos && pos.getCount() > 65535) bump(checks, 'over 65,535 vertices')
+      const nor = prim.getAttribute('NORMAL')
+      if (pos && nor && nor.getCount() !== pos.getCount()) bump(checks, 'NORMAL count differs from POSITION')
+      if (pos && !prim.getIndices() && pos.getCount() % 3) bump(checks, 'unindexed, vertex count not a multiple of 3')
       for (const s of prim.listSemantics()) {
         const arr = prim.getAttribute(s).getArray()
         if (arr && Array.from(arr).some((v) => !Number.isFinite(v))) bump(checks, `${s} not finite`)
       }
       const ind = prim.getIndices()
       if (ind && (ind.getCount() < 3 || ind.getCount() % 3)) bump(checks, 'indices not a positive multiple of 3')
+      if (ind && pos) {
+        const ia = ind.getArray(); let over = false, restart = false
+        for (const i of ia) { if (i >= pos.getCount()) over = true; if (i === 65535) restart = true }
+        if (over) bump(checks, 'an index at or past the vertex count')
+        if (restart) bump(checks, 'an index of 65535')
+      }
       const m = prim.getMaterial(); if (!m) continue
       const in01 = (v) => Number.isFinite(v) && v >= 0 && v <= 1
       if (!m.getBaseColorFactor().every(in01)) bump(checks, 'baseColorFactor outside [0, 1]')

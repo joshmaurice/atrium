@@ -1,6 +1,6 @@
 # Pre-brief: the `add` check (`add-check`)
 
-Status: **FINAL, Revision 1 (2026-11-05). Decisions RA-L1, RA-L4, RA-L5, RA-L7
+Status: **FINAL, Revision 1.1 (2026-11-05). Decisions RA-L1, RA-L4, RA-L5, RA-L7
 and RA-L8 approved** (operator, 2026-11-05: RA-L1, L4, L7 and L8 chosen as
 recommended; RA-L5 as recommended, on "ok go plz" after Claude said it would
 take it so unless told otherwise).
@@ -95,6 +95,11 @@ Duplicate and Undo accept other than A7.
 - **Taken without checks:** wrong-length arrays, non-numbers, indices past the
   end, indices above 65535 (wrapped by `Uint16Array`), and numbers that are
   finite as doubles but overflow Float32 (`1e39` is stored as `Infinity`).
+- **The avatar on the wire carries a marker:** `AtriumClient.connect`
+  (L652–660) adds `extras.atrium = { ephemeral: true }` to every avatar
+  descriptor, and K4 allows exactly that and nothing else in an avatar's
+  `extras.atrium` (`addCarriesAtriumExtras`, `session.js` L169–200). So a real
+  avatar's `extras` is `{ displayName?, atrium: { ephemeral: true } }`.
 - **First-party adds send exactly what is kept** (CR `q1(1)`, built with the
   real builders): the avatar (`buildAvatarDescriptor`), the teleporter pad, and
   the five palette kinds (`cube`, `plane`, `sphere`, `cylinder`, `ramp`);
@@ -119,9 +124,11 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
 (`buildAvatarDescriptor`, measured at `8fc82bb5`).
 
 ### 2.4 The two checks this round shares between `add` and `send`
-- **K6 (`checkTransformValues`, `send-policy.js` L115–124)** checks rotation and
-  scale. `send` also requires `translation` to be 3 finite numbers (L1687).
-  `add` doesn't check `translation` at all.
+- **K6 (`checkTransformValues`, `send-policy.js` L115–124)** checks an `add`'s
+  rotation and scale; its only caller is the `add` handler (L1314). `send`
+  checks its transforms inline with the same predicates (L1677–1687), and also
+  requires `translation` to be 3 finite numbers (`isVec3`, L1687). `add`
+  doesn't check `translation` at all.
 - **`materialValueOk` (`send-policy.js` L1405–1416)** checks shape and
   finiteness, not range: `send` accepts `metallicFactor: 7` or
   `baseColorFactor: [2, 0, 0, 1]`. glTF requires [0, 1]. Without RA-L7, A4
@@ -142,7 +149,7 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
   `WORLD_NOW_PRIVATE` (the eviction panel) and `SIGNED_OUT` (`app.js` L951–967).
   Any other code is only logged.
 - `WORLD_UNAVAILABLE`'s text is "That world doesn't exist, or it isn't public."
-  (`teleport-failure.js` L23), which would be wrong for a damaged world. **So
+  (`teleport-failure.js` L24), which would be wrong for a damaged world. **So
   RA-L8's join message gets a code of its own (A10),** a correction to the
   combined pre-brief's wording, not a new decision.
 - **Autosave** serializes and writes without reading back (`autosave.js`
@@ -151,9 +158,18 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
 
 ### 2.6 PROD (operator's `p6`, 2026-11-05, at `1e36f42`)
 - 23 worlds, **none unreadable**. 437 top-level objects; 410 copy today.
-- **Nothing saved that this round would refuse:** no node extensions, no extras
-  over 16 KiB, no non-finite values, no out-of-range materials, no mesh over 64
-  primitives. So no Duplicate or Undo that works today stops working.
+- **Nothing saved that this round would refuse, of what that `p6` checked:**
+  no node extensions, no extras over 16 KiB, no non-finite values, no
+  out-of-range materials, no mesh over 64 primitives, no indices count that
+  isn't a positive multiple of 3.
+- **Not checked by that run** (found by the pre-brief's own check): an index of
+  65535 or past the vertex count, a mesh with no primitives, a mesh name over
+  256 characters, a NORMAL count that differs from POSITION's, an unindexed
+  vertex count that isn't a multiple of 3, more than 65,535 vertices in an
+  unindexed primitive, and extras measured in UTF-8 bytes. **`p6` at this
+  file's commit counts all of them; its rerun is a release step (§6).** Until
+  then, "no Duplicate or Undo that works today stops working" holds only for
+  the cases above.
 
 ### 2.7 The probes (`devtasks/spike-richer-add/`, run from the repo root)
 | Probe | What it shows |
@@ -174,7 +190,8 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
 - **RA-L5 (a): the bounds:** names up to 256 characters; at most 64 primitives
   per mesh; non-Atrium `extras` up to 16 KiB; every colour and factor finite
   and in [0, 1]; `alphaCutoff` finite and 0 or more; every geometry number
-  finite **as a Float32**; an indexed primitive has at most 65,535 vertices;
+  finite **as a Float32**; every primitive has at most 65,535 vertices (so no
+  index is 65535);
   `indices` at least 3; lengths checked before any per-element work. "16 KiB"
   is the UTF-8 bytes of `JSON.stringify(value)`.
 - **RA-L7 (a): `send` gets the same material ranges,** through one shared
@@ -191,11 +208,12 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
     `{ code, message }`.
   - **Both read `tests/fixtures/add-node-vectors.json`,** shaped like
     `model-spec-vectors.json`: `{ note, nodes: [ { label, avatar, node, ok,
-    reason } ] }`, where `reason` is the shared code. **Every case in §2.3,
-    `p3`, `p7` and CR's `q1`/`q2` is a vector**, and so is every acceptance in
-    the tests below.
-  - **The reason codes** (exported, as `MODEL_REASONS` is): `translation`,
-    `extensions`, `extras-size`, `avatar-extras`, `mesh-keys`, `mesh-name`,
+    reason } ] }`, where `reason` is the shared code. **Every node-level case
+    in §2.3, `p3`, `p7` and CR's `q1`/`q2` is a vector**, and so is every
+    acceptance in the tests below. Two cases are not, because another check
+    owns them: `translation` (K6, A2) and `format` (the handler, A2). The
+    server test file covers both.
+  - **The reason codes** (exported, as `MODEL_REASONS` is): `extensions`, `extras-size`, `avatar-extras`, `mesh-keys`, `mesh-name`,
     `primitives-count`, `primitive-keys`, `attribute-keys`, `position-length`,
     `position-value`, `normal-length`, `normal-value`, `indices-length`,
     `indices-value`, `material-keys`, `material-value`, `avatar-primitives`,
@@ -208,8 +226,10 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
   - A node with no `mesh` is still checked at the node level (A2).
 - **A2, the node and the message:**
   - `translation`, when present: 3 finite numbers. **It goes into
-    `checkTransformValues`** (K6), which `add` and `send` both call, so the two
-    can't drift;
+    `checkTransformValues`** (K6), using `isVec3`, the predicate `send` already
+    uses for it (L1687), with `send`'s text, `translation must be 3 finite
+    numbers`. K6 runs before `checkAddNode` (A6), so a bad `translation` is
+    refused there, as `INVALID_VALUE` with that text;
   - `extensions`, when present, is an empty object;
   - world adds: `extras` other than its `atrium` key at most 16 KiB.
     `extras.atrium` keeps its own checks (`checkAtriumExtras`);
@@ -230,16 +250,21 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
   - `indices`, when present, is an array of at least 3 integers, its length a
     multiple of 3, each 0 ≤ i < the vertex count (so never 65535). Without
     indices, the vertex count is a multiple of 3.
-- **A4, the material**, when present: an object with only
-  `pbrMetallicRoughness`, itself an object with only:
+- **A4, the material**, when present: an object with at most
+  `pbrMetallicRoughness`, itself an object with at most:
   - `baseColorFactor`: 4 finite numbers in [0, 1];
   - `metallicFactor`, `roughnessFactor`: each a finite number in [0, 1].
   
-  The range predicates are the ones A9 exports.
+  So `material: {}` and `pbrMetallicRoughness: {}` pass: `ingestNode` keeps
+  them as glTF's default factors (L834), which is what they mean. No
+  first-party sender emits one. The range predicates are the ones A9 exports.
 - **A5, avatars:** A2–A4, and:
   - exactly 1 primitive, at most 1,024 vertices, at most 6,144 indices;
-  - `extras`: absent, or an object with only `displayName`, a string of at most
-    256 characters (the server then overwrites it, §2.1 step 7);
+  - `extras`: absent, or an object with at most two keys: `displayName`, a
+    string of at most 256 characters (the server then overwrites it, §2.1 step
+    7), and `atrium`, which A5 leaves to K4 (it allows exactly `{ ephemeral:
+    true }`, §2.2). **Every real avatar carries that marker;** A5 must accept
+    it;
   - no `extensions` (A2).
 - **A6, where it runs:**
   - in the `add` handler, **after K6 (L1314) and before step 7's overwrite and
@@ -249,16 +274,22 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
   - for avatars, in a `try` of its own;
   - it fails closed, as V9 does: an exception refuses the `add` with
     `INVALID_VALUE`;
-  - **a refusal is `INVALID_VALUE`, message `<reason code>: <plain text>`.**
+  - **a refusal by `checkAddNode` is `INVALID_VALUE`, message `<reason code>:
+    <plain text>`;** K6's and `format`'s keep their own texts.
     A refused `add` changes nothing and is broadcast to no one.
 - **A7, the client's Duplicate and Undo:**
+  - `edit-duplicate.js` imports it as `@atrium/client/add-spec`, as it imports
+    `model-spec` and `object-id`: that needs an `exports` entry in
+    `packages/client/package.json` and an import-map entry in
+    `apps/client/index.html` (L567–570), one line each, and nothing else in
+    either file;
   - `prepareDuplicate` and `prepareRestore` (`edit-duplicate.js` L320–353) run
     `add-spec.js` on the **descriptor they built**, at click time, and refuse
     with its reason. A node the server would refuse is never sent;
   - the hint's document-form rules (`duplicateRuleProblem`) stay as they are,
     except `MAX_INDEX` becomes 65,534;
-  - the avatar's own `add` and the palette and pad adds are unchanged (they
-    pass).
+  - the avatar's own `add` (with its `ephemeral` marker) and the palette and
+    pad adds are unchanged (they pass).
 - **A8, the schemas (AGENTS rule 1):** `add.client.json` and `add.server.json`
   type the mesh to match A3 and A4 where JSON Schema can say it (keys, types,
   array lengths); `format` becomes `{ "const": "gltf" }`; `error.json` gains
@@ -284,10 +315,14 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
   - **the client says so:** `_onSomDump` catches a `readJSON` failure, logs it,
     builds no SOM, and emits `error` with `code: 'WORLD_UNREADABLE'`, its
     `sessionId` and `url`, as a server error is emitted (L792–804);
-  - **the app shows it:** `client.on('error')` handles `WORLD_UNREADABLE` for
-    the ready session as it handles `WORLD_NOW_PRIVATE`: the failure panel,
-    with Go back. `codeToReason('WORLD_UNREADABLE')` is exactly `That world
-    can't be loaded right now.`
+  - **the app shows it:** `client.on('error')` (`app.js` L951) handles
+    `WORLD_UNREADABLE` when `err.sessionId === readySessionId`, beside
+    `WORLD_NOW_PRIVATE`: `showTeleportFailurePanel(teleportFailureMessage(err.url,
+    {}, 'WORLD_UNREADABLE'), { showGoBack: false })`. With
+    `codeToReason('WORLD_UNREADABLE')` exactly `That world can't be loaded right
+    now.`, the panel reads `Couldn't open <destination>. That world can't be
+    loaded right now.` (`teleport-failure.js` L150–151). Go back is hidden, as
+    for eviction: there may be no previous world.
 
 ## 5. Tests and proofs
 - **Run on today's code first, and keep the failure in the handoff:** the new
@@ -308,10 +343,11 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
     avatar, `1e39` and a wire `1e999` in POSITION, `translation: [1e999,0,0]`
     sent as raw text, a 600 KB `node.extensions`, and a 600 KB `format`: each
     refused, and **a present client receives no broadcast**;
-  - the real avatar, pad and palette descriptors and a real Duplicate
+  - the real avatar **as `AtriumClient.connect` sends it** (with
+    `extras.atrium.ephemeral`), pad and palette descriptors and a real Duplicate
     descriptor (built by `buildAvatarDescriptor`, `buildTeleporterDescriptor`,
     `buildPrimitiveDescriptor` and `prepareDuplicate`): accepted, broadcast, and
-    read back;
+    read back. `visitor-leak.test.js`'s first-party visitor cycle still passes;
   - `send` with `metallicFactor: 7`: refused. A material at each range's edges
     (0 and 1) is accepted by both `send` and `add`.
 - **A10:**
@@ -334,8 +370,8 @@ All reproduced through the real `attachSessionHandlers` (probes in §2.7).
     in both suites;
   - (p2) A5 removed: the avatar-budget vectors and the 20,000-primitive server
     test fail;
-  - (p3) `translation` taken out of `checkTransformValues`: the `translation`
-    vectors and the raw-text server test fail;
+  - (p3) `translation` taken out of `checkTransformValues`: K6's unit test for
+    it and the raw-text server test fail;
   - (p4) A9's ranges taken out of `materialValueOk`: the `send` range test
     fails;
   - (p5) autosave's read-back skipped: the A10 autosave test fails;
@@ -354,15 +390,18 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
      and the new server test file;
   3. A10: `readBackProblem`, autosave, the join message, `_onSomDump`, the app
      and `teleport-failure.js`, with their tests;
-  4. the client's Duplicate and Undo (A7), the full suites, proofs (p1)–(p6)
-     and the handoff.
+  4. the client's Duplicate and Undo (A7), with the `exports` and import-map
+     lines, the full suites, proofs (p1)–(p6) and the handoff.
 - **Files:**
   - `packages/server/src/send-policy.js`, `session.js`, `autosave.js`,
     `world.js`;
   - `packages/protocol/src/schemas/add.client.json`, `add.server.json`,
     `error.json`;
   - `packages/client/src/add-spec.js` (new), `AtriumClient.js`;
+  - `packages/client/package.json`: the `./add-spec` export only;
   - `apps/client/src/edit-duplicate.js`, `app.js`, `teleport-failure.js`;
+  - `apps/client/index.html`: the `@atrium/client/add-spec` import-map line
+    only;
   - `tests/fixtures/add-node-vectors.json` (new);
   - test files under `packages/*/test/`, `packages/*/tests/` and
     `apps/client/tests/`.
@@ -375,12 +414,27 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
 - **One outside review of the round's code,** with `p3`, `p4`, `p7` and
   `review-q/q2` to run at the pinned commit.
 - **Release:** a server, protocol and client round. DEV restarts at the deploy,
-  and acceptance needs a hard reload in every tab. Rolling back stores nothing
-  to undo, but reopens §2.3. If worlds have changed much since 2026-11-05,
-  rerun `p6` before the PROD deploy.
+  and acceptance needs a hard reload in every tab. **`package.json` changes
+  (an `exports` entry, no dependency), so the deploy's install step runs;**
+  the lockfile doesn't change. Rolling back stores nothing to undo, but reopens
+  §2.3.
+- **Before the PROD deploy, the operator reruns `p6`** (§2.6) at this file's
+  commit or later. A nonzero "would refuse" count is shown to Claude before
+  PROD: those objects keep working where they are, but Duplicate and Undo will
+  refuse them.
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.1, FINAL** (2026-11-05): a fresh check of Rev 1 against the code at
+  `8fc82bb5` (a Claude agent that hadn't written it) found two must-fixes,
+  both taken: **A5 would have refused every real avatar,** which carries
+  `extras.atrium.ephemeral` (now accepted, left to K4); and **`add-spec.js`
+  needs an `exports` entry and an import-map line** (now in §6). Also taken:
+  `send` doesn't call `checkTransformValues` (A2 now says K6 owns
+  `translation`, and it's not a vector); the 65,535-vertex cap applies to
+  every primitive; A10's panel call and text are pinned; `material: {}` passes;
+  §2.6 says exactly what PROD's `p6` checked, `p6` now counts the rest (in UTF-8
+  bytes), and its rerun is a release step. No decision changed.
 - **Rev 1, FINAL** (2026-11-05): carved out of `PREBRIEF-richer-add-copy.md`
   Rev 0.2 (§2.1–2.3, §2.9, §3, §4), after the two outside reviews of its
   Rev 0.1, with the operator's decisions. Changes from that §4, all found while
