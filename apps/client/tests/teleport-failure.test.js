@@ -269,3 +269,18 @@ describe('evictionMessage', () => {
     assert.ok(msg.includes('made private'))
   })
 })
+
+// ---------------------------------------------------------------------------
+// add-check A10 — the exact reason sentence for a world that will not load.
+// ---------------------------------------------------------------------------
+
+describe('codeToReason — WORLD_UNREADABLE (add-check A10)', () => {
+  test('is the exact sentence the panel shows', () => {
+    assert.equal(codeToReason('WORLD_UNREADABLE'), "That world can't be loaded right now.")
+  })
+
+  test('the panel reads "Couldn\'t open <destination>. <reason>"', () => {
+    const msg = teleportFailureMessage('wss://example.test/w/worlds/josh/garden', {}, 'WORLD_UNREADABLE')
+    assert.equal(msg, "Couldn't open example.test/w/worlds/josh/garden. That world can't be loaded right now.")
+  })
+})

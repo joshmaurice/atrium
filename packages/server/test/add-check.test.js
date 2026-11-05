@@ -425,6 +425,34 @@ test('a world add goes serialize → createWorldFromDocument → serialize', asy
 // send and add share the material ranges (A9)
 // ---------------------------------------------------------------------------
 
+test('A10: a join whose serialize throws gets WORLD_UNREADABLE, and the socket stays open', async () => {
+  const world = await createWorld(SPACE)
+  world.serialize = async () => { throw new Error('the document will not write') }
+
+  const http = createServer()
+  const port = await listen(http)
+  const wss = new WebSocketServer({ noServer: true })
+  const sessions = new Map()
+  const presence = { add() {}, remove() { return null }, list() { return [] }, setPosition() {} }
+  const { closeKeepalive } = attachSessionHandlers({ wss, world, sessions, presence, worldOwnerUserId: null })
+  http.on('upgrade', (req, socket, head) => {
+    wss.handleUpgrade(req, socket, head, (ws) => { wss.emit('connection', ws, req, null) })
+  })
+  closers.push(async () => { closeKeepalive(); wss.close(); http.close() })
+
+  const { ws, messages } = await connect(port)
+  try {
+    await hello(ws, messages, 'joiner-unreadable')
+    const err = await waitFor(messages, (m) => m.type === 'error', 4000)
+    assert.ok(err, 'the joiner is told')
+    assert.equal(err.code, 'WORLD_UNREADABLE')
+    assert.equal(err.message, 'world could not be loaded')
+    assert.equal(ws.readyState, WebSocket.OPEN, 'the socket stays open')
+  } finally {
+    ws.close()
+  }
+})
+
 test('send refuses metallicFactor 7; a material at each range edge is accepted by send and add', async () => {
   const { world, port } = await startOwnerWorld()
   const o = await owner(port)

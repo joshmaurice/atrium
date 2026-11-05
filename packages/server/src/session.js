@@ -934,6 +934,11 @@ export function attachSessionHandlers({
                 }
               } catch (err) {
                 console.error('som-dump serialize failed:', err)
+                // add-check A10/RA-L8 — tell the joiner instead of leaving it
+                // waiting. The socket stays open.
+                if (session && session.ws.readyState === 1 /* OPEN */) {
+                  sendError(session.ws, null, 'WORLD_UNREADABLE', 'world could not be loaded')
+                }
               }
             }
             break

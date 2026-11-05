@@ -1192,7 +1192,21 @@ export class AtriumClient extends EventEmitter {
     if (record.stale || record.closing) return
     const gen = this._worldGen
     const io  = makeWebIO()
-    const doc = await io.readJSON({ json: msg.gltf, resources: {} })
+    let doc
+    try {
+      doc = await io.readJSON({ json: msg.gltf, resources: {} })
+    } catch (error) {
+      // add-check A10/RA-L8 — the dump will not read: log it, build NO SOM, and
+      // emit an error as a server error is emitted (sessionId and url included).
+      console.error('[client] som-dump could not be read:', error)
+      if (this._worldGen !== gen) return // stale — drop silently
+      const err = new Error(`WORLD_UNREADABLE: ${error?.message ?? 'the world could not be loaded'}`)
+      err.code = 'WORLD_UNREADABLE'
+      err.sessionId = this._sessionId
+      err.url = this._wsUrl
+      this.emit('error', err)
+      return
+    }
     if (this._worldGen !== gen) return // stale — drop silently
 
     this._initSom(doc)

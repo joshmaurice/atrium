@@ -628,6 +628,31 @@ export async function createWorld(gltfPath, { baseUrl, logId: worldLogId = null 
 }
 
 /**
+ * add-check A10/RA-L8 — read a serialized world document back with the SAME
+ * `createIO()` `createWorldFromDocument` uses, and return `null` or the error's
+ * message. Autosave calls it on the document it just serialized: a document
+ * that will not read back is not written, and the last good row is kept.
+ *
+ * @param {string|object} json
+ * @returns {Promise<string|null>}
+ */
+export async function readBackProblem(json) {
+  const io = createIO()
+  let parsed
+  try {
+    parsed = typeof json === 'string' ? JSON.parse(json) : json
+  } catch (error) {
+    return error?.message ?? 'the document could not be parsed'
+  }
+  try {
+    await io.readJSON({ json: parsed, resources: {} })
+    return null
+  } catch (error) {
+    return error?.message ?? 'the document could not be read'
+  }
+}
+
+/**
  * Create a world from an in-memory glTF document (JSON string or parsed object).
  * Used for loading home worlds and other document-stored worlds from the DB.
  * Supports the same world API as createWorld() (in-memory vs file-based).

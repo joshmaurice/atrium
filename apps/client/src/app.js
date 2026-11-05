@@ -957,6 +957,14 @@ client.on('error', (err) => {
       { showGoBack: false }
     )
   }
+  // add-check A10/RA-L8 — the world could not be loaded after session:ready.
+  // Go back is hidden, as for eviction: there may be no previous world.
+  if (err.code === 'WORLD_UNREADABLE' && err.sessionId === readySessionId) {
+    showTeleportFailurePanel(
+      teleportFailureMessage(err.url, {}, 'WORLD_UNREADABLE'),
+      { showGoBack: false }
+    )
+  }
   // signin-sync I5 — the server closed this socket because the sign-in it was
   // admitted with signed out. The client does NOT assume it is signed out:
   // another tab may already have signed back in, so it asks `me()` and I4

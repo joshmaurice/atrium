@@ -27,6 +27,10 @@ export function codeToReason(code) {
     case 'SIGNED_OUT':
       // signin-sync I5 — the pin from the brief-review gate: this exact sentence.
       return 'You have been signed out.'
+    case 'WORLD_UNREADABLE':
+      // add-check A10/RA-L8 — the exact reason sentence for a world that will
+      // not load (the panel reads `Couldn't open <destination>. <reason>`).
+      return "That world can't be loaded right now."
     default:
       return ''
   }

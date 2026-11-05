@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import * as worldStore from './world-store.js'
+import { readBackProblem } from './world.js'
+import { logId } from './log-id.js'
 
 // ---------------------------------------------------------------------------
 // Tunable constants — env-visible for injection/override
@@ -48,6 +50,9 @@ export function createAutoSaveCoordinator(opts = {}) {
   const db = opts.db
   const debounceMs = opts.debounceMs ?? AUTO_SAVE_DEBOUNCE_MS
   const periodicMs = opts.periodicMs ?? AUTO_SAVE_PERIODIC_MS
+  // A10 test seam: the read-back the coordinator runs on the document it just
+  // serialized. The default is the real one (`world.js`'s `readBackProblem`).
+  const readBack = opts.readBackProblem ?? readBackProblem
 
   /**
    * Per-world state.
@@ -81,6 +86,20 @@ export function createAutoSaveCoordinator(opts = {}) {
       const document = JSON.stringify(
         await host.world.serialize({ excludeNodes })
       )
+      // add-check A10/RA-L8 — read it back BEFORE it is written. A document that
+      // will not read back is never saved: the previous row is kept, the log
+      // line appears once per world until a save succeeds, and the next save
+      // tries again.
+      const problem = await readBack(document)
+      if (problem) {
+        if (!entry.readBackLogged) {
+          entry.readBackLogged = true
+          console.error(`[autosave] read-back failed ${logId(worldId)}: ${problem}`)
+        }
+        entry.saving = false
+        return
+      }
+      entry.readBackLogged = false
       const result = worldStore.updateWorld(
         db.database,
         worldId,
@@ -128,7 +147,7 @@ export function createAutoSaveCoordinator(opts = {}) {
       }, periodicMs)
       if (periodicInterval.unref) periodicInterval.unref()
 
-      entry = { debounceTimer: null, periodicInterval, dirty: false, saving: false }
+      entry = { debounceTimer: null, periodicInterval, dirty: false, saving: false, readBackLogged: false }
       worlds.set(worldId, entry)
     }
 

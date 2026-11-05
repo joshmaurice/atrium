@@ -617,3 +617,71 @@ after(async () => {
   db.close()
   await rm(tempDir, { recursive: true, force: true })
 })
+// ---------------------------------------------------------------------------
+// Test A10 — autosave reads back; a document that will not read is not saved
+// (add-check RA-L8). The read-back is injected through the coordinator's seam.
+// ---------------------------------------------------------------------------
+
+test('A10: a document that will not read back is not saved; the previous row is kept', async () => {
+  const httpServer = createServer()
+  httpServer.listen(9016)
+  const registry = createWorldRegistry({ httpServer, db })
+
+  const tempWorld = await createWorld(FIXTURE_PATH)
+  const serializedDoc = JSON.stringify(await tempWorld.serialize({ excludeNodes: [] }))
+  const w = worldStore.createWorld(db.database, {
+    slug: 'readback-test',
+    name: 'Read-back Test',
+    document: serializedDoc,
+  }, userId)
+
+  const row = db.database.prepare('SELECT * FROM worlds WHERE id = ?').get(w.id)
+  const host = await registry.registerWorldFromDocument(row)
+  const previous = db.database.prepare('SELECT document FROM worlds WHERE id = ?').get(w.id).document
+
+  host.world.setField(host.world.listNodeNames()[0], 'translation', [1, 2, 3])
+
+  const lines = []
+  const originalError = console.error
+  const originalWarn = console.warn
+  console.error = (...args) => { lines.push(args.join(' ')) }
+  console.warn = () => {}
+  try {
+    let broken = true
+    const coordinator = createAutoSaveCoordinator({
+      db,
+      readBackProblem: async () => (broken ? 'the document did not read back' : null),
+    })
+
+    // 1. A read-back that reports a problem: the previous row is kept.
+    coordinator.markDirty(w.id, host)
+    await coordinator.flushAndTeardown(w.id, host)
+    const afterBad = db.database.prepare('SELECT document FROM worlds WHERE id = ?').get(w.id).document
+    assert.equal(afterBad, previous, 'the previous row is kept')
+
+    // 2. It tries again at the next save, and logs ONCE per world.
+    coordinator.markDirty(w.id, host)
+    await coordinator.flushAndTeardown(w.id, host)
+    const readBackLines = lines.filter((l) => l.includes('[autosave] read-back failed'))
+    assert.equal(readBackLines.length, 1, 'the log line appears once per world')
+    assert.ok(readBackLines[0].includes('the document did not read back'), readBackLines[0])
+    const stillBad = db.database.prepare('SELECT document FROM worlds WHERE id = ?').get(w.id).document
+    assert.equal(stillBad, previous, 'still the previous row')
+
+    // 3. The next good save writes.
+    broken = false
+    coordinator.markDirty(w.id, host)
+    await coordinator.flushAndTeardown(w.id, host)
+    const afterGood = db.database.prepare('SELECT document FROM worlds WHERE id = ?').get(w.id).document
+    assert.notEqual(afterGood, previous, 'the next good save writes')
+
+    coordinator.close()
+  } finally {
+    console.error = originalError
+    console.warn = originalWarn
+  }
+
+  registry.close()
+  httpServer.close()
+  worldStore.deleteWorld(db.database, w.id, userId)
+})
