@@ -34,6 +34,27 @@ export const SKY_CUSTOM = '__custom__'
 /** The two leaves this picker owns, relative to the root extras object. */
 export const BACKGROUND_LEAVES = Object.freeze(['atrium.background.type', 'atrium.background.texture'])
 
+/**
+ * A stable key for the Sky select's options (round 3, R4).
+ *
+ * The `<option>` list is rebuilt from scratch whenever this key changes, and
+ * left alone when it does not — so a behaviour's own writes no longer empty and
+ * recreate the select's children on every `som:set`. The inputs are exactly
+ * what the built options depend on: each option's `id` and `name`, and whether
+ * the disabled Custom entry is shown (`custom`). The select's live `value` and
+ * `disabled` are NOT inputs: the render sets those in place, only when they
+ * differ.
+ *
+ * @param {Array<{id: string, name: string}>} options
+ * @param {boolean} [custom]
+ * @returns {string}
+ */
+export function skyOptionsKey(options = [], custom = false) {
+  const rows = []
+  for (const option of options ?? []) rows.push([option?.id ?? '', option?.name ?? ''])
+  return JSON.stringify([custom === true, rows])
+}
+
 /** A deep copy of a JSON-ish extras object. */
 function deepCopy(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value))

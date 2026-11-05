@@ -322,3 +322,49 @@ describe('scripting-4d-1 (G6) — the importer\'s panel', () => {
     assert.match(panel, /text\(elements\.status, state\.problem/)
   })
 })
+
+// ── undo-hold r3 (R4, R5): the lists rebuild only on change; an echo isn't remote
+
+describe('undo-hold r3 (R4, R5) — the lists rebuild only on change, and a behaviour’s echo isn’t another session', () => {
+  /** Code only: a mention of a token inside a comment is not a call. */
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+
+  test('R4 — renderLibraryTiles compares libraryTilesKey against its kept key before emptying #library-tiles', () => {
+    const at = code.indexOf('function renderLibraryTiles(')
+    assert.notEqual(at, -1, 'renderLibraryTiles is in app.js')
+    const cmp = code.indexOf('libraryTilesKey(', at)
+    const empty = code.indexOf("libraryTilesEl.textContent = ''", at)
+    assert.ok(cmp !== -1 && empty !== -1 && cmp < empty,
+      `compares the key (${cmp}) before emptying #library-tiles (${empty})`)
+    assert.match(code.slice(at, empty), /if \(key === libraryTilesBuiltKey\)/,
+      'the kept key is compared against the new one')
+  })
+
+  test('R4 — renderSkySelect compares skyOptionsKey against its kept key before emptying #ep-sky', () => {
+    const at = code.indexOf('function renderSkySelect(')
+    assert.notEqual(at, -1, 'renderSkySelect is in app.js')
+    const cmp = code.indexOf('skyOptionsKey(', at)
+    const empty = code.indexOf("epSky.textContent = ''", at)
+    assert.ok(cmp !== -1 && empty !== -1 && cmp < empty,
+      `compares the key (${cmp}) before emptying #ep-sky (${empty})`)
+    assert.match(code.slice(at, empty), /if \(key !== skyOptionsBuiltKey\)/,
+      'the kept key is compared against the new one')
+  })
+
+  test('R4 — a surviving tile’s click handler calls the kept current onPick, not the one captured at build time', () => {
+    assert.match(code, /libraryTilesOnPick = onPick/, 'the render keeps the current onPick')
+    assert.match(code, /tile\.addEventListener\('click', \(\) => libraryTilesOnPick\?\.\(entry\.id\)\)/,
+      'the handler reads the kept variable')
+    assert.doesNotMatch(code, /tile\.addEventListener\('click', \(\) => onPick\(entry\.id\)\)/,
+      'the per-build closure is gone')
+  })
+
+  test('R5 — the som:set handler reads origin and routes a behaviour’s own echo to ownEchoSet', () => {
+    assert.match(code, /client\.on\('som:set', \(\{ nodeName, path, origin \}\) => \{/,
+      'the handler destructures origin')
+    assert.match(code,
+      /if \(TRANSFORM_FIELDS\.includes\(path\)\) \{\s*if \(origin === 'own'\) editTracker\.ownEchoSet\(node, path, \[\.\.\.node\[path\]\]\)\s*else editTracker\.remoteSet\(node, path, \[\.\.\.node\[path\]\]\)/,
+      'own echoes go to ownEchoSet, everything else to remoteSet')
+  })
+})

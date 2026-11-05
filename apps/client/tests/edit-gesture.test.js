@@ -1032,3 +1032,66 @@ describe('edit-gesture: a handle drag records only its handle’s field (R1)', (
     ], 'the round-1 behaviour: the move is recorded as a move AND a rotation')
   })
 })
+
+// ── undo-hold round 3 (R5): a behaviour’s own echo is not another session ─────
+//
+// `ownEchoSet(node, field, value)` does what `remoteSet` does to `confirmed` — so
+// a later revert puts back the server’s latest value (U16) — but it does NOT set
+// `remote`: a behaviour’s echo of a field a record has open is the server’s value
+// whenever they agree, not another session’s change, so the typed edit that
+// overlaps it is still recorded. Two unit quaternions keep sanitizeTransform’s
+// normalisation from touching them.
+
+describe('edit-gesture: ownEchoSet (R5)', () => {
+  const TURN = [0, Math.SQRT1_2, 0, Math.SQRT1_2]
+  const TURN2 = [0, 0, Math.SQRT1_2, Math.SQRT1_2]
+
+  test('a typed edit overlapped by the behaviour’s own echo is recorded', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'rotation', TURN)     // recorded; in flight
+    n.rotation = TURN2                                     // the echo applied locally
+    w.tracker.ownEchoSet(n, 'rotation', TURN2)             // the behaviour’s own echo
+    w.tracker.accepted(seq)
+    const [batch] = w.takeSettled()
+    assert.equal(batch.info.remote, false, 'not reported as another session’s')
+    assert.deepEqual(batch.results, [
+      { node: n, changes: [{ field: 'rotation', from: [0, 0, 0, 1], to: TURN }] },
+    ], 'the typed rotation is recorded (from → to)')
+  })
+
+  test('the contrast: the same steps through remoteSet report no result and remote true', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'rotation', TURN)
+    n.rotation = TURN2
+    w.tracker.remoteSet(n, 'rotation', TURN2)
+    w.tracker.accepted(seq)
+    const [batch] = w.takeSettled()
+    assert.equal(batch.info.remote, true)
+    assert.deepEqual(batch.results, [], 'another session touched it: nothing is recorded')
+  })
+
+  test('a refused typed edit reverts to the behaviour’s latest value, not the value before the edit', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'rotation', TURN)
+    n.rotation = TURN2
+    w.tracker.ownEchoSet(n, 'rotation', TURN2)
+    w.tracker.rejected(seq, { message: 'nope' })
+    assert.deepEqual(n.rotation, TURN2, 'the server’s latest value, never [0, 0, 0, 1]')
+    assert.equal(w.reverts.length, 0, 'nothing was written: the node is already the server’s value')
+  })
+
+  test('ownEchoSet on a node with no open record changes nothing and throws nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    assert.doesNotThrow(() => w.tracker.ownEchoSet(n, 'rotation', TURN2))
+    assert.equal(w.tracker.hasRecord(n, 'rotation'), false)
+    assert.deepEqual(w.takeSettled(), [])
+    assert.equal(w.tracker.awaitingCount, 0)
+    // and it never opened a record: the next commit starts from what the node holds
+    const seq = w.tracker.commit(n, 'rotation', TURN2)
+    assert.equal(seq, 1, 'the echo never reached the tracker')
+  })
+})

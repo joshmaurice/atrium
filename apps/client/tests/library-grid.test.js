@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  createLibraryGrid, groupByCategory, tileEnabled, tileBlockReason, libraryAnswerError,
+  createLibraryGrid, groupByCategory, tileEnabled, tileBlockReason, libraryAnswerError, libraryTilesKey,
 } from '../src/library-grid.js'
 import { createFormGate } from '../src/model-form.js'
 
@@ -464,5 +464,59 @@ describe('app.js wiring (read as a file)', () => {
 
   test('the catalog is loaded once, at startup', () => {
     assert.match(source, /loadCatalog\(\)\.then\(/)
+  })
+})
+
+// ── undo-hold round 3 (R4): the tiles rebuild only when what they show changes
+//
+// `libraryTilesKey` is the render's comparison: equal means leave the built DOM
+// alone (a behaviour's own writes no longer replace the tiles every ~75 ms), so
+// a click's press and release land on the same element.
+
+describe('undo-hold r3 (R4) — libraryTilesKey', () => {
+  const entry = (over = {}) => ({ id: 'A', name: 'Arm', category: 'Seating', thumbnail: '/t/a.jpg', ...over })
+  const keyOf = (entries, opts = {}) => libraryTilesKey(groupByCategory(entries), {
+    credit: 'credit', creditUrl: 'https://credit.example', base: 'https://base.example', ...opts,
+  })
+
+  test('it is equal for equal inputs', () => {
+    assert.equal(keyOf([entry()]), keyOf([entry()]))
+    assert.equal(keyOf([entry(), entry({ id: 'B' })]), keyOf([entry(), entry({ id: 'B' })]))
+  })
+
+  test('it changes when a category changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry({ category: 'Tables' })]))
+  })
+
+  test('it changes when an entry id changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry({ id: 'A2' })]))
+  })
+
+  test('it changes when an entry name changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry({ name: 'Arm Chair' })]))
+  })
+
+  test('it changes when an entry thumbnail changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry({ thumbnail: '/t/a2.jpg' })]))
+  })
+
+  test('it changes when the credit changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry()], { credit: 'other' }))
+  })
+
+  test('it changes when the credit URL changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry()], { creditUrl: 'https://other.example' }))
+  })
+
+  test('it changes when the base changes', () => {
+    assert.notEqual(keyOf([entry()]), keyOf([entry()], { base: 'https://other.example' }))
+  })
+
+  test('it is equal when only enabled or reason would differ (they are not inputs)', () => {
+    const opts = { credit: 'credit', creditUrl: 'https://credit.example', base: 'https://base.example' }
+    const a = libraryTilesKey(groupByCategory([entry()]), { ...opts, enabled: true, reason: null })
+    const b = libraryTilesKey(groupByCategory([entry()]), { ...opts, enabled: false, reason: 'Waiting for the server…' })
+    assert.equal(a, b)
+    assert.equal(a, keyOf([entry()]))
   })
 })

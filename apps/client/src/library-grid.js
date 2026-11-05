@@ -67,6 +67,34 @@ export function groupByCategory(models = []) {
 }
 
 /**
+ * A stable key for what the Library tiles SHOW (round 3, R4).
+ *
+ * The tiles are rebuilt from scratch whenever this key changes, and left alone
+ * (only each tile's `disabled`/`title` re-read) when it does not — so a
+ * behaviour's own writes, about 13 a second for a spinner, no longer replace
+ * the tile elements every ~75 ms and swallow a click. The inputs are exactly
+ * what the built DOM depends on: each group's category, each entry's `id`,
+ * `name` and `thumbnail`, the credit, the credit URL, and `base` (the world
+ * base URL the thumbnails resolve against). `enabled` and `reason` are NOT
+ * inputs: they change a tile's live state, not the structure — the render
+ * updates them in place.
+ *
+ * @param {Array<{category: string, entries: object[]}>} groups
+ * @param {{credit?: string|null, creditUrl?: string|null, base?: string|null}} [opts]
+ * @returns {string}
+ */
+export function libraryTilesKey(groups = [], { credit = null, creditUrl = null, base = null } = {}) {
+  const rows = []
+  for (const group of groups ?? []) {
+    rows.push(['g', group?.category ?? ''])
+    for (const entry of group?.entries ?? []) {
+      rows.push(['e', entry?.id ?? '', entry?.name ?? '', entry?.thumbnail ?? ''])
+    }
+  }
+  return JSON.stringify([credit ?? null, creditUrl ?? null, base ?? null, rows])
+}
+
+/**
  * The Library grid.
  *
  * @param {object} args

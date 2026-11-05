@@ -542,6 +542,22 @@ export function createEditTracker({
     rec.confirmed = value
   }
 
+  /**
+   * This tab's OWN echo of a transform field (round 3, R5) — a behaviour's
+   * `sendField` of a field a record has open, which the server applies and
+   * echoes back with `origin: 'own'`. Like `remoteSet`, it sets the open
+   * record's `confirmed` to the server's latest value, so a later revert puts
+   * back that value and never an older one (U16). Unlike `remoteSet`, it does
+   * NOT set `remote`: a behaviour's own echo is not another session's change, so
+   * the batch is still reported as this tab's (the typed edit is recorded).
+   * Does nothing when there is no open record.
+   */
+  function ownEchoSet(node, field, value) {
+    const rec = records.get(node)?.get(field)
+    if (!rec) return
+    rec.confirmed = value
+  }
+
   /** The node (or an ancestor) was removed: cancel and never write to it again. */
   function nodeRemoved(node) {
     // Dead first: cancelling a gesture reconciles its records, and a record
@@ -583,7 +599,7 @@ export function createEditTracker({
   }
 
   return {
-    begin, commit, accepted, rejected, unknown, remoteSet, nodeRemoved, pruneRemoved, reset,
+    begin, commit, accepted, rejected, unknown, remoteSet, ownEchoSet, nodeRemoved, pruneRemoved, reset,
     /** For tests and diagnostics: number of unanswered sends. */
     get pendingCount() { return sends.size },
     /** For tests and diagnostics: is a record open for this node and field? */

@@ -15,7 +15,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   createSkyPicker, skyValueFor, buildSkyExtras, restoreSkyExtras, backgroundOf,
-  SKY_NONE, SKY_CUSTOM,
+  skyOptionsKey, SKY_NONE, SKY_CUSTOM,
 } from '../src/sky-picker.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -636,5 +636,39 @@ describe('app.js wiring (read as a file)', () => {
     const body = source.slice(at, at + 400)
     assert.match(body, /sky\.resetWorld\(\)/, 'a static .gltf load resets the sky too')
     assert.match(body, /modelBridge\.resetWorld\(\)/)
+  })
+})
+
+// ── undo-hold round 3 (R4): the options rebuild only when what they show changes
+//
+// `skyOptionsKey` is the render's comparison: equal means leave the built
+// `<option>` list alone (a behaviour's own writes no longer empty and recreate
+// the select on every `som:set`).
+
+describe('undo-hold r3 (R4) — skyOptionsKey', () => {
+  const option = (over = {}) => ({ id: 'Sky_01', name: 'Cloudy', ...over })
+
+  test('it is equal for equal inputs', () => {
+    assert.equal(skyOptionsKey([option()], false), skyOptionsKey([option()], false))
+    assert.equal(
+      skyOptionsKey([option(), option({ id: 'Sky_02' })], true),
+      skyOptionsKey([option(), option({ id: 'Sky_02' })], true),
+    )
+  })
+
+  test('it changes when an option id changes', () => {
+    assert.notEqual(skyOptionsKey([option()], false), skyOptionsKey([option({ id: 'Sky_02' })], false))
+  })
+
+  test('it changes when an option name changes', () => {
+    assert.notEqual(skyOptionsKey([option()], false), skyOptionsKey([option({ name: 'Sunset' })], false))
+  })
+
+  test('it changes when custom changes', () => {
+    assert.notEqual(skyOptionsKey([option()], false), skyOptionsKey([option()], true))
+  })
+
+  test('an empty list is stable', () => {
+    assert.equal(skyOptionsKey([], false), skyOptionsKey(null, false))
   })
 })

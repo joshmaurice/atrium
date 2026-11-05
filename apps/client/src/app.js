@@ -38,9 +38,9 @@ import { palettePlacement, paletteName, teleporterName, copyName, modelName, fir
 import { createModelForm, createFormGate, middleTruncate } from './model-form.js'
 import { newObjectId } from '@atrium/client/object-id'
 import { createTeleporterForm } from './teleporter-form.js'
-import { createLibraryGrid, libraryAnswerError } from './library-grid.js'
+import { createLibraryGrid, libraryAnswerError, libraryTilesKey } from './library-grid.js'
 import { loadCatalog, storedUrl, EMPTY_CATALOG } from './library-catalog.js'
-import { createSkyPicker, SKY_NONE, SKY_CUSTOM } from './sky-picker.js'
+import { createSkyPicker, skyOptionsKey, SKY_NONE, SKY_CUSTOM } from './sky-picker.js'
 import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
@@ -1014,7 +1014,7 @@ avatar.on('avatar:peer-removed', ({ displayName, nodeName }) => {
 })
 
 // Live property updates on the selected node, and world-info panel for document extras
-client.on('som:set', ({ nodeName, path }) => {
+client.on('som:set', ({ nodeName, path, origin }) => {
   if (!client.som) return
   if (nodeName === '__document__') {
     // Z1 — the document's name reaches the HUD at once, BEFORE the sky work and
@@ -1033,7 +1033,14 @@ client.on('som:set', ({ nodeName, path }) => {
   if (node) {
     // U16 — another session's change reaches the gesture tracker, so a revert
     // puts back the server's value, never an older one. Edit mode on or off.
-    if (TRANSFORM_FIELDS.includes(path)) editTracker.remoteSet(node, path, [...node[path]])
+    // R5 (round 3) — a behaviour's OWN echo (`origin: 'own'`; the runner's
+    // `sendField`) is the server's value too, so it updates `confirmed`, but it
+    // is NOT another session's change: `ownEchoSet` records the typed edit that
+    // overlaps it instead of reporting the batch as "changed elsewhere".
+    if (TRANSFORM_FIELDS.includes(path)) {
+      if (origin === 'own') editTracker.ownEchoSet(node, path, [...node[path]])
+      else editTracker.remoteSet(node, path, [...node[path]])
+    }
     if (isTeleporter(node) || (TRANSFORM_FIELDS.includes(path) && subtreeSome(node, isTeleporter))) {
       rebuildPads()
     }
@@ -3830,15 +3837,45 @@ function renderLibraryStatus(text, kind = null) {
   libraryStatusEl.textContent = text ?? ''
 }
 
+// R4 (round 3) — the tiles are rebuilt only when what they SHOW changes. The
+// key and the entry names of the last build are kept here; `onPick` is kept
+// too, so a surviving tile's click handler calls the CURRENT one, never the
+// closure captured when the tile was built.
+let libraryTilesBuiltKey = null
+let libraryTileNames = []
+let libraryTilesOnPick = null
+
 /**
  * Build the tiles: one group per category, each tile a thumbnail and its name.
  * `enabled` is the grid's rule (`!blocked && modes.edit` AND no add in flight),
  * re-read on every refresh.
+ *
+ * R4 (round 3) — a behaviour's own writes call this about 13 times a second.
+ * The structure is rebuilt only when `libraryTilesKey` changes; on an unchanged
+ * key each existing tile's `disabled` and `title` are re-read IN PLACE (and
+ * only where they differ), so a click's press and release land on the same
+ * element.
  */
 function renderLibraryTiles(groups, { enabled, reason, credit, creditUrl, onPick }) {
   if (!libraryTilesEl) return
+  libraryTilesOnPick = onPick
+  const base = client.worldBaseUrl ?? null
+  const key = libraryTilesKey(groups, { credit: credit ?? null, creditUrl: creditUrl ?? null, base })
+  if (key === libraryTilesBuiltKey) {
+    const tiles = libraryTilesEl.querySelectorAll('.lg-tile')
+    for (let i = 0; i < tiles.length; i++) {
+      const name = libraryTileNames[i] ?? ''
+      const disabled = !enabled
+      const title = enabled ? name : (reason ?? name)
+      if (tiles[i].disabled !== disabled) tiles[i].disabled = disabled
+      if (tiles[i].title !== title) tiles[i].title = title
+    }
+    return
+  }
+  libraryTilesBuiltKey = key
   libraryTilesEl.textContent = ''
 
+  const names = []
   for (const group of groups) {
     const heading = document.createElement('div')
     heading.className = 'lg-category'
@@ -3863,11 +3900,13 @@ function renderLibraryTiles(groups, { enabled, reason, credit, creditUrl, onPick
       label.textContent = entry.name
 
       tile.append(thumb, label)
-      tile.addEventListener('click', () => onPick(entry.id))
+      tile.addEventListener('click', () => libraryTilesOnPick?.(entry.id))
       row.appendChild(tile)
+      names.push(entry.name)
     }
     libraryTilesEl.appendChild(row)
   }
+  libraryTileNames = names
 
   if (!libraryCreditEl) return
   libraryCreditEl.textContent = ''
@@ -3935,31 +3974,42 @@ epLibrary?.addEventListener('click', () => {
  */
 /**
  * Z4 — the select's options: None, the catalog's skies, and a disabled Custom
- * entry only while the world's texture is not a catalog sky. Rebuilt on every
- * render; the value is the SOM's, so another session's change shows up.
+ * entry only while the world's texture is not a catalog sky. The value is the
+ * SOM's, so another session's change shows up.
+ *
+ * R4 (round 3) — the `<option>` list is rebuilt only when `skyOptionsKey`
+ * changes; on an unchanged key the select's `value` and `disabled` are set in
+ * place, and only when they differ, so a behaviour's own writes no longer empty
+ * and recreate the select on every `som:set`.
  */
+let skyOptionsBuiltKey = null
+
 function renderSkySelect({ value, options, custom, enabled }) {
   if (!epSky) return
-  epSky.textContent = ''
-  const none = document.createElement('option')
-  none.value = SKY_NONE
-  none.textContent = 'None'
-  epSky.appendChild(none)
-  for (const option of options) {
-    const el = document.createElement('option')
-    el.value = option.id
-    el.textContent = option.name
-    epSky.appendChild(el)
+  const key = skyOptionsKey(options, custom)
+  if (key !== skyOptionsBuiltKey) {
+    skyOptionsBuiltKey = key
+    epSky.textContent = ''
+    const none = document.createElement('option')
+    none.value = SKY_NONE
+    none.textContent = 'None'
+    epSky.appendChild(none)
+    for (const option of options) {
+      const el = document.createElement('option')
+      el.value = option.id
+      el.textContent = option.name
+      epSky.appendChild(el)
+    }
+    if (custom) {
+      const el = document.createElement('option')
+      el.value = SKY_CUSTOM
+      el.textContent = 'Custom (set in the SOM Inspector)'
+      el.disabled = true
+      epSky.appendChild(el)
+    }
   }
-  if (custom) {
-    const el = document.createElement('option')
-    el.value = SKY_CUSTOM
-    el.textContent = 'Custom (set in the SOM Inspector)'
-    el.disabled = true
-    epSky.appendChild(el)
-  }
-  epSky.value = value
-  epSky.disabled = !enabled
+  if (epSky.value !== value) epSky.value = value
+  if (epSky.disabled !== !enabled) epSky.disabled = !enabled
 }
 
 function renderSkyStatus(text) {
