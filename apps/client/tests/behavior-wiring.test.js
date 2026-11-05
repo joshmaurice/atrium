@@ -80,10 +80,26 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
     assert.doesNotMatch(source, /dispatchPointerEvent\([^)]*\)[\s\S]{0,40}runner\?\.select/)
   })
 
-  test('the drag rule is set from the handle drag and from a form write', () => {
-    assert.match(source, /activeGesture = editTracker\.begin\(selected\)[\s\S]{0,200}?runner\?\.setGesture\(selected\.name\)/)
-    assert.match(source, /writeSend: \(node, field, value\) => \{[\s\S]{0,200}?runner\?\.setGesture\(node\.name\)/)
-    assert.match(source, /onTransformsSettled[\s\S]{0,200}?runner\?\.setGesture\(null\)/)
+  test('undo-hold — the drag rule is held in one collaborator, set and cleared at every path', () => {
+    // Code only: a mention of a token inside a comment is not a call.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+    // The ONE collaborator keeps the runner's gesture (undo-hold, H2/H3).
+    assert.match(code, /const hold = createBehaviorHold\(\{ setGesture: \(n\) => runner\?\.setGesture\(n\) \}\)/)
+    // hold.hold at a form write and at the drag's begin; hold.clear at the drag's end.
+    assert.match(code, /writeSend: \(node, field, value\) => \{[\s\S]{0,200}?hold\.hold\(node\)/)
+    assert.match(code, /activeGesture = editTracker\.begin\(selected\)[\s\S]{0,200}?hold\.hold\(selected\)/)
+    assert.match(code, /activeGesture = null[\s\S]{0,200}?hold\.clear\(\)/)
+    // The tracker's idle releases the hold.
+    assert.match(code, /onNodeIdle: \(node\) => hold\.released\(node\)/)
+    // onTransformsSettled no longer clears the hold (a settle for one node must
+    // not release another node's hold).
+    assert.doesNotMatch(code, /onTransformsSettled:[^}]*setGesture/)
+    // `runner?.setGesture(` appears exactly once in app.js, inside
+    // createBehaviorHold's argument — nothing else in the page calls it.
+    const hits = code.match(/runner\?\.setGesture\(/g) ?? []
+    assert.equal(hits.length, 1, `one runner?.setGesture( in app.js, got ${hits.length}`)
+    assert.match(code, /createBehaviorHold\(\{ setGesture: [\s\S]{0,80}?runner\?\.setGesture\(/)
   })
 
   test('F6 — the Visible checkbox writes through the same tracker', () => {

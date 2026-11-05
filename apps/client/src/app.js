@@ -15,7 +15,7 @@ import { teleportFailureMessage, evictionMessage, codeToReason, formatDestinatio
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { resolveSelectionRoot } from '@atrium/interaction'
 import { createEditModes } from './edit-modes.js'
-import { createEditTracker, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
+import { createEditTracker, createBehaviorHold, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
@@ -1755,6 +1755,12 @@ let activeGesture = null   // the handle drag under way (B4)
 let pressDown     = null   // { x, y, onHandle } at the last viewport mousedown
 let pendingRename = null   // { seq, node } while a rename is unanswered
 
+// F-L5 — the drag rule's hold (undo-hold, H2/H3). ONE collaborator keeps the
+// runner's gesture: it holds one node OBJECT. `writeSend` and a handle drag's
+// begin hold it; the handle drag's end clears it; the tracker's idle releases
+// it. This is the only place the file names the runner's gesture setter.
+const hold = createBehaviorHold({ setGesture: (n) => runner?.setGesture(n) })
+
 const editTracker = createEditTracker({
   read: (node, field) => node[field],
   // Local only: DocumentView renders it, nothing is sent (G2).
@@ -1773,8 +1779,8 @@ const editTracker = createEditTracker({
   },
   // Assigning outside applyLocally sends; lastSendSeq moves only if it did.
   writeSend: (node, field, value) => {
-    // F-L5 — a form write in flight is a gesture too.
-    runner?.setGesture(node.name)
+    // F-L5 — a form write in flight is a gesture too: hold the drag rule.
+    hold.hold(node)
     const before = client.lastSendSeq
     node[field] = value
     return client.lastSendSeq !== before ? client.lastSendSeq : null
@@ -1785,12 +1791,15 @@ const editTracker = createEditTracker({
     if (subtreeSome(node, isTeleporter)) rebuildPads()
   },
   // Y3 — one settle batch at a time: what the server accepted becomes an entry
+  // Y4 — the gesture is over; nothing is replayed.
   onTransformsSettled: (results, info) => {
     undo.onTransformsSettled(results, info)
-    // F-L5 — the gesture is over; nothing is replayed.
-    runner?.setGesture(null)
     refreshEditActions()
   },
+  // undo-hold (H1/H3) — the node has nothing in flight any more (including
+  // after an Undo's or a Redo's unrecorded send). Release the hold if it is
+  // still ours; another node's settle can no longer release it.
+  onNodeIdle: (node) => hold.released(node),
 })
 
 // 1b-2 N4 — the pending add, duplicate or delete (one at a time).
@@ -1992,12 +2001,14 @@ function onHandleDragging(isDragging) {
       activeGesture = editTracker.begin(selected)
       // F-L5 — the drag rule: behaviour sends to the edited node, its
       // descendants and its ancestors are dropped while the gesture lasts.
-      runner?.setGesture(selected.name)
+      hold.hold(selected)
     }
   } else if (activeGesture) {
     activeGesture.end()
     activeGesture = null
-    runner?.setGesture(null)
+    // A drag that changed nothing sends nothing, so no idle comes for it: the
+    // drag's own end clears the hold (undo-hold, H3).
+    hold.clear()
   }
   refreshEditActions()
 }
