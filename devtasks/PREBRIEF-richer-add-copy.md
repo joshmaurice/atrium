@@ -1,6 +1,6 @@
 # Pre-brief: the `add` check, the richer `add`, and copying objects
 
-Status: **DRAFT, Revision 0 (2026-11-02). Decisions RA-L1–RA-L6 and CP-L1–CP-L7
+Status: **DRAFT, Revision 0.1 (2026-11-04). Decisions RA-L1–RA-L6 and CP-L1–CP-L7
 are the operator's; none is decided yet.** Each has a recommendation.
 - **Drafted by Claude from `main` at `f42b5fe`.** Its code is the same as the
   released `84542c73` (DEV, MAIN and PROD): the commits on top change only
@@ -266,20 +266,37 @@ rm /tmp/atrium-survey.db
 - (b) Fold it into the richer `add` round. One round fewer, but the fix waits
   for the larger change and its review.
 
-**RA-L2. What the richer `add` carries.**
-- **(a) Recommended: 10-18's list, without accessor or buffer names:**
-  - **the material:** `name`, `extras`, `emissiveFactor`, `alphaMode`,
-    `alphaCutoff`, `doubleSided`, plus today's three factors;
-  - **the mesh and primitive:** `extras`;
-  - **the attributes:** `TEXCOORD_0`, `TEXCOORD_1` and `COLOR_0`.
+**RA-L2. What the richer `add` carries.** Every option below carries the
+material's name, emissive, alpha and double-sided. They differ on UVs, vertex
+colours and accessor and buffer labels:
+
+| | (a) | (b) | **(c) Recommended (Rev 0.1)** |
+|---|---|---|---|
+| Material `name`, `extras`, `emissiveFactor`, `alphaMode`, `alphaCutoff`, `doubleSided`, plus today's three factors | carried | carried | carried |
+| Mesh and primitive `extras` | carried | carried | carried |
+| UVs (`TEXCOORD_0`, `TEXCOORD_1`) and vertex colours (`COLOR_0`) | **carried** | not carried (refused) | **carried** |
+| Accessor and buffer names and `extras` | refused | refused | **dropped** |
+
+- **Why (c):** accessor and buffer names and `extras` are labels on the
+  containers, not on the geometry. Nothing in Atrium shows or reads them, and
+  three.js ignores them.
+  - `add` doesn't send accessors at all: the receiver builds fresh ones from
+    plain arrays.
+  - A buffer can't be carried faithfully anyway. `ingestNode` makes one
+    buffer per primitive (`SOMDocument.js` L804), while a file's buffer
+    usually holds many meshes.
   
-  Accessor and buffer names and `extras` stay refused (none in any fixture).
-  UVs and vertex colours are in no fixture either (§2.5). They're for step 7's
+  Refusing them would stop a user copying or undo-deleting an object for
+  something they can't see or change. Dropping them costs nothing. So D5
+  gains a second stated exception (with RA-L3's): "accessor and buffer labels
+  aren't kept". The original keeps them, and saves them as before.
+- **UVs and vertex colours** are in no fixture (§2.5). They're for step 7's
   import and export, and for textures later, and they cost the round little.
-- (b) Only what content uses today: the material's name, emissive, alpha and
-  double-sided. UVs and colours come with textures or step 7.
-- (c) (a), plus accessor and buffer names treated as droppable (not content).
-  This relaxes D5, which so far has never dropped anything.
+- (a) keeps D5 strict for the labels. (b) also leaves UVs and colours to
+  textures or step 7.
+- Carrying accessor names in an optional side field (`accessors: { POSITION:
+  { name } }`) was considered and set aside (operator, 2026-11-03): no
+  conceivable reader.
 
 **RA-L3. Shared materials (§2.6).**
 - **(a) Recommended: a copy, a duplicate and a restore each get their own
@@ -493,6 +510,11 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
   failure in the handoff.
 
 ## 9. Review log
+- **Rev 0.1** (2026-11-04): RA-L2's recommendation is now (c), dropping
+  accessor and buffer labels, after talking it through with the operator
+  (2026-11-02 to 11-03). RA-L2 is restated as a table, because Rev 0's wording
+  read as if UVs and vertex colours were refused under (a). Nothing else
+  changed. Still not reviewed.
 - **Rev 0** (2026-11-02, morning PT, `f42b5fe`): drafted by Claude from the
   operator's "let's do the richer add and copy". Probes `p1`–`p6` run. Not yet
   reviewed.

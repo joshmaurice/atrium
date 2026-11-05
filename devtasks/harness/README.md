@@ -49,6 +49,15 @@ DEV acceptance.
   - `checks/undo-hold/h1.py`: the stuck drag-rule hold after an Undo
     (`PREBRIEF-undo-hold.md` §2.3). It runs on `signin-sync/authserver.mjs`
     with `HOOKS=1`, like `checks/scripting-4d/`.
+    `h2.py` is the same with the move made by a handle drag (the gizmo's own
+    events): on `8ff7000` the dragged move records a plain Move and undoes.
+    `h3.py` is round 1's browser check (Undo, Redo, another object's move,
+    a rotation refused, the drag rule, a scale Undo). `h4.py` makes 12
+    mouse-like move drags on a spinning cube, each followed by Undo
+    (`REVISION-undo-hold-round-2.md` §1).
+    `h5.py` counts rebuilds of the Library tiles and the sky list in 2 s with
+    a spinner running, and tries a real click on a tile
+    (`REVISION-undo-hold-round-3.md` §1.1). `h3.py`'s check 4 is round 3's R5.
   - `checks/signin-sync/`: **real sign-in**, unlike everything above.
     - `authserver.mjs` runs the real server (`packages/server/src/index.js`,
       with its own DB at `$HARNESS_ROOT/auth.db`, reset at each start) behind
