@@ -12,7 +12,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  createEditTracker, sanitizeTransform, MIN_SCALE, REMOVED_MESSAGE,
+  createEditTracker, createBehaviorHold, sanitizeTransform, MIN_SCALE, REMOVED_MESSAGE,
 } from '../src/edit-gesture.js'
 
 function makeWorld() {
@@ -23,6 +23,8 @@ function makeWorld() {
   const messages = []
   const reverts = []
   const settled = []
+  const idles = []
+  const events = []
   const tracker = createEditTracker({
     read: (node, field) => node[field],
     writeLocal: (node, field, value) => { node[field] = value; locals.push({ node, field, value }) },
@@ -33,14 +35,17 @@ function makeWorld() {
       return s
     },
     onMessage: (text, info) => messages.push({ text, ...info }),
-    onReverted: (node, field, value) => reverts.push({ node, field, value }),
-    onTransformsSettled: (results, info) => settled.push({ results, info }),
+    onReverted: (node, field, value) => { reverts.push({ node, field, value }); events.push('reverted') },
+    onTransformsSettled: (results, info) => { settled.push({ results, info }); events.push('settled') },
+    onNodeIdle: (node) => { idles.push(node); events.push('idle') },
     now: () => t,
   })
   return {
-    tracker, locals, sent, messages, reverts, settled,
+    tracker, locals, sent, messages, reverts, settled, idles, events,
     /** The batches reported since the last call, and forget them. */
     takeSettled() { const out = settled.slice(); settled.length = 0; return out },
+    /** The idles fired since the last call, and forget them. */
+    takeIdles() { const out = idles.slice(); idles.length = 0; return out },
     advance(ms) { t += ms },
   }
 }
@@ -743,5 +748,201 @@ describe('edit-gesture: V4 (round 5) — the Visible field', () => {
     w.tracker.accepted(back)
     assert.equal(n.visible, true, 'and it un-hides')
     assert.equal(w.reverts.length, 0, 'nothing was reverted')
+  })
+})
+
+// ── undo-hold (H2): the behavior hold, kept by node object ──────────────────
+// A drag rule's `setGesture` is kept in this collaborator. It must be kept by
+// OBJECT: an idle for one object can never release another object's hold, even
+// when their names match (a restored object keeps its name).
+
+describe('edit-gesture: the behavior hold (H2)', () => {
+  function makeHold() {
+    const names = []
+    const hold = createBehaviorHold({ setGesture: (n) => names.push(n) })
+    return { hold, take() { const out = names.slice(); names.length = 0; return out } }
+  }
+
+  test('released of the held object clears the hold, once', () => {
+    const h = makeHold()
+    const a = node('a')
+    h.hold.hold(a)
+    assert.deepEqual(h.take(), ['a'])
+    h.hold.released(a)
+    assert.deepEqual(h.take(), [null])
+    h.hold.released(a)
+    assert.deepEqual(h.take(), [], 'already released: nothing more')
+  })
+
+  test('released of another object, including one with the same name, changes nothing', () => {
+    const h = makeHold()
+    const a = node('a')
+    h.hold.hold(a)
+    h.take()
+    h.hold.released(node('a'))          // the same name, a different object
+    assert.deepEqual(h.take(), [], 'a restored object keeps its name; the hold is by object')
+    h.hold.released(a)
+    assert.deepEqual(h.take(), [null], 'the object actually held still releases it')
+  })
+
+  test('hold of a second object replaces the first; released of the first then changes nothing', () => {
+    const h = makeHold()
+    const a = node('a')
+    const b = node('b')
+    h.hold.hold(a)
+    h.hold.hold(b)
+    assert.deepEqual(h.take(), ['a', 'b'])
+    h.hold.released(a)
+    assert.deepEqual(h.take(), [], 'no longer the held object')
+    h.hold.released(b)
+    assert.deepEqual(h.take(), [null])
+  })
+
+  test('clear always clears', () => {
+    const h = makeHold()
+    const a = node('a')
+    h.hold.hold(a)
+    h.take()
+    h.hold.clear()
+    assert.deepEqual(h.take(), [null])
+    h.hold.clear()
+    assert.deepEqual(h.take(), [null], 'clear releases even with nothing held')
+    h.hold.released(a)
+    assert.deepEqual(h.take(), [], 'and it forgot the object')
+  })
+})
+
+// ── undo-hold (H1): the tracker says when a node has nothing in flight ───────
+// `onNodeIdle(node)` fires exactly once each time a node goes from having an
+// open record to having none — accepted, refused and unknown sends, a removed
+// node, recorded and unrecorded commits alike — after any revert and any batch,
+// and never while a gesture on that node is still active. A commit (or a drag)
+// that sent nothing opens no record and fires nothing.
+
+describe('edit-gesture: onNodeIdle (H1)', () => {
+  test('a recorded commit accepted fires it once, after the send is answered', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [1, 0, 0])
+    assert.deepEqual(w.takeIdles(), [], 'not while the send is in flight')
+    w.tracker.accepted(seq)
+    assert.deepEqual(w.takeIdles(), [n])
+  })
+
+  test('a recorded commit refused fires it once', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [1, 0, 0])
+    w.tracker.rejected(seq, { message: 'no' })
+    assert.deepEqual(w.takeIdles(), [n])
+  })
+
+  test('an unrecorded commit (an Undo’s send) accepted fires it once', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [3, 0, 0], { record: false })
+    assert.deepEqual(w.takeIdles(), [])
+    w.tracker.accepted(seq)
+    assert.deepEqual(w.takeIdles(), [n], 'unrecorded sends close a record too: that is the bug')
+  })
+
+  test('an unrecorded commit refused fires it once', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [3, 0, 0], { record: false })
+    w.tracker.rejected(seq, { message: 'no' })
+    assert.deepEqual(w.takeIdles(), [n])
+  })
+
+  test('an edit:unknown fires it once', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })
+    g.end()
+    w.tracker.unknown(1)
+    assert.deepEqual(w.takeIdles(), [n])
+  })
+
+  test('a node removed mid-send fires it once, after the send is answered', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    w.advance(200); g.update({ translation: [1, 0, 0] })   // seq 1 in flight
+    w.tracker.nodeRemoved(n)
+    assert.deepEqual(w.takeIdles(), [], 'the send is still unanswered')
+    w.tracker.accepted(1)
+    assert.deepEqual(w.takeIdles(), [n])
+  })
+
+  test('it does not fire while a handle gesture on that node is active', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [1, 0, 0])   // in flight
+    const g = w.tracker.begin(n)                               // a drag begins on the node
+    w.tracker.accepted(seq)                                    // the commit's answer closes its record
+    assert.deepEqual(w.takeIdles(), [], 'a gesture on the node is still active')
+    g.end()                                                    // the drag changed nothing
+    assert.deepEqual(w.takeIdles(), [n], 'the gesture is over: now idle')
+  })
+
+  test('it does not fire for a commit that sent nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    assert.equal(w.tracker.commit(n, 'translation', [0, 0, 0]), null)
+    assert.deepEqual(w.takeIdles(), [])
+  })
+
+  test('a drag that changed nothing fires nothing', () => {
+    const w = makeWorld()
+    const n = node()
+    const g = w.tracker.begin(n)
+    g.update({ translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] })
+    g.end()
+    assert.deepEqual(w.takeIdles(), [], 'no record opened: no idle (the drag’s own end clears the hold)')
+  })
+
+  test('two overlapping commits on one node fire it once, after the second', () => {
+    const w = makeWorld()
+    const n = node()
+    const s1 = w.tracker.commit(n, 'translation', [1, 0, 0])
+    const s2 = w.tracker.commit(n, 'translation', [2, 0, 0])   // shares the record
+    w.tracker.accepted(s1)
+    assert.deepEqual(w.takeIdles(), [], 'one send is still outstanding')
+    w.tracker.accepted(s2)
+    assert.deepEqual(w.takeIdles(), [n])
+  })
+
+  test('it fires after the revert is written and the batch reported', () => {
+    const w = makeWorld()
+    const n = node()
+    const seq = w.tracker.commit(n, 'translation', [1, 0, 0])
+    w.tracker.rejected(seq, { message: 'no' })
+    assert.deepEqual(w.events, ['reverted', 'settled', 'idle'])
+  })
+})
+
+describe('edit-gesture: the hold and the tracker, wired as the app wires them (H3)', () => {
+  test('an Undo send (unrecorded) on the held node releases the hold after its answer', () => {
+    let seq = 0
+    const n = node('a')
+    const set = []
+    const hold = createBehaviorHold({ setGesture: (x) => set.push(x) })
+    const tracker = createEditTracker({
+      read: (node, field) => node[field],
+      writeLocal: (node, field, value) => { node[field] = value },
+      writeSend: (node, field, value) => { hold.hold(node); node[field] = value; return ++seq },
+      onNodeIdle: (node) => hold.released(node),
+    })
+    // An ordinary panel move: the hold names the node while its send is in flight.
+    const s1 = tracker.commit(n, 'translation', [1, 0, 0])
+    assert.deepEqual(set, ['a'])
+    tracker.accepted(s1)
+    assert.deepEqual(set, ['a', null], 'the recorded move released it')
+    // An Undo of it: unrecorded, so nothing but onNodeIdle can release the hold.
+    const s2 = tracker.commit(n, 'translation', [0, 0, 0], { record: false })
+    assert.deepEqual(set, ['a', null, 'a'], 'the undo holds again')
+    tracker.accepted(s2)
+    assert.deepEqual(set, ['a', null, 'a', null], 'and its answer releases it — the bug is fixed')
   })
 })

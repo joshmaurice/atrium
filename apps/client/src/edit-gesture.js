@@ -52,6 +52,23 @@
  * and its records become dead. In-flight sends still resolve, but a dead record
  * never writes to the node; a rejection on it reports that the object was
  * removed.
+ *
+ * Idle (undo-hold, H1) — `onNodeIdle(node)`:
+ * - fires exactly once each time a node goes from having an open record to
+ *   having none — accepted, refused and unknown sends, a removed node, and
+ *   recorded and unrecorded commits alike (an undo's or a redo's
+ *   `commit(…, { record: false })` is unrecorded: that is why nothing cleared
+ *   the hold after an Undo);
+ * - it fires after any revert has been written and any batch reported, and
+ *   never while a gesture on that node is still active;
+ * - a commit that sent nothing (the same value) opens no record and fires
+ *   nothing; and a drag that changed nothing opens no record either, so no
+ *   idle comes for it (its own end clears the hold — see `createBehaviorHold`).
+ *
+ * The hold (H2) — `createBehaviorHold({ setGesture })`, a pure collaborator
+ * kept by node OBJECT, not by name: an idle for one object can never release
+ * another object's hold, even when their names match (a restored object keeps
+ * its name).
  */
 
 export const TRANSFORM_FIELDS = ['translation', 'rotation', 'scale']
@@ -83,6 +100,37 @@ export function sanitizeTransform(field, value) {
   return [...value]
 }
 
+/**
+ * The hold the drag rule's `setGesture` is kept in (undo-hold, H2). Pure, kept
+ * by node OBJECT: an idle for one object can never release another object's
+ * hold, even when their names match.
+ *
+ * @param {object} opts
+ * @param {(name: string|null) => void} opts.setGesture  the runner's setGesture
+ * @returns {{ hold(node: object): void, released(node: object): void, clear(): void }}
+ */
+export function createBehaviorHold({ setGesture }) {
+  let held = null
+  return {
+    /** Hold `node`'s edits: behaviour sends to it are dropped until it is released. */
+    hold(node) {
+      held = node
+      setGesture(node.name)
+    },
+    /** The node has nothing in flight: release the hold, if it is ours. */
+    released(node) {
+      if (node !== held) return
+      held = null
+      setGesture(null)
+    },
+    /** The drag ended (or the world changed): forget the node and release. */
+    clear() {
+      held = null
+      setGesture(null)
+    },
+  }
+}
+
 function same(a, b) {
   if (a === b) return true
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
@@ -102,12 +150,16 @@ function same(a, b) {
  * @param {(results: object[], info: {acceptedOwnSend: boolean, remote: boolean, rejected: boolean}) => void} [opts.onTransformsSettled]
  *   a settle batch (Y3): the entries to record, and whether one of this tab's
  *   sends in it was accepted
+ * @param {(node: object) => void} [opts.onNodeIdle]
+ *   the node has nothing in flight any more (undo-hold, H1): no open record and
+ *   no gesture on it. Fired once per transition, after any revert and any batch.
  * @param {() => number} [opts.now]
  * @param {number} [opts.throttleMs=100]
  */
 export function createEditTracker({
   read, writeLocal, writeSend,
   onMessage = () => {}, onReverted = () => {}, onTransformsSettled = () => {},
+  onNodeIdle = () => {},
   now = () => Date.now(), throttleMs = 100,
 }) {
   /** @type {Map<object, Map<string, object>>} node → field → record */
@@ -118,9 +170,14 @@ export function createEditTracker({
   const gestures = new Set()
   /** @type {Set<object>} finished gestures whose records have not all reconciled */
   const awaiting = new Set()
+  /** @type {Set<object>} nodes with an open record (undo-hold, H1): the guard
+   *  that makes `onNodeIdle` fire once per transition back to idle, and not at
+   *  all for a node that never opened a record. */
+  const busy = new Set()
   let orderCounter = 0
 
   function recordFor(node, field, startValue) {
+    busy.add(node)
     let byField = records.get(node)
     if (!byField) { byField = new Map(); records.set(node, byField) }
     let rec = byField.get(field)
@@ -153,6 +210,25 @@ export function createEditTracker({
     }
   }
 
+  /** True when `node` has no open record and no gesture still active on it. */
+  function isNodeIdle(node) {
+    const byField = records.get(node)
+    if (byField && byField.size > 0) return false
+    for (const g of gestures) if (g.node === node) return false
+    return true
+  }
+
+  /**
+   * Fire `onNodeIdle(node)` exactly once for a node's transition back to idle
+   * (undo-hold, H1). `busy` is the transition guard: a node that never opened a
+   * record never fires, and a node fires again only after a new record opens.
+   */
+  function maybeIdle(node) {
+    if (!busy.has(node) || !isNodeIdle(node)) return
+    busy.delete(node)
+    onNodeIdle(node)
+  }
+
   function reconcile(rec) {
     if (rec.pending.size > 0 || rec.active > 0) return
     // Only write when the node actually differs from the server's value, and
@@ -168,6 +244,9 @@ export function createEditTracker({
     }
     dropRecord(rec)
     settleBatches()
+    // H1 — after the revert (above) and any batch (settleBatches): the node may
+    // now have nothing in flight.
+    maybeIdle(rec.node)
   }
 
   // ── Settle batches (Y3) ────────────────────────────────────────────────
@@ -280,11 +359,15 @@ export function createEditTracker({
     }
 
     function release() {
+      // Drop the gesture first: an idle check during the reconciles below must
+      // not see this gesture as still active (H1 rule 3 — it fires only once
+      // the gesture is over).
+      gestures.delete(gesture)
       for (const rec of touched.values()) {
         rec.active--
         reconcile(rec)
       }
-      gestures.delete(gesture)
+      maybeIdle(node)
     }
 
     // Once the gesture is over, it waits for every record it touched to
@@ -432,6 +515,9 @@ export function createEditTracker({
     for (const rec of recs) rec.dead = true
     for (const g of [...gestures]) if (g.node === node) g.cancel()
     for (const rec of recs) reconcile(rec)
+    // H1 — a removed node's records close here (and, for an in-flight send,
+    // when its answer arrives). Fire once when it has nothing left.
+    maybeIdle(node)
   }
 
   /**
@@ -449,6 +535,11 @@ export function createEditTracker({
   function reset() {
     // Dead first, as in nodeRemoved: nothing from the old connection writes.
     for (const byField of records.values()) for (const rec of byField.values()) rec.dead = true
+    // A reset is a session teardown (reconnect or world change): every node's
+    // state is discarded and the caller re-establishes the runner fresh, so no
+    // per-node idle is reported — the same reason reportBatch reports nothing
+    // for it. `busy` is cleared first so the cancels below fire no idle either.
+    busy.clear()
     awaiting.clear()
     for (const g of [...gestures]) g.cancel()
     records.clear()
