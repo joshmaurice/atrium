@@ -1,8 +1,9 @@
 # Pre-brief: the `add` check, the richer `add`, and copying objects
 
 Status: **DRAFT, Revision 0.2 (2026-11-05), after two outside reviews of Rev 0.1,
-both CHANGES REQUESTED. Decisions RA-L1–RA-L8 and CP-L1–CP-L7 are the operator's;
-none is decided yet.** Each has a recommendation.
+both CHANGES REQUESTED. Decided (operator, 2026-11-05): RA-L1 (a), RA-L4 (a),
+RA-L7 (a), RA-L8 (a), which settle `add-check`'s round. Still open: RA-L2,
+RA-L3, RA-L5, RA-L6 and CP-L1–CP-L7.** Each has a recommendation.
 - **The reviews:** `REVIEW-richer-add-copy-rev0.1-claude.md` (a runtime review:
   cloned, ran every suite and `p1`–`p5`, wrote probes `q1`–`q4`) and
   `REVIEW-richer-add-copy-rev0.1-chatgpt.md` (source-only: its clone failed on
@@ -345,7 +346,7 @@ rm /tmp/atrium-survey.db
 
 ## 3. Decisions (for the operator)
 
-**RA-L1. The live defect (§2.3).**
+**RA-L1. The live defect (§2.3).** **Decided (operator, 2026-11-05): (a).**
 - **(a) Recommended: its own small round first (`add-check`),** as the design split
   out step 0, its live security issue (design status notes; §9 step 0).
   §4 is its whole contract: the strict check of **today's** fields on every `add`, avatars included. The richer
@@ -423,7 +424,7 @@ colours and accessor and buffer labels:
   explains today. (a) needs the Undo text to say it. The operator's call, for
   `richer-add`.
 
-**RA-L4. Avatars.**
+**RA-L4. Avatars.** **Decided (operator, 2026-11-05): (a), with these numbers.**
 - **(a) Recommended (amended in Rev 0.2):** avatar `add`s get `add-check`'s
   rules, **a budget of their own**, and **none of the richer fields**. Avatars
   aren't copied or restored, so the new fields would only widen what an
@@ -476,6 +477,7 @@ colours and accessor and buffer labels:
 - **Reviews:** both (a).
 
 **RA-L7. The [0, 1] material ranges on `send` (new in Rev 0.2; CR-S1, GR-S2).**
+**Decided (operator, 2026-11-05): (a).**
 - **(a) Recommended: in `add-check`, one shared predicate for `add` and
   `send`,** as K6 did for transforms. Otherwise `add-check` itself creates
   objects that can't be duplicated or undo-deleted (§2.7). glTF requires the
@@ -485,7 +487,7 @@ colours and accessor and buffer labels:
   framing). `add-check` stays smaller, but ships the regression until then.
 
 **RA-L8. Defence in depth for documents that can't be read back (new in
-Rev 0.2; CR-M1).** `add-check` closes every way in that the reviews found, and
+Rev 0.2; CR-M1).** **Decided (operator, 2026-11-05): (a).** `add-check` closes every way in that the reviews found, and
 `richer-add` widens `ingestNode` next. These two make the next miss fail
 loudly instead of quietly:
 - **(a) Recommended: both in `add-check`:**
@@ -843,6 +845,10 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
   failure in the handoff.
 
 ## 9. Review log
+- **Rev 0.2, decisions recorded** (2026-11-05): the operator chose RA-L1 (a),
+  RA-L4 (a) with A5's numbers, RA-L7 (a) and RA-L8 (a). §4's other limits come
+  from RA-L5 (a), still open; the brief for `add-check` takes them as
+  recommended unless the operator says otherwise.
 - **Rev 0.2** (2026-11-05, against `8fc82bb5`): after two outside reviews of
   Rev 0.1 at `923bd444`, both **CHANGES REQUESTED**:
   `REVIEW-richer-add-copy-rev0.1-claude.md` (runtime) and
