@@ -1,7 +1,8 @@
 # Pre-brief: a behaviour stops after Undo (`undo-hold`)
 
-Status: **DRAFT, Revision 0 (2026-11-04). Decisions UH-L1–UH-L3 are the
-operator's; none is decided yet.** Each has a recommendation.
+Status: **FINAL, Revision 1 (2026-11-04). Decisions UH-L1–UH-L3 approved as
+recommended** (operator, 2026-11-04 20:17 PT: "ok approved"). Rev 1 also
+settles where the hold is kept (§4 H2), which Rev 0 left to the worker.
 - **Drafted by Claude from `main` at `8ff7000`.** Its code is the same as the
   released `84542c73` (DEV, MAIN and PROD). Line numbers are at that commit.
 - **The report (operator, 2026-11-04):** "when i have the model rotating, and
@@ -127,23 +128,46 @@ the round's tests cover it at the unit level.
   hard reload.
 - (b) Fold it into `add-check`'s release. It would wait for the larger round.
 
-## 4. The contract (as recommended)
+## 4. The contract (approved)
 - **H1, the tracker** (`edit-gesture.js`):
   - `createEditTracker` takes `onNodeIdle = () => {}`;
   - it calls `onNodeIdle(node)` exactly once each time the node goes from
     having an open record or active gesture to having none, **after** any
     revert has been written and any batch has been reported;
   - it never calls it while a gesture on that node is active.
-- **H2, the wiring** (`app.js`):
-  - `onNodeIdle: (node) => { if (runner?.gestureName === node.name) runner?.setGesture(null) }`
-    (or the runner gains `clearGestureIf(name)`; the worker picks one and
-    tests it);
-  - `onTransformsSettled` no longer calls `setGesture(null)`;
-  - the drag's own set and clear stay.
-- **H3, the runner:** at most the small read or conditional clear that H2
-  needs. Nothing else changes.
+- **H2, the hold, kept by node object** (settled in Rev 1). A new pure
+  export in `edit-gesture.js`:
+  - `createBehaviorHold({ setGesture })` returns `{ hold(node), released(node),
+    clear() }`;
+  - `hold(node)` remembers that node **object** and calls
+    `setGesture(node.name)`;
+  - `released(node)` does nothing unless `node` is the object it holds. If
+    it is, it forgets it and calls `setGesture(null)`;
+  - `clear()` forgets the node and calls `setGesture(null)`.
+  
+  Keeping the object, not a name, means that an idle for one object can't
+  release another object's hold, even when their names match (a restored
+  object).
+- **H3, the wiring** (`app.js`), with `setGesture: (n) => runner?.setGesture(n)`:
+  - `writeSend` calls `hold.hold(node)` where it calls `runner?.setGesture(node.name)`
+    today (L1777);
+  - a handle drag's begin calls `hold.hold(selected)` (L1995), and its end
+    calls `hold.clear()` (L2000), as today. A drag that changed nothing sends
+    nothing, so no idle would come for it;
+  - `onNodeIdle: (node) => hold.released(node)`;
+  - `onTransformsSettled` no longer calls `setGesture(null)` (L1791).
+  
+  **Nothing else in `app.js` calls `runner?.setGesture`.**
+- **H4, the runner:** no change.
 
 ## 5. Tests
+- **`createBehaviorHold` unit tests** (`edit-gesture.test.js`):
+  - `released` of the held object clears the hold, once;
+  - `released` of another object, **including one with the same name**,
+    changes nothing;
+  - `hold` of a second object replaces the first; `released` of the first
+    then changes nothing;
+  - `clear` always clears.
 - **Tracker unit tests** (`edit-gesture.test.js`):
   - `onNodeIdle` fires once after:
     - a recorded commit accepted;
@@ -155,11 +179,24 @@ the round's tests cover it at the unit level.
   - it doesn't fire while a handle gesture on that node is active, nor for a
     commit that sent nothing;
   - two overlapping commits on one node fire it once, after the second.
-- **The wiring:**
-  - `behavior-wiring.test.js` gains the `onNodeIdle` site, and the absence of
-    the clear in `onTransformsSettled`;
-  - a DOM-free test of the branch: an idle for another node leaves the hold.
-- **The browser check:** `h1.py`, with checks 3 and 4 turned round. After the
+- **The wiring** (`behavior-wiring.test.js`; its L84–86 guards change):
+  - `writeSend` and the drag's begin call `hold.hold(…)`; the drag's end
+    calls `hold.clear()`;
+  - `onNodeIdle` calls `hold.released(node)`;
+  - `onTransformsSettled`'s body has no `setGesture`;
+  - `runner?.setGesture(` appears exactly once in `app.js`, inside
+    `createBehaviorHold`'s argument.
+- **Proofs** (each break made, the named tests seen failing, the file
+  restored from a saved copy):
+  - (p1) remove the `onNodeIdle` call from the tracker: the tracker tests
+    fail;
+  - (p2) call `onNodeIdle` while a gesture on the node is active: the
+    gesture test fails;
+  - (p3) make `released` clear for any node: the other-object test fails;
+  - (p4) put `runner?.setGesture(null)` back in `onTransformsSettled`: the
+    wiring guard fails.
+- **The browser check (Claude's, on the published SHA, before DEV
+  acceptance):** `h1.py`, with checks 3 and 4 turned round. After the
   Undo the spinner sends and turns within 1 s. Add:
   - the same after a Redo;
   - an Undo of a **rotation** while it spins is refused as "changed
@@ -173,8 +210,16 @@ the round's tests cover it at the unit level.
 
 ## 6. Worker rules and release path
 As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
-- **One commit, or two** (the tracker with its tests, then the wiring with the
-  browser check). Each is runnable.
+- **Two commits, each runnable:**
+  1. `edit-gesture.js`: `onNodeIdle` and `createBehaviorHold`, with their
+     tests;
+  2. `app.js` and `behavior-wiring.test.js`, the full suites, proofs
+     (p1)–(p4) and the handoff.
+- **Files:** `apps/client/src/edit-gesture.js`, `apps/client/src/app.js`,
+  `apps/client/tests/edit-gesture.test.js`,
+  `apps/client/tests/behavior-wiring.test.js`. **No other file.** The browser
+  check (`devtasks/harness/checks/undo-hold/`) is Claude's, run before DEV
+  acceptance.
 - **A new check must fail on today's code** before its PASS counts.
 - **The code review is enough:** this pre-brief doesn't need its own outside
   review unless the operator wants one. The change is small and client-only,
@@ -183,4 +228,9 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
 
 ## 7. Review log
 - **Rev 0** (2026-11-04, evening PT, `8ff7000`): drafted by Claude from the
-  operator's report. Reproduced with `h1.py`. Not yet reviewed.
+  operator's report. Reproduced with `h1.py`.
+- **Rev 1, FINAL** (2026-11-04, 20:17 PT): UH-L1 (a), UH-L2 (a) and UH-L3 (a)
+  approved. §4 settles the hold as a pure `createBehaviorHold` kept by node
+  object (H2), so the runner doesn't change (H4). §5 gains its tests and
+  proofs (p1)–(p4); §6 lists the files and the two commits. No outside review
+  of the pre-brief (UH-L3); the round's code review stands.
