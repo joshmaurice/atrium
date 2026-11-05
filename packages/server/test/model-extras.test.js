@@ -204,7 +204,9 @@ test('Z8: each invalid kind is refused with nothing applied, broadcast or saved'
       { name: 'model-js', node: { name: 'model-js', extras: { atrium: { model: { url: 'javascript:1' } } } } },
       { name: 'model-http', node: { name: 'model-http', extras: { atrium: { model: { url: 'http://h/m.glb' } } } } },
       { name: 'model-extra-key', node: { name: 'model-extra-key', extras: { atrium: { model: { url: '/m.glb', playback: {} } } } } },
-      { name: 'model-mesh', node: { name: 'model-mesh', mesh: { primitives: [] }, extras: { atrium: { model: { url: 'https://h/m.glb' } } } } },
+      // A3/A8 — the mesh is valid, so the refusal this case pins is the model
+      // rule's (a model node must not carry a mesh), not the schema's.
+      { name: 'model-mesh', node: { name: 'model-mesh', mesh: { primitives: [{ attributes: { POSITION: [0, 0, 0, 1, 0, 0, 0, 1, 0] } }] }, extras: { atrium: { model: { url: 'https://h/m.glb' } } } } },
     ]
     let seq = 200
     for (const c of cases) {

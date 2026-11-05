@@ -405,7 +405,9 @@ test('commons — operator mutation succeeds and persists', async () => {
   ws.send(JSON.stringify({
     type: 'add', seq: 1, node: {
       name: 'op-added-node',
-      mesh: { primitives: [{ attributes: { POSITION: 0 } }] },
+      // add-check A3 — POSITION is a flat array of 3 numbers per vertex; a
+      // number is now refused, and this test is about the operator's mutation.
+      mesh: { primitives: [{ attributes: { POSITION: [0, 0, 0, 1, 0, 0, 0, 1, 0] } }] },
     }
   }))
 
@@ -587,7 +589,8 @@ test('commons — last session leaves, host remains in registry', async () => {
   ws.send(JSON.stringify({
     type: 'add', seq: 1, node: {
       name: 'flush-test-node',
-      mesh: { primitives: [{ attributes: { POSITION: 0 } }] },
+      // add-check A3 — a flat POSITION array, so the add is accepted.
+      mesh: { primitives: [{ attributes: { POSITION: [0, 0, 0, 1, 0, 0, 0, 1, 0] } }] },
     }
   }))
   await new Promise(r => setTimeout(r, 100))
