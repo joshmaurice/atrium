@@ -264,10 +264,43 @@ test('CR-M2: a 20,000-primitive avatar is refused, with the reply under 500 ms',
     const err = await waitFor(v.messages, (m) => m.type === 'error', 5000)
     const elapsed = performance.now() - start
     assertRefused(err, 'the avatar add')
+    // A8's schema caps `primitives` at 64 items, so this reply is its
+    // UNKNOWN_MESSAGE on the length alone; A5's own budget is pinned by the
+    // avatar-budget test below, which the schema lets through to the rule.
     assert.ok(elapsed < 500, `refused from the length alone (${Math.round(elapsed)} ms)`)
     assert.equal(world.som.getNodeByName(v.avatarName), null, 'nothing changed')
   } finally {
     v.ws.close()
+  }
+})
+
+test('A5: a 2-primitive, 1,025-vertex or 900 KB-extras avatar is refused by the avatar budget, broadcasting nothing', async () => {
+  const { world, port } = await startOwnerWorld()
+  const witness = await connect(port)
+  await hello(witness.ws, witness.messages, 'witness-a5')
+  const v = await visitor(port, 'visitor-a5')
+  try {
+    const cases = [
+      { label: 'a 2-primitive avatar', reason: /^avatar-primitives:/,
+        node: { mesh: { primitives: [{ attributes: { POSITION: pos3 } }, { attributes: { POSITION: pos3 } }] } } },
+      { label: 'a 1,025-vertex avatar', reason: /^avatar-vertices:/,
+        node: { mesh: { primitives: [{ attributes: { POSITION: new Array(3 * 1025).fill(0) } }] } } },
+      { label: 'a 900 KB avatar extras', reason: /^avatar-extras:/,
+        node: { extras: { blob: 'a'.repeat(900 * 1024) }, mesh: { primitives: [{ attributes: { POSITION: pos3 } }] } } },
+    ]
+    for (const c of cases) {
+      v.ws.send(JSON.stringify(avatarAddMessage('visitor-a5', v.avatarName, c.node)))
+      const err = await waitFor(v.messages, (m) => m.type === 'error', 5000)
+      assertRefused(err, c.label)
+      assert.match(err.message, c.reason, `${c.label}: its own reason (${err.message})`)
+      assert.equal(world.som.getNodeByName(v.avatarName), null, `${c.label}: nothing changed`)
+      v.messages.length = 0
+    }
+    await delay(300)
+    assert.equal(witness.messages.find((m) => m.type === 'add'), undefined, 'a present client receives no broadcast')
+  } finally {
+    v.ws.close()
+    witness.ws.close()
   }
 })
 

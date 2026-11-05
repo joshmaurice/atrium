@@ -27,6 +27,7 @@ import { Document } from '@gltf-transform/core'
 import { KHRLightsPunctual } from '@gltf-transform/extensions'
 import { SOMDocument } from '@atrium/som'
 import { authorizeSend } from '../src/send-policy.js'
+import { checkTransformValues } from '../src/send-policy.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const VECTORS = JSON.parse(readFileSync(resolve(__dirname, '../../../tests/fixtures/value-vectors.json'), 'utf8'))
@@ -105,4 +106,19 @@ test('G4: a write the runner has no rule for is still the server\'s to decide', 
   const denied = decide({ kind: 'node', field: 'no-such-field', value: 1 })
   assert.equal(denied.ok, false)
   assert.equal(denied.code, 'PERMISSION_DENIED')
+})
+
+// add-check A2 — K6's `translation` rule is the one `add` runs. `send` checks
+// the same value inline through the same `isVec3` predicate; this is the shared
+// checker's own unit test, which nothing else covers (the server test that goes
+// through the handler is `add-check.test.js`).
+test('add-check A2: checkTransformValues refuses a translation that is not 3 finite numbers', () => {
+  for (const bad of [[], [0, 0], [0, 0, 0, 0], ['0', 0, 0], [null, 0, 0], [NaN, 0, 0], [Infinity, 0, 0], 'x', 7, null]) {
+    const decision = checkTransformValues({ translation: bad })
+    assert.equal(decision.ok, false, `translation ${JSON.stringify(bad)} is refused`)
+    assert.equal(decision.code, 'INVALID_VALUE')
+    assert.equal(decision.message, 'translation must be 3 finite numbers')
+  }
+  assert.equal(checkTransformValues({ translation: [1, 2, 3] }).ok, true, '[1, 2, 3] is accepted')
+  assert.equal(checkTransformValues({}).ok, true, 'an absent translation is accepted')
 })

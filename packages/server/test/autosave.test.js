@@ -646,9 +646,10 @@ test('A10: a document that will not read back is not saved; the previous row is 
   const originalWarn = console.warn
   console.error = (...args) => { lines.push(args.join(' ')) }
   console.warn = () => {}
+  let coordinator = null
   try {
     let broken = true
-    const coordinator = createAutoSaveCoordinator({
+    coordinator = createAutoSaveCoordinator({
       db,
       readBackProblem: async () => (broken ? 'the document did not read back' : null),
     })
@@ -674,14 +675,12 @@ test('A10: a document that will not read back is not saved; the previous row is 
     await coordinator.flushAndTeardown(w.id, host)
     const afterGood = db.database.prepare('SELECT document FROM worlds WHERE id = ?').get(w.id).document
     assert.notEqual(afterGood, previous, 'the next good save writes')
-
-    coordinator.close()
   } finally {
+    coordinator?.close()
     console.error = originalError
     console.warn = originalWarn
+    registry.close()
+    httpServer.close()
+    worldStore.deleteWorld(db.database, w.id, userId)
   }
-
-  registry.close()
-  httpServer.close()
-  worldStore.deleteWorld(db.database, w.id, userId)
 })
