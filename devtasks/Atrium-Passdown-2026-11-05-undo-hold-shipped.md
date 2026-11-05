@@ -150,6 +150,12 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
      CP-L1–CP-L7. The defect is wider than Rev 0.1 said: it includes a world
      that saves but can't be loaded, and a single message that stalls the
      server. See its §9.
+   - **Then:** the operator ran `p6` on PROD (23 worlds, none unreadable,
+     nothing saved that the check would refuse), decided RA-L1, L4, L5, L7
+     and L8 (a), and `add-check` was split out as
+     **`PREBRIEF-add-check.md` FINAL Rev 1.1** (base `25f6b083`), with
+     **`KICKOFF-add-check.md`** ready for the front door. The combined
+     pre-brief stays a draft for `richer-add` and `copy-objects`.
 2. **The Behaviour panel shows only "Custom graph"** for an imported graph:
    no file name (none is stored) and no targets, though they are stored.
    UH-L2 put the targets display in the copy round. The file name needs a
