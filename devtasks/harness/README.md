@@ -46,6 +46,9 @@ DEV acceptance.
     so start the server with its output there).
   - `checks/scripting-4b-2/`: see its README (it also lists the 28-script
     regression set).
+  - `checks/undo-hold/h1.py`: the stuck drag-rule hold after an Undo
+    (`PREBRIEF-undo-hold.md` §2.3). It runs on `signin-sync/authserver.mjs`
+    with `HOOKS=1`, like `checks/scripting-4d/`.
   - `checks/signin-sync/`: **real sign-in**, unlike everything above.
     - `authserver.mjs` runs the real server (`packages/server/src/index.js`,
       with its own DB at `$HARNESS_ROOT/auth.db`, reset at each start) behind
