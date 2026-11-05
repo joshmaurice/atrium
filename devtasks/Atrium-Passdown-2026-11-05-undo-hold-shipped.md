@@ -28,7 +28,7 @@ below).
 | What | State |
 |---|---|
 | Release | `COMPLETE`. DEV = MAIN = PROD = **`8fc82bb5203ecbbf6f862d7d5839c111f916e77f`**, which is round 3's reviewed tip `2f28f030` plus `main`'s `devtasks/` notes (the same code). Healthy (`/api/health` ok on both). PROD's `app.js` is `263624977af7` |
-| Board | Round 3's acceptance `t_1deabb33` is done. **Superseded and still blocked: round 1's `t_96969906` and round 2's `t_68a0a48c`.** Archive them (§6) |
+| Board | Round 3's acceptance `t_1deabb33` is done. **Superseded and still blocked: round 1's `t_96969906` and round 2's `t_68a0a48c`.** Archive them (§7) |
 | Branches on GitHub | `workflow/undo-hold`, and `release/{a096cf3f8fcf,4f66f93b7f8b,2f28f030ec72}` beside 4d-1's five. All can be deleted (by the operator) |
 | `main` after the release | this file, `h6.py` and the outside-review prompt, all under `devtasks/`, pushed after `COMPLETE` |
 | **Still live on PROD** | **the `add` defect** (`PREBRIEF-richer-add-copy.md` §2.3): an anonymous visitor's malformed avatar `add` stops joins to that world while they stay. RA-L1 asks whether to fix it alone first |
@@ -124,7 +124,19 @@ also changed `library-grid.js` and `sky-picker.js`.
 They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
 `checks/scripting-4d/` does.
 
-## 5. Follow-ups
+## 5. Where Phase 3 stands (`docs/DESIGN-phase3-placement-scripting.md` §9)
+
+| Step | What | State |
+|---|---|---|
+| 0, 0b | source-ref guard; Create stops copying the commons | done |
+| 1–3 | Edit mode, undo/redo, models by URL, library and sky | done |
+| 4 | the scripting runtime: 4a, 4b-1/2, 4c, 4d-1 (plus this undo-hold fix) | **done**. 4d-2 and the other `PREBRIEF-scripting-4d.md` §10 extras are optional add-ons, not plan steps |
+| **side track** | **the `add` check, the richer `add`, copying objects** (the 10-19 copy-objects passdown; `PREBRIEF-richer-add-copy.md`) | **next, by the operator's choice (2026-11-02)**, ahead of step 5. The richer `add` has to come before step 7 at the latest |
+| 5 | the graphical behaviour editor (design §5.6: evaluate the Khronos authoring tool first; it's React, against Atrium's no-build rule) | **next in the plan, after the side track** |
+| 6 | owner-only JavaScript in a Web Worker | after 5 |
+| 7 | export and import of objects | last |
+
+## 6. Follow-ups
 1. **Next: the `add` work.** `PREBRIEF-richer-add-copy.md` is DRAFT Rev 0.1
    at `923bd444`, with decisions RA-L1–RA-L6 and CP-L1–CP-L7 open. RA-L2 (c)
    is recommended after the operator's discussion.
@@ -146,8 +158,35 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
 5. **`c2.py` failed check 3 once on `4f66f93b`** ("steady host"), then passed
    four runs. It's a timing flake; rerun it once before reading anything into
    it.
+6. **Two behaviour-driven objects moving at once are choppy** (operator,
+   2026-11-05). Turning either off restores the other.
+   - **This is by design.** A world's behaviour sends share **one queue: one
+     send every 50 ms, 20 a second for the whole world**, taken in turn by
+     every changing key (`PREBRIEF-scripting-4b-2.md` §F7, L978;
+     `runner.js` L19 and L61). So two spinners get 10 updates a second
+     each, and three about 7.
+   - **Nothing smooths between steps, for the host too:** the host applies a
+     value on its echo (`PREBRIEF-scripting-4d.md` **G-L5 (a)**, L944,
+     approved as "an explicit, temporary departure" from the design's
+     "continuous motion never goes over the network", design L570). The
+     importer's note says "Visitors see this motion in steps, not smoothly."
+   - **The options,** each needing a short pre-brief:
+     - **(1) renderer smoothing:** each client glides between the updates
+       it receives for behaviour-driven objects. It's client-only, covers
+       `onTick` and interpolations alike, adds about one step of delay and
+       no traffic. It's a new decision next to G-L5 (a), not a reversal.
+       **Claude's pick;**
+     - **(2) several keys per send:** each spinner keeps 20 a second, but
+       traffic grows with moving objects. It changes F7's budget;
+     - **(3) the synced transition,** G-L5 (b) in 4d's §10: smooth, one
+       send per interpolation, but it doesn't cover an endless `onTick`
+       spin.
+   - **The workaround today:** a glTF animation in the model, with the Play
+     animation template. Every client plays it locally.
+   - **Where it goes:** the operator wants it recorded; it isn't scheduled
+     yet. It fits after the `add` check, or as its own small client round.
 
-## 6. Cleanup (operator, on the host)
+## 7. Cleanup (operator, on the host)
 ```bash
 hermes kanban --board atrium archive t_96969906
 hermes kanban --board atrium archive t_68a0a48c
