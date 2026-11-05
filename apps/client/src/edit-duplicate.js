@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import { modelExtrasProblem, modelReasonText } from '@atrium/client/model-spec'
+import { checkAddNode } from '@atrium/client/add-spec'
 import { objectIdProblem } from '@atrium/client/object-id'
 import { withNewObjectId } from './object-identity.js'
 import { newObjectId } from '@atrium/client/object-id'
@@ -33,7 +34,7 @@ export const MIN_SCALE = 1e-6
 
 const FLOAT = 5126                 // glTF componentType FLOAT
 const TRIANGLES = 4
-const MAX_INDEX = 65535            // ingestNode stores indices as Uint16Array
+const MAX_INDEX = 65534            // add-check A3: no index may be 65,535
 const SCENE_GRAPH_PARENTS = new Set(['Root', 'Scene', 'Node'])
 
 export const DUPLICATE_REASONS = Object.freeze({
@@ -47,6 +48,7 @@ export const DUPLICATE_REASONS = Object.freeze({
   extensions: 'This object has extensions a copy would lose',
   transform:  'Fix this object’s rotation or scale before duplicating it',
   size:       'This object is too large to duplicate',
+  add:        'The server would refuse this object',
 })
 
 function deny(rule, detail) {
@@ -156,7 +158,7 @@ function meshProblem(mesh) {
     if (idx) {
       const p = accessorProblem(idx, 'index', { vec3: false })
       if (p) return p
-      for (const i of idx.getArray()) if (i > MAX_INDEX) return 'an index above 65535'
+      for (const i of idx.getArray()) if (i > MAX_INDEX) return 'an index above 65534'
     }
     const m = materialProblem(prim.getMaterial())
     if (m) return m
@@ -299,6 +301,16 @@ export function remapBehaviorTargets(behavior, fromId, toId) {
   return copy
 }
 
+/**
+ * A7 — the rule the server would apply to this `add`, run on the descriptor we
+ * built, at click time (add-spec.js, A1–A5). A node the server would refuse is
+ * never sent. Its reason is reported as the server reports it.
+ */
+function addSpecProblem(descriptor) {
+  const problem = checkAddNode(descriptor)
+  return problem ? deny('add', `${problem.code}: ${problem.message}`) : null
+}
+
 /** The descriptor, with the copy's behaviour remapped, if it carries one. */
 function withRemappedBehavior(descriptor, fromId, toId) {
   const atrium = descriptor.extras?.atrium
@@ -328,6 +340,8 @@ export function prepareDuplicate(node, { name }) {
   const descriptor = withRemappedBehavior(withNewObjectId(built, () => copyId), originalId, copyId)
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
+  const refused = addSpecProblem(descriptor)
+  if (refused) return refused
   return { ok: true, descriptor, bytes }
 }
 
@@ -349,5 +363,7 @@ export function prepareRestore(node, { name = node.getName?.() } = {}) {
   const descriptor = buildDescriptor(node, name, 0)
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
+  const refused = addSpecProblem(descriptor)
+  if (refused) return refused
   return { ok: true, descriptor, bytes }
 }

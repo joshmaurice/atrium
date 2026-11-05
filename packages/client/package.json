@@ -12,6 +12,7 @@
     "./NavigationController": "./src/NavigationController.js",
     "./AnimationController": "./src/AnimationController.js",
     "./model-spec": "./src/model-spec.js",
+    "./add-spec": "./src/add-spec.js",
     "./model-fetch": "./src/model-fetch.js",
     "./animation-spec": "./src/animation-spec.js",
     "./object-id": "./src/object-id.js"

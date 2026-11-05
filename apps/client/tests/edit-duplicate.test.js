@@ -217,9 +217,9 @@ test('rule 6: morph targets and morph weights', () => {
   expectRule(node({ mesh: cubeMesh({ meshOpts: { weights: [0.5] } }) }), 'mesh')
 })
 
-test('rule 6: an index of 65 536 is refused', () => {
+test('rule 6: an index above 65,534 is refused', () => {
   const p = primitive({ positions: new Array(9).fill(0), indices: new Uint32Array([0, 1, 65536]) })
-  assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /65535/)
+  assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /65534/)
 })
 
 test('rule 6: textures, emissive, blending, double-sided materials', () => {
@@ -283,14 +283,14 @@ test('rule 8 (review #9): legacy transforms are refused and left unchanged', () 
   assert.equal(prepareDuplicate(node({ rotation: [0, 0, 0, 1.0005] }), { name: NAME }).ok, true)
 })
 
-test('rule 9: a 9 000-vertex primitive with normals is refused by size; 1 000 is fine', () => {
+test('rule 9: a 9 000-vertex primitive with normals is refused by size; 999 is fine', () => {
   const big = (count) => {
     const positions = Array.from({ length: count * 3 }, (_, i) => Math.fround(Math.sin(i) * 0.123456789))
     return node({ mesh: mesh([primitive({ positions, normals: positions })]) })
   }
   const r = expectRule(big(9000), 'size')
   assert.match(r.reason, /bytes; the limit is 1,000,000/)
-  const ok = prepareDuplicate(big(1000), { name: NAME })
+  const ok = prepareDuplicate(big(999), { name: NAME })
   assert.equal(ok.ok, true)
   assert.ok(ok.bytes < MAX_ADD_BYTES)
 })
@@ -544,3 +544,34 @@ test('E7: a valid existing id is not refused by the rule', () => {
   assert.equal(prepareRestore(node({ extras: { atrium: { objectId: ID } } })).ok, true)
 })
 
+
+// ── A7: Duplicate and Undo run the server's `add` rule on their descriptor ──
+
+test('A7: a metallicFactor of 2 is refused by prepareDuplicate with A1’s reason', () => {
+  const n = node({ mesh: cubeMesh({ mat: material({ metallic: 2 }) }) })
+  const r = prepareDuplicate(n, { name: NAME })
+  assert.equal(r.ok, false)
+  assert.equal(r.rule, 'add')
+  assert.ok(r.reason.startsWith(DUPLICATE_REASONS.add), r.reason)
+  assert.match(r.reason, /material-value/)
+})
+
+test('A7: a metallicFactor of 2 is refused by prepareRestore with A1’s reason', () => {
+  const n = node({ mesh: cubeMesh({ mat: material({ metallic: 2 }) }) })
+  const r = prepareRestore(n)
+  assert.equal(r.ok, false)
+  assert.equal(r.rule, 'add')
+  assert.match(r.reason, /material-value/)
+})
+
+test('A7: the A1 rule leaves every accepted descriptor accepted', () => {
+  for (const n of [
+    node({ mesh: cubeMesh() }),
+    node({ mesh: cubeMesh({ mat: material({ metallic: 1, roughness: 0, baseColor: [0, 1, 0, 1] }) }) }),
+    node({ extras: { displayName: 'Cube one', atrium: { objectId: ID, ephemeral: true } } }),
+    node({ translation: [1.5, 0, 0], mesh: cubeMesh() }),
+  ]) {
+    assert.equal(prepareDuplicate(n, { name: NAME }).ok, true)
+    assert.equal(prepareRestore(n).ok, true)
+  }
+})
