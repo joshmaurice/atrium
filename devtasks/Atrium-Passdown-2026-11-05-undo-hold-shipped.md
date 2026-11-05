@@ -144,6 +144,12 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
      `devtasks/OUTSIDE-REVIEW-PROMPT-richer-add-copy.md`, pinned to
      `923bd444`.
    - Its §2.3 defect is live on PROD (§1).
+   - **Update (later on 2026-11-05):** two outside reviews came back, both
+     CHANGES REQUESTED (`REVIEW-richer-add-copy-rev0.1-{claude,chatgpt}.md`).
+     The pre-brief is now **DRAFT Rev 0.2**, with decisions RA-L1–RA-L8 and
+     CP-L1–CP-L7. The defect is wider than Rev 0.1 said: it includes a world
+     that saves but can't be loaded, and a single message that stalls the
+     server. See its §9.
 2. **The Behaviour panel shows only "Custom graph"** for an imported graph:
    no file name (none is stored) and no targets, though they are stored.
    UH-L2 put the targets display in the copy round. The file name needs a
