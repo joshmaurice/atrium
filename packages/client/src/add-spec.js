@@ -51,6 +51,10 @@ export function isUnitRange(v) {
 export function isUnitRangeVec4(v) {
   return Array.isArray(v) && v.length === 4 && v.every(isUnitRange)
 }
+/** A4/A9 — three finite numbers in [0, 1] (emissiveFactor). */
+export function isUnitRangeVec3(v) {
+  return Array.isArray(v) && v.length === 3 && v.every(isUnitRange)
+}
 /** A4/A9 — a finite number that is zero or more. */
 export function isNonNegativeFinite(v) {
   return isFiniteNumber(v) && v >= 0

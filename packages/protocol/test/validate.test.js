@@ -249,6 +249,60 @@ describe('add', () => {
     assert.equal(valid, false)
   })
 
+  // ─── add-check A8 — the schema types the mesh and the format ──────
+
+  it('add-check A8: accepts a typed mesh', () => {
+    const position = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+    const { valid } = validate('client', {
+      type: 'add', seq: 1,
+      node: {
+        name: 'cube-01',
+        mesh: {
+          name: 'cube',
+          primitives: [{
+            attributes: { POSITION: position, NORMAL: position },
+            indices: [0, 1, 2],
+            material: { pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1], metallicFactor: 0.5, roughnessFactor: 0.5 } },
+          }],
+        },
+      },
+    })
+    assert.equal(valid, true)
+  })
+
+  it('add-check A8: refuses an unknown mesh key', () => {
+    const position = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+    const { valid } = validate('client', {
+      type: 'add', seq: 1,
+      node: { name: 'cube-01', mesh: { primitives: [{ attributes: { POSITION: position } }], weights: [1] } },
+    })
+    assert.equal(valid, false)
+  })
+
+  it('add-check A8: refuses a primitive with no POSITION', () => {
+    const { valid } = validate('client', {
+      type: 'add', seq: 1,
+      node: { name: 'cube-01', mesh: { primitives: [{ attributes: {} }] } },
+    })
+    assert.equal(valid, false)
+  })
+
+  it('add-check A8: refuses a format that is not "gltf"', () => {
+    for (const format of ['glTF', 'obj', 42, 'gltf ']) {
+      const { valid } = validate('client', { type: 'add', seq: 1, format, node: { name: 'cube-01' } })
+      assert.equal(valid, false, JSON.stringify(format))
+    }
+  })
+
+  it('add-check A8: accepts an absent format and the string "gltf"', () => {
+    for (const msg of [
+      { type: 'add', seq: 1, node: { name: 'cube-01' } },
+      { type: 'add', seq: 1, format: 'gltf', node: { name: 'cube-01' } },
+    ]) {
+      assert.equal(validate('client', msg).valid, true)
+    }
+  })
+
   it('rejects add with invalid translation', () => {
     const { valid } = validate('client', {
       type: 'add', seq: 1,

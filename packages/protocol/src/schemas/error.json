@@ -20,6 +20,7 @@
         "UNKNOWN_MESSAGE",
         "WORLD_UNAVAILABLE",
         "WORLD_NOW_PRIVATE",
+        "WORLD_UNREADABLE",
         "SESSION_CONFLICT",
         "SIGNED_OUT"
       ]

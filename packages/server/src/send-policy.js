@@ -1410,11 +1410,12 @@ export function isValidPlayback(value) {
 
 function materialValueOk(prop, value) {
   switch (prop) {
-    case 'baseColorFactor':  return isVec4(value)
-    case 'emissiveFactor':   return isVec3(value)
+    // add-check A9/RA-L7 — one set of material ranges, shared with `add` (A4).
+    case 'baseColorFactor':  return isUnitRangeVec4(value)
+    case 'emissiveFactor':   return isUnitRangeVec3(value)
     case 'metallicFactor':
-    case 'roughnessFactor':
-    case 'alphaCutoff':      return isFiniteNumber(value)
+    case 'roughnessFactor':  return isUnitRange(value)
+    case 'alphaCutoff':      return isNonNegativeFinite(value)
     case 'alphaMode':        return value === 'OPAQUE' || value === 'MASK' || value === 'BLEND'
     case 'doubleSided':      return isBool(value)
     default:                 return false
@@ -1891,6 +1892,10 @@ export function isUnitRange(v) {
 /** A4/A9 — four finite numbers in [0, 1]. */
 export function isUnitRangeVec4(v) {
   return Array.isArray(v) && v.length === 4 && v.every(isUnitRange)
+}
+/** A4/A9 — three finite numbers in [0, 1] (emissiveFactor). */
+export function isUnitRangeVec3(v) {
+  return Array.isArray(v) && v.length === 3 && v.every(isUnitRange)
 }
 /** A4/A9 — a finite number that is zero or more. */
 export function isNonNegativeFinite(v) {

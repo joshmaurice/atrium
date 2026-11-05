@@ -13,7 +13,7 @@ import { parsePath, worldPosition } from '@atrium/som'
 import { logId } from './log-id.js'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
-  checkAtriumExtras, checkTransformValues, checkModelHost,
+  checkAtriumExtras, checkTransformValues, checkModelHost, checkAddNode,
   ANIMATION_LEAF, OBJECT_ID_TAKEN, BEHAVIOR_LEAF, BEHAVIOR_NODES_PER_WORLD, behaviorCountIn,
   // scripting-4d G2 — the world behaviour total (Rev 1 S5).
   BEHAVIOR_WORLD_BYTES_MAX, behaviorBytesIn, behaviorLeafBytes,
@@ -1317,6 +1317,31 @@ export function attachSessionHandlers({
               break
             }
 
+            // --- add-check A2/A6: the message's format, when present, is exactly "gltf".
+            // It lives here, beside the call to checkAddNode, for avatars and world adds alike.
+            if (msg.format !== undefined && msg.format !== 'gltf') {
+              sendError(ws, msg.seq, 'INVALID_VALUE', 'format must be "gltf"')
+              break
+            }
+
+            // --- add-check A5/A6: the avatar's own budget, in a try of its own.
+            // The check runs BEFORE the displayName overwrite below, so a real avatar
+            // (which carries extras.atrium.ephemeral) is accepted with its marker.
+            if (isAvatar) {
+              let avatarProblem
+              try {
+                avatarProblem = checkAddNode(msg.node, { avatar: true })
+              } catch (error) {
+                logCheckFailure(session, 'add', error)
+                sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+                break
+              }
+              if (avatarProblem) {
+                sendError(ws, msg.seq, 'INVALID_VALUE', `${avatarProblem.code}: ${avatarProblem.message}`)
+                break
+              }
+            }
+
             // --- L5/K4: the non-avatar extras.atrium checks ---
             // After the gate and the A4/A5 checks, where the length cap was.
             // One shared checker with `send`, so add and send can't drift.
@@ -1329,12 +1354,20 @@ export function attachSessionHandlers({
               let checks
               try {
                 checks = {
+                  // add-check A1/A6 — the whole-node rule, FIRST in the V9 try, so a
+                  // model node with a malformed mesh gets the mesh's reason.
+                  addNode: checkAddNode(msg.node, { avatar: false }),
                   extras: checkAtriumExtras(msg.node.extras),
                   model: checkModelHost(msg.node),
                 }
               } catch (error) {
                 logCheckFailure(session, 'add', error)
                 sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+                break
+              }
+              const addNodeCheck = checks.addNode
+              if (addNodeCheck) {
+                sendError(ws, msg.seq, 'INVALID_VALUE', `${addNodeCheck.code}: ${addNodeCheck.message}`)
                 break
               }
               const extrasCheck = checks.extras
