@@ -58,6 +58,8 @@ DEV acceptance.
     `h5.py` counts rebuilds of the Library tiles and the sky list in 2 s with
     a spinner running, and tries a real click on a tile
     (`REVISION-undo-hold-round-3.md` §1.1). `h3.py`'s check 4 is round 3's R5.
+    `h6.py` checks that the Library still shows its tiles and that a sky
+    picked in one tab shows in another (round 3's R4 must not freeze them).
   - `checks/signin-sync/`: **real sign-in**, unlike everything above.
     - `authserver.mjs` runs the real server (`packages/server/src/index.js`,
       with its own DB at `$HARNESS_ROOT/auth.db`, reset at each start) behind
