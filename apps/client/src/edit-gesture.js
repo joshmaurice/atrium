@@ -69,6 +69,14 @@
  * kept by node OBJECT, not by name: an idle for one object can never release
  * another object's hold, even when their names match (a restored object keeps
  * its name).
+ *
+ * A handle drag records only what its handle changes (round 2, R1) —
+ * `handleUpdate(mode, object)` returns the `update` values for a handle in that
+ * mode: `'translate'` gives only the translation, `'rotate'` only the rotation,
+ * `'scale'` only the scale, and any other mode all three, as before. So a Move
+ * drag can no longer pick up a rotation that a behaviour's echo wrote to the
+ * object while the drag was under way, and so cannot be refused by Undo as
+ * "changed elsewhere".
  */
 
 export const TRANSFORM_FIELDS = ['translation', 'rotation', 'scale']
@@ -101,6 +109,32 @@ export function sanitizeTransform(field, value) {
 }
 
 /**
+ * The `update` values for a handle drag in `mode` (round 2, R1). A handle
+ * changes one field, so the gesture records one: `'translate'` gives the
+ * translation, `'rotate'` the rotation, `'scale'` the scale. Any other mode
+ * gives all three, as the handler did before this round.
+ *
+ * Pure: `object` only has to carry `position`, `quaternion` and `scale`, each
+ * with a `toArray()`. Keeping the fields the OTHER modes own out of the update
+ * is the fix: a Move drag can no longer copy in a rotation an echo wrote while
+ * it ran, so Undo no longer refuses the step as "changed elsewhere".
+ *
+ * @param {string} mode    the TransformControls' own `mode`
+ * @param {{ position: {toArray(): number[]}, quaternion: {toArray(): number[]}, scale: {toArray(): number[]} }} object
+ * @returns {{ translation?: number[], rotation?: number[], scale?: number[] }}
+ */
+export function handleUpdate(mode, object) {
+  if (mode === 'translate') return { translation: object.position.toArray() }
+  if (mode === 'rotate') return { rotation: object.quaternion.toArray() }
+  if (mode === 'scale') return { scale: object.scale.toArray() }
+  return {
+    translation: object.position.toArray(),
+    rotation: object.quaternion.toArray(),
+    scale: object.scale.toArray(),
+  }
+}
+
+/**
  * The hold the drag rule's `setGesture` is kept in (undo-hold, H2). Pure, kept
  * by node OBJECT: an idle for one object can never release another object's
  * hold, even when their names match.
@@ -123,7 +157,8 @@ export function createBehaviorHold({ setGesture }) {
       held = null
       setGesture(null)
     },
-    /** The drag ended (or the world changed): forget the node and release. */
+    /** The drag ended, or the edit session ended (a reconnect or a world
+     *  change): forget the node and release. */
     clear() {
       held = null
       setGesture(null)
@@ -536,9 +571,10 @@ export function createEditTracker({
     // Dead first, as in nodeRemoved: nothing from the old connection writes.
     for (const byField of records.values()) for (const rec of byField.values()) rec.dead = true
     // A reset is a session teardown (reconnect or world change): every node's
-    // state is discarded and the caller re-establishes the runner fresh, so no
-    // per-node idle is reported — the same reason reportBatch reports nothing
-    // for it. `busy` is cleared first so the cancels below fire no idle either.
+    // state is discarded and no per-node idle is reported — the same reason
+    // reportBatch reports nothing for it. The caller (the app's
+    // endEditSession) clears the hold itself, right after this reset. `busy` is
+    // cleared first so the cancels below fire no idle either.
     busy.clear()
     awaiting.clear()
     for (const g of [...gestures]) g.cancel()

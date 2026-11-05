@@ -12,7 +12,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  createEditTracker, createBehaviorHold, sanitizeTransform, MIN_SCALE, REMOVED_MESSAGE,
+  createEditTracker, createBehaviorHold, handleUpdate, sanitizeTransform, MIN_SCALE, REMOVED_MESSAGE,
 } from '../src/edit-gesture.js'
 
 function makeWorld() {
@@ -944,5 +944,91 @@ describe('edit-gesture: the hold and the tracker, wired as the app wires them (H
     assert.deepEqual(set, ['a', null, 'a'], 'the undo holds again')
     tracker.accepted(s2)
     assert.deepEqual(set, ['a', null, 'a', null], 'and its answer releases it — the bug is fixed')
+  })
+})
+
+// ── undo-hold round 2 (R1): a handle drag records only its handle's field ────
+// A handle changes one field, so a drag in that mode must record that one field
+// and no other. Otherwise a Move drag copies in a rotation an echo wrote while
+// the drag ran, and Undo refuses the whole step as "changed elsewhere" (W4).
+// `handleUpdate(mode, object)` is the pure rule; it needs only an object with
+// `position`, `quaternion` and `scale`, each carrying a `toArray()`.
+
+describe('edit-gesture: handleUpdate (R1)', () => {
+  const vec = (v) => ({ toArray: () => [...v] })
+  const handleObj = () => ({
+    position:   vec([1, 2, 3]),
+    quaternion: vec([0, 0, 0, 1]),
+    scale:      vec([2, 2, 2]),
+  })
+
+  test('translate returns exactly the translation', () => {
+    assert.deepEqual(handleUpdate('translate', handleObj()), { translation: [1, 2, 3] })
+  })
+
+  test('rotate returns exactly the rotation', () => {
+    assert.deepEqual(handleUpdate('rotate', handleObj()), { rotation: [0, 0, 0, 1] })
+  })
+
+  test('scale returns exactly the scale', () => {
+    assert.deepEqual(handleUpdate('scale', handleObj()), { scale: [2, 2, 2] })
+  })
+
+  test('any other mode returns all three, as the handler did before this round', () => {
+    assert.deepEqual(handleUpdate('off', handleObj()), {
+      translation: [1, 2, 3],
+      rotation:    [0, 0, 0, 1],
+      scale:       [2, 2, 2],
+    })
+  })
+})
+
+describe('edit-gesture: a handle drag records only its handle’s field (R1)', () => {
+  const vec = (v) => ({ toArray: () => [...v] })
+  const handleObj = (over = {}) => ({
+    position:   vec(over.position   ?? [0, 0, 0]),
+    quaternion: vec(over.quaternion ?? [0, 0, 0, 1]),
+    scale:      vec(over.scale      ?? [1, 1, 1]),
+  })
+  // A unit quaternion, so sanitizeTransform leaves it exactly as it is.
+  const TURNED = [0, Math.SQRT1_2, 0, Math.SQRT1_2]
+
+  test('a Move drag on a node an echo rotates mid-drag records only the translation', () => {
+    const w = makeWorld()
+    const n = node('cube')
+    // 1. the drag begins on the node.
+    const g = w.tracker.begin(n)
+    // 2. the node's rotation changes underneath, as an echo of a behaviour's
+    //    send already on the wire would change it.
+    n.rotation = TURNED
+    // 3. the handle is a Move handle, so only the position goes into the
+    //    gesture — even though the object's quaternion has changed too.
+    g.update(handleUpdate('translate', handleObj({ position: [1, 2, 3], quaternion: TURNED })))
+    g.end()
+    // 4. the send (one, in the fixed code) is accepted.
+    for (const s of w.sent) w.tracker.accepted(s.seq)
+    const [batch] = w.takeSettled()
+    assert.deepEqual(batch.results, [
+      { node: n, changes: [{ field: 'translation', from: [0, 0, 0], to: [1, 2, 3] }] },
+    ], 'only the translation is recorded: the echo’s rotation is not, so Undo accepts the step')
+  })
+
+  test('the contrast: the same drag given all three fields records the rotation too (round 1)', () => {
+    const w = makeWorld()
+    const n = node('cube')
+    const g = w.tracker.begin(n)
+    n.rotation = TURNED
+    // Round 1's handler: the dragged object's every field, whatever the mode.
+    g.update({ translation: [1, 2, 3], rotation: TURNED, scale: [1, 1, 1] })
+    g.end()
+    w.tracker.accepted(w.sent[0].seq)
+    w.tracker.accepted(w.sent[1].seq)
+    const [batch] = w.takeSettled()
+    assert.deepEqual(batch.results, [
+      { node: n, changes: [
+        { field: 'translation', from: [0, 0, 0], to: [1, 2, 3] },
+        { field: 'rotation', from: [0, 0, 0, 1], to: TURNED },
+      ] },
+    ], 'the round-1 behaviour: the move is recorded as a move AND a rotation')
   })
 })

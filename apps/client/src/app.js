@@ -15,7 +15,7 @@ import { teleportFailureMessage, evictionMessage, codeToReason, formatDestinatio
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { resolveSelectionRoot } from '@atrium/interaction'
 import { createEditModes } from './edit-modes.js'
-import { createEditTracker, createBehaviorHold, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
+import { createEditTracker, createBehaviorHold, handleUpdate, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
@@ -1961,6 +1961,10 @@ function setEditMode(on) {
 function endEditSession() {
   setEditMode(false)
   editTracker.reset()
+  // R2 (round 2) — the session's end clears the hold, after the tracker's
+  // reset: a reset reports no idle, so nothing else would release a hold still
+  // in force at a reconnect or a world change.
+  hold.clear()
   structure.reset()
   undo.endSession()
   pendingRename = null
@@ -2015,11 +2019,9 @@ function onHandleDragging(isDragging) {
 
 function onHandleChange() {
   if (!activeGesture || !selectedObj) return
-  activeGesture.update({
-    translation: selectedObj.position.toArray(),
-    rotation:    selectedObj.quaternion.toArray(),
-    scale:       selectedObj.scale.toArray(),
-  })
+  // R1 (round 2) — the gesture records only the field the handle's own mode
+  // changes: a Move drag cannot pick up a rotation an echo wrote mid-drag.
+  activeGesture.update(handleUpdate(gizmo.mode, selectedObj))
   refreshEditVectors()
   // Z7 — LIVE during the drag: the pad's own world position is read again, so the
   // note appears as it is dragged onto the spawn point and hides as it leaves.

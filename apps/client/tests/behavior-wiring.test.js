@@ -107,6 +107,23 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
     assert.match(source, /applyVisibility\(docView, client\.som\)/)
     assert.match(source, /setNodeVisible\(docView, node, node\.visible !== false\)/)
   })
+
+  test('undo-hold r2 (R1, R2) — a drag records only its handle’s field; the session’s end clears the hold', () => {
+    // Code only, as above: a mention of a token inside a comment is not a call.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+    // R1 — onHandleChange hands the handle's own mode to handleUpdate, and
+    // builds no three-field object of its own.
+    assert.match(code,
+      /function onHandleChange\(\) \{[\s\S]{0,400}?activeGesture\.update\(handleUpdate\(gizmo\.mode, selectedObj\)\)/,
+      'the drag updates the gesture through handleUpdate')
+    assert.doesNotMatch(code, /activeGesture\.update\(\{[\s\S]{0,300}?translation:/,
+      'onHandleChange builds no three-field object of its own')
+    // R2 — the edit session's end clears the hold, after the tracker's reset.
+    assert.match(code,
+      /function endEditSession\(\)[\s\S]{0,300}?editTracker\.reset\(\)[\s\S]{0,200}?hold\.clear\(\)/,
+      'endEditSession clears the hold after the tracker reset')
+  })
 })
 
 describe('scripting-4b-2 — the page carries the section\'s elements', () => {
