@@ -49,6 +49,8 @@ DEV acceptance.
   - `checks/undo-hold/h1.py`: the stuck drag-rule hold after an Undo
     (`PREBRIEF-undo-hold.md` §2.3). It runs on `signin-sync/authserver.mjs`
     with `HOOKS=1`, like `checks/scripting-4d/`.
+    `h2.py` is the same with the move made by a handle drag (the gizmo's own
+    events): on `8ff7000` the dragged move records a plain Move and undoes.
   - `checks/signin-sync/`: **real sign-in**, unlike everything above.
     - `authserver.mjs` runs the real server (`packages/server/src/index.js`,
       with its own DB at `$HARNESS_ROOT/auth.db`, reset at each start) behind
