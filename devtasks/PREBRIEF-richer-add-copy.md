@@ -188,8 +188,8 @@ editing emissive, alpha or double-sided in the Edit panel; a licence label
 - World documents saved **before** today are not affected by the
   serialize-throws class. A world whose saved document couldn't serialize would
   already fail every join.
-- **But CR-M1's class saves cleanly.** So whether PROD already holds an
-  unreadable world isn't known. `p6` counts and flags them (§2.9).
+- **But CR-M1's class saves cleanly**, so PROD was surveyed for it: **no
+  unreadable world** (operator's `p6`, 2026-11-05, §2.5).
 
 ### 2.4 Duplicate's and Undo's rules (`edit-duplicate.js`)
 - **D5 is lossless (N3):** a node can be duplicated or restored only if
@@ -252,8 +252,24 @@ So:
   from legacy content. So owners' own worlds are mostly palette, pads and
   models, which copy today. Legacy content is mainly the commons, which is
   seeded from `space.gltf` (`PREBRIEF-worldload-address-sync.md`).
-- **PROD's real mix isn't measured.** `p6` is the operator's survey for it
-  (§2.9).
+- **PROD's real mix, measured (operator's `p6` run, 2026-11-05, at `1e36f42`):**
+  23 worlds, **none unreadable**; 437 top-level objects.
+  
+  | Duplicate's verdict today | Top-level objects |
+  |---|---|
+  | copies today | 410 |
+  | a named material | 18 |
+  | children (groups) | 9 |
+  
+  | What a mesh would lose, at any depth | Primitives |
+  |---|---|
+  | a material name | 36 |
+  | emissive | 1 |
+  
+  - **No shared materials, no alpha, no double-sided, no attributes beyond
+    POSITION and NORMAL, no textures** on PROD;
+  - **nothing that `add-check` or RA-L7's ranges would refuse** in saved
+    content: the list was empty.
 
 ### 2.6 Shared materials (`p5`)
 - In `atrium.gltf`, `Column-1` and `Column-2` share one material, "Marble",
@@ -415,6 +431,8 @@ colours and accessor and buffer labels:
 - (c) Carry the sharing (a reference to an existing material). That needs
   material identity: the same authority question as material pointers (4d-1
   passdown §5.1). Not now.
+- **PROD today (§2.5): no shared materials at all,** so (a) and (b) differ
+  only for content added later, and for the fixtures.
 - **Reviews:** CR agrees with (a). **GR prefers (b) for now:** delete one of
   two columns, recolour the other, then Undo, and the restored column has the
   old colour and no longer follows the shared edits. Even one node whose
@@ -749,10 +767,9 @@ and `send` shares the material ranges.
     the real builders.
 - **Release:** a server, client and protocol round. DEV restarts at the deploy,
   and acceptance needs a hard reload in every tab.
-  - **Before release:** the operator runs `p6` (§2.9). If it reports an
-    unreadable world, that's a repair to plan first, not something this round
-    fixes. Its "would refuse" counts say how much saved content Duplicate and
-    Undo will newly refuse.
+  - **Before release:** the operator ran `p6` on 2026-11-05 (§2.5): no
+    unreadable world, and nothing saved that this round would newly refuse.
+    Rerun it just before the PROD deploy if worlds have changed much since.
   - **Rolling back** loses nothing that this round stores (it stores nothing
     new). It does reopen §2.3.
 
@@ -845,6 +862,10 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
   failure in the handoff.
 
 ## 9. Review log
+- **Rev 0.2, PROD survey** (2026-11-05): the operator ran `p6` at `1e36f42`.
+  23 worlds, none unreadable; 410 of 437 top-level objects copy today; nothing
+  saved that `add-check` would refuse; no shared materials. Recorded in §2.3,
+  §2.5, RA-L3 and §4's release note.
 - **Rev 0.2, decisions recorded** (2026-11-05): the operator chose RA-L1 (a),
   RA-L4 (a) with A5's numbers, RA-L7 (a) and RA-L8 (a). §4's other limits come
   from RA-L5 (a), still open; the brief for `add-check` takes them as
