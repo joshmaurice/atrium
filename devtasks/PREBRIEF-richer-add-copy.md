@@ -2,8 +2,9 @@
 
 Status: **DRAFT, Revision 0.2 (2026-11-05), after two outside reviews of Rev 0.1,
 both CHANGES REQUESTED. Decided (operator, 2026-11-05): RA-L1 (a), RA-L4 (a),
-RA-L7 (a), RA-L8 (a), which settle `add-check`'s round. Still open: RA-L2,
-RA-L3, RA-L5, RA-L6 and CP-L1–CP-L7.** Each has a recommendation.
+RA-L7 (a), RA-L8 (a), and RA-L5 (a) as recommended, which settle `add-check`'s
+round; its contract is now `PREBRIEF-add-check.md` FINAL Rev 1 (§4). Still open
+here: RA-L2, RA-L3, RA-L6 and CP-L1–CP-L7.** Each has a recommendation.
 - **The reviews:** `REVIEW-richer-add-copy-rev0.1-claude.md` (a runtime review:
   cloned, ran every suite and `p1`–`p5`, wrote probes `q1`–`q4`) and
   `REVIEW-richer-add-copy-rev0.1-chatgpt.md` (source-only: its clone failed on
@@ -464,7 +465,7 @@ colours and accessor and buffer labels:
   sequence and the identity coupling (AGENTS rule 2), so not in this round.
 - **Reviews:** both (a), with a budget like this one.
 
-**RA-L5. Bounds** (4c passdown §4.1: bound every stored or forwarded string).
+**RA-L5. Bounds** (4c passdown §4.1: bound every stored or forwarded string). **Decided (operator, 2026-11-05): (a), as recommended, with Rev 0.2's additions.**
 - **(a) Recommended, provisional:**
   - names (mesh and material): at most 256 characters, as `NAME_MAX`;
   - each mesh, primitive or material `extras`: at most 16 KiB of JSON, and no
@@ -519,6 +520,9 @@ loudly instead of quietly:
   - **the client says so too:** `_onSomDump` (`AtriumClient.js` L1191) catches
     a `readJSON` failure and reports it the same way, rather than leaving the
     newcomer on a world that never loads.
+  - **Corrected in `PREBRIEF-add-check.md` §2.5:** the join message's code is
+    `WORLD_UNREADABLE`, not `WORLD_UNAVAILABLE`, and the app gains a panel for
+    it.
 - (b) Only the two join messages. Smaller, but leaves CR-M1's persistence path open to
   a future `ingestNode` bug.
 - (c) Neither, as Rev 0.1.
@@ -652,126 +656,20 @@ can see and copy anything in this world."
 - (b) Only in the Inspect panel.
 - **Reviews:** both (a).
 
-## 4. The contract for `add-check` (as recommended, Rev 0.2)
-Rev 0.1's A1–A6 checked only `node.mesh`. Both reviews showed that the defect
-is wider (§2.3), so the check now covers the whole node, avatars have a budget,
-and `send` shares the material ranges.
+## 4. The contract for `add-check`: moved
+**`add-check`'s contract is now `devtasks/PREBRIEF-add-check.md`, FINAL Rev 1
+(2026-11-05).** It was carved out of this file's Rev 0.2 §4, with the operator's
+decisions (RA-L1, L4, L5, L7, L8), so that its round can be kicked off while
+`richer-add`'s and `copy-objects`' decisions stay open here. Read that file, not
+this one, for anything in the round. It also corrects two things this file's
+Rev 0.2 §4 said:
+- the message's `format` is forwarded as sent and needs pinning, as
+  `node.extensions` does;
+- RA-L8's join message is a new code, `WORLD_UNREADABLE`, with an app panel,
+  because `WORLD_UNAVAILABLE` would show the wrong text and the app shows
+  nothing for it after `session:ready`.
 
-- **A1, one rule in two places, pinned by vectors.**
-  - On the server, **`checkAddNode(node, { avatar })`** in `send-policy.js`
-    (Rev 0.1's `checkAddMesh`). On the client,
-    `packages/client/src/add-spec.js`, built like `model-spec.js`.
-  - Both read `tests/fixtures/add-node-vectors.json`: every accepted and refused
-    case, with its reason.
-  - **A1 is complete on its own:** it never relies on the schema (A8). The
-    vectors test A1 alone.
-  - **Lengths first:** every array's length and every key set is checked before
-    any per-element work, so a 20,000-primitive message is refused in
-    microseconds (CR-M2).
-  - A node with no `mesh` is still checked at the node level (A2).
-- **A2, the node** (CR-M3, GR-S1):
-  - `translation`, when present: 3 finite numbers. **This goes into K6's
-    `checkTransformValues`,** which `add` and `send` share, so the two can't
-    drift again;
-  - `extensions`, when present, is an empty object. Anything in it is refused:
-    nothing keeps it, yet the server would forward it;
-  - world adds: `extras` outside `extras.atrium` at most 16 KiB (UTF-8 bytes of
-    `JSON.stringify`). `extras.atrium` keeps its own checks
-    (`checkAtriumExtras`);
-  - avatars: A5.
-- **A3, the mesh:**
-  - `mesh` is an object with only `name` (a string, at most 256 characters)
-    and `primitives` (an array of 1–64 entries);
-  - each primitive has only `attributes`, `indices` and `material`;
-  - `attributes` has `POSITION`, and `NORMAL` optionally, and nothing else;
-  - POSITION is an array whose length is a multiple of 3, at least 9 (CR-M1's
-    `POSITION []` and `[0,0]` are refused here), at most 3 × 65,535;
-  - NORMAL, when present, has POSITION's length;
-  - **every POSITION and NORMAL number is finite as a Float32**:
-    `Number.isFinite(Math.fround(v))` (GR-M1). `1e39` is refused; so is a
-    wire `1e999`;
-  - `indices`, when present, is an array of at least 3 integers whose length is
-    a multiple of 3, each 0 ≤ i < the vertex count (so never 65535, CR-N1).
-    Without indices, the vertex count is a multiple of 3.
-- **A4, the material:** an object with only `pbrMetallicRoughness`, which
-  holds only:
-  - `baseColorFactor`: 4 finite numbers in [0, 1];
-  - `metallicFactor` and `roughnessFactor`: each a finite number in [0, 1].
-  
-  Every first-party add already sends exactly this (§2.2; CR `q1` built the
-  avatar, the pad and all five palette kinds with the real builders and found
-  none refused).
-- **A5, avatars (RA-L4):** A2–A4, and:
-  - exactly 1 primitive, at most 1,024 vertices and at most 6,144 indices;
-  - `extras`: only `displayName`, a string of at most 256 characters;
-  - no `extensions` (A2 already).
-- **A6, where it runs** (CR-S3):
-  - in the `add` handler, after K6 (`session.js` L1314) and before the first
-    world change (L1383), for avatar and world adds alike;
-  - for world adds, **inside the existing V9 `try`** (L1329), first in that
-    block, so a model node with a malformed mesh gets the mesh's reason;
-  - for avatars, in a `try` of its own (the V9 block is world-only);
-  - it fails closed, as V9 does: an exception refuses the `add` with
-    `INVALID_VALUE`. A refusal is `INVALID_VALUE` with `<field>: <reason>`
-    (`mesh: …`, `translation: …`, `extensions: …`, `avatar: …`).
-- **A7, the client** (CR-S3):
-  - Duplicate and Undo run the client copy of A1 on the **built descriptor**,
-    in `prepareDuplicate` and `prepareRestore` (`edit-duplicate.js` L320–353).
-    They run at click time and build exactly what the server will see. A node
-    the server would refuse is refused there with its reason, rather than sent
-    and refused;
-  - the hint's document-form rules (`duplicateRuleProblem`) stay as they are,
-    because they run on every hint refresh and are kept cheap on purpose;
-    `MAX_INDEX` becomes 65,534 to match A3 (CR-N1);
-  - the avatar's own `add` is unchanged (it already passes A5).
-- **A8, the schema (AGENTS rule 1):** `add.client.json` and `add.server.json`
-  type the mesh to match A3 and A4 where JSON Schema can say it (keys, types,
-  lengths), and `node.extensions` stays an object. The value rules stay in A1.
-  The protocol tests change with it.
-  - **Which layer refuses what (CR-S3):** the server validates the schema
-    first, so a shape the schema catches is refused as `UNKNOWN_MESSAGE` with
-    Ajv's text, not `INVALID_VALUE`. That's expected: the vectors pin A1 alone,
-    and the server tests assert only "refused, nothing changed" for those.
-- **A9, `send`'s material ranges (RA-L7):** `materialValueOk` uses the same
-  predicates as A4: `baseColorFactor`, `metallicFactor`, `roughnessFactor` and
-  `emissiveFactor` in [0, 1]; `alphaCutoff` finite and 0 or more. One exported
-  predicate, used by both.
-- **A10, defence in depth (RA-L8):**
-  - autosave reads back what it serialized and keeps the previous row if that
-    fails (logged once per world);
-  - a join whose serialize fails sends the joiner `WORLD_UNAVAILABLE`;
-  - the client's `_onSomDump` catches a read failure and shows it.
-- **Tests** (end to end, CR-M1; the seam rule):
-  - the vectors in both suites, including every case in §2.3, `p3`, `p7` and
-    CR's `q1`/`q2`;
-  - **every server acceptance check ends with a read-back:** the later joiner
-    **reads** its `som-dump` with the client's own `WebIO.readJSON`
-    (`KHRONOS_EXTENSIONS`), and a world `add` is followed by `serialize` →
-    `createWorldFromDocument` → `serialize`. "The `som-dump` arrives" isn't
-    enough: CR-M1 sends one;
-  - `p4` as a server test on port 0, plus CR-M1's `POSITION []`. A visitor's
-    malformed avatar `add` is refused, and a later visitor's join reads its
-    `som-dump`. **Run it on today's code first and see it fail** (4d-1 passdown
-    §3);
-  - CR-M2's 20,000-primitive avatar is refused, and the refusal takes under
-    50 ms;
-  - CR `q3`'s 900 KB avatar `extras` and a 1,025-vertex avatar are refused; the
-    real avatar is accepted;
-  - a present client's broadcast: refused `add`s are never broadcast (GR);
-  - `send` with `metallicFactor: 7` is refused (A9), and a material at the
-    range's edges is accepted by both `send` and `add`;
-  - A10: an autosave whose read-back fails keeps the previous row (a test seam
-    that makes `serialize` return an unreadable document); a failed join
-    serialize sends `WORLD_UNAVAILABLE`;
-  - the palette, pad, avatar and Duplicate descriptors as acceptances, built by
-    the real builders.
-- **Release:** a server, client and protocol round. DEV restarts at the deploy,
-  and acceptance needs a hard reload in every tab.
-  - **Before release:** the operator ran `p6` on 2026-11-05 (§2.5): no
-    unreadable world, and nothing saved that this round would newly refuse.
-    Rerun it just before the PROD deploy if worlds have changed much since.
-  - **Rolling back** loses nothing that this round stores (it stores nothing
-    new). It does reopen §2.3.
+`richer-add` (§5) widens that file's A1–A4 and keeps its A5 for avatars.
 
 ## 5. The contract sketch for `richer-add` (written out in Rev 1, after RA-L2–RA-L5)
 - **A1's rule widens** by RA-L2 and RA-L5. Avatar adds keep `add-check`'s set
@@ -862,6 +760,10 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
   failure in the handoff.
 
 ## 9. Review log
+- **Rev 0.2, `add-check` split out** (2026-11-05): §4 moved to
+  `PREBRIEF-add-check.md` FINAL Rev 1, with RA-L5 (a) confirmed; that file adds
+  the `format` rule and `WORLD_UNREADABLE`. This file stays a draft for
+  `richer-add` and `copy-objects`.
 - **Rev 0.2, PROD survey** (2026-11-05): the operator ran `p6` at `1e36f42`.
   23 worlds, none unreadable; 410 of 437 top-level objects copy today; nothing
   saved that `add-check` would refuse; no shared materials. Recorded in §2.3,
