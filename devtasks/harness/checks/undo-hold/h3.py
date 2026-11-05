@@ -5,12 +5,13 @@
 #   1 Undo of a panel move: the spinner sends and turns again within 1 s (h1's 3, turned round)
 #   2 Redo of it: the same
 #   3 Undo then a move of ANOTHER cube: the first keeps spinning throughout (h1's 4, turned round)
-#   4 an Undo of a ROTATION while it spins: refused, "changed elsewhere" (unchanged, by design)
+#   4 a typed ROTATION while it spins: recorded, and its Undo refused as "changed elsewhere" (round 3)
 #   5 the drag rule still holds DURING a handle drag (sends dropped), and lets go at its end
 #   6 scale: Undo of a panel scale while it spins: put back, spinner keeps going
 # On 8ff7000 (before the fix) 1, 2, 3 and 6 FAIL (6 is the same stuck hold, after a
-# scale Undo); 0, 4 and 5 pass. Note 2 on 8ff7000 is not a clean Redo repro: the
-# hold is already stuck from 1.
+# scale Undo); 0 and 5 pass. Note 2 on 8ff7000 is not a clean Redo repro: the
+# hold is already stuck from 1. Check 4 was rewritten for round 3 (R5): on
+# 4f66f93b its "recorded", "refused" and "no other object moved" lines FAIL.
 # Server: checks/signin-sync/authserver.mjs with HOOKS=1 (see scripting-4d/README.md).
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripting-4d'))
@@ -29,6 +30,7 @@ SETF = """({ f, i, v }) => { const e = document.querySelector(`#edit-panel input
 DRAG = """() => { const e = __ep(); const g = e.gizmo, o = e.selectedObj; g.dispatchEvent({ type: 'dragging-changed', value: true });
   o.position.x += 0.5; g.dispatchEvent({ type: 'objectChange' }); return null }"""
 END = "() => { __ep().gizmo.dispatchEvent({ type: 'dragging-changed', value: false }) }"
+LABEL = "document.getElementById('ep-undo').title || document.getElementById('ep-undo').textContent"
 ERR = "document.getElementById('ep-error').textContent"
 yaw = lambda q: math.degrees(2 * math.atan2(q[1], q[3]))
 
@@ -81,12 +83,18 @@ with sync_playwright() as pw:
     s2 = spinning(a, x, 1000); print('after Undo', s1, '| after moving the other cube', s2)
     check('3 spinning after the Undo AND after moving another object', spins(s1) and spins(s2), (s1, s2))
 
-    # 4 Undo of a rotation while it spins: refused, by design
+    # 4 a typed rotation while it spins (round 3, R5): it IS recorded, and its Undo is
+    #   refused as 'changed elsewhere' with no other object moving. Before round 3 the
+    #   edit went unrecorded and Undo silently moved the OTHER cube back.
+    y_before = tr(a, y)
     setf(a, x, 'rotation', 0, 30)
     a.page.wait_for_timeout(800)
+    label = a.ev(LABEL); print('after the typed rotation: Undo label', repr(label))
+    check('4 the typed rotation is recorded (Undo Rotate)', label.startswith('Undo Rotate'), label)
     a.page.click('#ep-undo'); a.page.wait_for_timeout(800)
-    msg = a.ev(ERR); s = spinning(a, x); print('rotation Undo message:', repr(msg), '| then', s)
-    check("4 an Undo of a rotation while it spins is refused as 'changed elsewhere'", 'changed elsewhere' in msg, msg)
+    msg = a.ev(ERR); s = spinning(a, x); print('rotation Undo message:', repr(msg), '| then', s, '| other cube', tr(a, y))
+    check("4 its Undo is refused as 'changed elsewhere'", 'changed elsewhere' in msg, msg)
+    check('4 and no other object moved', tr(a, y) == y_before, (y_before, tr(a, y)))
     check('4 and the spinner keeps going', spins(s), s)
 
     # 5 the drag rule during a handle drag
