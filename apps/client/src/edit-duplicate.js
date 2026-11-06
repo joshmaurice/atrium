@@ -12,10 +12,23 @@ import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
  * edit-duplicate.js — whether a node can be duplicated, and the `add`
  * descriptor of its copy (Phase 3 step 1b-2, N3). Pure: no DOM, no three.js.
  *
- * The contract is lossless (D5): a node is eligible only if everything it has
- * survives an `add` (`SOMDocument.ingestNode` keeps the node's TRS and extras,
- * the mesh name, POSITION / NORMAL / indices and three material factors).
- * Anything else is refused, whether or not it changes what's rendered today.
+ * The contract is lossless (D5): a node is eligible only if everything a save
+ * keeps of it survives an `add`. `SOMDocument.ingestNode` keeps the node's TRS
+ * and extras; the mesh's name and extras; per primitive its extras, POSITION,
+ * NORMAL, TEXCOORD_0/1, COLOR_0 (all FLOAT) and indices; and the material's
+ * name, extras, three factors, emissive, alpha mode, cutoff and double-sided
+ * (richer-add R4/R7). Anything else is refused, whether or not it changes
+ * what's rendered today.
+ *
+ * Stated exceptions (PREBRIEF-richer-add.md R8), what an `add` doesn't keep:
+ * - accessor and buffer NAMES (RA-L2 (c), modified): a restored object loses
+ *   them for good. Their `extras` are refused, not dropped;
+ * - material and mesh SHARING (RA-L3 (a)): a copy or a restore gets its own
+ *   mesh and material; `prepareRestore` says so (`sharedMaterial`), and the
+ *   Undo button's title tells the owner;
+ * - an index's storage type: the same values come back as unsigned short.
+ * Not exceptions (a save keeps none of them either): a cutoff outside MASK, and
+ * a vector factor within 1e-5 of its default (the writer's own tolerance).
  *
  * It reads the glTF-Transform node itself (`getMesh()`, `listPrimitives()`…):
  * the SOM wrappers don't expose geometry (J4). Call it at click time; nothing
@@ -33,6 +46,12 @@ export const UNIT_TOLERANCE = 1e-3
 export const MIN_SCALE = 1e-6
 
 const FLOAT = 5126                 // glTF componentType FLOAT
+/** richer-add R7 — the semantics a copy carries, and each one's accessor types. */
+const VERTEX_SEMANTICS = Object.freeze({
+  POSITION: ['VEC3'], NORMAL: ['VEC3'], TEXCOORD_0: ['VEC2'], TEXCOORD_1: ['VEC2'], COLOR_0: ['VEC3', 'VEC4'],
+})
+/** glTF-Transform's writer tolerance for a vector factor (`MathUtils.eq`). */
+const WRITER_TOLERANCE = 10e-6
 const TRIANGLES = 4
 const MAX_INDEX = 65534            // add-check A3: no index may be 65,535
 const SCENE_GRAPH_PARENTS = new Set(['Root', 'Scene', 'Node'])
@@ -106,57 +125,55 @@ function atriumProblem(extras) {
 }
 
 // An accessor carries only what ingestNode rebuilds: values, nothing else.
-function accessorProblem(acc, label, { vec3 }) {
-  if (acc.getName() !== '') return `${label} accessor has a name`
+// richer-add R7/R8 — its NAME (and its buffer's) is dropped, a stated
+// exception (RA-L2 (c), modified); its `extras` and extensions still refuse it.
+function accessorProblem(acc, label, { types = null } = {}) {
   if (!isEmptyObject(acc.getExtras())) return `${label} accessor has extras`
   if (hasExtensions(acc)) return `${label} accessor has extensions`
   const buf = acc.getBuffer?.()
-  if (buf && (buf.getName() !== '' || !isEmptyObject(buf.getExtras()) || hasExtensions(buf))) {
-    return `${label} buffer has a name, extras or extensions`
+  if (buf && (!isEmptyObject(buf.getExtras()) || hasExtensions(buf))) {
+    return `${label} buffer has extras or extensions`
   }
   if (acc.getSparse?.()) return `${label} accessor is sparse`
-  if (vec3) {
-    if (acc.getType() !== 'VEC3') return `${label} is not VEC3`
+  if (types) {
+    if (!types.includes(acc.getType())) return `${label} is not ${types.join(' or ')}`
     if (acc.getComponentType() !== FLOAT) return `${label} is not float`
     if (acc.getNormalized()) return `${label} is normalized`
   }
   return null
 }
 
+// richer-add R7 — a material's name, extras, emissive, alpha and double-sided
+// are carried now; extensions and textures still refuse it.
 function materialProblem(mat) {
   if (!mat) return null
-  if (mat.getName() !== '') return 'material has a name'
-  if (!isEmptyObject(mat.getExtras())) return 'material has extras'
   if (hasExtensions(mat)) return 'material has extensions'
   if (mat.getBaseColorTexture() || mat.getMetallicRoughnessTexture() || mat.getNormalTexture() ||
       mat.getOcclusionTexture() || mat.getEmissiveTexture()) return 'material has textures'
-  const e = mat.getEmissiveFactor()
-  if (e[0] !== 0 || e[1] !== 0 || e[2] !== 0) return 'material is emissive'
-  if (mat.getAlphaMode() !== 'OPAQUE') return 'material is not opaque'
-  if (mat.getDoubleSided()) return 'material is double-sided'
   return null
 }
 
+// richer-add R7 — mesh and primitive extras and the R1 attributes are carried
+// now (the extras' size and content are add-spec's, at click time).
 function meshProblem(mesh) {
   if ((mesh.getWeights() ?? []).length > 0) return 'morph weights'
   if (hasExtensions(mesh)) return 'mesh extensions'
-  if (!isEmptyObject(mesh.getExtras())) return 'mesh extras'
   for (const prim of mesh.listPrimitives()) {
     if (prim.getMode() !== TRIANGLES) return 'not triangles'
     if (hasExtensions(prim)) return 'primitive extensions'
-    if (!isEmptyObject(prim.getExtras())) return 'primitive extras'
     if (prim.listTargets().length > 0) return 'morph targets'
     const semantics = prim.listSemantics().slice().sort()
-    const ok = semantics.length === 1 ? semantics[0] === 'POSITION'
-      : semantics.length === 2 && semantics[0] === 'NORMAL' && semantics[1] === 'POSITION'
+    const ok = semantics.includes('POSITION') &&
+      semantics.every((sem) => Object.hasOwn(VERTEX_SEMANTICS, sem)) &&
+      (!semantics.includes('TEXCOORD_1') || semantics.includes('TEXCOORD_0'))
     if (!ok) return `attributes ${semantics.join(', ')}`
     for (const sem of semantics) {
-      const p = accessorProblem(prim.getAttribute(sem), sem, { vec3: true })
+      const p = accessorProblem(prim.getAttribute(sem), sem, { types: VERTEX_SEMANTICS[sem] })
       if (p) return p
     }
     const idx = prim.getIndices()
     if (idx) {
-      const p = accessorProblem(idx, 'index', { vec3: false })
+      const p = accessorProblem(idx, 'index')
       if (p) return p
       for (const i of idx.getArray()) if (i > MAX_INDEX) return 'an index above 65534'
     }
@@ -175,6 +192,58 @@ function transformProblem(rotation, scale) {
 
 function sendableArray(acc) {
   return Array.from(acc.getArray())
+}
+
+/** The writer writes a vector factor only when it isn't within 1e-5 of the default. */
+function differsFromDefault(values, defaults) {
+  return values.some((v, i) => Math.abs(v - defaults[i]) > WRITER_TOLERANCE)
+}
+
+/**
+ * richer-add R7 — a material in canonical form: today's three factors always;
+ * every new field only when a save would write it (PREBRIEF-richer-add.md
+ * §2.4), so `prepareRestore(ingest(d))` is `d` again.
+ */
+function materialDescriptor(mat) {
+  const out = {}
+  if (mat.getName() !== '') out.name = mat.getName()
+  const extras = mat.getExtras()
+  if (!isEmptyObject(extras)) out.extras = structuredClone(extras)
+  out.pbrMetallicRoughness = {
+    baseColorFactor: [...mat.getBaseColorFactor()],
+    metallicFactor:  mat.getMetallicFactor(),
+    roughnessFactor: mat.getRoughnessFactor(),
+  }
+  const emissive = [...mat.getEmissiveFactor()]
+  if (differsFromDefault(emissive, [0, 0, 0])) out.emissiveFactor = emissive
+  const mode = mat.getAlphaMode()
+  if (mode !== 'OPAQUE') out.alphaMode = mode
+  if (mode === 'MASK' && mat.getAlphaCutoff() !== 0.5) out.alphaCutoff = mat.getAlphaCutoff()
+  if (mat.getDoubleSided()) out.doubleSided = true
+  return out
+}
+
+/**
+ * richer-add R8 — does a restore of this node lose sharing? True when its mesh
+ * is used by more than one node, or any of its materials by more than one
+ * primitive, counting only primitives of meshes some node still uses (a file
+ * world isn't healed, so an orphan mesh's primitive mustn't count).
+ *
+ * @param {object} node  the glTF-Transform Node
+ * @returns {boolean}
+ */
+export function hasSharedMaterial(node) {
+  const mesh = node?.getMesh?.()
+  if (!mesh) return false
+  const nodeUsers = (m) => (m.listParents?.() ?? []).filter((p) => p.propertyType === 'Node').length
+  if (nodeUsers(mesh) > 1) return true
+  const liveUsers = (mat) => (mat.listParents?.() ?? []).filter((prim) =>
+    prim.propertyType === 'Primitive' &&
+    (prim.listParents?.() ?? []).some((m) => m.propertyType === 'Mesh' && nodeUsers(m) > 0)).length
+  return mesh.listPrimitives().some((prim) => {
+    const mat = prim.getMaterial()
+    return !!mat && liveUsers(mat) > 1
+  })
 }
 
 /**
@@ -196,23 +265,23 @@ function buildDescriptor(node, name, offsetX) {
   if (mesh) {
     const primitives = mesh.listPrimitives().map((prim) => {
       const out = { attributes: { POSITION: sendableArray(prim.getAttribute('POSITION')) } }
-      const normal = prim.getAttribute('NORMAL')
-      if (normal) out.attributes.NORMAL = sendableArray(normal)
+      // richer-add R7 — the other carried semantics the primitive HAS (its own
+      // list, never a probe by name), in a fixed order; FLOAT by the rules
+      const semantics = new Set(prim.listSemantics())
+      for (const sem of ['NORMAL', 'TEXCOORD_0', 'TEXCOORD_1', 'COLOR_0']) {
+        if (semantics.has(sem)) out.attributes[sem] = sendableArray(prim.getAttribute(sem))
+      }
       const idx = prim.getIndices()
       if (idx) out.indices = sendableArray(idx)
+      const primExtras = prim.getExtras()
+      if (!isEmptyObject(primExtras)) out.extras = structuredClone(primExtras)
       const mat = prim.getMaterial()
-      if (mat) {
-        out.material = {
-          pbrMetallicRoughness: {
-            baseColorFactor: [...mat.getBaseColorFactor()],
-            metallicFactor:  mat.getMetallicFactor(),
-            roughnessFactor: mat.getRoughnessFactor(),
-          },
-        }
-      }
+      if (mat) out.material = materialDescriptor(mat)
       return out
     })
     descriptor.mesh = mesh.getName() !== '' ? { name: mesh.getName(), primitives } : { primitives }
+    const meshExtras = mesh.getExtras()
+    if (!isEmptyObject(meshExtras)) descriptor.mesh.extras = structuredClone(meshExtras)
   }
   return descriptor
 }
@@ -350,12 +419,14 @@ export function prepareDuplicate(node, { name }) {
  * are N3's, unchanged; the descriptor is built by the same code as a copy but
  * with the node's own name and its own translation, no offset applied or
  * subtracted (U5). Its output is the canonical form the undo engine compares:
- * the same node gives the same descriptor, key order included.
+ * the same node gives the same descriptor (`sameDescriptor` compares keys and
+ * values, not key order). richer-add R8: `sharedMaterial: true` when the
+ * restore won't share what the node shares (`hasSharedMaterial`).
  *
  * @param {object} node  the glTF-Transform Node (read now, from current values)
  * @param {object} [opts]
  * @param {string} [opts.name]  defaults to the node's own name
- * @returns {{ok: true, descriptor: object, bytes: number} | {ok: false, rule: string, reason: string}}
+ * @returns {{ok: true, descriptor: object, bytes: number, sharedMaterial?: true} | {ok: false, rule: string, reason: string}}
  */
 export function prepareRestore(node, { name = node.getName?.() } = {}) {
   const problem = duplicateRuleProblem(node)
@@ -365,5 +436,5 @@ export function prepareRestore(node, { name = node.getName?.() } = {}) {
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   const refused = addSpecProblem(descriptor)
   if (refused) return refused
-  return { ok: true, descriptor, bytes }
+  return hasSharedMaterial(node) ? { ok: true, descriptor, bytes, sharedMaterial: true } : { ok: true, descriptor, bytes }
 }

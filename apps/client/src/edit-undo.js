@@ -25,11 +25,17 @@
  * `edit:accepted`/`edit:rejected`/`edit:unknown` whatever the mode.
  */
 
-import { addMessageBytes } from './edit-duplicate.js'
+import { addMessageBytes, hasSharedMaterial } from './edit-duplicate.js'
 import { collectSubtree } from './edit-structure.js'
 
 /** W8 — at most this many entries per stack. */
 export const MAX_ENTRIES = 100
+/**
+ * richer-add R8 (RA-L3 (a)) — what the Undo button's title adds for a delete
+ * whose restore won't share what the object shared.
+ */
+export const SHARED_MATERIAL_NOTE = '(it comes back with its own material)'
+
 /** W8 — at most this many UTF-8 bytes of descriptors across both stacks. */
 export const MAX_DESCRIPTOR_BYTES = 16 * 1024 * 1024
 
@@ -285,7 +291,7 @@ export function createEditUndo({
     if (!gltfNode) return { ok: false, reason: 'not addressable' }
     const r = prepareRestore(gltfNode)
     if (!r.ok) return { ok: false, reason: r.reason }
-    return { ok: true, descriptor: r.descriptor }
+    return { ok: true, descriptor: r.descriptor, sharedMaterial: r.sharedMaterial === true }
   }
 
   function registerAdd(seq, { name, duplicate = false }) {
@@ -300,7 +306,10 @@ export function createEditUndo({
    */
   function registerDelete(seq, { node, name, descriptor }) {
     if (seq == null) return
-    const req = { kind: 'delete', seq, node, name, descriptor: descriptor ?? null, failed: false }
+    // richer-add R8 — read here from the node (cheap), since the caller passes
+    // only the click-time descriptor
+    const sharedMaterial = !!descriptor && hasSharedMaterial(node?._node)
+    const req = { kind: 'delete', seq, node, name, descriptor: descriptor ?? null, sharedMaterial, failed: false }
     requests.set(seq, req)
     deleteWindow = req
     return req
@@ -322,6 +331,7 @@ export function createEditUndo({
       direction,
       entry,
       descriptor: cap.ok ? cap.descriptor : null,
+      sharedMaterial: cap.ok && cap.sharedMaterial,
       failed: !cap.ok,
     }
   }
@@ -335,8 +345,12 @@ export function createEditUndo({
     const cap = capture(node)
     if (!cap.ok) { req.failed = true; return }
     req.descriptor = cap.descriptor
+    req.sharedMaterial = cap.sharedMaterial
     // R4 — a removal's entry keeps the descriptor its later re-add will use
-    if (req.entry) req.entry.descriptor = cap.descriptor
+    if (req.entry) {
+      req.entry.descriptor = cap.descriptor
+      req.entry.sharedMaterial = cap.sharedMaterial
+    }
   }
 
   function acceptAdd(req) {
@@ -367,6 +381,7 @@ export function createEditUndo({
       name: req.name,
       handle: handleFor(req.node),
       descriptor: req.descriptor,
+      sharedMaterial: req.sharedMaterial === true,
     })
   }
 
@@ -494,7 +509,9 @@ export function createEditUndo({
     const stack = kind === 'undo' ? undoStack : redoStack
     const entry = stack[stack.length - 1]
     if (!entry) return reason(kind)
-    return `${kind === 'undo' ? 'Undo' : 'Redo'} ${entry.label} “${entry.name}”`
+    const base = `${kind === 'undo' ? 'Undo' : 'Redo'} ${entry.label} “${entry.name}”`
+    // richer-add R8 — only an undo of a delete restores; Redo needs no text
+    return kind === 'undo' && entry.kind === 'delete' && entry.sharedMaterial ? `${base} ${SHARED_MATERIAL_NOTE}` : base
   }
 
   // ── The engine (Y4) ────────────────────────────────────────────────────

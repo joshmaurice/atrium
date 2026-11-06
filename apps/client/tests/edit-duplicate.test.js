@@ -31,7 +31,7 @@ function accessor(array, { type = 'VEC3', componentType = 5126, normalized = fal
 function material(o = {}) {
   const m = {
     name: '', extras: {}, extensions: 0, textures: {}, emissive: [0, 0, 0], alphaMode: 'OPAQUE',
-    doubleSided: false, baseColor: [0.8, 0.8, 0.8, 1], metallic: 0, roughness: 0.8, ...o,
+    alphaCutoff: 0.5, doubleSided: false, baseColor: [0.8, 0.8, 0.8, 1], metallic: 0, roughness: 0.8, ...o,
   }
   return {
     getName: () => m.name, getExtras: () => m.extras, listExtensions: () => ext(m.extensions),
@@ -41,6 +41,7 @@ function material(o = {}) {
     getOcclusionTexture: () => m.textures.occlusion ?? null,
     getEmissiveTexture: () => m.textures.emissive ?? null,
     getEmissiveFactor: () => m.emissive, getAlphaMode: () => m.alphaMode, getDoubleSided: () => m.doubleSided,
+    getAlphaCutoff: () => m.alphaCutoff,
     getBaseColorFactor: () => m.baseColor, getMetallicFactor: () => m.metallic, getRoughnessFactor: () => m.roughness,
     _m: m,
   }
@@ -161,15 +162,17 @@ test('rule 6 (outside review nit): node morph weights are refused', () => {
   assert.match(expectRule(node({ mesh: cubeMesh(), weights: [0.5] }), 'mesh').reason, /node morph weights/)
 })
 
-test('rule 6 (outside review nit): a buffer with a name, extras or extensions', () => {
+test('rule 6 (outside review nit; richer-add RA-L2 (c) modified): a buffer with extras or extensions is refused; its name is dropped', () => {
   for (const buffer of [
-    { getName: () => 'geo.bin', getExtras: () => ({}), listExtensions: () => [] },
     { getName: () => '', getExtras: () => ({ a: 1 }), listExtensions: () => [] },
     { getName: () => '', getExtras: () => ({}), listExtensions: () => [{}] },
   ]) {
     const p = primitive({ attrs: { POSITION: accessor(new Float32Array(9), { buffer }) } })
-    assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /buffer has a name, extras or extensions/)
+    assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /buffer has extras or extensions/)
   }
+  const named = { getName: () => 'geo.bin', getExtras: () => ({}), listExtensions: () => [] }
+  const pn = primitive({ attrs: { POSITION: accessor(new Float32Array(9), { buffer: named }) } })
+  assert.equal(prepareDuplicate(node({ mesh: mesh([pn]) }), { name: NAME }).ok, true, 'a named buffer copies; the name is dropped')
   const plain = { getName: () => '', getExtras: () => ({}), listExtensions: () => [] }
   const p = primitive({ attrs: { POSITION: accessor(new Float32Array(9), { buffer: plain }) } })
   assert.equal(prepareDuplicate(node({ mesh: mesh([p]) }), { name: NAME }).ok, true)
@@ -197,12 +200,29 @@ test('rule 6: primitive mode other than triangles', () => {
   assert.match(expectRule(node({ mesh: cubeMesh({ mode: 1 }) }), 'mesh').reason, /not triangles/)
 })
 
-test('rule 6: attributes other than POSITION (and NORMAL)', () => {
-  const p = primitive({ attrs: {
+test('rule 6 (richer-add R7): TEXCOORD_0/1 and COLOR_0 copy; any other attribute is refused', () => {
+  const ok = primitive({ attrs: {
     POSITION: accessor(new Float32Array(9)), NORMAL: accessor(new Float32Array(9)),
     TEXCOORD_0: accessor(new Float32Array(6), { type: 'VEC2' }),
+    TEXCOORD_1: accessor(new Float32Array(6), { type: 'VEC2' }),
+    COLOR_0: accessor(new Float32Array(12).fill(0.5), { type: 'VEC4' }),
   } })
-  assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /TEXCOORD_0/)
+  const r = prepareDuplicate(node({ mesh: mesh([ok]) }), { name: NAME })
+  assert.equal(r.ok, true, r.reason)
+  assert.deepEqual(Object.keys(r.descriptor.mesh.primitives[0].attributes), ['POSITION', 'NORMAL', 'TEXCOORD_0', 'TEXCOORD_1', 'COLOR_0'])
+  for (const [attrs, re] of [
+    [{ TANGENT: accessor(new Float32Array(12), { type: 'VEC4' }) }, /TANGENT/],
+    [{ TEXCOORD_1: accessor(new Float32Array(6), { type: 'VEC2' }) }, /TEXCOORD_1/],
+    [{ TEXCOORD_0: accessor(new Float32Array(9), { type: 'VEC3' }) }, /TEXCOORD_0 is not VEC2/],
+    [{ COLOR_0: accessor(new Float32Array(6), { type: 'VEC2' }) }, /COLOR_0 is not VEC3 or VEC4/],
+    [{ COLOR_0: accessor(new Uint8Array(12), { type: 'VEC4', componentType: 5121, normalized: true }) }, /COLOR_0 is not float/],
+    [{ TEXCOORD_0: accessor(new Uint16Array(6), { type: 'VEC2', componentType: 5123, normalized: true }) }, /TEXCOORD_0 is not float/],
+    [{ COLOR_0: accessor(new Float32Array(12), { type: 'VEC4', normalized: true }) }, /COLOR_0 is normalized/],
+    [{ TEXCOORD_0: accessor(new Float32Array(6), { type: 'VEC2', sparse: true }) }, /TEXCOORD_0 accessor is sparse/],
+  ]) {
+    const p = primitive({ attrs: { POSITION: accessor(new Float32Array(9)), ...attrs } })
+    assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, re)
+  }
 })
 
 test('rule 6: non-float, normalized or sparse vertex data', () => {
@@ -222,27 +242,48 @@ test('rule 6: an index above 65,534 is refused', () => {
   assert.match(expectRule(node({ mesh: mesh([p]) }), 'mesh').reason, /65534/)
 })
 
-test('rule 6: textures, emissive, blending, double-sided materials', () => {
-  for (const [o, re] of [
-    [{ textures: { baseColor: {} } }, /textures/],
-    [{ textures: { normal: {} } }, /textures/],
-    [{ emissive: [0.1, 0, 0] }, /emissive/],
-    [{ alphaMode: 'BLEND' }, /opaque/],
-    [{ doubleSided: true }, /double-sided/],
-  ]) {
-    assert.match(expectRule(node({ mesh: cubeMesh({ mat: material(o) }) }), 'mesh').reason, re)
+test('rule 6: textures are still refused; emissive, blending and double-sided copy (richer-add R7)', () => {
+  for (const o of [{ textures: { baseColor: {} } }, { textures: { normal: {} } }]) {
+    assert.match(expectRule(node({ mesh: cubeMesh({ mat: material(o) }) }), 'mesh').reason, /textures/)
   }
+  const r = prepareDuplicate(node({ mesh: cubeMesh({ mat: material({ emissive: [0.1, 0, 0], alphaMode: 'BLEND', doubleSided: true }) }) }), { name: NAME })
+  assert.equal(r.ok, true, r.reason)
+  const m = r.descriptor.mesh.primitives[0].material
+  assert.deepEqual(m.emissiveFactor, [0.1, 0, 0]); assert.equal(m.alphaMode, 'BLEND'); assert.equal(m.doubleSided, true)
+  assert.equal('alphaCutoff' in m, false, 'a cutoff only with MASK')
+})
+
+test('richer-add R7: the canonical material form emits only what a save keeps', () => {
+  const build = (o) => prepareRestore(node({ mesh: cubeMesh({ mat: material(o) }) })).descriptor.mesh.primitives[0].material
+  assert.deepEqual(build({}), { pbrMetallicRoughness: { baseColorFactor: [0.8, 0.8, 0.8, 1], metallicFactor: 0, roughnessFactor: 0.8 } },
+    'a plain material is exactly today’s form')
+  assert.equal('alphaCutoff' in build({ alphaCutoff: 0.3 }), false, 'OPAQUE, cutoff 0.3: no cutoff (no save keeps it)')
+  assert.equal('alphaCutoff' in build({ alphaMode: 'BLEND', alphaCutoff: 0.3 }), false, 'BLEND, cutoff 0.3: no cutoff')
+  assert.equal(build({ alphaMode: 'MASK', alphaCutoff: 0.3 }).alphaCutoff, 0.3, 'MASK, cutoff 0.3: emitted')
+  assert.equal('alphaCutoff' in build({ alphaMode: 'MASK', alphaCutoff: 0.5 }), false, 'MASK at the default: not emitted')
+  assert.equal('emissiveFactor' in build({ emissive: [5e-6, 0, 0] }), false, 'within the writer’s 1e-5 of black: not emitted')
+  assert.deepEqual(build({ emissive: [2e-5, 0, 0] }).emissiveFactor, [2e-5, 0, 0])
+  assert.equal('doubleSided' in build({ doubleSided: false }), false)
+  assert.equal('alphaMode' in build({ alphaMode: 'OPAQUE' }), false)
+  const named = build({ name: 'Marble', extras: { note: 'x' } })
+  assert.equal(named.name, 'Marble'); assert.deepEqual(named.extras, { note: 'x' })
 })
 
 // Review #2 — a visually ordinary cube, one unsupported property at a time.
-test('rule 6 (review #2): a visually ordinary cube with metadata add can’t carry', () => {
+test('rule 6 (review #2; richer-add R7): extras and names copy, extensions are still refused', () => {
+  for (const [label, n, check] of [
+    ['primitive extras', node({ mesh: cubeMesh({ extras: { tag: 1 } }) }), (d) => assert.deepEqual(d.mesh.primitives[0].extras, { tag: 1 })],
+    ['material extras', node({ mesh: cubeMesh({ mat: material({ extras: { note: 'x' } }) }) }), (d) => assert.deepEqual(d.mesh.primitives[0].material.extras, { note: 'x' })],
+    ['material name', node({ mesh: cubeMesh({ mat: material({ name: 'Brick' }) }) }), (d) => assert.equal(d.mesh.primitives[0].material.name, 'Brick')],
+    ['mesh extras', node({ mesh: cubeMesh({ meshOpts: { extras: { lod: 0 } } }) }), (d) => assert.deepEqual(d.mesh.extras, { lod: 0 })],
+  ]) {
+    const r = prepareDuplicate(n, { name: NAME })
+    assert.equal(r.ok, true, `${label}: ${r.reason}`)
+    check(r.descriptor)
+  }
   const cases = [
-    ['primitive extras', node({ mesh: cubeMesh({ extras: { tag: 1 } }) })],
     ['primitive extensions', node({ mesh: cubeMesh({ extensions: 1 }) })],
-    ['material has extras', node({ mesh: cubeMesh({ mat: material({ extras: { note: 'x' } }) }) })],
-    ['material has a name', node({ mesh: cubeMesh({ mat: material({ name: 'Brick' }) }) })],
     ['material has extensions', node({ mesh: cubeMesh({ mat: material({ extensions: 1 }) }) })],
-    ['mesh extras', node({ mesh: cubeMesh({ meshOpts: { extras: { lod: 0 } } }) })],
     ['mesh extensions', node({ mesh: cubeMesh({ meshOpts: { extensions: 1 } }) })],
   ]
   for (const [detail, n] of cases) {
@@ -251,16 +292,25 @@ test('rule 6 (review #2): a visually ordinary cube with metadata add can’t car
   }
 })
 
-test('rule 6 (review #2): an accessor with a name, extras or extensions', () => {
+test('rule 6 (review #2; RA-L2 (c) modified): an accessor’s extras or extensions refuse it; its name is dropped', () => {
   const withAcc = (o) => primitive({ attrs: { POSITION: accessor(new Float32Array(9), o) } })
-  assert.match(expectRule(node({ mesh: mesh([withAcc({ name: 'pos' })]) }), 'mesh').reason, /accessor has a name/)
+  const r = prepareDuplicate(node({ mesh: mesh([withAcc({ name: 'pos' })]) }), { name: NAME })
+  assert.equal(r.ok, true, 'a named accessor copies')
+  assert.equal(JSON.stringify(r.descriptor).includes('"pos"'), false, 'and the name is not in the descriptor')
   assert.match(expectRule(node({ mesh: mesh([withAcc({ extras: { a: 1 } })]) }), 'mesh').reason, /accessor has extras/)
   assert.match(expectRule(node({ mesh: mesh([withAcc({ extensions: 1 })]) }), 'mesh').reason, /accessor has extensions/)
   // the index accessor too
   const p = primitive({ positions: new Array(9).fill(0), indices: [0, 1, 2] })
   const idx = p.getIndices()
-  const named = { ...idx, getName: () => 'idx' }
-  assert.match(expectRule(node({ mesh: mesh([{ ...p, getIndices: () => named }]) }), 'mesh').reason, /index accessor has a name/)
+  assert.equal(prepareDuplicate(node({ mesh: mesh([{ ...p, getIndices: () => ({ ...idx, getName: () => 'idx' }) }]) }), { name: NAME }).ok, true, 'a named index copies')
+  assert.match(expectRule(node({ mesh: mesh([{ ...p, getIndices: () => ({ ...idx, getExtras: () => ({ a: 1 }) }) }]) }), 'mesh').reason, /index accessor has extras/)
+})
+
+test('richer-add R8: a Uint32 index restores as the same values (stored as unsigned short)', () => {
+  const p = primitive({ positions: new Array(9).fill(0), indices: new Uint32Array([0, 1, 2]) })
+  const r = prepareRestore(node({ mesh: mesh([p]) }))
+  assert.equal(r.ok, true, r.reason)
+  assert.deepEqual(r.descriptor.mesh.primitives[0].indices, [0, 1, 2])
 })
 
 test('rule 7: extensions on the node', () => {
@@ -447,7 +497,7 @@ test('Y2: every one of N3’s rules 1–9 refuses a restore too', () => {
   expectRestoreRule(node({ mesh: m, parents: ['Root', 'Scene', 'AnimationChannel'] }), 'referenced')
   expectRestoreRule(node({ extras: { atrium: { source: null } } }), 'external')
   expectRestoreRule(node({ extras: { atrium: { teleporter: 'x' } } }), 'atrium')
-  expectRestoreRule(node({ mesh: cubeMesh({ meshOpts: { extras: { lod: 0 } } }) }), 'mesh')
+  expectRestoreRule(node({ mesh: cubeMesh({ meshOpts: { extensions: 1 } }) }), 'mesh')
   expectRestoreRule(node({ mesh: m, extensions: 1 }), 'extensions')
   expectRestoreRule(node({ mesh: m, rotation: [0, 0, 0, 0.99] }), 'transform')
   expectRestoreRule(node({ mesh: m, scale: [1, 0, 1] }), 'transform')

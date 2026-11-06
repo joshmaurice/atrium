@@ -13,10 +13,14 @@ import assert from 'node:assert/strict'
 import {
   createEditUndo, MAX_ENTRIES, MAX_DESCRIPTOR_BYTES,
   NOTHING_TO_UNDO, NOTHING_TO_REDO, WAITING_MESSAGE, OUT_OF_STEP_MESSAGE,
-  DELETE_CHANGED_MESSAGE,
+  DELETE_CHANGED_MESSAGE, SHARED_MATERIAL_NOTE,
 } from '../src/edit-undo.js'
 import { prepareRestore } from '../src/edit-duplicate.js'
 import { sanitizeTransform } from '../src/edit-gesture.js'
+import { fileURLToPath } from 'node:url'
+// richer-add R8 — a real fixture node, through glTF-Transform's ES module build
+const { NodeIO } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
+const ATRIUM_GLTF = fileURLToPath(new URL('../../../tests/fixtures/atrium.gltf', import.meta.url))
 
 // ── a stand-in SOM world ────────────────────────────────────────────────────
 
@@ -1039,3 +1043,34 @@ describe('edit-undo: V4 (round 5) — the Visible field', () => {
     assert.equal(app.undo.undoCount, 1, 'and the entry is back where it started')
   })
 })
+
+describe('edit-undo: richer-add R8, the shared-material note (RA-L3 (a))', () => {
+  /** A SOM-like wrapper over a REAL glTF-Transform node from atrium.gltf. */
+  async function realNode(name) {
+    const doc = await new NodeIO().read(ATRIUM_GLTF)
+    const gltf = doc.getRoot().listNodes().find((n) => n.getName() === name)
+    return { name, translation: [...gltf.getTranslation()], rotation: [...gltf.getRotation()], scale: [...gltf.getScale()], children: [], extras: {}, _node: gltf }
+  }
+
+  test('undoing the delete of an object whose material is shared says it comes back with its own', async () => {
+    const app = makeApp()
+    const a = app.put(await realNode('FloorAccent'))
+    const del = app.clickDelete(a)
+    assert.equal(del.restorable, true)
+    app.answer(del.seq, 'accepted')
+    assert.equal(app.undo.label('undo'), `Undo Delete “FloorAccent” ${SHARED_MATERIAL_NOTE}`)
+  })
+
+  test('an object that shares nothing gets no note, and Redo never does', async () => {
+    const app = makeApp()
+    const floor = app.put(await realNode('Floor'))
+    app.answer(app.clickDelete(floor).seq, 'accepted')
+    assert.equal(app.undo.label('undo'), 'Undo Delete “Floor”')
+    const accent = app.put(await realNode('FloorAccent'))
+    app.answer(app.clickDelete(accent).seq, 'accepted')
+    app.undo.run('undo')
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    assert.equal(app.undo.label('redo'), 'Redo Delete “FloorAccent”', 'no note on Redo')
+  })
+})
+
