@@ -66,7 +66,9 @@ export function isFloat32(v) {
 
 /** A1 — the shared reason codes and their plain text. */
 export const ADD_REASONS = Object.freeze({
+  'node-type':         'the node must be an object',
   'extensions':        'extensions must be empty or absent',
+  'extras-type':       'extras must be an object',
   'extras-size':       `extras other than atrium must be at most ${NODE_EXTRAS_BYTES_MAX} bytes`,
   'avatar-extras':     'an avatar extras must have at most displayName and atrium',
   'mesh-keys':         'mesh must have only a name and primitives',
@@ -114,7 +116,7 @@ function jsonBytes(value) {
 
 /** A2/A5 — the avatar extras rule. Returns a reason code, or null. */
 function avatarExtrasProblem(extras) {
-  if (extras === undefined || extras === null) return null
+  if (extras === undefined) return null
   if (!isPlainObject(extras)) return 'avatar-extras'
   for (const key of Object.keys(extras)) {
     if (key !== 'displayName' && key !== 'atrium') return 'avatar-extras'
@@ -127,8 +129,12 @@ function avatarExtrasProblem(extras) {
 
 /** A2 — the world-add extras-byte rule. Returns a reason code, or null. */
 function worldExtrasProblem(extras) {
-  if (extras === undefined || extras === null || typeof extras !== 'object' || Array.isArray(extras)) return null
-  const rest = {}
+  if (extras === undefined) return null
+  // Round 2 R3: fail closed on its own, without relying on the schema.
+  if (!isPlainObject(extras)) return 'extras-type'
+  // Round 2 R1: a prototype-less copy, so an own `__proto__` key is measured
+  // like any other (an assignment into `{}` would set the prototype instead).
+  const rest = Object.create(null)
   for (const key of Object.keys(extras)) {
     if (key === 'atrium') continue
     rest[key] = extras[key]
@@ -139,7 +145,7 @@ function worldExtrasProblem(extras) {
 
 /** A4 — the material rule. Returns a reason code, or null. */
 function materialAddProblem(material) {
-  if (material === undefined || material === null) return null
+  if (material === undefined) return null
   if (!isPlainObject(material)) return 'material-keys'
   for (const key of Object.keys(material)) {
     if (key !== 'pbrMetallicRoughness') return 'material-keys'
@@ -156,8 +162,12 @@ function materialAddProblem(material) {
   return null
 }
 
-/** A3 — one primitive's rule. Returns a reason code, or null. */
-function primitiveAddProblem(prim, { avatar }) {
+/**
+ * A3/A5 — one primitive's shape: its key sets, every array's length, the avatar
+ * budget and its material. Reads no POSITION, NORMAL or index value (round 2 R4:
+ * every primitive's shape is checked before any primitive's values).
+ */
+function primitiveShapeProblem(prim, { avatar }) {
   if (!isPlainObject(prim)) return 'primitive-keys'
   for (const key of Object.keys(prim)) {
     if (key !== 'attributes' && key !== 'indices' && key !== 'material') return 'primitive-keys'
@@ -175,22 +185,36 @@ function primitiveAddProblem(prim, { avatar }) {
     return 'normal-length'
   }
   const vertexCount = position.length / 3
+  // A5 — the avatar vertex budget, from the length.
   if (avatar && vertexCount > AVATAR_VERTEX_MAX) return 'avatar-vertices'
-  for (const v of position) if (!isFloat32(v)) return 'position-value'
-  if (normal !== undefined) {
-    for (const v of normal) if (!isFloat32(v)) return 'normal-value'
-  }
   const indices = prim.indices
-  if (indices !== undefined && indices !== null) {
+  if (indices !== undefined) {
     if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0) return 'indices-length'
+    // A5 — the avatar index budget, from the length.
     if (avatar && indices.length > AVATAR_INDEX_MAX) return 'avatar-indices'
-    for (const i of indices) {
-      if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= vertexCount) return 'indices-value'
-    }
   } else {
+    // Without indices the vertex count must itself be a multiple of 3.
     if (vertexCount % 3 !== 0) return 'indices-length'
   }
   return materialAddProblem(prim.material)
+}
+
+/** A3 — one primitive's values, after every primitive's shape has passed. */
+function primitiveValuesProblem(prim) {
+  const { POSITION: position, NORMAL: normal } = prim.attributes
+  for (let i = 0; i < position.length; i++) if (!isFloat32(position[i])) return 'position-value'
+  if (normal !== undefined) {
+    for (let i = 0; i < normal.length; i++) if (!isFloat32(normal[i])) return 'normal-value'
+  }
+  const indices = prim.indices
+  if (indices !== undefined) {
+    const vertexCount = position.length / 3
+    for (let k = 0; k < indices.length; k++) {
+      const i = indices[k]
+      if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= vertexCount) return 'indices-value'
+    }
+  }
+  return null
 }
 
 /** A3/A5 — the mesh rule. Returns a reason code, or null. */
@@ -209,8 +233,13 @@ function meshAddProblem(mesh, { avatar }) {
   } else {
     if (primitives.length < 1 || primitives.length > PRIMITIVE_MAX) return 'primitives-count'
   }
+  // Round 2 R4: every primitive's shape first, then any primitive's values.
   for (const prim of primitives) {
-    const problem = primitiveAddProblem(prim, { avatar })
+    const problem = primitiveShapeProblem(prim, { avatar })
+    if (problem) return problem
+  }
+  for (const prim of primitives) {
+    const problem = primitiveValuesProblem(prim)
     if (problem) return problem
   }
   return null
@@ -226,7 +255,8 @@ function meshAddProblem(mesh, { avatar }) {
  * @returns {null | { code: string, message: string }}
  */
 export function checkAddNode(node, { avatar = false } = {}) {
-  if (node === null || typeof node !== 'object' || Array.isArray(node)) return null
+  // Round 2 R3: a non-object node is refused here too, not left to the schema.
+  if (!isPlainObject(node)) return addDeny('node-type')
 
   if (node.extensions !== undefined && !isEmptyExtensions(node.extensions)) {
     return addDeny('extensions')
@@ -235,7 +265,7 @@ export function checkAddNode(node, { avatar = false } = {}) {
   const extrasProblem = avatar ? avatarExtrasProblem(node.extras) : worldExtrasProblem(node.extras)
   if (extrasProblem) return addDeny(extrasProblem)
 
-  if (node.mesh !== undefined && node.mesh !== null) {
+  if (node.mesh !== undefined) {
     const problem = meshAddProblem(node.mesh, { avatar })
     if (problem) return addDeny(problem)
   }
