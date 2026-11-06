@@ -166,8 +166,10 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
      found a `__proto__` bypass of the extras budget and an autosave race that
      loses an edit made during a save (older than this round). **Round 2**
      (`REVISION-add-check-round-2.md`, fast lane by Claude, operator's choice)
-     fixes them on `claude/add-check-r2` at `302654c8`. It needs its outside
-     review, then a DEV deploy from the host. A hidden host tab stopping
+     fixes them on `claude/add-check-r2` at `302654c8` (on DEV as `1df266e1`).
+     Its outside review found round 2's autosave fix flawed (a flush that
+     could wait forever); **round 2.1, `d56444c0`, fixes it** (REVISION §8).
+     It needs a short follow-up review, then a DEV deploy from the host. A hidden host tab stopping
      behaviours is recorded there as a follow-up.
 2. **The Behaviour panel shows only "Custom graph"** for an imported graph:
    no file name (none is stored) and no targets, though they are stored.

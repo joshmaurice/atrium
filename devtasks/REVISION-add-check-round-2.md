@@ -1,7 +1,9 @@
 # Revision: `add-check` round 2
 
 Status: **implemented by Claude in the fast lane** (operator's choice,
-2026-11-05), on `claude/add-check-r2` at **302654c8bb990ef6a7674a693754d1cd9ec8f49d**, on top of round 1's
+2026-11-05), on `claude/add-check-r2`. **Round 2.1 (§8) is the current tip,
+`d56444c0fec6e9c5c9aeff811a2c7abd93cacfe8`;** round 2 was
+302654c8bb990ef6a7674a693754d1cd9ec8f49d, on top of round 1's
 reviewed tip `53764b76`. It supersedes round 1's DEV (`14c7adcf`), which the
 operator had tested but the host never accepted (undo-hold passdown §3.4).
 - **The contract** is still `PREBRIEF-add-check.md` FINAL Rev 1.1 (base
@@ -85,3 +87,34 @@ Claude, at the tip, Node v22.23.4, after `pnpm install --frozen-lockfile --ignor
 - **The cheaper pipeline** (operator, 2026-11-05, on OpenRouter cost): run
   publish and DEV deploy from the host rather than as agent cards; size
   reviewer duties to the round; fewer retries on review cards.
+
+## 8. Round 2.1 (after the outside review of round 2)
+**The review:** `REVIEW-add-check-code-r2-chatgpt.md` (source only), CHANGES
+REQUESTED. It found R1, R3, R4, R5 and N1 fixed, and round 2's autosave fix
+flawed. Round 2 had reached DEV as `1df266e1`; round 2.1 supersedes it, and
+the host still waits for DEV acceptance.
+
+| # | Finding | Reproduced by Claude at `302654c8` | Fix in `d56444c0` |
+|---|---|---|---|
+| M1 | **A flush could wait forever.** Round 2 returned each save's follow-up from the promise the flush awaited, so saves that kept failing while save requests kept arriving held the flush, and its bounded retry never ran | On the real coordinator (failing read-back of 20 ms, periodic every 5 ms): **still pending after 1.5 s and 73 save attempts**. The production timings (a 60 s periodic) make it unlikely, not impossible | `entry.current` is one save; its single follow-up is scheduled separately, never during a flush; periodic and debounced saves stand back while a flush runs; the flush waits for the one save in flight, then makes at most two of its own |
+| — | **Found by Claude while reproducing M1: `stop()` while a flush waited made the process spin.** Round 2's `while (entry.inFlight) await entry.inFlight` kept awaiting an already-settled promise, blocking the event loop | The test file hung until `timeout` killed it | The loop is gone (above) |
+| S1 | **A save stopped mid-way could still write, and clear a new entry's `dirty`** (same world, same generation number). The registry awaits the flush before `stop()`, so the normal path was safe | Reproduced with the coordinator: the stopped save wrote, and the new entry's edit was then never saved | A save checks its entry is still the world's before writing or changing any state |
+| N1 | The first race test waited fixed times | — | It waits for the saved result, with a 3 s limit |
+| N2 | The read-back log's once-only flag reset before the write succeeded | — | It resets only after a successful write |
+
+**Not changed:** the review's note on R4 (a material's four
+`baseColorFactor` numbers are read in the shape pass, before a later
+primitive's keys). It's bounded work, and the review doesn't count it as a
+blocker. A4's material check stays in the shape pass.
+
+**Proof:** three new tests in `autosave.test.js`. On `302654c8` the M1 test
+fails and then the file hangs; the S1 test fails (the stopped save wrote); the
+stop-during-flush test hangs (exit 124 under `timeout 30`). On `d56444c0`,
+16/16.
+
+**Suites at `d56444c0`:** every suite again, each server file alone under `timeout 180`: **3,864 tests, 0 fail, 0 skipped**, all 52 server files exit 0 (round 2's 3,861 plus the three new tests). Claude's probes of M1 and S1 on the real coordinator: the flush finishes (about 55 ms, 3 attempts), and the stopped save writes nothing.
+
+**Release path:** a short outside follow-up review
+(`OUTSIDE-REVIEW-PROMPT-add-check-code-r2.1.md`), then the host's
+`atrium-deploy-gate "dev d56444c0fec6e9c5c9aeff811a2c7abd93cacfe8"`, then
+DEV acceptance as §6 says.
