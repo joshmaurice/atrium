@@ -624,7 +624,8 @@ after(async () => {
 
 test('A10: a document that will not read back is not saved; the previous row is kept', async () => {
   const httpServer = createServer()
-  httpServer.listen(9016)
+  // Round 2 N1: port 0 (the OS picks), as new tests should.
+  httpServer.listen(0)
   const registry = createWorldRegistry({ httpServer, db })
 
   const tempWorld = await createWorld(FIXTURE_PATH)
@@ -682,5 +683,92 @@ test('A10: a document that will not read back is not saved; the previous row is 
     registry.close()
     httpServer.close()
     worldStore.deleteWorld(db.database, w.id, userId)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Round 2 R2 — an edit made while a save is in flight is never lost
+// (REVISION-add-check-round-2.md; outside code review M2). The read-back seam
+// holds the first save open, so the timing is deterministic. On 53764b76 (and
+// on 8fc82bb5, with the serialize await as the window) the edit was lost.
+// ---------------------------------------------------------------------------
+
+/** A read-back that holds its FIRST call open until `release()`; `entered` resolves when it's held. */
+function heldReadBack() {
+  let release, entered
+  const gate = new Promise((r) => { release = r })
+  const reached = new Promise((r) => { entered = r })
+  let first = true
+  return {
+    readBackProblem: async () => { if (first) { first = false; entered(); await gate } return null },
+    release: () => release(),
+    entered: reached,
+  }
+}
+
+async function raceWorld(slug) {
+  const httpServer = createServer()
+  httpServer.listen(0)
+  const registry = createWorldRegistry({ httpServer, db })
+  const tempWorld = await createWorld(FIXTURE_PATH)
+  const w = worldStore.createWorld(db.database, {
+    slug, name: slug, document: JSON.stringify(await tempWorld.serialize({ excludeNodes: [] })),
+  }, userId)
+  const row = db.database.prepare('SELECT * FROM worlds WHERE id = ?').get(w.id)
+  const host = await registry.registerWorldFromDocument(row)
+  const nodeName = host.world.listNodeNames()[0]
+  const savedTranslation = () => {
+    const doc = JSON.parse(db.database.prepare('SELECT document FROM worlds WHERE id = ?').get(w.id).document)
+    return doc.nodes.find((n) => n.name === nodeName)?.translation ?? null
+  }
+  const cleanup = () => { registry.close(); httpServer.close(); worldStore.deleteWorld(db.database, w.id, userId) }
+  return { w, host, nodeName, savedTranslation, cleanup }
+}
+
+test('R2: an edit made during a save\'s read-back is saved by a later save', async () => {
+  const { w, host, nodeName, savedTranslation, cleanup } = await raceWorld('race-debounce')
+  const held = heldReadBack()
+  const coordinator = createAutoSaveCoordinator({ db, debounceMs: 20, periodicMs: 60000, readBackProblem: held.readBackProblem })
+  try {
+    host.world.setField(nodeName, 'translation', [1, 2, 3])
+    coordinator.markDirty(w.id, host)
+    await held.entered                                   // save 1 holds [1, 2, 3] in its read-back
+    host.world.setField(nodeName, 'translation', [4, 5, 6])
+    coordinator.markDirty(w.id, host)                    // the edit during the save
+    await new Promise((r) => setTimeout(r, 80))          // its debounce fires while save 1 is in flight
+    held.release()
+    await new Promise((r) => setTimeout(r, 150))         // save 1 writes; the edit's save follows it
+    assert.deepEqual(savedTranslation(), [4, 5, 6], 'the edit made during the save was saved')
+  } finally {
+    coordinator.close()
+    cleanup()
+  }
+})
+
+test('R2: flushAndTeardown during a save waits for it, then saves the edit made meanwhile', async () => {
+  const { w, host, nodeName, savedTranslation, cleanup } = await raceWorld('race-flush')
+  const held = heldReadBack()
+  const coordinator = createAutoSaveCoordinator({ db, debounceMs: 20, periodicMs: 60000, readBackProblem: held.readBackProblem })
+  const lines = []
+  const originalError = console.error
+  const originalWarn = console.warn
+  console.error = (...args) => { lines.push(args.join(' ')) }
+  console.warn = (...args) => { lines.push(args.join(' ')) }
+  try {
+    host.world.setField(nodeName, 'translation', [1, 2, 3])
+    coordinator.markDirty(w.id, host)
+    await held.entered
+    host.world.setField(nodeName, 'translation', [7, 8, 9])
+    coordinator.markDirty(w.id, host)
+    const flushing = coordinator.flushAndTeardown(w.id, host)   // the owner leaves mid-save
+    held.release()
+    await flushing
+    assert.deepEqual(savedTranslation(), [7, 8, 9], 'the flush saved the edit made during the save')
+    assert.equal(lines.filter((l) => l.includes('CRITICAL')).length, 0, lines.join(' | '))
+  } finally {
+    coordinator.close()
+    console.error = originalError
+    console.warn = originalWarn
+    cleanup()
   }
 })

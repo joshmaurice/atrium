@@ -63,14 +63,36 @@ export function createAutoSaveCoordinator(opts = {}) {
   // -------------------------------------------------------------------------
   // Internal: perform the save operation
   // -------------------------------------------------------------------------
-  async function doSave(worldId, host) {
+  // Round 2 R2 (REVISION-add-check-round-2.md): a save never loses an edit made
+  // while it runs. `markDirty` bumps `entry.gen`; a save clears `dirty` only if
+  // no edit came in after it began; a save asked for while one is in flight
+  // runs as soon as that one finishes (it was dropped before); and the flushes
+  // wait for a save in flight (`entry.inFlight`) before saving.
+  function doSave(worldId, host) {
     const entry = worlds.get(worldId)
-    if (!entry || entry.saving) return
+    if (!entry) return Promise.resolve()
+    if (entry.saving) {
+      entry.again = true
+      return entry.inFlight
+    }
+    entry.inFlight = runSave(worldId, host, entry).finally(() => {
+      if (worlds.get(worldId) !== entry) return
+      entry.inFlight = null
+      if (entry.again) {
+        entry.again = false
+        if (entry.dirty) return doSave(worldId, host)
+      }
+    })
+    return entry.inFlight
+  }
+
+  async function runSave(worldId, host, entry) {
     if (!host || host.ownerUserId === null) return
     if (host.mutationPolicy === 'read-only') return
     if (!host.world || !db) return
 
     entry.saving = true
+    const gen = entry.gen
 
     // L11/K9 — exclude, by IDENTITY, the node each session's accepted avatar
     // `add` created. These nodes are ephemeral and must not appear in persisted
@@ -108,10 +130,11 @@ export function createAutoSaveCoordinator(opts = {}) {
       )
 
       if (result.ok) {
-        const entry = worlds.get(worldId)
-        if (entry) {
-          entry.dirty = false
-          entry.saving = false
+        const e = worlds.get(worldId)
+        if (e) {
+          // Round 2 R2: an edit made during this save keeps the world dirty.
+          if (e.gen === gen) e.dirty = false
+          e.saving = false
         }
       } else if (result.code === 'NOT_FOUND') {
         // The world row was deleted while it was still live — stop tracking
@@ -147,7 +170,7 @@ export function createAutoSaveCoordinator(opts = {}) {
       }, periodicMs)
       if (periodicInterval.unref) periodicInterval.unref()
 
-      entry = { debounceTimer: null, periodicInterval, dirty: false, saving: false, readBackLogged: false }
+      entry = { debounceTimer: null, periodicInterval, dirty: false, saving: false, readBackLogged: false, gen: 0, again: false, inFlight: null }
       worlds.set(worldId, entry)
     }
 
@@ -162,6 +185,7 @@ export function createAutoSaveCoordinator(opts = {}) {
     if (entry.debounceTimer.unref) entry.debounceTimer.unref()
 
     entry.dirty = true
+    entry.gen++
   }
 
   // -------------------------------------------------------------------------
@@ -182,7 +206,10 @@ export function createAutoSaveCoordinator(opts = {}) {
   // -------------------------------------------------------------------------
   async function flushAndTeardown(worldId, host) {
     const entry = worlds.get(worldId)
-    if (!entry || !entry.dirty) return
+    if (!entry) return
+    // Round 2 R2: let a save in flight finish first; it may leave the world dirty.
+    while (entry.inFlight) await entry.inFlight
+    if (!entry.dirty) return
 
     // Cancel the debounce timer so it doesn't fire after the flush
     if (entry.debounceTimer) {
@@ -215,7 +242,10 @@ export function createAutoSaveCoordinator(opts = {}) {
   // -------------------------------------------------------------------------
   async function flushWorld(worldId, host) {
     const entry = worlds.get(worldId)
-    if (!entry || !entry.dirty) return
+    if (!entry) return
+    // Round 2 R2: let a save in flight finish first; it may leave the world dirty.
+    while (entry.inFlight) await entry.inFlight
+    if (!entry.dirty) return
 
     if (entry.debounceTimer) {
       clearTimeout(entry.debounceTimer)
