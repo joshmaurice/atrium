@@ -187,6 +187,31 @@ export function addSetsAtriumSource(node) {
  * @param {{extras?: object}} node
  * @returns {boolean}
  */
+/**
+ * richer-add R6 — the text a stale tab's refused `add` or `remove` carries.
+ * It never contains "already in use", which the palette retries on.
+ */
+export const STALE_CLIENT_MESSAGE = 'this page is older than the server: reload it to keep editing'
+
+/**
+ * richer-add R6 — is this session an unreloaded first-party tab? Every app tab
+ * since 4b-2 sends `scriptRunner` on every connection that can edit, and a
+ * richer-add tab sends `addFields` (2 or more) beside it. A session with
+ * `scriptRunner` and no such `addFields` runs an older `ingestNode`, which drops
+ * the richer fields, so its Undo would restore a poorer copy. A session with
+ * neither capability (tests, the protocol inspector, a cross-origin client in
+ * an open world) is not judged here.
+ *
+ * @param {object|null|undefined} capabilities  the session's `hello` capabilities
+ * @returns {boolean}
+ */
+export function isStaleEditor(capabilities) {
+  if (capabilities == null || typeof capabilities !== 'object') return false
+  if (capabilities.scriptRunner === undefined) return false
+  const level = capabilities.addFields
+  return !(Number.isInteger(level) && level >= 2)
+}
+
 export function addCarriesAtriumExtras(node) {
   const extras = node?.extras
   if (!isNonNullObject(extras)) return false
@@ -1284,6 +1309,14 @@ export function attachSessionHandlers({
               break
             }
 
+            // --- richer-add R6: an unreloaded tab may not add (its Undo would
+            // restore a poorer copy). Avatar adds are never refused for it, so a
+            // stale tab still joins and is still seen.
+            if (!isAvatar && isStaleEditor(session.capabilities)) {
+              sendError(ws, msg.seq, 'INVALID_VALUE', STALE_CLIENT_MESSAGE)
+              break
+            }
+
             // --- A4/A5 (non-avatar adds only) ---
             // The parent must not be, or descend from, a live avatar or an
             // externally loaded node, and the new name must pass the D3 rules.
@@ -1494,6 +1527,14 @@ export function attachSessionHandlers({
             // --- MUTATION GATE: only owner may remove nodes ---
             if (!isMutator(session, false)) {
               sendError(ws, msg.seq, 'PERMISSION_DENIED', 'Only the owner may mutate nodes in this world')
+              break
+            }
+
+            // --- richer-add R6 (review M1): nor remove. A stale tab's Delete of
+            // a restorable object asks nothing, and R6 would refuse its Undo, so
+            // an accepted remove would be permanent.
+            if (isStaleEditor(session.capabilities)) {
+              sendError(ws, msg.seq, 'INVALID_VALUE', STALE_CLIENT_MESSAGE)
               break
             }
 

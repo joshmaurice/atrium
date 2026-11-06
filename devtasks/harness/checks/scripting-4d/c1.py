@@ -50,7 +50,7 @@ with sync_playwright() as pw:
     a = owner_tab(octx, 'A', first=True)
     W = new_world(a, 'c1'); slug = W.rsplit('/', 1)[1]; print('A connected', a.connect(W))
     v = Tab(vctx, 'V'); print('V connected', v.connect(W)); a.page.wait_for_timeout(800)
-    check('A is the host with scriptRunner 3', a.ev(HOST)['active'] is True and hello(a) == {'tick': {'interval': 5000}, 'scriptRunner': 3}, (a.ev(HOST), hello(a)))
+    check('A is the host with scriptRunner 3', a.ev(HOST)['active'] is True and hello(a) == {'tick': {'interval': 5000}, 'scriptRunner': 3, 'addFields': 2}, (a.ev(HOST), hello(a)))
 
     a.edit_on(); x = add_cube(a); y = add_cube(a)
     a.ev(MOVE, {'name': x, 't': [-1, 0.5, -2]}); a.ev(MOVE, {'name': y, 't': [-2.5, 0.5, -2]}); a.page.wait_for_timeout(500)

@@ -19,7 +19,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { Document, WebIO } from '@gltf-transform/core'
 import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions'
 import { createWorld, createWorldFromDocument } from '../src/world.js'
-import { attachSessionHandlers } from '../src/session.js'
+import { attachSessionHandlers, isStaleEditor, STALE_CLIENT_MESSAGE } from '../src/session.js'
 import { SOMDocument } from '../../som/src/SOMDocument.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -389,3 +389,92 @@ test('R2: an avatar add with any richer field is refused with avatar-fields, bro
     witness.ws.close()
   }
 })
+
+// ---------------------------------------------------------------------------
+// R6 — the version-skew check
+// ---------------------------------------------------------------------------
+
+const STALE = { tick: { interval: 5000 }, scriptRunner: 3 }
+const CURRENT = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 2 }
+
+test('R6: isStaleEditor is exactly scriptRunner without addFields of 2 or more', () => {
+  assert.equal(isStaleEditor(STALE), true)
+  assert.equal(isStaleEditor({ scriptRunner: 2 }), true, 'a 4c tab')
+  assert.equal(isStaleEditor({ scriptRunner: 1, addFields: 1 }), true, 'a field set older than 2')
+  assert.equal(isStaleEditor(CURRENT), false)
+  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 3 }), false, 'a later page')
+  assert.equal(isStaleEditor({ tick: { interval: 5000 } }), false, 'neither capability: tests, the inspector')
+  assert.equal(isStaleEditor({}), false)
+  assert.equal(isStaleEditor(undefined), false)
+  assert.equal(STALE_CLIENT_MESSAGE.includes('already in use'), false, 'the palette retries on that phrase')
+})
+
+test('R6: a stale session\u2019s world add and remove are refused with the reload text; its avatar add is accepted', async () => {
+  const { world, port } = await startOwnerWorld()
+  const witness = await visitor(port, 'witness-r6')
+  const { ws, messages } = await connect(port)
+  try {
+    const reply = await hello(ws, messages, 'stale-a', STALE)
+    // the world add
+    ws.send(JSON.stringify({ type: 'add', seq: 3, node: { name: 'cube-stale', mesh: { primitives: [{ attributes: { POSITION: pos3 } }] } } }))
+    const err = await waitFor(messages, (m) => m.type === 'error' && m.seq === 3)
+    assert.ok(err, 'refused'); assert.equal(err.code, 'INVALID_VALUE'); assert.equal(err.message, STALE_CLIENT_MESSAGE)
+    assert.equal(world.som.getNodeByName('cube-stale'), null, 'nothing changed')
+    // the remove of an object that exists (the review's M1)
+    assert.ok(world.som.getNodeByName('crate-01'), 'the fixture has crate-01')
+    ws.send(JSON.stringify({ type: 'remove', seq: 4, node: 'crate-01' }))
+    const rerr = await waitFor(messages, (m) => m.type === 'error' && m.seq === 4)
+    assert.ok(rerr, 'the remove is refused'); assert.equal(rerr.message, STALE_CLIENT_MESSAGE)
+    assert.ok(world.som.getNodeByName('crate-01'), 'the object stays')
+    // its own avatar is still accepted, so a stale tab still joins and is seen
+    ws.send(JSON.stringify(avatarAddMessage('stale-a', reply.avatarNodeName, { mesh: { primitives: [{ attributes: { POSITION: pos3 } }] } })))
+    assert.ok(await waitFor(witness.messages, (m) => m.type === 'add' && m.node?.name === reply.avatarNodeName), 'its avatar add is broadcast')
+    await delay(100)
+    assert.equal(witness.messages.filter((m) => m.type === 'add' && m.node?.name === 'cube-stale').length, 0, 'the world add was broadcast to no one')
+    assert.equal(witness.messages.filter((m) => m.type === 'remove' && m.node === 'crate-01').length, 0, 'nor the remove')
+    // a later joiner still has the object
+    const doc = await readDump(await joinAndReadDump(port, 'joiner-r6'))
+    assert.ok(nodeIn(doc, 'crate-01'), 'crate-01 is in the next joiner\u2019s som-dump')
+  } finally {
+    ws.close(); witness.ws.close()
+  }
+})
+
+test('R6 (review M1): a stale tab\u2019s Delete then Undo leaves the object where it was', async () => {
+  const { world, port } = await startOwnerWorld()
+  const { ws, messages } = await connect(port)
+  try {
+    await hello(ws, messages, 'stale-b', STALE)
+    const before = world.som.getNodeByName('crate-01')
+    ws.send(JSON.stringify({ type: 'remove', seq: 5, node: 'crate-01' }))          // the Delete
+    assert.equal((await waitFor(messages, (m) => m.type === 'error' && m.seq === 5))?.message, STALE_CLIENT_MESSAGE)
+    ws.send(JSON.stringify({ type: 'add', seq: 6, node: { name: 'crate-01', mesh: { primitives: [{ attributes: { POSITION: pos3 } }] } } }))   // what its Undo would send
+    assert.equal((await waitFor(messages, (m) => m.type === 'error' && m.seq === 6))?.message, STALE_CLIENT_MESSAGE)
+    assert.equal(world.som.getNodeByName('crate-01'), before, 'the same object is still there')
+  } finally {
+    ws.close()
+  }
+})
+
+test('R6: a current session (addFields 2 or 3) and a session with neither capability add and remove as before', async () => {
+  const { world, port } = await startOwnerWorld()
+  const caps = [['current', CURRENT], ['later', { ...CURRENT, addFields: 3 }], ['neither', { tick: { interval: 5000 } }]]
+  let seq = 20
+  for (const [label, capabilities] of caps) {
+    const { ws, messages } = await connect(port)
+    try {
+      await hello(ws, messages, `ok-${label}`, capabilities)
+      const name = `cube-${label}`
+      ws.send(JSON.stringify({ type: 'add', seq: ++seq, node: { name, mesh: { primitives: [{ attributes: { POSITION: pos3 } }] } } }))
+      const addSeq = seq
+      assert.ok(await waitFor(messages, (m) => m.type === 'add' && m.requestSeq === addSeq), `${label}: the add is accepted`)
+      ws.send(JSON.stringify({ type: 'remove', seq: ++seq, node: name }))
+      const removeSeq = seq
+      assert.ok(await waitFor(messages, (m) => m.type === 'remove' && m.requestSeq === removeSeq), `${label}: the remove is accepted`)
+      assert.equal(world.som.getNodeByName(name), null)
+    } finally {
+      ws.close()
+    }
+  }
+})
+

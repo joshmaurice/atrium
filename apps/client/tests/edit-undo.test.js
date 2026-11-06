@@ -913,6 +913,20 @@ describe('edit-undo: undo’s own structural requests (Y4)', () => {
     assert.equal(app.messages.at(-1), "Couldn’t undo: this world's behaviours would exceed 1 MiB")
   })
 
+  test('(richer-add R6) a stale tab’s Delete refused with the reload text records nothing', () => {
+    // richer-add R6 (review M1) — the server refuses an unreloaded tab's
+    // `remove` as well as its `add`, so its Delete can't become permanent. The
+    // engine records nothing for a refused delete: no entry to undo, nothing
+    // to redo, and the node was never removed.
+    const app = makeApp()
+    const a = app.put(somNode('Pad'))
+    const del = app.clickDelete(a)
+    assert.equal(del.restorable, true, 'a restorable node: the click asks nothing (N2/W6)')
+    app.answer(del.seq, 'rejected', 'this page is older than the server: reload it to keep editing')
+    assert.equal(app.undo.undoCount, 0, 'nothing to undo')
+    assert.equal(app.undo.redoCount, 0)
+  })
+
   test('a re-add after an undo of a delete selects the new node (W10, R5)', () => {
     const app = makeApp()
     const a = app.put(somNode('Pad'))

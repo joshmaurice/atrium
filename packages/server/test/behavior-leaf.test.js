@@ -324,7 +324,8 @@ async function hello(ws, messages, id) {
   // scripting-4d G-L9 — a 4c page sends `scriptRunner: 2` and, since step 4,
   // is NEVER the host (the election requires 3). These tests only send edits
   // on the owner's own connection, so no session here needs the role.
-  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
+  // richer-add R6 — a current tab carries addFields beside scriptRunner.
+  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2, addFields: 2 } }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
   return reply

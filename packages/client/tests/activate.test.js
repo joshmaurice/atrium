@@ -138,6 +138,20 @@ test('AC4/G5: the hello carries scriptRunner: 3 only when asked, and NO key othe
   assert.equal(helloOff.capabilities.tick.interval, 5000, 'the rest of the capabilities are unchanged')
 })
 
+test('richer-add R6: the hello carries addFields: 2 exactly when it carries scriptRunner', () => {
+  const on = makeClient({ scriptRunner: true })
+  on.mock._fire('open')
+  const helloOn = on.mock.of('hello')[0]
+  assert.equal(helloOn.capabilities.addFields, 2, 'beside scriptRunner')
+  assert.deepEqual(Object.keys(helloOn.capabilities).sort(), ['addFields', 'scriptRunner', 'tick'])
+  assert.equal(validate('client', helloOn).valid, true)
+
+  const off = makeClient()
+  off.mock._fire('open')
+  const helloOff = off.mock.of('hello')[0]
+  assert.equal('addFields' in helloOff.capabilities, false, 'never without scriptRunner: an older server refuses an unknown capability')
+})
+
 test('AC4/S1: activate sends nothing before session:ready', async () => {
   const { client, mock } = makeClient()
   assert.equal(client.activate('Switch'), null, 'not connected: null, nothing sent')

@@ -79,7 +79,8 @@ function waitForClose(ws) {
   return new Promise((res) => { if (ws.readyState === WebSocket.CLOSED) return res(); ws.once('close', res) })
 }
 
-async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3 }) {
+// richer-add R6 — the first-party app's hello carries addFields beside scriptRunner.
+async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 2 }) {
   ws.send(JSON.stringify({ type: 'hello', id, capabilities }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'the hello reply arrives')

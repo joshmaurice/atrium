@@ -753,8 +753,17 @@ export class AtriumClient extends EventEmitter {
       // server accepts: a pre-4b-2 server refuses any `scriptRunner` it does not
       // know, and PROD ran one. Nothing is lost — a cross-origin connection is
       // always anonymous (signin-sync I1), so it could never be the host anyway.
+      //
+      // richer-add R6 — `addFields: 2` rides exactly where `scriptRunner` does:
+      // it names the `add` field set this client keeps (2 = richer-add's). A
+      // server refuses a world `add` or a `remove` from a session that sends
+      // `scriptRunner` without it (an unreloaded tab), and an older server
+      // refuses any capability it doesn't know, hence the same condition.
       const capabilities = { tick: { interval: 5000 } }
-      if (scriptRunner) capabilities.scriptRunner = 3
+      if (scriptRunner) {
+        capabilities.scriptRunner = 3
+        capabilities.addFields = 2
+      }
       const helloMsg = {
         type: 'hello',
         id:   sessionId,
