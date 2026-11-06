@@ -167,27 +167,6 @@ export function addSetsAtriumSource(node) {
 }
 
 /**
- * K4/L5 — true if an avatar `add` descriptor carries an `extras.atrium` that
- * must be refused.
- *
- * The pre-brief says a first-party avatar descriptor "carries only
- * `extras.displayName` (`buildAvatarDescriptor`, `AtriumClient.connect`)".
- * That is true of `buildAvatarDescriptor` (renderer-three) but NOT of what the
- * client actually sends: `AtriumClient.connect` (~L359) injects
- * `extras.atrium.ephemeral = true` into every avatar descriptor before the
- * `add` goes out (apps/client's pointer handlers read that marker to skip
- * avatars). Refusing *any* own `extras.atrium` would therefore refuse every
- * real avatar add and break the pipeline.
- *
- * So the refusal is: any own `extras.atrium` is refused EXCEPT the exact
- * first-party marker `{ ephemeral: true }` and nothing else. That still refuses
- * `{}`, `{ behavior }`, `{ teleporter }` and every other key, exactly as the
- * K4 table and §7.1's K4 rows require.
- *
- * @param {{extras?: object}} node
- * @returns {boolean}
- */
-/**
  * richer-add R6 — the text a stale tab's refused `add` or `remove` carries.
  * It never contains "already in use", which the palette retries on.
  */
@@ -212,6 +191,27 @@ export function isStaleEditor(capabilities) {
   return !(Number.isInteger(level) && level >= 2)
 }
 
+/**
+ * K4/L5 — true if an avatar `add` descriptor carries an `extras.atrium` that
+ * must be refused.
+ *
+ * The pre-brief says a first-party avatar descriptor "carries only
+ * `extras.displayName` (`buildAvatarDescriptor`, `AtriumClient.connect`)".
+ * That is true of `buildAvatarDescriptor` (renderer-three) but NOT of what the
+ * client actually sends: `AtriumClient.connect` (~L359) injects
+ * `extras.atrium.ephemeral = true` into every avatar descriptor before the
+ * `add` goes out (apps/client's pointer handlers read that marker to skip
+ * avatars). Refusing *any* own `extras.atrium` would therefore refuse every
+ * real avatar add and break the pipeline.
+ *
+ * So the refusal is: any own `extras.atrium` is refused EXCEPT the exact
+ * first-party marker `{ ephemeral: true }` and nothing else. That still refuses
+ * `{}`, `{ behavior }`, `{ teleporter }` and every other key, exactly as the
+ * K4 table and §7.1's K4 rows require.
+ *
+ * @param {{extras?: object}} node
+ * @returns {boolean}
+ */
 export function addCarriesAtriumExtras(node) {
   const extras = node?.extras
   if (!isNonNullObject(extras)) return false

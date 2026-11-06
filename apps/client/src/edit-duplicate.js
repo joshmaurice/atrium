@@ -27,6 +27,8 @@ import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
  *   mesh and material; `prepareRestore` says so (`sharedMaterial`), and the
  *   Undo button's title tells the owner;
  * - an index's storage type: the same values come back as unsigned short.
+ * - accessor SHARING between primitives: each primitive's copy gets its own
+ *   accessors (the same values; nothing in Atrium sees or edits the sharing).
  * Not exceptions (a save keeps none of them either): a cutoff outside MASK, and
  * a vector factor within 1e-5 of its default (the writer's own tolerance).
  *

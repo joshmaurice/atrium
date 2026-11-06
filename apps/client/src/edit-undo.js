@@ -334,6 +334,10 @@ export function createEditUndo({
       sharedMaterial: cap.ok && cap.sharedMaterial,
       failed: !cap.ok,
     }
+    // richer-add R8 — the entry's note follows the object as it is NOW: after a
+    // Delete and an Undo the restored object shares nothing, so its next
+    // Undo-of-delete has no note (the entry's descriptor follows R4's re-capture)
+    if (cap.ok) entry.sharedMaterial = cap.sharedMaterial
   }
 
   /** A `som:set`, `som:rename` or `som:add` while a delete is pending (Y2). */

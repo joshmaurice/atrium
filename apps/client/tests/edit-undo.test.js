@@ -19,7 +19,8 @@ import { prepareRestore } from '../src/edit-duplicate.js'
 import { sanitizeTransform } from '../src/edit-gesture.js'
 import { fileURLToPath } from 'node:url'
 // richer-add R8 — a real fixture node, through glTF-Transform's ES module build
-const { NodeIO } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
+const { NodeIO, Document } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
+const { SOMDocument } = await import('../../../packages/som/src/SOMDocument.js')
 const ATRIUM_GLTF = fileURLToPath(new URL('../../../tests/fixtures/atrium.gltf', import.meta.url))
 
 // ── a stand-in SOM world ────────────────────────────────────────────────────
@@ -1049,7 +1050,20 @@ describe('edit-undo: richer-add R8, the shared-material note (RA-L3 (a))', () =>
   async function realNode(name) {
     const doc = await new NodeIO().read(ATRIUM_GLTF)
     const gltf = doc.getRoot().listNodes().find((n) => n.getName() === name)
+    return { ...wrap(name, gltf), _doc: doc }
+  }
+  /** A SOM-like wrapper over a glTF-Transform node. */
+  function wrap(name, gltf) {
     return { name, translation: [...gltf.getTranslation()], rotation: [...gltf.getRotation()], scale: [...gltf.getScale()], children: [], extras: {}, _node: gltf }
+  }
+  /** A descriptor through the REAL ingestNode, in a fresh world's scene. */
+  function ingestReal(descriptor) {
+    const doc = new Document()
+    const scene = doc.createScene()
+    new SOMDocument(doc).ingestNode(descriptor)
+    const node = doc.getRoot().listNodes().find((n) => n.getName() === descriptor.name)
+    scene.addChild(node)
+    return node
   }
 
   test('undoing the delete of an object whose material is shared says it comes back with its own', async () => {
@@ -1071,6 +1085,32 @@ describe('edit-undo: richer-add R8, the shared-material note (RA-L3 (a))', () =>
     app.undo.run('undo')
     app.answer(app.sent.at(-1).seq, 'accepted')
     assert.equal(app.undo.label('redo'), 'Redo Delete “FloorAccent”', 'no note on Redo')
+  })
+
+  test('after Delete, Undo, Redo the note is gone: the restored object shares nothing', async () => {
+    const app = makeApp()
+    const accent = app.put(await realNode('FloorAccent'))
+    const descriptor = prepareRestore(accent._node).descriptor
+    app.answer(app.clickDelete(accent).seq, 'accepted')
+    app.undo.run('undo')
+    // the server's re-add, through the real ingestNode: a node with its own material
+    const readded = app.adds().at(-1).node
+    readded._node = ingestReal(descriptor)
+    app.answer(app.sent.at(-1).seq, 'accepted')
+    app.undo.run('redo')
+    app.answer(app.deletes().at(-1).seq, 'accepted')
+    assert.equal(app.undo.label('undo'), 'Undo Delete “FloorAccent”', 'no note: nothing is shared now')
+  })
+
+  test('a re-capture during a pending delete updates the note', async () => {
+    const app = makeApp()
+    const floor = app.put(await realNode('Floor'))
+    const del = app.clickDelete(floor)
+    // a remote change during the window: another node now uses Floor's mesh
+    floor._doc.createNode('Twin').setMesh(floor._node.getMesh())
+    app.undo.reCapture()
+    app.answer(del.seq, 'accepted')
+    assert.equal(app.undo.label('undo'), `Undo Delete “Floor” ${SHARED_MATERIAL_NOTE}`)
   })
 })
 

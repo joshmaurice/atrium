@@ -100,6 +100,10 @@ for (const [copy, check] of COPIES) {
       const node = { name: 'a', mesh: { primitives: [first, { attributes: { ...ok.attributes, COLOR_0: [1, 0, 0, 1, 0] } }] } }
       assert.equal(check(node).code, 'color-length')
     })
+    test('richer-add: a TEXCOORD_1 length is refused without reading it, TEXCOORD_0 or POSITION', () => {
+      const node = { name: 'a', mesh: mesh({ attributes: { POSITION: untouchable(3000), TEXCOORD_0: untouchable(2000), TEXCOORD_1: untouchable(1999) } }) }
+      assert.equal(check(node).code, 'texcoord-length')
+    })
     test('richer-add: a TEXCOORD_0 length is refused without reading it or POSITION', () => {
       const node = { name: 'a', mesh: mesh({ attributes: { POSITION: untouchable(3000), TEXCOORD_0: untouchable(1999) } }) }
       assert.equal(check(node).code, 'texcoord-length')
