@@ -150,6 +150,27 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
      CP-L1–CP-L7. The defect is wider than Rev 0.1 said: it includes a world
      that saves but can't be loaded, and a single message that stalls the
      server. See its §9.
+   - **Then:** the operator ran `p6` on PROD (23 worlds, none unreadable,
+     nothing saved that the check would refuse), decided RA-L1, L4, L5, L7
+     and L8 (a), and `add-check` was split out as
+     **`PREBRIEF-add-check.md` FINAL Rev 1.1** (base `25f6b083`), with
+     **`KICKOFF-add-check.md`** ready for the front door. The combined
+     pre-brief stays a draft for `richer-add` and `copy-objects`.
+   - **`p6` rerun at `6980e24` (operator, 2026-11-05 14:26 PT), with the
+     Rev 1.1 counters:** 23 worlds, none unreadable; **nothing saved that
+     `add-check` or the new `send` ranges would refuse**, including the cases
+     the first run didn't check (`PREBRIEF-add-check.md` §2.6). The spec's §6
+     rerun before the PROD deploy still applies, in case worlds change.
+   - **Round 1** (`53764b76`, GLM-implemented, GLM review PASS) reached DEV as
+     `14c7adcf`. Its outside code review (`REVIEW-add-check-code-r1-chatgpt.md`)
+     found a `__proto__` bypass of the extras budget and an autosave race that
+     loses an edit made during a save (older than this round). **Round 2**
+     (`REVISION-add-check-round-2.md`, fast lane by Claude, operator's choice)
+     fixes them on `claude/add-check-r2` at `302654c8` (on DEV as `1df266e1`).
+     Its outside review found round 2's autosave fix flawed (a flush that
+     could wait forever); **round 2.1, `d56444c0`, fixes it** (REVISION §8).
+     It needs a short follow-up review, then a DEV deploy from the host. A hidden host tab stopping
+     behaviours is recorded there as a follow-up.
 2. **The Behaviour panel shows only "Custom graph"** for an imported graph:
    no file name (none is stored) and no targets, though they are stored.
    UH-L2 put the targets display in the copy round. The file name needs a
