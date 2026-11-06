@@ -37,10 +37,11 @@
         "extensions": { "type": "object" },
         "mesh": {
           "type": "object",
-          "description": "glTF mesh descriptor with primitives including geometry and material (add-check A3/A4)",
+          "description": "glTF mesh descriptor with primitives including geometry and material (add-check A3/A4; richer-add R1/R5: the value rules are checkAddNode's)",
           "additionalProperties": false,
           "properties": {
             "name": { "type": "string", "maxLength": 256 },
+            "extras": { "type": "object" },
             "primitives": {
               "type": "array",
               "minItems": 1,
@@ -50,6 +51,7 @@
                 "additionalProperties": false,
                 "required": ["attributes"],
                 "properties": {
+                  "extras": { "type": "object" },
                   "attributes": {
                     "type": "object",
                     "additionalProperties": false,
@@ -63,6 +65,18 @@
                       "NORMAL": {
                         "type": "array",
                         "items": { "type": "number" }
+                      },
+                      "TEXCOORD_0": {
+                        "type": "array",
+                        "items": { "type": "number" }
+                      },
+                      "TEXCOORD_1": {
+                        "type": "array",
+                        "items": { "type": "number" }
+                      },
+                      "COLOR_0": {
+                        "type": "array",
+                        "items": { "type": "number" }
                       }
                     }
                   },
@@ -74,6 +88,17 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                      "name": { "type": "string", "maxLength": 256 },
+                      "extras": { "type": "object" },
+                      "emissiveFactor": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "minItems": 3,
+                        "maxItems": 3
+                      },
+                      "alphaMode": { "enum": ["OPAQUE", "MASK", "BLEND"] },
+                      "alphaCutoff": { "type": "number", "minimum": 0 },
+                      "doubleSided": { "type": "boolean" },
                       "pbrMetallicRoughness": {
                         "type": "object",
                         "additionalProperties": false,

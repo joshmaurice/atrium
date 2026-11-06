@@ -287,6 +287,47 @@ describe('add', () => {
     assert.equal(valid, false)
   })
 
+  // ─── richer-add R5 — the richer fields, typed where JSON Schema can say it ──
+
+  const richerNode = () => ({
+    name: 'rich-01',
+    mesh: {
+      name: 'm', extras: { lod: 0 },
+      primitives: [{
+        attributes: { POSITION: [0, 0, 0, 1, 0, 0, 0, 1, 0], TEXCOORD_0: [0, 0, 1, 0, 0, 1], TEXCOORD_1: [0, 0, 1, 0, 0, 1], COLOR_0: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+        extras: { tag: 'p' },
+        material: {
+          name: 'Marble', extras: { note: 'x' }, emissiveFactor: [1, 0, 0], alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true,
+          pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1] },
+        },
+      }],
+    },
+  })
+
+  it('richer-add R5: both directions accept every richer field', () => {
+    assert.equal(validate('client', { type: 'add', seq: 1, node: richerNode() }).valid, true)
+    assert.equal(validate('server', { type: 'add', seq: 1, node: richerNode(), requestSeq: 1, session: 's' }).valid, true)
+  })
+
+  it('richer-add R5: refuses the shapes the schema can say', () => {
+    const cases = [
+      (n) => { n.mesh.primitives[0].material.alphaMode = 'ADD' },
+      (n) => { n.mesh.primitives[0].material.doubleSided = 'yes' },
+      (n) => { n.mesh.primitives[0].material.alphaCutoff = -1 },
+      (n) => { n.mesh.primitives[0].material.emissiveFactor = [1, 0] },
+      (n) => { n.mesh.primitives[0].material.name = 'x'.repeat(257) },
+      (n) => { n.mesh.primitives[0].material.occlusionTexture = { index: 0 } },
+      (n) => { n.mesh.primitives[0].attributes.TANGENT = [0, 0, 0, 1] },
+      (n) => { n.mesh.primitives[0].attributes.COLOR_0 = ['red'] },
+      (n) => { n.mesh.primitives[0].extras = [1] },
+      (n) => { n.mesh.extras = 'x' },
+    ]
+    for (const mutate of cases) {
+      const node = richerNode(); mutate(node)
+      assert.equal(validate('client', { type: 'add', seq: 1, node }).valid, false, mutate.toString())
+    }
+  })
+
   it('add-check A8: refuses a format that is not "gltf"', () => {
     for (const format of ['glTF', 'obj', 42, 'gltf ']) {
       const { valid } = validate('client', { type: 'add', seq: 1, format, node: { name: 'cube-01' } })

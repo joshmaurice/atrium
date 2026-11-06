@@ -794,37 +794,50 @@ export class SOMDocument extends SOMObject {
 
     if (descriptor.mesh) {
       const mesh    = this._document.createMesh(descriptor.mesh.name ?? '')
+      if (descriptor.mesh.extras) mesh.setExtras(descriptor.mesh.extras)
       const somMesh = new SOMMesh(mesh, this)
       somMesh._prims = []
       this._meshMap.set(mesh, somMesh)
       somNode._mesh = somMesh
 
+      // richer-add R4 (CR-M2) — ONE buffer per ingestNode call, created on the
+      // first accessor and shared by every accessor of this call. Ingest cost
+      // grows with the document's buffer count; pruning a removed node still
+      // disposes it, since only this node's accessors use it.
+      let buf = null
+      const accessor = (type, array) => {
+        if (buf === null) buf = this._document.createBuffer()
+        return this._document.createAccessor().setType(type).setArray(array).setBuffer(buf)
+      }
+
       for (const primDesc of descriptor.mesh.primitives ?? []) {
         const prim = this._document.createPrimitive()
-        const buf  = this._document.createBuffer()
+        const attributes = primDesc.attributes
+        if (primDesc.extras) prim.setExtras(primDesc.extras)
 
-        if (Array.isArray(primDesc.attributes?.POSITION)) {
-          const acc = this._document.createAccessor()
-            .setType('VEC3')
-            .setArray(new Float32Array(primDesc.attributes.POSITION))
-            .setBuffer(buf)
-          prim.setAttribute('POSITION', acc)
+        if (Array.isArray(attributes?.POSITION)) {
+          prim.setAttribute('POSITION', accessor('VEC3', new Float32Array(attributes.POSITION)))
         }
 
-        if (Array.isArray(primDesc.attributes?.NORMAL)) {
-          const acc = this._document.createAccessor()
-            .setType('VEC3')
-            .setArray(new Float32Array(primDesc.attributes.NORMAL))
-            .setBuffer(buf)
-          prim.setAttribute('NORMAL', acc)
+        if (Array.isArray(attributes?.NORMAL)) {
+          prim.setAttribute('NORMAL', accessor('VEC3', new Float32Array(attributes.NORMAL)))
+        }
+
+        // richer-add R4 — UVs as VEC2 FLOAT; COLOR_0 as VEC3 when it holds 3
+        // values per vertex, else VEC4 (unambiguous for any vertex count >= 1).
+        for (const semantic of ['TEXCOORD_0', 'TEXCOORD_1']) {
+          if (Array.isArray(attributes?.[semantic])) {
+            prim.setAttribute(semantic, accessor('VEC2', new Float32Array(attributes[semantic])))
+          }
+        }
+        if (Array.isArray(attributes?.COLOR_0)) {
+          const vertexCount = Array.isArray(attributes.POSITION) ? attributes.POSITION.length / 3 : 0
+          const type = attributes.COLOR_0.length === 3 * vertexCount ? 'VEC3' : 'VEC4'
+          prim.setAttribute('COLOR_0', accessor(type, new Float32Array(attributes.COLOR_0)))
         }
 
         if (Array.isArray(primDesc.indices)) {
-          const acc = this._document.createAccessor()
-            .setType('SCALAR')
-            .setArray(new Uint16Array(primDesc.indices))
-            .setBuffer(buf)
-          prim.setIndices(acc)
+          prim.setIndices(accessor('SCALAR', new Uint16Array(primDesc.indices)))
         }
 
         const somPrim = new SOMPrimitive(prim, this)
@@ -832,11 +845,19 @@ export class SOMDocument extends SOMObject {
         somMesh._prims.push(somPrim)
 
         if (primDesc.material) {
-          const mat = this._document.createMaterial()
-          const pbr = primDesc.material.pbrMetallicRoughness
+          const m   = primDesc.material
+          const mat = this._document.createMaterial(m.name ?? '')
+          const pbr = m.pbrMetallicRoughness
           if (pbr?.baseColorFactor)              mat.setBaseColorFactor(pbr.baseColorFactor)
           if (pbr?.metallicFactor  !== undefined) mat.setMetallicFactor(pbr.metallicFactor)
           if (pbr?.roughnessFactor !== undefined) mat.setRoughnessFactor(pbr.roughnessFactor)
+          // richer-add R4 — the material fields, as given; an absent one keeps
+          // glTF-Transform's default.
+          if (m.extras)                     mat.setExtras(m.extras)
+          if (m.emissiveFactor)             mat.setEmissiveFactor(m.emissiveFactor)
+          if (m.alphaMode   !== undefined)  mat.setAlphaMode(m.alphaMode)
+          if (m.alphaCutoff !== undefined)  mat.setAlphaCutoff(m.alphaCutoff)
+          if (m.doubleSided !== undefined)  mat.setDoubleSided(m.doubleSided)
           const somMat = new SOMMaterial(mat)
           this._materialMap.set(mat, somMat)
           somPrim._material = somMat
