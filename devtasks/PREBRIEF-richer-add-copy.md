@@ -3,7 +3,7 @@
 Status: **DRAFT, Revision 0.4 (2026-11-05), the draft for `copy-objects`.**
 Its first two rounds now have contracts of their own: **`add-check`**,
 `PREBRIEF-add-check.md` FINAL Rev 1.1 (shipped to PROD as `cdfe88a8`, §4), and
-**`richer-add`**, `PREBRIEF-richer-add.md` DRAFT Rev 1.4 (§5), which holds
+**`richer-add`**, `PREBRIEF-richer-add.md` FINAL Rev 2 (§5), which holds
 RA-L2, RA-L3 and RA-L6. **Still open here: CP-L1–CP-L7,** each with a
 recommendation. Decided (operator, 2026-11-05): RA-L1 (a), RA-L2 (c) modified (accessor and buffer names dropped, their `extras` refused), RA-L3 (a)
 (with a revisit trigger), RA-L4 (a), RA-L5 (a), RA-L6 (a), RA-L7 (a), RA-L8 (a).

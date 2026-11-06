@@ -1,6 +1,6 @@
 # Pre-brief: the richer `add` (`richer-add`)
 
-Status: **DRAFT, Revision 1.4 (2026-11-05), ready to be made FINAL. Decided (operator, 2026-11-05):
+Status: **FINAL, Revision 2 (2026-11-05): approved by the operator ("ok yes plz", 20:07 PT) after Rev 1.4. Decided (operator, 2026-11-05):
 RA-L2 (c) modified (names dropped, extras refused) and RA-L3 (a), with a revisit trigger (§3); RA-L6 and how the round
 runs, "no preference", so Claude's recommendations: RA-L6 (a) and the fast lane
 (§6.1).** The contract for the second of the three rounds in
@@ -682,6 +682,8 @@ Claude's recommendation):
    gives the commands with the real SHA once it exists.
 
 ## 7. Review log
+- **Rev 2, FINAL** (2026-11-05): Rev 1.4 approved by the operator; no text
+  changed. Implementation on `claude/richer-add` (§6.1).
 - **Rev 1.4** (2026-11-05, evening): ChatGPT's review of Rev 1.2 at
   `cf844b8c` (`REVIEW-richer-add-rev1.2-chatgpt.md`, source-only, CHANGES
   REQUESTED). Claude reproduced each finding in the source first. Taken:
