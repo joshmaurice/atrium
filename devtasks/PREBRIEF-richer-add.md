@@ -1,13 +1,14 @@
 # Pre-brief: the richer `add` (`richer-add`)
 
-Status: **DRAFT, Revision 1.3 (2026-11-05). Decided (operator, 2026-11-05):
+Status: **DRAFT, Revision 1.4 (2026-11-05), ready to be made FINAL. Decided (operator, 2026-11-05):
 RA-L2 (c) modified (names dropped, extras refused) and RA-L3 (a), with a revisit trigger (§3); RA-L6 and how the round
 runs, "no preference", so Claude's recommendations: RA-L6 (a) and the fast lane
 (§6.1).** The contract for the second of the three rounds in
 `PREBRIEF-richer-add-copy.md`, written out from that file's §5 sketch, as
 `add-check` was carved out into `PREBRIEF-add-check.md`. A fresh Claude agent
-checked Rev 1.1 against the code (§7). **Next: one outside review of this file
-(ChatGPT),** then FINAL.
+checked Rev 1.1 against the code, and ChatGPT reviewed Rev 1.2 (§7): one
+must-fix (R6 now refuses a stale tab's `remove` too) and three should-fixes,
+all taken. The reviewer: "suitable to finalize" once M1 is fixed.
 - **What it widens.** `PREBRIEF-add-check.md` FINAL Rev 1.1 is the rule this
   round widens: its A1–A4 widen for world adds, its A5 (avatars) stays exactly
   as it is, and A6–A10 are unchanged. Read that file first.
@@ -243,6 +244,15 @@ browser.
   L53 expects `{ tick, scriptRunner: 3 }`, so it updates with R6.
 - **A hard-reload note doesn't prevent it** (CR-S4): nothing tells a stale tab
   it's stale.
+- **Refusing a stale tab's `add` alone would make its deletes permanent**
+  (ChatGPT review of Rev 1.2, M1; confirmed in the source). A Delete of an
+  object that `prepareRestore` accepts asks nothing (`app.js` L2744–2758,
+  N2/W6): the stale tab sends `remove`, the server accepts it (its handler,
+  `session.js` L1489–1540, checks only the gate and the avatar and external
+  rules), and the tab's Undo is an `add`, which R6 refuses; the entry is
+  dropped and a reload clears the stack. A refused delete instead shows
+  "Couldn’t delete: <the server's text>" and leaves the object
+  (`onStructureAnswer`, `app.js` L2875–2876).
 
 ### 2.8 The probes (`devtasks/spike-richer-add/`, run from the repo root)
 | Probe | What it shows |
@@ -414,10 +424,12 @@ that file holds.
     condition, `AtriumClient.js` L756–757), and never elsewhere: an older
     server refuses an unknown capability (§2.7). "2" names the field set: 1 was
     `add-check`'s, never sent.
-  - **The server** refuses a **world** `add` from a session whose
+  - **The server** refuses a **world** `add`, **and every `remove`**, from a
+    session whose
     capabilities carry `scriptRunner` (any value) **and not** `addFields` of 2
     or more,
-    after the mutation gate (L1279–1285) and before the non-avatar checks:
+    after the mutation gate (`add` L1279–1285, `remove` L1494–1498) and
+    before the other checks:
     `INVALID_VALUE`, message `this page is older than the server: reload it to
     keep editing`. (It doesn't contain "already in use", which the palette
     retries on.) That pair is exactly an unreloaded first-party tab:
@@ -426,15 +438,20 @@ that file holds.
     left alone:** the server tests' own `hello`s (16 files send world adds as an
     owner or in an open world), the protocol inspector, and a cross-origin
     client in an `open` world (`isMutator`, `session.js` L659–664) keep working
-    unchanged, and their adds pass R1 like any other. **Not caught:** a pre-4b-2
-    tab (no `scriptRunner`; none can still be open), and a stale tab on a
+    unchanged, and their adds pass R1 like any other. **Not caught, and
+    accepted as limitations, not guaranteed away** (ChatGPT review, S1): a
+    same-origin tab loaded before 4b-2 shipped (2026-10-29) and never reloaded
+    since, which sends no `scriptRunner`; and a stale tab on a
     cross-origin connection to an `open` world (no `scriptRunner` there).
     Every PROD world has an owner (the commons' policy is `owner` or
     `read-only`), so the second is theoretical, on DEV or a test server only.
   - **Avatar adds are never refused for it**, so a stale tab still joins and
     is still seen.
-  - `send`, `remove` and everything else are unaffected: only an `add` can
-    restore a poorer copy.
+  - **`remove` too, so a stale tab can't delete what it can't restore**
+    (§2.7). A stale tab can still visit, move, recolour and rename (`send` loses
+    nothing, and Undo undoes a `send` with a `send`). The client never sends
+    `remove` for an avatar (the server removes it at disconnect), so R6 has no
+    avatar exemption to make there.
 - **R7, Duplicate and Undo (`edit-duplicate.js`).**
   - **The rules narrow to what's still lost.** `materialProblem` drops its
     name, `extras`, emissive, alpha-mode and double-sided refusals and keeps
@@ -472,6 +489,11 @@ that file holds.
     primitives of meshes some node still uses (a file world isn't healed, so an
     orphan mesh's primitive mustn't count); `edit-undo.js` keeps it on the delete's entry (and on every
     re-capture) and `label('undo')` appends the text. Redo needs no text.
+  - **not an exception, stated:** an index accessor's storage type. `accessorProblem`
+    checks the type of VEC3 attributes only (L118), so a `Uint8Array` or
+    `Uint32Array` index whose values are under 65,535 passes today, and the
+    copy or restore stores the same values as `Uint16Array` (ChatGPT review,
+    S2; true today). Same triangles, a different `componentType` in the file;
   - **not an exception:** a cutoff outside `MASK`, which no save keeps (§2.4),
     and a vector factor within 1e-5 of its default, which no save keeps
     either. (`send` can still make present clients and a later joiner
@@ -513,6 +535,12 @@ that file holds.
     session's avatar `add` accepted; with `{ scriptRunner: 3, addFields: 2 }`:
     accepted; with `addFields: 3`: accepted; with neither (`{ tick: … }`
     only): accepted;
+  - **R6's `remove` (the review's M1):** a stale session's `remove` of a world
+    object is refused with R6's text and the object stays, broadcast to no one;
+    then, through the real Undo lifecycle (`edit-undo.js` with the client), a
+    Delete in a stale session is refused, nothing is recorded, and the object
+    is still in the world and in the next joiner's `som-dump`; a current
+    session's Delete and Undo work;
   - **existing tests:** `world-total.test.js`'s and `behavior-leaf.test.js`'s
     `hello`s gain `addFields: 2` (§2.7), in commit 3, and every other server
     file still passes unchanged.
@@ -539,7 +567,15 @@ that file holds.
     own material; a node whose mesh another node uses gets the text too; an
     orphan mesh's primitive doesn't make a material count as shared;
   - the canonical form: an `OPAQUE` material with cutoff 0.3 emits no cutoff; a
-    `MASK` one emits it.
+    `MASK` one emits it;
+  - **`COLOR_0` VEC3 and VEC4, each with a material** (the review's S3), through
+    `prepareRestore` → `ingestNode` → `serialize` → reload → `prepareRestore`:
+    the accessor's type is VEC3 or VEC4 as sent, and the descriptors are
+    `sameDescriptor`-equal;
+  - a `Uint32Array` index restores as the same values in a `Uint16Array` (R8);
+  - the save-and-reload half's one skipped case (a base colour within 1e-5 of
+    the default, R7) is a named `test.skip` with its reason, so it shows in the
+    count, never folded into a PASS (the review's N2).
 - **`packages/renderer-three`:** `p9` as a test, through the real
   `document-view.js` if it can run headless, otherwise through
   `DocumentView` as `p9` does.
@@ -551,7 +587,8 @@ that file holds.
     fail;
   - (p2) `alphaCutoff` emitted whatever the mode: the canonical-form test and
     the fixed point fail;
-  - (p3) R6's server check removed: the stale-session test fails;
+  - (p3) R6's server checks removed, `add`'s and `remove`'s in turn: the
+    stale-session tests for each fail;
   - (p4) R2 removed (avatars allowed the new fields): the `avatar-fields`
     vectors fail in both suites;
   - (p5) `COLOR_0`'s range check removed: its value vectors fail in both suites;
@@ -565,8 +602,10 @@ that file holds.
   then delete and Undo `ground-plane`; through the SOM Inspector make a palette
   cube emissive, `BLEND` with alpha 0.5, and double-sided, then Duplicate it,
   delete and Undo it, and reload: it renders self-lit, transparent and with its
-  back face each time. An unreloaded second tab, opened before the deploy:
-  Duplicate is refused with R6's text, and a reload fixes it.
+  back face each time. An unreloaded second tab, opened before the deploy (the review's N1):
+  a palette add, Duplicate, Delete and Undo are each refused with R6's text on
+  screen, the object Delete was pressed on is still there, and a reload fixes
+  it.
 
 ## 6. Worker rules and release path
 As `add-check` (`PREBRIEF-add-check.md` §6), with these specifics:
@@ -643,6 +682,23 @@ Claude's recommendation):
    gives the commands with the real SHA once it exists.
 
 ## 7. Review log
+- **Rev 1.4** (2026-11-05, evening): ChatGPT's review of Rev 1.2 at
+  `cf844b8c` (`REVIEW-richer-add-rev1.2-chatgpt.md`, source-only, CHANGES
+  REQUESTED). Claude reproduced each finding in the source first. Taken:
+  - **M1, must-fix:** R6 refused a stale tab's `add` but not its `remove`, so
+    a stale Delete (which asks nothing for a restorable object) became
+    permanent when R6 refused its Undo. R6 now refuses `remove` from the same
+    sessions (§2.7, R6, §5, proof (p3));
+  - **S1:** the pre-4b-2 tab is an accepted limitation, not "none can be open"
+    (R6);
+  - **S2:** an index's storage type is stated as changed, not lost (R8, §5);
+  - **S3:** VEC3 and VEC4 `COLOR_0` through the full round trip (§5);
+  - **N1:** the stale tab's refusals seen on screen at DEV acceptance (§5);
+    **N2:** the skipped case is a named skip (§5).
+  
+  The review found R1–R5, R7's canonical form, R4's buffer, RA-L2 and RA-L3,
+  and the scope sound, and said it wouldn't reopen RA-L2 or RA-L3. Rev 1.3's
+  RA-L2 modification postdates the reviewed commit and changes no finding.
 - **Rev 1.3** (2026-11-05, evening): a second ChatGPT review arrived, of the
   combined draft's Rev 0.1 at `923bd444` (it had been given the old prompt), so
   not a review of this file: `REVIEW-richer-add-copy-rev0.1-chatgpt-2.md`. Its
