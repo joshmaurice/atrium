@@ -161,6 +161,14 @@ They run on `checks/signin-sync/authserver.mjs` with `HOOKS=1`, as
      `add-check` or the new `send` ranges would refuse**, including the cases
      the first run didn't check (`PREBRIEF-add-check.md` §2.6). The spec's §6
      rerun before the PROD deploy still applies, in case worlds change.
+   - **Round 1** (`53764b76`, GLM-implemented, GLM review PASS) reached DEV as
+     `14c7adcf`. Its outside code review (`REVIEW-add-check-code-r1-chatgpt.md`)
+     found a `__proto__` bypass of the extras budget and an autosave race that
+     loses an edit made during a save (older than this round). **Round 2**
+     (`REVISION-add-check-round-2.md`, fast lane by Claude, operator's choice)
+     fixes them on `claude/add-check-r2` at `302654c8`. It needs its outside
+     review, then a DEV deploy from the host. A hidden host tab stopping
+     behaviours is recorded there as a follow-up.
 2. **The Behaviour panel shows only "Custom graph"** for an imported graph:
    no file name (none is stored) and no targets, though they are stored.
    UH-L2 put the targets display in the copy round. The file name needs a
