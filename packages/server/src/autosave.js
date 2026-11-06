@@ -63,29 +63,36 @@ export function createAutoSaveCoordinator(opts = {}) {
   // -------------------------------------------------------------------------
   // Internal: perform the save operation
   // -------------------------------------------------------------------------
-  // Round 2 R2 (REVISION-add-check-round-2.md): a save never loses an edit made
-  // while it runs. `markDirty` bumps `entry.gen`; a save clears `dirty` only if
-  // no edit came in after it began; a save asked for while one is in flight
-  // runs as soon as that one finishes (it was dropped before); and the flushes
-  // wait for a save in flight (`entry.inFlight`) before saving.
+  // Round 2 R2, as amended in round 2.1 (REVISION-add-check-round-2.md):
+  // - a save never loses an edit made while it runs: `markDirty` bumps
+  //   `entry.gen`, and a save clears `dirty` only if no edit came in after it
+  //   began;
+  // - one save at a time: a save asked for while one runs (`entry.current`)
+  //   sets `entry.again`, and ONE follow-up save runs after it, unless a flush
+  //   has begun (`entry.flushing`);
+  // - a save whose entry was stopped or replaced while it ran writes nothing
+  //   and changes nothing;
+  // - the flushes wait for the one save in flight, never a chain of saves, so
+  //   their retry budget stays finite.
   function doSave(worldId, host) {
     const entry = worlds.get(worldId)
     if (!entry) return Promise.resolve()
-    if (entry.saving) {
+    if (entry.current) {
       entry.again = true
-      return entry.inFlight
+      return entry.current
     }
-    entry.inFlight = runSave(worldId, host, entry).finally(() => {
-      if (worlds.get(worldId) !== entry) return
-      entry.inFlight = null
-      if (entry.again) {
-        entry.again = false
-        if (entry.dirty) return doSave(worldId, host)
-      }
+    const current = runSave(worldId, host, entry)
+    entry.current = current
+    current.then(() => {
+      if (entry.current === current) entry.current = null
+      const followUp = entry.again && !entry.flushing && worlds.get(worldId) === entry && entry.dirty
+      entry.again = false
+      if (followUp) doSave(worldId, host)
     })
-    return entry.inFlight
+    return current
   }
 
+  /** One save. Never rejects. */
   async function runSave(worldId, host, entry) {
     if (!host || host.ownerUserId === null) return
     if (host.mutationPolicy === 'read-only') return
@@ -93,18 +100,17 @@ export function createAutoSaveCoordinator(opts = {}) {
 
     entry.saving = true
     const gen = entry.gen
-
-    // L11/K9 — exclude, by IDENTITY, the node each session's accepted avatar
-    // `add` created. These nodes are ephemeral and must not appear in persisted
-    // documents. A session whose avatar add was refused owns nothing to exclude.
-    const excludeNodes = []
-    for (const [, session] of host.sessions) {
-      if (session.avatarNode) {
-        excludeNodes.push(session.avatarNode)
-      }
-    }
-
     try {
+      // L11/K9 — exclude, by IDENTITY, the node each session's accepted avatar
+      // `add` created. These nodes are ephemeral and must not appear in persisted
+      // documents. A session whose avatar add was refused owns nothing to exclude.
+      const excludeNodes = []
+      for (const [, session] of host.sessions) {
+        if (session.avatarNode) {
+          excludeNodes.push(session.avatarNode)
+        }
+      }
+
       const document = JSON.stringify(
         await host.world.serialize({ excludeNodes })
       )
@@ -113,15 +119,15 @@ export function createAutoSaveCoordinator(opts = {}) {
       // line appears once per world until a save succeeds, and the next save
       // tries again.
       const problem = await readBack(document)
+      // Round 2.1: stopped or replaced while it ran — write nothing.
+      if (worlds.get(worldId) !== entry) return
       if (problem) {
         if (!entry.readBackLogged) {
           entry.readBackLogged = true
           console.error(`[autosave] read-back failed ${logId(worldId)}: ${problem}`)
         }
-        entry.saving = false
         return
       }
-      entry.readBackLogged = false
       const result = worldStore.updateWorld(
         db.database,
         worldId,
@@ -130,26 +136,21 @@ export function createAutoSaveCoordinator(opts = {}) {
       )
 
       if (result.ok) {
-        const e = worlds.get(worldId)
-        if (e) {
-          // Round 2 R2: an edit made during this save keeps the world dirty.
-          if (e.gen === gen) e.dirty = false
-          e.saving = false
-        }
+        // An edit made during this save keeps the world dirty.
+        if (entry.gen === gen) entry.dirty = false
+        // Round 2.1: the read-back log may appear again only after a save succeeds.
+        entry.readBackLogged = false
       } else if (result.code === 'NOT_FOUND') {
         // The world row was deleted while it was still live — stop tracking
         stop(worldId)
-      } else {
-        const e = worlds.get(worldId)
-        if (e) e.saving = false
       }
     } catch (err) {
       console.error(
         `[autosave] Failed to save world "${worldId}":`, err.message
       )
       // Keep dirty flag so the periodic tick retries
-      const e = worlds.get(worldId)
-      if (e) e.saving = false
+    } finally {
+      entry.saving = false
     }
   }
 
@@ -170,7 +171,7 @@ export function createAutoSaveCoordinator(opts = {}) {
       }, periodicMs)
       if (periodicInterval.unref) periodicInterval.unref()
 
-      entry = { debounceTimer: null, periodicInterval, dirty: false, saving: false, readBackLogged: false, gen: 0, again: false, inFlight: null }
+      entry = { debounceTimer: null, periodicInterval, dirty: false, saving: false, readBackLogged: false, gen: 0, again: false, current: null, flushing: false }
       worlds.set(worldId, entry)
     }
 
@@ -179,7 +180,7 @@ export function createAutoSaveCoordinator(opts = {}) {
     entry.debounceTimer = setTimeout(() => {
       const e = worlds.get(worldId)
       if (e) e.debounceTimer = null
-      if (!e || !e.dirty) return
+      if (!e || !e.dirty || e.flushing) return
       doSave(worldId, host)
     }, debounceMs)
     if (entry.debounceTimer.unref) entry.debounceTimer.unref()
@@ -193,7 +194,7 @@ export function createAutoSaveCoordinator(opts = {}) {
   // -------------------------------------------------------------------------
   function periodicSave(worldId, host) {
     const entry = worlds.get(worldId)
-    if (!entry || !entry.dirty) return
+    if (!entry || !entry.dirty || entry.flushing) return
     doSave(worldId, host)
   }
 
@@ -205,34 +206,7 @@ export function createAutoSaveCoordinator(opts = {}) {
   // is immediate — no waiting for the debounce window.
   // -------------------------------------------------------------------------
   async function flushAndTeardown(worldId, host) {
-    const entry = worlds.get(worldId)
-    if (!entry) return
-    // Round 2 R2: let a save in flight finish first; it may leave the world dirty.
-    while (entry.inFlight) await entry.inFlight
-    if (!entry.dirty) return
-
-    // Cancel the debounce timer so it doesn't fire after the flush
-    if (entry.debounceTimer) {
-      clearTimeout(entry.debounceTimer)
-      entry.debounceTimer = null
-    }
-
-    // First attempt
-    await doSave(worldId, host)
-
-    // One retry on failure — if still dirty after doSave, try again
-    if (entry.dirty) {
-      console.warn(
-        `[autosave] Retrying flush for world "${worldId}" (previous save failed)`
-      )
-      await doSave(worldId, host)
-      // If still dirty after retry, log loudly but proceed with teardown
-      if (entry.dirty) {
-        console.error(
-          `[autosave] CRITICAL: Flush failed for world "${worldId}" after retry — changes may be lost`
-        )
-      }
-    }
+    await flush(worldId, host)
   }
 
   // -------------------------------------------------------------------------
@@ -241,27 +215,48 @@ export function createAutoSaveCoordinator(opts = {}) {
   // but the host stays resident.
   // -------------------------------------------------------------------------
   async function flushWorld(worldId, host) {
+    const entry = await flush(worldId, host)
+    // The host stays: an edit that came in during the flush is saved as usual.
+    if (entry && worlds.get(worldId) === entry && entry.dirty) doSave(worldId, host)
+  }
+
+  /**
+   * The shared flush: cancel the debounce, wait for the ONE save in flight,
+   * then at most two saves of its own. Periodic and debounced saves stand back
+   * while it runs (round 2.1), so it always finishes.
+   */
+  async function flush(worldId, host) {
     const entry = worlds.get(worldId)
-    if (!entry) return
-    // Round 2 R2: let a save in flight finish first; it may leave the world dirty.
-    while (entry.inFlight) await entry.inFlight
-    if (!entry.dirty) return
-
-    if (entry.debounceTimer) {
-      clearTimeout(entry.debounceTimer)
-      entry.debounceTimer = null
-    }
-
-    await doSave(worldId, host)
-
-    if (entry.dirty) {
-      console.warn(`[autosave] Retrying flush for world "${worldId}" (previous save failed)`)
-      await doSave(worldId, host)
-      if (entry.dirty) {
-        console.error(
-          `[autosave] CRITICAL: Flush failed for world "${worldId}" after retry — changes may be lost`
-        )
+    if (!entry) return null
+    entry.flushing = true
+    try {
+      // Cancel the debounce timer so it doesn't fire after the flush
+      if (entry.debounceTimer) {
+        clearTimeout(entry.debounceTimer)
+        entry.debounceTimer = null
       }
+      if (entry.current) await entry.current
+      if (worlds.get(worldId) !== entry || !entry.dirty) return entry
+
+      // First attempt
+      await doSave(worldId, host)
+
+      // One retry on failure — if still dirty after doSave, try again
+      if (worlds.get(worldId) === entry && entry.dirty) {
+        console.warn(
+          `[autosave] Retrying flush for world "${worldId}" (previous save failed)`
+        )
+        await doSave(worldId, host)
+        // If still dirty after retry, log loudly but proceed with teardown
+        if (worlds.get(worldId) === entry && entry.dirty) {
+          console.error(
+            `[autosave] CRITICAL: Flush failed for world "${worldId}" after retry — changes may be lost`
+          )
+        }
+      }
+      return entry
+    } finally {
+      entry.flushing = false
     }
   }
 

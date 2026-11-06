@@ -693,6 +693,19 @@ test('A10: a document that will not read back is not saved; the previous row is 
 // on 8fc82bb5, with the serialize await as the window) the edit was lost.
 // ---------------------------------------------------------------------------
 
+/** Polls `cond` every 10 ms until it holds (true) or `ms` pass (false). */
+async function until(cond, ms = 3000) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    if (cond()) return true
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  return cond()
+}
+const deepEqualish = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+/** Resolves with `p`'s value, or with 'TIMED OUT' after `ms`. */
+const within = (p, ms) => Promise.race([p.then(() => 'finished'), new Promise((r) => setTimeout(() => r('TIMED OUT'), ms))])
+
 /** A read-back that holds its FIRST call open until `release()`; `entered` resolves when it's held. */
 function heldReadBack() {
   let release, entered
@@ -737,8 +750,8 @@ test('R2: an edit made during a save\'s read-back is saved by a later save', asy
     coordinator.markDirty(w.id, host)                    // the edit during the save
     await new Promise((r) => setTimeout(r, 80))          // its debounce fires while save 1 is in flight
     held.release()
-    await new Promise((r) => setTimeout(r, 150))         // save 1 writes; the edit's save follows it
-    assert.deepEqual(savedTranslation(), [4, 5, 6], 'the edit made during the save was saved')
+    // Round 2.1 (review r2 N1): wait for the observable result, not a fixed time.
+    assert.ok(await until(() => deepEqualish(savedTranslation(), [4, 5, 6])), `saved ${JSON.stringify(savedTranslation())}`)
   } finally {
     coordinator.close()
     cleanup()
@@ -769,6 +782,83 @@ test('R2: flushAndTeardown during a save waits for it, then saves the edit made 
     coordinator.close()
     console.error = originalError
     console.warn = originalWarn
+    cleanup()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Round 2.1 — the outside review of round 2 (REVIEW-add-check-code-r2-chatgpt.md)
+// and Claude's own run of it. Each fails on 302654c8.
+// ---------------------------------------------------------------------------
+
+test('R2.1 (review r2 M1): flushAndTeardown finishes while saves keep failing and save requests keep arriving', async () => {
+  const { w, host, cleanup } = await raceWorld('race-chain')
+  let attempts = 0
+  const coordinator = createAutoSaveCoordinator({
+    db, debounceMs: 1, periodicMs: 5,
+    readBackProblem: async () => { attempts++; await new Promise((r) => setTimeout(r, 20)); return 'never reads back' },
+  })
+  const lines = []
+  const originalError = console.error
+  const originalWarn = console.warn
+  console.error = (...args) => { lines.push(args.join(' ')) }
+  console.warn = (...args) => { lines.push(args.join(' ')) }
+  try {
+    coordinator.markDirty(w.id, host)
+    await new Promise((r) => setTimeout(r, 10))           // a save is in flight, periodic ticks keep asking
+    const result = await within(coordinator.flushAndTeardown(w.id, host), 2000)
+    assert.equal(result, 'finished', `the flush finished (after ${attempts} attempts)`)
+    assert.equal(lines.filter((l) => l.includes('CRITICAL')).length, 1, 'it gave up once, loudly')
+    assert.ok(attempts <= 6, `a bounded number of attempts (${attempts})`)
+  } finally {
+    coordinator.close()
+    console.error = originalError
+    console.warn = originalWarn
+    cleanup()
+  }
+})
+
+test('R2.1 (review r2 S1): a save stopped mid-way writes nothing and leaves a new entry for the world dirty', async () => {
+  const { w, host, nodeName, savedTranslation, cleanup } = await raceWorld('race-replaced')
+  const held = heldReadBack()
+  // The first save is started by flushWorld (no debounce needed), and the debounce
+  // is long, so the only write that can happen before the flush below is the
+  // stopped save's.
+  const coordinator = createAutoSaveCoordinator({ db, debounceMs: 60000, periodicMs: 60000, readBackProblem: held.readBackProblem })
+  try {
+    const before = savedTranslation()
+    host.world.setField(nodeName, 'translation', [1, 2, 3])
+    coordinator.markDirty(w.id, host)
+    coordinator.flushWorld(w.id, host)                      // starts the old entry's save
+    await held.entered                                      // which holds [1, 2, 3]
+    coordinator.stop(w.id)                                  // stopped mid-save
+    host.world.setField(nodeName, 'translation', [5, 5, 5])
+    coordinator.markDirty(w.id, host)                       // a new entry for the same world
+    held.release()
+    await new Promise((r) => setTimeout(r, 50))
+    assert.deepEqual(savedTranslation(), before, 'the stopped save wrote nothing')
+    await coordinator.flushAndTeardown(w.id, host)
+    assert.deepEqual(savedTranslation(), [5, 5, 5], "the new entry stayed dirty, and its flush saved it")
+  } finally {
+    coordinator.close()
+    cleanup()
+  }
+})
+
+test('R2.1: stop() while a flush waits for a save does not hang the flush', async () => {
+  const { w, host, nodeName, cleanup } = await raceWorld('race-stop-flush')
+  const held = heldReadBack()
+  const coordinator = createAutoSaveCoordinator({ db, debounceMs: 20, periodicMs: 60000, readBackProblem: held.readBackProblem })
+  try {
+    host.world.setField(nodeName, 'translation', [1, 2, 3])
+    coordinator.markDirty(w.id, host)
+    await held.entered
+    const flushing = coordinator.flushAndTeardown(w.id, host)
+    coordinator.stop(w.id)
+    held.release()
+    assert.equal(await within(flushing, 2000), 'finished')
+  } finally {
+    coordinator.close()
     cleanup()
   }
 })
