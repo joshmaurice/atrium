@@ -8,8 +8,8 @@ or risky before it is. Read-only: don't push, don't open PRs, don't touch any
 deployed site.
 
 Repository: https://github.com/joshmaurice/atrium (public)
-Review commit: cf844b8c3697ad6a27c4f41172d2eef9e5fe04d1
-Document: devtasks/PREBRIEF-richer-add.md (DRAFT Rev 1.2)
+Review commit: 783defcc629e43ffa411b1a5ce76c7464c58b546
+Document: devtasks/PREBRIEF-richer-add.md (DRAFT Rev 1.3)
 Its line numbers refer to code at cdfe88a876cf3388a84de69aea6872407eb032c7
 (the released code, PROD), which is identical to the review commit outside
 devtasks/.
@@ -20,10 +20,10 @@ the pre-brief's §3 records where it disagreed with you and why.
 
 STEP 1 — GET THE CODE (please try this first)
   git clone https://github.com/joshmaurice/atrium && cd atrium
-  git checkout cf844b8c3697ad6a27c4f41172d2eef9e5fe04d1
+  git checkout 783defcc629e43ffa411b1a5ce76c7464c58b546
 Say in your review whether the clone worked; if not, quote the error (it has
 failed on DNS before) and read the files at the pinned commit through
-  https://raw.githubusercontent.com/joshmaurice/atrium/cf844b8c3697ad6a27c4f41172d2eef9e5fe04d1/<path>
+  https://raw.githubusercontent.com/joshmaurice/atrium/783defcc629e43ffa411b1a5ce76c7464c58b546/<path>
 A source-only review is still valuable; label it as one.
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
@@ -66,7 +66,7 @@ WHERE TO SPEND THE TIME, in order
    one get through? What does the stale tab show its user?
 4. R4's one buffer per ingestNode call: anything that assumes one per
    primitive (pruning on delete, serialize with excluded avatars, the renderer)?
-5. The two stated D5 exceptions (RA-L2 (c): accessor and buffer labels dropped;
+5. The two stated D5 exceptions (RA-L2 (c) modified: accessor and buffer names dropped, their extras refused;
    RA-L3 (a): a restore gets its own material), now decided by the operator
    with a revisit trigger. Not to re-argue: is the trigger enough, and is
    anything else lost that the document doesn't state?
