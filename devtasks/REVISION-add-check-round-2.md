@@ -1,6 +1,6 @@
 # Revision: `add-check` round 2
 
-Status: **implemented by Claude in the fast lane** (operator's choice,
+Status: **SHIPPED to PROD as `cdfe88a8` (2026-11-05, 02:25 UTC).** Implemented by Claude in the fast lane (operator's choice,
 2026-11-05), on `claude/add-check-r2`. **Round 2.1 (§8) is the current tip,
 `d56444c0fec6e9c5c9aeff811a2c7abd93cacfe8`;** round 2 was
 302654c8bb990ef6a7674a693754d1cd9ec8f49d, on top of round 1's
@@ -118,3 +118,8 @@ stop-during-flush test hangs (exit 124 under `timeout 30`). On `d56444c0`,
 (`OUTSIDE-REVIEW-PROMPT-add-check-code-r2.1.md`), then the host's
 `atrium-deploy-gate "dev d56444c0fec6e9c5c9aeff811a2c7abd93cacfe8"`, then
 DEV acceptance as §6 says.
+
+**Outcome:** the follow-up review (`REVIEW-add-check-code-r2.1-chatgpt.md`)
+approved `d56444c0` with two test-only nits. DEV `cdfe88a8` passed the
+operator's acceptance (including the last-tab autosave check), then MAIN and
+PROD. See `Atrium-Passdown-2026-11-05-add-check-shipped.md`.
