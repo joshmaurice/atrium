@@ -8,8 +8,11 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkAddNode as serverCheck } from '../src/send-policy.js'
-import { checkAddNode as clientCheck } from '../../client/src/add-spec.js'
+import * as server from '../src/send-policy.js'
+import * as client from '../../client/src/add-spec.js'
+
+const serverCheck = server.checkAddNode
+const clientCheck = client.checkAddNode
 
 const COPIES = [['server', serverCheck], ['client', clientCheck]]
 
@@ -92,6 +95,55 @@ for (const [copy, check] of COPIES) {
       const node = { name: 'a', mesh: { primitives: [first, { ...ok, material: { pbrMetallicRoughness: { metallicFactor: 7 } } }] } }
       assert.equal(check(node).code, 'material-value')
     })
+    test("richer-add: a later primitive's bad COLOR_0 length is refused without reading an earlier primitive's TEXCOORD or COLOR values", () => {
+      const first = { attributes: { POSITION: untouchable(2997), TEXCOORD_0: untouchable(1998), COLOR_0: untouchable(3996) } }
+      const node = { name: 'a', mesh: { primitives: [first, { attributes: { ...ok.attributes, COLOR_0: [1, 0, 0, 1, 0] } }] } }
+      assert.equal(check(node).code, 'color-length')
+    })
+    test('richer-add: a TEXCOORD_0 length is refused without reading it or POSITION', () => {
+      const node = { name: 'a', mesh: mesh({ attributes: { POSITION: untouchable(3000), TEXCOORD_0: untouchable(1999) } }) }
+      assert.equal(check(node).code, 'texcoord-length')
+    })
+  })
+
+  describe(`${copy}: richer-add extras (R1)`, () => {
+    const tri = { attributes: { POSITION: [0, 0, 0, 1, 0, 0, 0, 1, 0] } }
+    // JSON.stringify({ k: s }) is s.length + 8 bytes: `{"k":"` + s + `"}`.
+    const sized = (bytes) => ({ k: 'x'.repeat(bytes - 8) })
+    const places = {
+      mesh: (extras) => ({ name: 'a', mesh: { primitives: [tri], extras } }),
+      primitive: (extras) => ({ name: 'a', mesh: mesh({ ...tri, extras }) }),
+      material: (extras) => ({ name: 'a', mesh: mesh({ ...tri, material: { extras } }) }),
+    }
+    for (const [place, build] of Object.entries(places)) {
+      test(`${place} extras of exactly 16,384 bytes is accepted, 16,385 refused`, () => {
+        assert.equal(check(build(sized(16384))), null)
+        assert.equal(check(build(sized(16385))).code, 'part-extras')
+      })
+      test(`${place} extras measured in UTF-8 bytes, not characters`, () => {
+        // 'é' is 2 bytes: 8,189 of them plus 8 is 16,386 bytes in 8,197 characters.
+        assert.equal(check(build({ k: 'é'.repeat(8189) })).code, 'part-extras')
+      })
+      test(`${place} extras holding Infinity, -Infinity or NaN, at any depth, is refused`, () => {
+        for (const bad of [{ a: Infinity }, { a: [1, [2, -Infinity]] }, { a: { b: { c: NaN } } }]) {
+          assert.equal(check(build(bad)).code, 'part-extras', JSON.stringify(bad))
+        }
+      })
+      test(`${place} extras: an own __proto__ key is measured like any other`, () => {
+        const extras = JSON.parse(`{"__proto__":{"k":"${'x'.repeat(17000)}"}}`)
+        assert.equal(check(build(extras)).code, 'part-extras')
+      })
+    }
+    test('a 60-deep extras value (the wire allows 64) is accepted', () => {
+      let deep = 1
+      for (let i = 0; i < 60; i++) deep = { d: [deep] }
+      assert.equal(check(places.mesh({ deep })), null)
+    })
+    test('an extras value too deep for JSON.stringify is refused, not thrown', () => {
+      let deep = 1
+      for (let i = 0; i < 200000; i++) deep = [deep]
+      assert.equal(check(places.mesh({ deep })).code, 'part-extras')
+    })
   })
 }
 
@@ -105,6 +157,20 @@ describe('the two copies agree on every generated case', () => {
     ]
     for (const [node, avatar] of cases) {
       assert.equal(serverCheck(node, { avatar })?.code ?? null, clientCheck(node, { avatar })?.code ?? null)
+    }
+  })
+})
+
+describe('richer-add R3: the two copies share their codes and constants', () => {
+  test('ADD_REASONS is identical in both copies, every new code included', () => {
+    assert.deepEqual({ ...client.ADD_REASONS }, { ...server.ADD_REASONS })
+    for (const code of ['avatar-fields', 'part-extras', 'material-name', 'texcoord-length', 'texcoord-value', 'color-length', 'color-value']) {
+      assert.equal(typeof server.ADD_REASONS[code], 'string', code)
+    }
+  })
+  test('the R1 constants are identical in both copies', () => {
+    for (const name of ['ATTRIBUTE_KEYS', 'MATERIAL_KEYS', 'ALPHA_MODES', 'MATERIAL_NAME_MAX', 'PART_EXTRAS_BYTES_MAX']) {
+      assert.deepEqual(client[name], server[name], name)
     }
   })
 })

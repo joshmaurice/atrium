@@ -1906,6 +1906,22 @@ export function isFloat32(v) {
   return typeof v === 'number' && Number.isFinite(Math.fround(v))
 }
 
+/** richer-add R1 — the accessor semantics a world `add` carries (RA-L2 (c)). */
+export const ATTRIBUTE_KEYS = Object.freeze(['POSITION', 'NORMAL', 'TEXCOORD_0', 'TEXCOORD_1', 'COLOR_0'])
+/** richer-add R1/R2 — the material keys a world `add` carries; an avatar only `pbrMetallicRoughness`. */
+export const MATERIAL_KEYS = Object.freeze(['name', 'extras', 'pbrMetallicRoughness', 'emissiveFactor', 'alphaMode', 'alphaCutoff', 'doubleSided'])
+/** richer-add R1 — the three alpha modes. */
+export const ALPHA_MODES = Object.freeze(['OPAQUE', 'MASK', 'BLEND'])
+/** richer-add R1 — a material name is at most 256 characters. */
+export const MATERIAL_NAME_MAX = 256
+/** richer-add R1 — a mesh, primitive or material `extras` carries at most 16 KiB of UTF-8. */
+export const PART_EXTRAS_BYTES_MAX = 16 * 1024
+
+/** The richer-add fields (R1) an avatar may never carry (R2). */
+const RICHER_ATTRIBUTES = new Set(['TEXCOORD_0', 'TEXCOORD_1', 'COLOR_0'])
+const RICHER_MATERIAL_KEYS = new Set(['name', 'extras', 'emissiveFactor', 'alphaMode', 'alphaCutoff', 'doubleSided'])
+const PBR_KEYS = new Set(['baseColorFactor', 'metallicFactor', 'roughnessFactor'])
+
 /** A1 — the shared reason codes and their plain text. */
 export const ADD_REASONS = Object.freeze({
   'node-type':         'the node must be an object',
@@ -1913,19 +1929,26 @@ export const ADD_REASONS = Object.freeze({
   'extras-type':       'extras must be an object',
   'extras-size':       `extras other than atrium must be at most ${NODE_EXTRAS_BYTES_MAX} bytes`,
   'avatar-extras':     'an avatar extras must have at most displayName and atrium',
-  'mesh-keys':         'mesh must have only a name and primitives',
+  'avatar-fields':     'an avatar carries only POSITION, NORMAL, indices and the three material factors',
+  'mesh-keys':         'mesh must have only a name, extras and primitives',
   'mesh-name':         `mesh name must be a string of at most ${MESH_NAME_MAX} characters`,
   'primitives-count':  `mesh must have 1 to ${PRIMITIVE_MAX} primitives`,
-  'primitive-keys':    'each primitive must have only attributes, indices and material',
-  'attribute-keys':    'attributes must have POSITION and, optionally, NORMAL',
+  'primitive-keys':    'each primitive must have only attributes, indices, material and extras',
+  'part-extras':       `mesh, primitive and material extras must be objects of at most ${PART_EXTRAS_BYTES_MAX} bytes, with no atrium key and only finite numbers`,
+  'attribute-keys':    'attributes must have POSITION and, optionally, NORMAL, TEXCOORD_0, TEXCOORD_1 (only with TEXCOORD_0) and COLOR_0',
   'position-length':   `POSITION must be an array of at least 9 numbers, a multiple of 3, and at most ${3 * VERTEX_MAX}`,
   'position-value':    'every POSITION value must be a number finite as a Float32',
   'normal-length':     'NORMAL must be an array of the same length as POSITION',
   'normal-value':      'every NORMAL value must be a number finite as a Float32',
+  'texcoord-length':   'TEXCOORD_0 and TEXCOORD_1 must be arrays of 2 numbers per vertex',
+  'texcoord-value':    'every TEXCOORD value must be a number finite as a Float32',
+  'color-length':      'COLOR_0 must be an array of 3 or 4 numbers per vertex',
+  'color-value':       'every COLOR_0 value must be a finite number within 0 to 1',
   'indices-length':    'indices must be an array of at least 3 integers, its length a multiple of 3',
   'indices-value':     'every index must be an integer within the vertex count',
-  'material-keys':     'material must have only pbrMetallicRoughness',
-  'material-value':    'material values must be finite, and colours and factors within 0 to 1',
+  'material-keys':     'material must have only name, extras, pbrMetallicRoughness (with the three factors), emissiveFactor, alphaMode, alphaCutoff and doubleSided',
+  'material-name':     `material name must be a string of at most ${MATERIAL_NAME_MAX} characters`,
+  'material-value':    'material values must be finite, colours and factors within 0 to 1, alphaMode OPAQUE, MASK or BLEND, alphaCutoff 0 or more and only with MASK, and doubleSided a boolean',
   'avatar-primitives': `an avatar mesh must have exactly ${AVATAR_PRIMITIVES} primitive`,
   'avatar-vertices':   `an avatar primitive must have at most ${AVATAR_VERTEX_MAX} vertices`,
   'avatar-indices':    `an avatar mesh must have at most ${AVATAR_INDEX_MAX} indices`,
@@ -1986,40 +2009,117 @@ function worldExtrasProblem(extras) {
   return jsonBytes(rest) > NODE_EXTRAS_BYTES_MAX ? 'extras-size' : null
 }
 
-/** A4 — the material rule. Returns a reason code, or null. */
-function materialAddProblem(material) {
+/**
+ * richer-add R1 — every number in a JSON value is finite. Iterative, so a deep
+ * value can't exhaust the stack; only own enumerable keys are read.
+ */
+function allNumbersFinite(value) {
+  const stack = [value]
+  while (stack.length > 0) {
+    const v = stack.pop()
+    if (typeof v === 'number') {
+      if (!Number.isFinite(v)) return false
+    } else if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) stack.push(v[i])
+    } else if (v !== null && typeof v === 'object') {
+      for (const key of Object.keys(v)) stack.push(v[key])
+    }
+  }
+  return true
+}
+
+/**
+ * richer-add R1 — a mesh, primitive or material `extras`: a plain object, no
+ * `atrium` key (Atrium's data lives on the node), at most 16 KiB of UTF-8, and
+ * every number finite (a wire `1e999` is `Infinity`, held live and saved as
+ * `null`). The size is measured before the walk.
+ */
+function partExtrasProblem(extras) {
+  if (extras === undefined) return null
+  if (!isPlainObject(extras)) return 'part-extras'
+  if (Object.hasOwn(extras, 'atrium')) return 'part-extras'
+  if (jsonBytes(extras) > PART_EXTRAS_BYTES_MAX) return 'part-extras'
+  if (!allNumbersFinite(extras)) return 'part-extras'
+  return null
+}
+
+/**
+ * A4/R1/R2 — the material's key sets (shape). An avatar's material keeps
+ * add-check's set: any richer-add key is `avatar-fields`.
+ */
+function materialShapeProblem(material, { avatar }) {
   if (material === undefined) return null
   if (!isPlainObject(material)) return 'material-keys'
   for (const key of Object.keys(material)) {
-    if (key !== 'pbrMetallicRoughness') return 'material-keys'
+    if (key === 'pbrMetallicRoughness') continue
+    if (RICHER_MATERIAL_KEYS.has(key)) {
+      if (avatar) return 'avatar-fields'
+      continue
+    }
+    return 'material-keys'
   }
   const pbr = material.pbrMetallicRoughness
   if (pbr === undefined) return null
   if (!isPlainObject(pbr)) return 'material-keys'
   for (const key of Object.keys(pbr)) {
-    if (key !== 'baseColorFactor' && key !== 'metallicFactor' && key !== 'roughnessFactor') return 'material-keys'
+    if (!PBR_KEYS.has(key)) return 'material-keys'
   }
-  if (pbr.baseColorFactor !== undefined && !isUnitRangeVec4(pbr.baseColorFactor)) return 'material-value'
-  if (pbr.metallicFactor !== undefined && !isUnitRange(pbr.metallicFactor)) return 'material-value'
-  if (pbr.roughnessFactor !== undefined && !isUnitRange(pbr.roughnessFactor)) return 'material-value'
   return null
 }
 
 /**
- * A3/A5 — one primitive's shape: its key sets, every array's length, the avatar
- * budget and its material. Reads no POSITION, NORMAL or index value (round 2 R4:
+ * A4/A9/R1 — the material's scalar values. Cheap (no array element of the
+ * geometry is read), so it runs in the shape phase, as add-check's did; the
+ * material's `extras` is walked in the values phase.
+ */
+function materialValuesProblem(material) {
+  if (material === undefined) return null
+  const pbr = material.pbrMetallicRoughness
+  if (pbr !== undefined) {
+    if (pbr.baseColorFactor !== undefined && !isUnitRangeVec4(pbr.baseColorFactor)) return 'material-value'
+    if (pbr.metallicFactor !== undefined && !isUnitRange(pbr.metallicFactor)) return 'material-value'
+    if (pbr.roughnessFactor !== undefined && !isUnitRange(pbr.roughnessFactor)) return 'material-value'
+  }
+  if (material.name !== undefined) {
+    if (typeof material.name !== 'string' || material.name.length > MATERIAL_NAME_MAX) return 'material-name'
+  }
+  if (material.emissiveFactor !== undefined && !isUnitRangeVec3(material.emissiveFactor)) return 'material-value'
+  if (material.alphaMode !== undefined && !ALPHA_MODES.includes(material.alphaMode)) return 'material-value'
+  if (material.alphaCutoff !== undefined) {
+    // §2.4 — a save keeps the cutoff only with MASK, so anywhere else it would be dropped.
+    if (!isNonNegativeFinite(material.alphaCutoff) || material.alphaMode !== 'MASK') return 'material-value'
+  }
+  if (material.doubleSided !== undefined && typeof material.doubleSided !== 'boolean') return 'material-value'
+  return null
+}
+
+/**
+ * A3/A5/R1/R2 — one primitive's shape: its key sets, every array's length, the
+ * avatar budget and its material's keys. Reads no array element (round 2 R4:
  * every primitive's shape is checked before any primitive's values).
  */
 function primitiveShapeProblem(prim, { avatar }) {
   if (!isPlainObject(prim)) return 'primitive-keys'
   for (const key of Object.keys(prim)) {
-    if (key !== 'attributes' && key !== 'indices' && key !== 'material') return 'primitive-keys'
+    if (key === 'attributes' || key === 'indices' || key === 'material') continue
+    if (key === 'extras') {
+      if (avatar) return 'avatar-fields'
+      continue
+    }
+    return 'primitive-keys'
   }
   const attributes = prim.attributes
   if (!isPlainObject(attributes) || !Object.hasOwn(attributes, 'POSITION')) return 'attribute-keys'
   for (const key of Object.keys(attributes)) {
-    if (key !== 'POSITION' && key !== 'NORMAL') return 'attribute-keys'
+    if (key === 'POSITION' || key === 'NORMAL') continue
+    if (RICHER_ATTRIBUTES.has(key)) {
+      if (avatar) return 'avatar-fields'
+      continue
+    }
+    return 'attribute-keys'
   }
+  // glTF — indexed semantics start at 0 and are consecutive.
+  if (Object.hasOwn(attributes, 'TEXCOORD_1') && !Object.hasOwn(attributes, 'TEXCOORD_0')) return 'attribute-keys'
   const position = attributes.POSITION
   if (!Array.isArray(position) || position.length < 9 ||
       position.length % 3 !== 0 || position.length > 3 * VERTEX_MAX) return 'position-length'
@@ -2028,6 +2128,13 @@ function primitiveShapeProblem(prim, { avatar }) {
     return 'normal-length'
   }
   const vertexCount = position.length / 3
+  for (const key of ['TEXCOORD_0', 'TEXCOORD_1']) {
+    const uv = attributes[key]
+    if (uv !== undefined && (!Array.isArray(uv) || uv.length !== 2 * vertexCount)) return 'texcoord-length'
+  }
+  const color = attributes.COLOR_0
+  if (color !== undefined && (!Array.isArray(color) ||
+      (color.length !== 3 * vertexCount && color.length !== 4 * vertexCount))) return 'color-length'
   // A5 — the avatar vertex budget, from the length.
   if (avatar && vertexCount > AVATAR_VERTEX_MAX) return 'avatar-vertices'
   const indices = prim.indices
@@ -2039,15 +2146,25 @@ function primitiveShapeProblem(prim, { avatar }) {
     // Without indices the vertex count must itself be a multiple of 3.
     if (vertexCount % 3 !== 0) return 'indices-length'
   }
-  return materialAddProblem(prim.material)
+  return materialShapeProblem(prim.material, { avatar }) ?? materialValuesProblem(prim.material)
 }
 
-/** A3 — one primitive's values, after every primitive's shape has passed. */
+/** A3/R1 — one primitive's values, after every primitive's shape has passed. */
 function primitiveValuesProblem(prim) {
-  const { POSITION: position, NORMAL: normal } = prim.attributes
+  const attributes = prim.attributes
+  const { POSITION: position, NORMAL: normal } = attributes
   for (let i = 0; i < position.length; i++) if (!isFloat32(position[i])) return 'position-value'
   if (normal !== undefined) {
     for (let i = 0; i < normal.length; i++) if (!isFloat32(normal[i])) return 'normal-value'
+  }
+  for (const key of ['TEXCOORD_0', 'TEXCOORD_1']) {
+    const uv = attributes[key]
+    if (uv === undefined) continue
+    for (let i = 0; i < uv.length; i++) if (!isFloat32(uv[i])) return 'texcoord-value'
+  }
+  const color = attributes.COLOR_0
+  if (color !== undefined) {
+    for (let i = 0; i < color.length; i++) if (!isUnitRange(color[i])) return 'color-value'
   }
   const indices = prim.indices
   if (indices !== undefined) {
@@ -2057,14 +2174,20 @@ function primitiveValuesProblem(prim) {
       if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= vertexCount) return 'indices-value'
     }
   }
-  return null
+  // R1 — the `extras` walks, last: they are the only unbounded-depth reads.
+  return partExtrasProblem(prim.material?.extras) ?? partExtrasProblem(prim.extras)
 }
 
-/** A3/A5 — the mesh rule. Returns a reason code, or null. */
+/** A3/A5/R1/R2 — the mesh rule. Returns a reason code, or null. */
 function meshAddProblem(mesh, { avatar }) {
   if (!isPlainObject(mesh)) return 'mesh-keys'
   for (const key of Object.keys(mesh)) {
-    if (key !== 'name' && key !== 'primitives') return 'mesh-keys'
+    if (key === 'name' || key === 'primitives') continue
+    if (key === 'extras') {
+      if (avatar) return 'avatar-fields'
+      continue
+    }
+    return 'mesh-keys'
   }
   if (mesh.name !== undefined) {
     if (typeof mesh.name !== 'string' || mesh.name.length > MESH_NAME_MAX) return 'mesh-name'
@@ -2086,16 +2209,16 @@ function meshAddProblem(mesh, { avatar }) {
     const problem = primitiveValuesProblem(prim)
     if (problem) return problem
   }
-  return null
+  return partExtrasProblem(mesh.extras)
 }
 
 /**
- * A1–A5 — the `add` node rule. Returns `null` when the node is accepted, or
- * `{ code, message }`. `avatar` selects the avatar budget (A5) and the avatar
- * `extras` rule.
+ * A1–A5, richer-add R1–R3 — the `add` node rule. Returns `null` when the node
+ * is accepted, or `{ code, message }`. `avatar` selects the avatar budget (A5),
+ * the avatar `extras` rule, and add-check's narrower field set (R2).
  *
  * The node's `translation` (A2/K6) and the message's `format` (A2) are NOT
- * checked here: another check owns each, and the server test file covers both.
+ * checked here: on the server another check owns each.
  *
  * @param {*} node
  * @param {{avatar?: boolean}} [opts]
@@ -2114,7 +2237,7 @@ export function checkAddNode(node, { avatar = false } = {}) {
   const extrasProblem = avatar ? avatarExtrasProblem(node.extras) : worldExtrasProblem(node.extras)
   if (extrasProblem) return addDeny(extrasProblem)
 
-  // A3/A4/A5 — the mesh, when present.
+  // A3/A4/A5/R1/R2 — the mesh, when present.
   if (node.mesh !== undefined) {
     const problem = meshAddProblem(node.mesh, { avatar })
     if (problem) return addDeny(problem)

@@ -1,5 +1,5 @@
 {
-  "note": "Shared by the server's and the client's tests (add-check A1). Every 'node' goes through `checkAddNode(node, { avatar })`, which returns null or { code, message }. 'reason' is the shared code. 'avatar' selects A5's budget and extras rule. The 20,000-primitive avatar (CR-M2) is not a literal vector: it is exercised by the server test file, which bounds the reply at 500 ms. Round 2 (REVISION-add-check-round-2.md) adds the R1 (__proto__), R3 (fail closed) and small S3 boundary vectors; the large boundaries (1,024 avatar vertices, 6,144 indices, 65,535 vertices) are generated in packages/server/test/add-node-boundaries.test.js, which runs both copies.",
+  "note": "Shared by the server's and the client's tests (add-check A1). Every 'node' goes through `checkAddNode(node, { avatar })`, which returns null or { code, message }. 'reason' is the shared code. 'avatar' selects A5's budget and extras rule. The 20,000-primitive avatar (CR-M2) is not a literal vector: it is exercised by the server test file, which bounds the reply at 500 ms. Round 2 (REVISION-add-check-round-2.md) adds the R1 (__proto__), R3 (fail closed) and small S3 boundary vectors; the large boundaries (1,024 avatar vertices, 6,144 indices, 65,535 vertices) are generated in packages/server/test/add-node-boundaries.test.js, which runs both copies. richer-add (PREBRIEF-richer-add.md R1–R3) flips two world vectors to accepted (TEXCOORD_0, alphaMode BLEND) and adds the 'R1:' vectors; values JSON can't hold (Infinity, NaN in extras) and the 16 KiB edges are in add-node-boundaries.test.js.",
   "nodes": [
     {
       "label": "a minimal world add: one primitive, three vertices, no indices",
@@ -1624,7 +1624,7 @@
       "reason": "attribute-keys"
     },
     {
-      "label": "attributes with an extra attribute",
+      "label": "attributes with an extra attribute (richer-add: TEXCOORD_0 is now carried)",
       "avatar": false,
       "node": {
         "name": "cube-01",
@@ -1656,8 +1656,7 @@
           ]
         }
       },
-      "ok": false,
-      "reason": "attribute-keys"
+      "ok": true
     },
     {
       "label": "POSITION of 8 numbers",
@@ -2010,7 +2009,7 @@
       "reason": "indices-value"
     },
     {
-      "label": "material with an extra key",
+      "label": "material with alphaMode BLEND (richer-add: now carried)",
       "avatar": false,
       "node": {
         "name": "cube-01",
@@ -2038,8 +2037,7 @@
           ]
         }
       },
-      "ok": false,
-      "reason": "material-keys"
+      "ok": true
     },
     {
       "label": "baseColorFactor [2, 0, 0, 1]",
@@ -12677,6 +12675,2077 @@
         }
       },
       "ok": true
+    },
+    {
+      "label": "R1: TEXCOORD_0",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: TEXCOORD_0 and TEXCOORD_1",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "TEXCOORD_1": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: COLOR_0 VEC3 (3 per vertex)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: COLOR_0 VEC4 (4 per vertex)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  1,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1,
+                  0.5
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: TEXCOORD values may lie outside [0, 1] (tiling)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  -2,
+                  0,
+                  3.5,
+                  0,
+                  0,
+                  10
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: mesh extras",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          ],
+          "extras": {
+            "lod": 0
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: primitive extras",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "extras": {
+                "tag": "a"
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: material name and extras",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "name": "Marble",
+                "extras": {
+                  "note": "x"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: emissive, BLEND and double-sided",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "emissiveFactor": [
+                  1,
+                  0.5,
+                  0
+                ],
+                "alphaMode": "BLEND",
+                "doubleSided": true
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: MASK with alphaCutoff 0.3",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "MASK",
+                "alphaCutoff": 0.3
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: MASK with alphaCutoff 2 (a fully cut-out mask; a save keeps it)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "MASK",
+                "alphaCutoff": 2
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: explicit defaults are accepted",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "OPAQUE",
+                "doubleSided": false,
+                "emissiveFactor": [
+                  0,
+                  0,
+                  0
+                ],
+                "name": ""
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: a material with only richer fields (no pbrMetallicRoughness)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "emissiveFactor": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: every new field at once",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "NORMAL": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "TEXCOORD_1": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "COLOR_0": [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  1,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1,
+                  0.5
+                ]
+              },
+              "indices": [
+                0,
+                1,
+                2
+              ],
+              "extras": {
+                "p": 1
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "name": "All",
+                "extras": {
+                  "m": [
+                    1,
+                    2
+                  ]
+                },
+                "emissiveFactor": [
+                  0.1,
+                  0.2,
+                  0.3
+                ],
+                "alphaMode": "MASK",
+                "alphaCutoff": 0.25,
+                "doubleSided": true
+              }
+            }
+          ],
+          "name": "m",
+          "extras": {
+            "k": {
+              "n": 1
+            }
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "R1: avatar with TEXCOORD_0",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar with COLOR_0",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar with mesh extras",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          ],
+          "extras": {
+            "x": 1
+          }
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar with primitive extras",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "extras": {
+                "x": 1
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar material with name",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "name": "Skin"
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar material with extras",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "extras": {
+                  "x": 1
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar material with emissiveFactor",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "emissiveFactor": [
+                  1,
+                  0,
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar material with alphaMode",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "BLEND"
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar material with alphaCutoff",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaCutoff": 0.5
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar material with doubleSided",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "doubleSided": true
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
+    },
+    {
+      "label": "R1: avatar with an unknown attribute keeps attribute-keys",
+      "avatar": true,
+      "node": {
+        "name": "avatar-abc",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TANGENT": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "attribute-keys"
+    },
+    {
+      "label": "R1: TANGENT is still refused",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TANGENT": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "attribute-keys"
+    },
+    {
+      "label": "R1: TEXCOORD_2 is refused",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "TEXCOORD_1": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "TEXCOORD_2": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "attribute-keys"
+    },
+    {
+      "label": "R1: TEXCOORD_1 without TEXCOORD_0",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_1": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "attribute-keys"
+    },
+    {
+      "label": "R1: COLOR_1 is refused",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_1": [
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "attribute-keys"
+    },
+    {
+      "label": "R1: TEXCOORD_0 of the wrong length",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "texcoord-length"
+    },
+    {
+      "label": "R1: TEXCOORD_1 not an array",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  1
+                ],
+                "TEXCOORD_1": {
+                  "0": 0
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "texcoord-length"
+    },
+    {
+      "label": "R1: TEXCOORD_0 with 1e39 (Float32 overflow)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  1e+39,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "texcoord-value"
+    },
+    {
+      "label": "R1: TEXCOORD_0 with a string",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "TEXCOORD_0": [
+                  0,
+                  0,
+                  "1",
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "texcoord-value"
+    },
+    {
+      "label": "R1: COLOR_0 of 5 per vertex",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  1,
+                  0,
+                  0,
+                  1,
+                  1,
+                  1,
+                  0,
+                  0,
+                  1,
+                  1,
+                  1,
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "color-length"
+    },
+    {
+      "label": "R1: COLOR_0 of 2 per vertex",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  1,
+                  0,
+                  1,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "color-length"
+    },
+    {
+      "label": "R1: COLOR_0 above 1",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  1.5,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "color-value"
+    },
+    {
+      "label": "R1: COLOR_0 below 0",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ],
+                "COLOR_0": [
+                  -0.1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "color-value"
+    },
+    {
+      "label": "R1: mesh extras with an atrium key",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          ],
+          "extras": {
+            "atrium": {}
+          }
+        }
+      },
+      "ok": false,
+      "reason": "part-extras"
+    },
+    {
+      "label": "R1: primitive extras an array",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "extras": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "part-extras"
+    },
+    {
+      "label": "R1: material extras null",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "extras": null
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "part-extras"
+    },
+    {
+      "label": "R1: material extras with an atrium key",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "extras": {
+                  "atrium": 1
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "part-extras"
+    },
+    {
+      "label": "R1: material name of 257 characters",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-name"
+    },
+    {
+      "label": "R1: material name a number",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "name": 7
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-name"
+    },
+    {
+      "label": "R1: emissiveFactor above 1",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "emissiveFactor": [
+                  2,
+                  0,
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: emissiveFactor of length 2",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "emissiveFactor": [
+                  1,
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: alphaMode not one of the three",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "ADD"
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: alphaCutoff with BLEND (a save drops it)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "BLEND",
+                "alphaCutoff": 0.5
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: alphaCutoff with no alphaMode (OPAQUE)",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaCutoff": 0.5
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: alphaCutoff below 0",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "alphaMode": "MASK",
+                "alphaCutoff": -1
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: doubleSided a string",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "doubleSided": "yes"
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-value"
+    },
+    {
+      "label": "R1: occlusionTexture is still refused",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "occlusionTexture": {
+                  "index": 0
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-keys"
+    },
+    {
+      "label": "R1: a texture inside pbrMetallicRoughness is still refused",
+      "avatar": false,
+      "node": {
+        "name": "obj",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorTexture": {
+                    "index": 0
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-keys"
     }
   ]
 }
