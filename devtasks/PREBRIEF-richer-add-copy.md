@@ -1,11 +1,11 @@
 # Pre-brief: the `add` check, the richer `add`, and copying objects
 
-Status: **DRAFT, Revision 0.3 (2026-11-05), the draft for `copy-objects`.**
+Status: **DRAFT, Revision 0.4 (2026-11-05), the draft for `copy-objects`.**
 Its first two rounds now have contracts of their own: **`add-check`**,
 `PREBRIEF-add-check.md` FINAL Rev 1.1 (shipped to PROD as `cdfe88a8`, §4), and
-**`richer-add`**, `PREBRIEF-richer-add.md` DRAFT Rev 1.2 (§5), which holds
+**`richer-add`**, `PREBRIEF-richer-add.md` DRAFT Rev 1.3 (§5), which holds
 RA-L2, RA-L3 and RA-L6. **Still open here: CP-L1–CP-L7,** each with a
-recommendation. Decided (operator, 2026-11-05): RA-L1 (a), RA-L2 (c), RA-L3 (a)
+recommendation. Decided (operator, 2026-11-05): RA-L1 (a), RA-L2 (c) modified (accessor and buffer names dropped, their `extras` refused), RA-L3 (a)
 (with a revisit trigger), RA-L4 (a), RA-L5 (a), RA-L6 (a), RA-L7 (a), RA-L8 (a).
 - **Rev 0.3 (against `cdfe88a8`):** §2.1, §2.2, §2.4 and §2.7 rechecked against
   the code (line numbers and facts changed with `add-check`); §2.3 marked closed;
@@ -484,7 +484,14 @@ loudly instead of quietly:
   - it shows a read-only panel with **Copy**, the object's credit (CP-L3), its
     behaviour if it has one (design Q6: visitors may read scripts), and C2's
     note;
-  - clicks in Inspect mode don't send `activate`.
+  - clicks in Inspect mode don't send `activate`;
+  - **Rev 0.4 (second ChatGPT review, CP-L1 note): Inspect doesn't select
+    hidden objects.** Edit mode deliberately keeps them selectable
+    (`visibleHits(…, { includeHidden: true })`, `app.js` L2134–2138, F-L8, so
+    the owner can un-hide one); "Edit mode's rules" must not carry that over, so
+    Inspect picks with `includeHidden: false`, as `PointerInputBridge` does
+    outside Edit mode. (A hidden object is already in every visitor's
+    `som-dump`, so this is about what a visitor is offered, not exposure.)
   
   Owners get Copy and Paste in Edit mode.
 - (b) A Copy item on right-click, with no mode. It's smaller, but it needs a
@@ -507,6 +514,13 @@ loudly instead of quietly:
   objects (a teleport replaces the SOM). At Paste, apply the new name,
   `objectId`, credit and behaviour change, then recount the message's bytes. A
   failed paste leaves the clipboard as it was.
+- **Rev 0.4 (second ChatGPT review, S6): the paste's lifecycle.** A paste is an
+  ordinary `add`, so it reuses the structure tracker and Undo's request and
+  answer handling (`edit-structure.js`, `edit-undo.js`), as Duplicate does: a
+  refused paste shows the server's text and records nothing; a teleport while a
+  paste is pending is the tracker's existing "the world did not answer" case;
+  a change to the original after Copy doesn't reach the clipboard (it's a
+  snapshot). The copy revision checks each against the tracker's code.
 
 **CP-L3. The credit's shape (C4).**
 - **(a) Recommended, keeping C4's ids:**
@@ -597,7 +611,14 @@ loudly instead of quietly:
   - **another host is shown before it's fetched** (GR-S7): pasting makes the
     owner's browser fetch from that host. CR notes a hostile world can already
     make every visitor fetch any `https` URL today, so this is disclosure, not
-    a new exposure.
+    a new exposure;
+  - **Rev 0.4 (second ChatGPT review, S4):** the resolved absolute URL goes
+    through `modelUrlProblem` again at Paste, never around it; the fetch keeps
+    today's protections (`model-fetch.js`: `credentials: 'omit'`,
+    `referrerPolicy: 'no-referrer'`, the per-model and per-world budgets,
+    confirmed in the source); and **the source base comes from the live
+    connection at Copy** (the world the client is in), never from a credit
+    field the object carries.
 
 **CP-L7. Where C2's note goes** (models-by-url L12 (b) put it here). "Visitors
 can see and copy anything in this world."
@@ -673,6 +694,16 @@ release merge and PROD `COMPLETE`.
   failure in the handoff.
 
 ## 9. Review log
+- **Rev 0.4** (2026-11-05, evening): a second ChatGPT review of Rev 0.1
+  (`REVIEW-richer-add-copy-rev0.1-chatgpt-2.md`; it was given the old prompt).
+  Most of it was already taken (`add-check`, `richer-add`'s FLOAT rule, Rev
+  0.2's CP-L2/L3/L5/L6). New, taken: Inspect skips hidden objects (CP-L1); the
+  paste's lifecycle (CP-L2); revalidation, fetch protections and the live
+  source base (CP-L6); and, for `richer-add`, its S5 (RA-L2 modified, decided by
+  the operator). **Recorded for later, not in these rounds:** its M2's
+  per-world resource budget. The 1 MiB message cap doesn't bound a world's
+  total size or its `som-dump`, and copy makes filling a world easier, though
+  only for its owner (CR-S2 said the same).
 - **Rev 0.3** (2026-11-05, against `cdfe88a8`, after `add-check` shipped):
   `richer-add`'s contract written out as `PREBRIEF-richer-add.md` DRAFT Rev 1.2;
   RA-L2, RA-L3 and RA-L6 moved there and decided ((c), (a), (a)); §2.1, §2.2, §2.4, §2.7 and §2.8's line

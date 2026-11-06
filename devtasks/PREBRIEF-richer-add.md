@@ -1,7 +1,7 @@
 # Pre-brief: the richer `add` (`richer-add`)
 
-Status: **DRAFT, Revision 1.2 (2026-11-05). Decided (operator, 2026-11-05):
-RA-L2 (c) and RA-L3 (a), with a revisit trigger (§3); RA-L6 and how the round
+Status: **DRAFT, Revision 1.3 (2026-11-05). Decided (operator, 2026-11-05):
+RA-L2 (c) modified (names dropped, extras refused) and RA-L3 (a), with a revisit trigger (§3); RA-L6 and how the round
 runs, "no preference", so Claude's recommendations: RA-L6 (a) and the fast lane
 (§6.1).** The contract for the second of the three rounds in
 `PREBRIEF-richer-add-copy.md`, written out from that file's §5 sketch, as
@@ -259,7 +259,10 @@ here: RA-L1 (a), RA-L4 (a) (avatars get none of the richer fields), RA-L5 (a)
 (the bounds, which R1 applies to the new fields), RA-L7 (a), RA-L8 (a).
 
 **RA-L2. What the richer `add` carries.** **Decided (operator, 2026-11-05):
-(c), as recommended.** Every option carries the material's
+(c), modified in Rev 1.3: accessor and buffer names are dropped, their `extras`
+are refused** (a second ChatGPT review, S5: `extras` can carry application data;
+names are labels). It costs nothing today: no fixture has either, and nothing
+Atrium writes makes one. Every option carries the material's
 `name`, `extras`, `emissiveFactor`, `alphaMode`, `alphaCutoff` (with `MASK`,
 §2.4) and `doubleSided`, and mesh and primitive `extras`.
 
@@ -268,7 +271,7 @@ here: RA-L1 (a), RA-L4 (a) (avatars get none of the richer fields), RA-L5 (a)
 | UVs (`TEXCOORD_0`, `TEXCOORD_1`) and vertex colours (`COLOR_0`), FLOAT only | carried | refused | carried |
 | Accessor and buffer names and `extras` | refused | refused | **dropped**, a stated D5 exception |
 
-- **Claude (c):** the labels are on the containers, not the geometry. `add`
+- **Claude (c), before the modification:** the labels are on the containers, not the geometry. `add`
   sends no accessors (the receiver builds new ones from plain arrays), a buffer
   can't be carried faithfully anyway (a file's buffer holds many meshes, and
   `ingestNode` makes its own, §2.2), nothing in Atrium or three.js reads them,
@@ -438,8 +441,9 @@ that file holds.
     extensions and textures. `meshProblem` allows mesh and primitive `extras`
     and the R1 attributes, each FLOAT, not normalized, not sparse, with
     `TEXCOORD_n` VEC2 and `COLOR_0` VEC3 or VEC4; everything else it refuses
-    today it still refuses. `accessorProblem` stops checking names and `extras`
-    on accessors and buffers (RA-L2 (c)), and keeps every other check.
+    today it still refuses. `accessorProblem` stops checking accessor and
+    buffer **names** (RA-L2 (c), modified), and keeps every other check,
+    `extras` included.
   - **`buildDescriptor` emits the new fields canonically** (CR-S4): mesh
     `extras`, primitive `extras`, material `name` and `extras` only when not
     empty; `emissiveFactor` only when the writer would write it (not within
@@ -460,7 +464,7 @@ that file holds.
   - A7 stays: the built descriptor goes through `add-spec.js` at click time.
 - **R8, the stated exceptions.** The D5 comment (`edit-duplicate.js` L15–19)
   lists what an `add` doesn't keep, so the rule stays honest:
-  - accessor and buffer labels (RA-L2 (c)): a restored object loses them for good (CR-N3);
+  - accessor and buffer names (RA-L2 (c), modified): a restored object loses them for good (CR-N3). Their `extras` are refused, not dropped;
   - material sharing (RA-L3 (a)): **the Undo button's title for that entry
     adds "(it comes back with its own material)"**. `prepareRestore` returns
     `sharedMaterial: true` when the node's mesh has more than one node user, or
@@ -519,8 +523,10 @@ that file holds.
     L200–206), emissive, `BLEND` and double-sided (L226–236), and mesh,
     primitive and material `extras` and a material name (L239–252) change to
     accept and emit them; their extensions and textures cases stay refused, and
-    the accessor-label cases (L253–263) change to "dropped": the label isn't in
-    the descriptor, and the copy is accepted. Normalized and integer
+    in the accessor-label cases (L253–263), the name cases (the vertex and the
+    index accessor's) change to "dropped" (the name isn't in the descriptor and
+    the copy is accepted) and the `extras` and extensions cases stay refused;
+    a buffer with a name is accepted and one with `extras` refused. Normalized and integer
     `COLOR_0`/`TEXCOORD_0`, a VEC3 `TEXCOORD_0`, a sparse one, textures and
     extensions are still refused;
   - **the fixed point (R7)** over every top-level node of every fixture world
@@ -637,6 +643,18 @@ Claude's recommendation):
    gives the commands with the real SHA once it exists.
 
 ## 7. Review log
+- **Rev 1.3** (2026-11-05, evening): a second ChatGPT review arrived, of the
+  combined draft's Rev 0.1 at `923bd444` (it had been given the old prompt), so
+  not a review of this file: `REVIEW-richer-add-copy-rev0.1-chatgpt-2.md`. Its
+  M1, M2, S1, S2, N1 and N2 are `add-check`'s and shipped; M3 is this file's
+  FLOAT rule; M4, S3, S4 and S6 are the copy round's (the combined file's
+  Rev 0.4). **Taken here: its S5,** by the operator: RA-L2 (c) modified, names
+  dropped and `extras` refused (§3, R7, R8, §5). Its RA-L3 caveat ("Undo must
+  warn that sharing changes, and this must be tested") is R8 and §5 already.
+  Its "safer cutoff bounds" isn't taken: glTF allows any cutoff ≥ 0, and a
+  cutoff above 1 is a fully cut-out `MASK`, which a save keeps. Its M2's
+  longer-term per-world resource budget is recorded in the combined file's §9,
+  for later. **This file's own outside review is still to come.**
 - **Rev 1.2** (2026-11-05): a fresh Claude agent checked Rev 1.1 against the
   code (it hadn't written it: emulated R4, R6 and R7 in a scratch copy, ran
   every server file that sends `add`, and wrote six probes). Claude reproduced
