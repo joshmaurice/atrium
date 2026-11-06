@@ -1,10 +1,17 @@
 # Pre-brief: the `add` check, the richer `add`, and copying objects
 
-Status: **DRAFT, Revision 0.2 (2026-11-05), after two outside reviews of Rev 0.1,
-both CHANGES REQUESTED. Decided (operator, 2026-11-05): RA-L1 (a), RA-L4 (a),
-RA-L7 (a), RA-L8 (a), and RA-L5 (a) as recommended, which settle `add-check`'s
-round; its contract is now `PREBRIEF-add-check.md` FINAL Rev 1.1 (§4). Still open
-here: RA-L2, RA-L3, RA-L6 and CP-L1–CP-L7.** Each has a recommendation.
+Status: **DRAFT, Revision 0.3 (2026-11-05), the draft for `copy-objects`.**
+Its first two rounds now have contracts of their own: **`add-check`**,
+`PREBRIEF-add-check.md` FINAL Rev 1.1 (shipped to PROD as `cdfe88a8`, §4), and
+**`richer-add`**, `PREBRIEF-richer-add.md` DRAFT Rev 1.2 (§5), which holds
+RA-L2, RA-L3 and RA-L6. **Still open here: CP-L1–CP-L7,** each with a
+recommendation. Decided (operator, 2026-11-05): RA-L1 (a), RA-L2 (c), RA-L3 (a)
+(with a revisit trigger), RA-L4 (a), RA-L5 (a), RA-L6 (a), RA-L7 (a), RA-L8 (a).
+- **Rev 0.3 (against `cdfe88a8`):** §2.1, §2.2, §2.4 and §2.7 rechecked against
+  the code (line numbers and facts changed with `add-check`); §2.3 marked closed;
+  §3's RA-L2, RA-L3 and RA-L6 moved to `PREBRIEF-richer-add.md` §3 with their
+  arguments; §5 and §7 now point there. CP-L1–CP-L7 and §2.8 are as in Rev 0.2,
+  with §2.8's line numbers rechecked.
 - **The reviews:** `REVIEW-richer-add-copy-rev0.1-claude.md` (a runtime review:
   cloned, ran every suite and `p1`–`p5`, wrote probes `q1`–`q4`) and
   `REVIEW-richer-add-copy-rev0.1-chatgpt.md` (source-only: its clone failed on
@@ -69,58 +76,57 @@ by URL carry textured content); lights, cameras, skins and animation on `add`;
 editing emissive, alpha or double-sided in the Edit panel; a licence label
 (C4's "later, optionally"); a clipboard that survives a reload (CP-L2).
 
-## 2. Verified facts (at `f42b5fe`; the cited code is unchanged at `8fc82bb5`)
+## 2. Verified facts (at `f42b5fe`, Rev 0.1; §2.1, §2.2, §2.4 and §2.7 rechecked at `cdfe88a8`, Rev 0.3)
 
-### 2.1 The `add` path
-- **The schema accepts almost any mesh.** `add.client.json` requires
-  `node.name`. Under `mesh.primitives[]`, `attributes` is any object,
-  `indices` is anything and `material` is any object. Array items aren't typed.
-  `add.server.json` has the same node shape, plus `requestSeq` and `session`.
-- **The server checks the add, but not its mesh** (`session.js` L1226–1420), in
-  this order:
+### 2.1 The `add` path (at `cdfe88a8`)
+- **The schema types the mesh** since `add-check` (A8): `add.client.json`
+  requires `node.name`, and `mesh`, each primitive, `attributes`, `material`
+  and `pbrMetallicRoughness` are `additionalProperties: false`, with the
+  fields `ingestNode` keeps. `format` is `{ "const": "gltf" }`. `add.server.json`
+  has the same node shape, plus `requestSeq` and `session`.
+- **The server checks the whole node** (`session.js` L1231–1458), in this
+  order:
   1. `msg.id`, the avatar's name, and that an avatar has no parent;
-  2. S2 (`source`), and K4/L5 (an avatar carries no `extras.atrium`);
-  3. the mutation gate;
+  2. S2 (`source`), and K4/L5 (an avatar carries no `extras.atrium` but its
+     `ephemeral` marker);
+  3. the mutation gate (L1279–1285);
   4. for world adds: parent, name rules and `objectId` uniqueness;
-  5. K6 (transform values, avatars included);
-  6. for world adds: `checkAtriumExtras`, `checkModelHost` and the behaviour
-     caps.
-  
-  Nothing in that list looks at `node.mesh`.
+  5. K6, with `translation` (L1315–1323), avatars included;
+  6. `format` (L1325–1330);
+  7. for avatars, `checkAddNode` with A5's budget, in a `try` of its own
+     (L1332–1348); for world adds, `checkAddNode` first in the V9 `try`, then
+     `checkAtriumExtras`, `checkModelHost` and the behaviour caps
+     (L1355–1411).
 - **The server stores what `ingestNode` keeps and broadcasts the message as
-  sent** (`world.js` L573–591; `session.js` L1394–1413). Every client applies
-  the broadcast with the **same** `SOMDocument.ingestNode`
-  (`AtriumClient.js` L1533–1557). So widening `ingestNode` widens the server
-  and every client at once.
+  sent** (`world.js` L573–591 and L721–739; `session.js` L1431–1451), and since
+  `add-check` those are the same set. Every client applies the broadcast with
+  the **same** `SOMDocument.ingestNode` (`AtriumClient.js` L1547–1571). So
+  widening `ingestNode` widens the server and every client at once.
 - **Limits that exist:** `maxPayload` is 1 MiB (`session.js` L31, L281); message
-  depth is at most 64 (`message-depth.js`); the client caps a Duplicate or
-  Restore at `MAX_ADD_BYTES` 1,000,000 (`edit-duplicate.js` L25).
+  depth is at most 64 (`message-depth.js`); A1–A5's bounds
+  (`PREBRIEF-add-check.md` §4); the client caps a Duplicate or Restore at
+  `MAX_ADD_BYTES` 1,000,000 (`edit-duplicate.js` L26).
 
-### 2.2 What `ingestNode` keeps (`SOMDocument.js` L781–852)
+### 2.2 What `ingestNode` keeps (`SOMDocument.js` L781–852, unchanged at `cdfe88a8`)
 - **Kept:** the node's name, TRS and `extras`; the mesh name; POSITION and
-  NORMAL as float VEC3; indices as `Uint16Array`; per primitive, a **new**
-  material with three factors: `baseColorFactor`, `metallicFactor`,
-  `roughnessFactor`.
-- **Dropped without a word:** every other attribute (`p3`: `TEXCOORD_0`), the
-  material's name, emissive and every other material field (`p3`), mesh,
-  primitive and material `extras`, and **`node.extensions`** (CR-M3, GR-S1;
-  `p7`). The schema types `node.extensions` as an object.
-- **Taken without checks:** wrong-length arrays, non-numbers (`new
-  Float32Array(['a'])` is `NaN`), indices past the end, and indices above 65535,
-  which `Uint16Array` silently wraps (70000 becomes 4464). Also:
-  - **numbers that are finite as doubles but not as Float32:** `1e39` or
-    `3.5e38` in POSITION is stored as `Infinity` (GR-M1; `p7`);
-  - **`Infinity` itself:** `1e999` on the wire is `Infinity` after
-    `JSON.parse`, and Ajv's `type: number` accepts it (CR `q-ajv`);
-  - **`translation`:** K6 (`checkTransformValues`, `send-policy.js` L115–124)
-    checks only rotation and scale, while `send` requires 3 finite numbers
-    (L1687). An `add` with `translation: [1e999, 0, 0]` is accepted (CR-M3).
+  NORMAL as float VEC3; indices as `Uint16Array`; per primitive, a **new**,
+  unnamed material with three factors: `baseColorFactor`, `metallicFactor`,
+  `roughnessFactor`; one buffer per primitive (L804).
+- **Dropped:** every other attribute, the material's name, emissive and every
+  other material field, mesh, primitive and material `extras`, and
+  `node.extensions` (`PREBRIEF-richer-add.md` `p8` (c)). **Since `add-check`
+  none of these reach it:** the schema and `checkAddNode` refuse them first.
+- **Taken without checks,** as before: wrong lengths, non-numbers, indices past
+  the end or above 65535, Float32 overflow. **Since `add-check` none of these
+  reach it either** (A3), and `translation` is in K6 (A2,
+  `checkTransformValues`, `send-policy.js` L115–130).
 - First-party adds send exactly what is kept: the avatar capsule
-  (`geometry-utils.js` L120–143), the palette and pads (`PRIMITIVE_MATERIAL`
-  L152; L265–282), and Duplicate and Undo (`buildDescriptor`,
-  `edit-duplicate.js` L183–216).
+  (`buildAvatarDescriptor`, `geometry-utils.js` L119), the palette and pads
+  (`PRIMITIVE_MATERIAL` L151; `buildPrimitiveDescriptor` L237,
+  `buildTeleporterDescriptor` L262), and Duplicate and Undo (`buildDescriptor`,
+  `edit-duplicate.js` L185–218).
 
-### 2.3 The live defect: one malformed `add` stops joins (`p3`, `p4`)
+### 2.3 The live defect: one malformed `add` stops joins (`p3`, `p4`). **Closed by `add-check` (`cdfe88a8`).**
 - **`p3` (world module).** An `add` whose POSITION has 4 numbers passes the
   schema and is accepted. The next `serialize()` then throws `RangeError:
   Offset is outside the bounds of the DataView`. Every other malformed case
@@ -192,22 +198,32 @@ editing emissive, alpha or double-sided in the Edit panel; a licence label
 - **But CR-M1's class saves cleanly**, so PROD was surveyed for it: **no
   unreadable world** (operator's `p6`, 2026-11-05, §2.5).
 
-### 2.4 Duplicate's and Undo's rules (`edit-duplicate.js`)
+### 2.4 Duplicate's and Undo's rules (`edit-duplicate.js`, at `cdfe88a8`)
 - **D5 is lossless (N3):** a node can be duplicated or restored only if
   everything it has survives an `add`. Anything else is refused with a reason
-  (`DUPLICATE_REASONS` L39–50, rules L247–275).
-- **The mesh rules refuse:** a named or `extras`-carrying material or
-  accessor; extensions; textures; emissive; any alpha mode but `OPAQUE`;
+  (`DUPLICATE_REASONS` L40–52, which gained `add` with A7; rules
+  `duplicateRuleProblem` L249–277).
+- **The mesh rules refuse:** a named or `extras`-carrying material, accessor or
+  buffer; extensions; textures; emissive; any alpha mode but `OPAQUE`;
   double-sided; attributes other than POSITION and NORMAL; morph targets; any
-  mode but triangles; an index above 65535 (`materialProblem` L124–136,
-  `meshProblem` L138–165).
-- **One hole (CR-S4):** `materialProblem` never checks `alphaCutoff`. An opaque
-  material whose cutoff was set through `send` duplicates and restores
-  **without** it. `richer-add` closes this by carrying it.
-- **One off-by-one (CR-N1):** glTF forbids the index 65535 in an unsigned-short
-  accessor (it's WebGL 2's primitive-restart value). `MAX_INDEX` (L36) allows it.
-- **`prepareRestore` (L346–353) is Undo's canonical form.** It uses the same
-  rules and builder as Duplicate, with the node's own name and translation.
+  mode but triangles; an index above 65,534 (`accessorProblem` L109–124,
+  `materialProblem` L126–138, `meshProblem` L140–167).
+- **The "`alphaCutoff` hole" (CR-S4) loses nothing a save keeps** (corrected in
+  Rev 0.3, `PREBRIEF-richer-add.md` §2.4): `materialProblem` never checks the
+  cutoff, so an opaque material whose cutoff was set through `send` duplicates
+  and restores without it, but glTF-Transform's writer writes a cutoff only
+  with `MASK`, so a save, a joiner's `som-dump` and a reload drop it too.
+  `richer-add` carries the cutoff with `MASK`.
+- **CR-N1's off-by-one is closed:** `MAX_INDEX` (L37) is 65,534 (A7).
+- **A7 is in:** `prepareDuplicate` (L332–346) and `prepareRestore` (L360–369)
+  run `add-spec.js` on the built descriptor (`addSpecProblem`, L309–312).
+- **`prepareRestore` is Undo's canonical form.** It uses the same rules and
+  builder as Duplicate, with the node's own name and translation. Undo compares
+  captures with `sameDescriptor` (`edit-undo.js` L68–84), exact on keys and
+  values but **not** on key order.
+- **Sharing is already lost today for an unnamed material** (Rev 0.3,
+  `PREBRIEF-richer-add.md` §2.3, `p8` (f)): `materialProblem` doesn't look at
+  sharing, so only the name stops the fixtures' shared materials.
 - **Planes get a back face in their geometry** (`addBackFace`,
   `geometry-utils.js` L57) **because Duplicate refuses `doubleSided`**
   (K2). That stays as it is. Changing it isn't part of these rounds.
@@ -281,32 +297,35 @@ So:
   restore through `add` **never shares**, whatever the richer `add` carries
   (RA-L3).
 
-### 2.7 Other edits and extras
+### 2.7 Other edits and extras (at `cdfe88a8`)
 - **`send` can already write `emissiveFactor`, `alphaMode`, `alphaCutoff` and
-  `doubleSided`** on a material (`send-policy.js` L57–68). The SOM Inspector
-  can make an object emissive, and Duplicate then refuses it. The Edit panel
-  doesn't expose these fields.
-- **`send` checks material values for shape, not range** (`materialValueOk`,
-  `send-policy.js` L1405–1416: `isVec4`, `isFiniteNumber`). It accepts
-  `metallicFactor: 7` or `baseColorFactor: [2, 0, 0, 1]`; glTF requires [0, 1].
-  So an `add-check` with [0, 1] ranges on `add` alone would make such an object
-  impossible to duplicate or undo-delete (CR-S1, GR-S2). RA-L7.
+  `doubleSided`** on a material (`MATERIAL_PROPS`, `send-policy.js` L59–67).
+  The SOM Inspector can make an object emissive, and Duplicate then refuses it.
+  The Edit panel doesn't expose these fields.
+- **`send` checks material ranges since `add-check` (A9, RA-L7):**
+  `materialValueOk` (L1411–1423) uses the shared predicates (L1888–1907):
+  every factor and `emissiveFactor` finite and in [0, 1], `alphaCutoff` finite
+  and 0 or more, `alphaMode` one of the three, `doubleSided` a boolean. It
+  doesn't relate the cutoff to the mode (a cutoff on an `OPAQUE` material is
+  accepted, and not saved, `PREBRIEF-richer-add.md` §2.4). Saved materials out
+  of range keep working; PROD had none (`p6`).
 - **`checkAtriumExtras` accepts unknown `extras.atrium` keys without looking
-  at them** (`send-policy.js` L160–203). An `origin` or `copiedFrom` would pass
-  today with any value, up to the 1 MiB message.
+  at them** (`send-policy.js` L166–206). A2's 16 KiB bound covers `extras`
+  **other than** `atrium` (`worldExtrasProblem` L1974–1987), so an `origin` or
+  `copiedFrom` would still pass today with any value, up to the 1 MiB message.
 - **`send` can't write node `extras`** except the named leaves (`NODE_FIELDS`
   L51 and the teleporter, model, animation, `objectId` and behaviour leaves).
   So a value set at `add` time can only change by deleting the node and adding
   it again.
-- **The behaviour leaf's `origin` must be `"local"`** (`behavior-spec.js` L88,
-  L621). The design meant `origin` for the URL an imported behaviour came from
-  (§5.4).
+- **The behaviour leaf's `origin` must be `"local"`** (`BEHAVIOR_KEYS`
+  `behavior-spec.js` L86–88, the check at L621). The design meant `origin` for
+  the URL an imported behaviour came from (§5.4).
 
 ### 2.8 Facts for the copy step
 - **Visitors can't select anything.** Selection is Edit mode, gated by
-  `canEditNow()` (`app.js` L1567). Outside Edit mode, a click on an object
+  `canEditNow()` (`app.js` L1582). Outside Edit mode, a click on an object
   whose behaviour listens for `select` sends `activate`
-  (`activate-click.js`; `app.js` L55, L980).
+  (`activate-click.js`; `app.js` L55, L2192).
 - **The client uses no browser storage at all** (no `localStorage` or
   `sessionStorage` anywhere in `apps/client/src` or `packages/client/src`).
   **Moving between worlds happens in the page**: `app.js` never changes
@@ -322,12 +341,12 @@ So:
   `logout` and `me`). So today a username in an address is permanent. C4 chose
   ids because usernames "may change".
 - **Behaviours in another world:** Duplicate remaps the copy's
-  self-references and keeps its grants (F10, `edit-duplicate.js` L289–309).
+  self-references and keeps its grants (F10, `remapBehaviorTargets` and `withRemappedBehavior`, `edit-duplicate.js` L291–321).
   Pasted into another world, a grant names an object id that doesn't exist
   there.
   - **Grants are positional (CR-S5, GR-M3).** `nodeMap` is a unique list whose
     entry 0 must be the object's own id (`behavior-spec.js` L775–780), and
-    graph pointers bind to it **by index** (L814–819, L910–919), as do
+    graph pointers bind to it **by index** (L812–819, `pointerBinding` L910–920), as do
     `/animations/<i>` references. Removing an entry shifts every later index,
     or puts it out of range so `behaviorCheck` refuses the paste.
   - **An owner chooses their objects' ids,** and any visitor can read every id
@@ -348,18 +367,12 @@ So:
 | `p6-db-survey.mjs <db copy>` | **the operator's host survey**: §2.5's two tables for every saved world in a copy of the database. It prints counts only, and was tested on a scratch database holding two fixtures and one bad row. **Rev 0.2:** it also counts what `add-check` and RA-L7's ranges would newly refuse in saved content, flags unreadable worlds (CR-M1), and falls back to Node's built-in `node:sqlite` if `better-sqlite3` isn't built. Retested on a scratch database with an out-of-range material and a `POSITION []` world: both found |
 | `p7-float32-extensions.mjs` | **Rev 0.2:** GR-M1's Float32 overflow and `node.extensions`, through the real handler and save/reload; the later joiner's `som-dump` is read with the client's own `WebIO.readJSON` |
 | `review-q/q1-…`, `review-q/q2-…` | **Rev 0.2:** CR's probes, unchanged. `q2` was rerun at `8fc82bb5` (CR-M1, CR-M2, the wire `1e999`) |
+| `p8-richer-add-facts.mjs`, `p9-render-mapping.mjs` | **Rev 0.3:** the facts behind `PREBRIEF-richer-add.md` (its §2.8) |
 
-**The operator's survey (recommended before `add-check`'s release, Rev 0.2).**
-It now answers two questions that matter to round 1: does PROD already hold a
-world that can't be loaded (CR-M1), and what saved content would `add-check`
-newly stop Duplicate and Undo from handling (CR-S1, CR-N4)? On the host, against
-a backup made with `sqlite3 <db> ".backup /tmp/atrium-survey.db"` (never a plain
-file copy):
-```bash
-cd <a checkout at Rev 0.2's commit or later, after pnpm install>
-node devtasks/spike-richer-add/p6-db-survey.mjs /tmp/atrium-survey.db
-rm /tmp/atrium-survey.db
-```
+**The operator's survey** ran on PROD at `1e36f42` before `add-check`'s release
+(§2.5). Its next run, with the counters `richer-add` added, is a release step of
+that round: the host commands, with real paths, are in `PREBRIEF-richer-add.md`
+§6.
 
 ## 3. Decisions (for the operator)
 
@@ -373,75 +386,17 @@ rm /tmp/atrium-survey.db
 - **Reviews:** both (a). CR: "Agree, strongly. PROD is public and §2.3 is live."
   Rev 0.2's §4 takes in both reviews' must-fixes for this round.
 
-**RA-L2. What the richer `add` carries.** Every option below carries the
-material's name, emissive, alpha and double-sided. They differ on UVs, vertex
-colours and accessor and buffer labels:
+**RA-L2. What the richer `add` carries.** **Moved (Rev 0.3) to
+`PREBRIEF-richer-add.md` §3,** with the reviews' arguments and Rev 0.3's facts
+(no fixture has an accessor or buffer label; PROD's are counted by the next
+`p6`). **Decided (operator, 2026-11-05): (c),** with a revisit trigger.
 
-| | (a) | (b) | **(c) Recommended (Rev 0.1)** |
-|---|---|---|---|
-| Material `name`, `extras`, `emissiveFactor`, `alphaMode`, `alphaCutoff`, `doubleSided`, plus today's three factors | carried | carried | carried |
-| Mesh and primitive `extras` | carried | carried | carried |
-| UVs (`TEXCOORD_0`, `TEXCOORD_1`) and vertex colours (`COLOR_0`) | **carried** | not carried (refused) | **carried** |
-| Accessor and buffer names and `extras` | refused | refused | **dropped** |
-
-- **Why (c):** accessor and buffer names and `extras` are labels on the
-  containers, not on the geometry. Nothing in Atrium shows or reads them, and
-  three.js ignores them.
-  - `add` doesn't send accessors at all: the receiver builds fresh ones from
-    plain arrays.
-  - A buffer can't be carried faithfully anyway. `ingestNode` makes one
-    buffer per primitive (`SOMDocument.js` L804), while a file's buffer
-    usually holds many meshes.
-  
-  Refusing them would stop a user copying or undo-deleting an object for
-  something they can't see or change. So D5 gains a second stated exception
-  (with RA-L3's): "accessor and buffer labels aren't kept". A duplicate's
-  original keeps them; **a restored object loses them** (CR-N3: after an Undo,
-  the restored node is the only copy).
-- **UVs and vertex colours** are in no fixture (§2.5). They're for step 7's
-  import and export, and for textures later, and they cost the round little.
-- (a) keeps D5 strict for the labels. (b) also leaves UVs and colours to
-  textures or step 7.
-- Carrying accessor names in an optional side field (`accessors: { POSITION:
-  { name } }`) was considered and set aside (operator, 2026-11-03): no
-  conceivable reader.
-- **How the new attributes are encoded (CR-S4, GR-S5), recommended:** carry
-  **FLOAT attributes only**; refuse normalized-integer `COLOR_0` and
-  `TEXCOORD_*`. Today's `sendableArray` copies raw integers, so a
-  normalized-byte colour would arrive as 0–255. Converting to floats is the
-  alternative (a third stated D5 exception, a component-type change); no fixture
-  needs it, and models by URL carry such files untouched. `COLOR_0` is VEC3 or
-  VEC4, and `ingestNode` takes its type from the wire's length against
-  POSITION's vertex count.
-- **Reviews:** CR agrees with (c). **GR prefers (a)**, or (c) for Copy and
-  Duplicate only, with Undo refusing: Undo "ordinarily means restoring what was
-  removed", and the labels might hold pipeline metadata. **Claude keeps (c)**:
-  under (a) or GR's split, deleting any `atrium.gltf` object whose accessors
-  carry a label can't be undone, for data nothing in Atrium reads, and step 7's
-  export doesn't need. It's the operator's call; nothing in `add-check` depends
-  on it.
-
-**RA-L3. Shared materials (§2.6).**
-- **(a) Recommended: a copy, a duplicate and a restore each get their own
-  material.** D5 gains one stated exception: "material sharing isn't kept".
-  The Undo note says that a restored object no longer shares its material's
-  edits. Copies being independent is what Copy should mean anyway.
-- (b) Copies are independent, but Undo refuses to restore an object whose
-  material is shared, keeping D5 strict for Undo. Deleting a column then can't
-  be undone.
-- (c) Carry the sharing (a reference to an existing material). That needs
-  material identity: the same authority question as material pointers (4d-1
-  passdown §5.1). Not now.
-- **PROD today (§2.5): no shared materials at all,** so (a) and (b) differ
-  only for content added later, and for the fixtures.
-- **Reviews:** CR agrees with (a). **GR prefers (b) for now:** delete one of
-  two columns, recolour the other, then Undo, and the restored column has the
-  old colour and no longer follows the shared edits. Even one node whose
-  primitives shared a material loses that. **Claude keeps (a):** (b) makes
-  deleting any `atrium.gltf` column permanent (9 primitives share "Marble"),
-  and the sharing (a) loses is the behaviour §2.6 shows nothing in Atrium
-  explains today. (a) needs the Undo text to say it. The operator's call, for
-  `richer-add`.
+**RA-L3. Shared materials (§2.6).** **Moved (Rev 0.3) to
+`PREBRIEF-richer-add.md` §3.** **Decided (operator, 2026-11-05): (a),** with a
+revisit trigger (step 7's import, material identity, or labels or sharing found
+by `p6`). New
+in Rev 0.3: today's Duplicate and Undo already lose sharing for an unnamed
+shared material, and PROD has no shared materials.
 
 **RA-L4. Avatars.** **Decided (operator, 2026-11-05): (a), with these numbers.**
 - **(a) Recommended (amended in Rev 0.2):** avatar `add`s get `add-check`'s
@@ -485,15 +440,10 @@ colours and accessor and buffer labels:
   - every length is checked **before** any per-element work (CR-M2).
 - (b) Other numbers. Nothing else in the design depends on them.
 
-**RA-L6. Rounds and order.**
-- **(a) Recommended:** `add-check`, then `richer-add`, then `copy-objects`
-  (single objects only). The subtree `add` is recorded as the next placement
-  round: the evidence is §2.5's 13 groups, and it would also make deleting a
-  group undoable (design §4.5).
-- (b) The subtree `add` before `copy-objects`, so copying the commons' lamps
-  and furniture works from the start. That's a larger protocol change, with a
-  pre-brief of its own.
-- **Reviews:** both (a).
+**RA-L6. Rounds and order.** **Moved (Rev 0.3) to
+`PREBRIEF-richer-add.md` §3,** since its first round has shipped: it now orders
+`copy-objects` and the subtree `add` after `richer-add`. **(a),** `copy-objects`
+first (operator: "no preference", so the recommendation; both reviews (a)).
 
 **RA-L7. The [0, 1] material ranges on `send` (new in Rev 0.2; CR-S1, GR-S2).**
 **Decided (operator, 2026-11-05): (a).**
@@ -671,41 +621,17 @@ Rev 0.2 §4 said:
 
 `richer-add` (§5) widens that file's A1–A4 and keeps its A5 for avatars.
 
-## 5. The contract sketch for `richer-add` (written out in Rev 1, after RA-L2–RA-L5)
-- **A1's rule widens** by RA-L2 and RA-L5. Avatar adds keep `add-check`'s set
-  (RA-L4).
-- **`ingestNode` keeps the new fields**, on the server and every client
-  (§2.1).
-- **`buildDescriptor` emits them;** `materialProblem` and `meshProblem` narrow
-  to what's still refused. Undo's canonical form (`prepareRestore`) changes
-  shape: undo entries live only in memory, so nothing is migrated.
-- **Checks that matter:**
-  - `p1` and `p2` rerun: the 13 named-material nodes copy;
-  - the commons' `ground-plane` and `crate-01` can be deleted and restored
-    (10-18 §4.6);
-  - in the browser: an emissive copy renders self-lit (Atrium has no bloom,
-    so "glows" overstated it, GR-N1), a `BLEND` copy is transparent, a
-    double-sided copy shows its back, and a `COLOR_0` copy is coloured.
-    CR read `@gltf-transform/view` 4.4.0's source: each maps to three.js with
-    no other change (L154, L196, L894–924). Not yet seen in a browser.
-  
-  All of these on a duplicate, a restore and a reload.
-- **RA-L3's note** goes into the Undo text, and into the D5 comment in
-  `edit-duplicate.js`.
-- **Rev 0.2 items for the Rev 1 contract** (CR-S4, CR-M2, GR-S5):
-  - FLOAT attributes only (RA-L2); `COLOR_0`'s type from its length;
-  - `alphaCutoff` is carried, which closes today's D5 hole (§2.4);
-  - **the canonical form emits a material field only when it differs from
-    the glTF default**, since glTF-Transform can't tell an explicit default
-    from an absent one, and `prepareRestore` is compared key order included;
-  - **one buffer per `ingestNode` call, not per primitive** (`SOMDocument.js`
-    L804), since ingest cost grows with the document's buffer count (CR `q4`:
-    2.6 ms in a fresh world, 62 ms once ~19,000 buffers are in it);
-  - **version skew:** during the deploy window, an owner's tab that hasn't
-    reloaded ingests a richer `add` without the new fields; if it then
-    deletes and undoes that object, it re-adds the poorer copy, silently. A
-    `hello` capability (as `scriptRunner` does) lets the server refuse a
-    stale client's `add`. A hard-reload note doesn't prevent it.
+## 5. The contract for `richer-add`: moved
+**`richer-add`'s contract is now `devtasks/PREBRIEF-richer-add.md`, DRAFT
+Rev 1.2 (2026-11-05),** written out from this section's Rev 0.2 sketch against
+`cdfe88a8`, with RA-L2, RA-L3 and RA-L6. It widens `PREBRIEF-add-check.md`'s
+A1–A4 and keeps A5. It also corrects two things the sketch said:
+- **`alphaCutoff` is carried only with `MASK`,** because a save keeps it
+  nowhere else; the "hole" lost nothing a save keeps (§2.4);
+- **Undo's comparison ignores key order:** what the canonical form needs is a
+  fixed point, `prepareRestore(ingest(d))` equal to `d`.
+
+`copy-objects` (§6) builds on `richer-add`'s descriptor.
 
 ## 6. The sketch for `copy-objects` (its own revision after CP-L1–CP-L7)
 - The client: Inspect mode (CP-L1); the clipboard (CP-L2); Paste through
@@ -721,25 +647,12 @@ Rev 0.2 §4 said:
   (a2), never removed; model URLs resolved at Paste (CP-L6).
 
 ## 7. Worker rules and release path
-As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
-- **`add-check` in four commits, each runnable:**
-  1. the vectors and both copies of `checkAddNode`, with `translation` in K6;
-  2. the handler, `send`'s ranges (A9) and the schema;
-  3. A10: autosave's read-back and the two join messages;
-  4. the client (Duplicate and Undo) and the full suites, with the handoff.
-- **The seam rule:** acceptance tests build descriptors with the real
-  builders (`threeGeometryToGltfPrimitive`, `prepareDuplicate`) and send
-  them through the real `attachSessionHandlers`.
-- **A new check must fail on today's code** before its PASS counts.
-- **Server test files run one at a time** (AGENTS.md gotcha), and new tests
-  use port 0.
-- **One outside review of this pre-brief and one of each round's code.** The
-  reviewer gets the files at a pinned commit and runs `p3`, `p4`, `p7` and
-  `review-q/q2` if they can. Rev 0.1 had two (§9); Rev 0.2's changes to §4 are
-  the reviews' own recommendations, so the operator may take §4 to a brief
-  without a third.
-- **Never push to `main` between a round's release merge and PROD
-  `COMPLETE`.**
+`add-check`'s are in `PREBRIEF-add-check.md` §6 and `richer-add`'s in
+`PREBRIEF-richer-add.md` §6. `copy-objects`' come with its own revision, on the
+same pattern: the seam rule, a new check failing on today's code before its
+PASS counts, server test files one at a time on port 0, one outside review of
+the pre-brief and one of the code, and nothing pushed to `main` between a
+release merge and PROD `COMPLETE`.
 
 ## 8. Notes for the brief author
 - **The check is about what `ingestNode` keeps, not what glTF allows.** A field
@@ -760,6 +673,13 @@ As scripting-4d-1 (`PREBRIEF-scripting-4d.md` §8), with these specifics:
   failure in the handoff.
 
 ## 9. Review log
+- **Rev 0.3** (2026-11-05, against `cdfe88a8`, after `add-check` shipped):
+  `richer-add`'s contract written out as `PREBRIEF-richer-add.md` DRAFT Rev 1.2;
+  RA-L2, RA-L3 and RA-L6 moved there and decided ((c), (a), (a)); §2.1, §2.2, §2.4, §2.7 and §2.8's line
+  numbers rechecked against the code; §2.3 marked closed; §2.4's `alphaCutoff`
+  hole corrected; §2.9's survey block, which had placeholders, now points at
+  that file's real host commands; §5 and §7 point at the two contracts. This
+  file stays the draft for `copy-objects` (CP-L1–CP-L7).
 - **Rev 0.2, `add-check` split out** (2026-11-05): §4 moved to
   `PREBRIEF-add-check.md` FINAL Rev 1 (then 1.1), with RA-L5 (a) confirmed; that file adds
   the `format` rule and `WORLD_UNREADABLE`. This file stays a draft for

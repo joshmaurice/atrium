@@ -56,6 +56,26 @@ for (const row of db.rows('SELECT document FROM worlds')) {
           m.getMetallicRoughnessTexture() || m.getOcclusionTexture()) bump(inner, 'textures')
       if (m.listExtensions().length) bump(inner, 'material extensions')
       if (m.listParents().filter((x) => x.propertyType === 'Primitive').length > 1) bump(inner, 'material shared')
+      // richer-add (PREBRIEF-richer-add.md §2.5): what RA-L2 and the FLOAT rule decide.
+      if (m.getAlphaMode() === 'MASK' && m.getAlphaCutoff() !== 0.5) bump(inner, 'alphaCutoff (MASK, not 0.5)')
+      if (Object.keys(m.getExtras() ?? {}).length) bump(inner, 'material extras')
+    }
+  }
+  // richer-add: labels and encodings, per primitive at any depth.
+  for (const mesh of doc.getRoot().listMeshes()) {
+    if (mesh.listParents().filter((x) => x.propertyType === 'Node').length > 1) bump(inner, 'mesh shared by several nodes (RA-L3)')
+    if (Object.keys(mesh.getExtras() ?? {}).length) bump(inner, 'mesh extras')
+    for (const prim of mesh.listPrimitives()) {
+      if (Object.keys(prim.getExtras() ?? {}).length) bump(inner, 'primitive extras')
+      const accs = [...prim.listAttributes(), prim.getIndices()].filter(Boolean)
+      if (accs.some((a) => a.getName())) bump(inner, 'accessor name (RA-L2)')
+      if (accs.some((a) => Object.keys(a.getExtras() ?? {}).length)) bump(inner, 'accessor extras (RA-L2)')
+      if (accs.some((a) => a.getBuffer()?.getName())) bump(inner, 'buffer name (RA-L2)')
+      if (accs.some((a) => Object.keys(a.getBuffer()?.getExtras() ?? {}).length)) bump(inner, 'buffer extras (RA-L2)')
+      for (const s of prim.listSemantics()) {
+        const a = prim.getAttribute(s)
+        if (a.getComponentType() !== 5126 || a.getNormalized()) bump(inner, `attribute ${s} not plain FLOAT`)
+      }
     }
   }
   // Rev 0.2 (outside reviews M1/M3/S1/N1/N4): what `add-check` and the [0, 1]
