@@ -18,6 +18,25 @@
     "userId": { "type": "string", "minLength": 1, "description": "signin-sync I1 — the admitted user's id, present exactly when signedIn is true" },
     "scriptHost": { "type": "boolean", "description": "scripting-4b-1 E4/E5 — true when this session holds the world's script-host role" },
     "hostGen": { "type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "scripting-4b-1 E5 — the host generation, present exactly when scriptHost is true" },
+    "world": {
+      "type": "object",
+      "description": "copy-objects K1 — the world this socket is in. Present in every hello this server sends; NOT required, because a client may talk to another or older Atrium server. Ids are this server's own; a client checks every field itself.",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "the world's id on this server" },
+        "owner": {
+          "type": "object",
+          "description": "present exactly when the world has an owner",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1, "description": "the owner's user id" },
+            "name": { "type": "string", "minLength": 1, "description": "the owner's current username, present only when the server found one" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "capabilities": {
       "type": "object",
       "properties": {

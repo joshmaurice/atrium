@@ -142,6 +142,59 @@ function roleFromHello(msg) {
  * All three fields are required, so a non-active message still carries a
  * `hostGen` (the generation it refers to).
  */
+// ---------------------------------------------------------------------------
+// copy-objects K1 — `hello.world`, checked by the client itself
+//
+// The same forms as the credit's (`world`, `creator`, `creatorName`: K2),
+// pinned by `tests/fixtures/credit-vectors.json`'s `forms`. Field by field: a
+// bad `world.id` makes the whole value null; a bad `owner.id` drops `owner`; a
+// bad `owner.name` drops `name` alone, so the owner's own world keeps its id
+// even when their name can't be used.
+// ---------------------------------------------------------------------------
+
+/** K2's id form: 1–128 characters, none below U+0021. */
+export function worldIdFormOk(v) {
+  if (typeof v !== 'string' || v.length < 1 || v.length > 128) return false
+  for (let i = 0; i < v.length; i++) if (v.charCodeAt(i) < 0x21) return false
+  return true
+}
+
+/**
+ * K2's name form: 1–64 characters, none below U+0020, nor U+007F,
+ * U+2028–U+2029, U+202A–U+202E, U+2066–U+2069.
+ */
+export function worldNameFormOk(v) {
+  if (typeof v !== 'string' || v.length < 1 || v.length > 64) return false
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i)
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029 ||
+        (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) return false
+  }
+  return true
+}
+
+function isPlainRecord(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/**
+ * The checked `hello.world`: `{ id, owner?: { id, name? } }`, a fresh object
+ * holding only those fields, or null.
+ *
+ * @param {*} value  `msg.world` as received
+ * @returns {{ id: string, owner?: { id: string, name?: string } } | null}
+ */
+export function worldFromHello(value) {
+  if (!isPlainRecord(value) || !worldIdFormOk(value.id)) return null
+  const world = { id: value.id }
+  const owner = value.owner
+  if (isPlainRecord(owner) && worldIdFormOk(owner.id)) {
+    world.owner = { id: owner.id }
+    if (worldNameFormOk(owner.name)) world.owner.name = owner.name
+  }
+  return world
+}
+
 function roleFromScriptHost(msg) {
   const active = msg?.active
   if (typeof active !== 'boolean') return null
@@ -230,6 +283,11 @@ export class AtriumClient extends EventEmitter {
     // The app compares `userId`, never the display name.
     this.signedIn = undefined
     this.userId = undefined
+    // copy-objects K1 — the world this connection is in, from `hello.world`,
+    // checked field by field (`worldFromHello`): `{ id, owner?: { id, name? } }`,
+    // or null when the server didn't say or its id isn't in the credit's form.
+    // Reset wherever `signedIn` is.
+    this.world = null
     this._transmitName = null
 
     // 4b-1 E6 — the script-host role this client believes it holds. Set ONLY
@@ -639,6 +697,7 @@ export class AtriumClient extends EventEmitter {
     // one's identity. `undefined` means unknown, never anonymous.
     this.signedIn = undefined
     this.userId = undefined
+    this.world = null
 
     // ---- Create new session identity ----
     const sessionId      = globalThis.crypto.randomUUID()
@@ -849,6 +908,7 @@ export class AtriumClient extends EventEmitter {
       // signin-sync I1 — no connection, no admission: back to unknown.
       this.signedIn = undefined
       this.userId = undefined
+      this.world = null
       // A3 — a socket close ends the connection with any pending edit.
       this._resolveAllPendingAsUnknown(record)
       this.emit('disconnected', {
@@ -907,6 +967,7 @@ export class AtriumClient extends EventEmitter {
         // signin-sync I1 — back to unknown.
         this.signedIn = undefined
         this.userId = undefined
+        this.world = null
         // A3 — a connect timeout ends the connection with any pending edit.
         this._resolveAllPendingAsUnknown(record)
         // 4) Close the socket (which may fire error/close later)
@@ -972,6 +1033,7 @@ export class AtriumClient extends EventEmitter {
     // signin-sync I1 — no connection, no admission: back to unknown.
     this.signedIn = undefined
     this.userId = undefined
+    this.world = null
     this._clearPointerState()
 
     // A3 — every pending edit on this connection becomes edit:unknown at once.
@@ -1162,6 +1224,9 @@ export class AtriumClient extends EventEmitter {
     this.userId = (this.signedIn === true && typeof msg.userId === 'string')
       ? msg.userId
       : undefined
+    // copy-objects K1 — the world, checked here: another server can send
+    // anything, and the client validates no incoming message.
+    this.world = worldFromHello(msg.world)
 
     // 4b-1 E6 — the role from `hello`, read with E5's rules and AFTER canEdit
     // is set, so ONE listener covers both `hello` and `script-host`. A hello

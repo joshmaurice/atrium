@@ -855,6 +855,29 @@ export function attachSessionHandlers({
               hostGen = scriptHost.hostGen
             }
 
+            // copy-objects K1 (CP-L3 (c)) — the world this socket is in: its id,
+            // and its owner's id and current username when it has an owner. The
+            // name is present only when the lookup finds one (no database, a
+            // test owner id, or a failed lookup: no name); the hello is never
+            // refused for it. Claimed by the server, read by Copy for the
+            // credit; the client checks every field itself.
+            const helloWorld = { id: String(worldId) }
+            if (worldOwnerUserId != null) {
+              helloWorld.owner = { id: String(worldOwnerUserId) }
+              if (db) {
+                try {
+                  const ownerRow = db.database.prepare(
+                    'SELECT username FROM users WHERE id = ?'
+                  ).get(worldOwnerUserId)
+                  if (ownerRow && typeof ownerRow.username === 'string' && ownerRow.username.length > 0) {
+                    helloWorld.owner.name = ownerRow.username
+                  }
+                } catch {
+                  // No name: the owner's id still goes.
+                }
+              }
+            }
+
             ws.send(JSON.stringify({
               type: 'hello',
               id: session.id,
@@ -872,6 +895,7 @@ export function attachSessionHandlers({
               // when `scriptHost` is true.
               scriptHost: isScriptHost,
               ...(isScriptHost ? { hostGen } : {}),
+              world: helloWorld,
               capabilities: {
                 tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
               },

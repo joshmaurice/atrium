@@ -12,7 +12,9 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -20,6 +22,8 @@ import { WebIO } from '@gltf-transform/core'
 import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions'
 import { createWorld, createWorldFromDocument } from '../src/world.js'
 import { attachSessionHandlers } from '../src/session.js'
+import { createDb } from '../src/db.js'
+import { validate } from '../../protocol/src/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SPACE = resolve(__dirname, '../../../tests/fixtures/space.gltf')
@@ -241,5 +245,82 @@ test('K3: every malformed shared credit vector is refused with INVALID_VALUE nam
       'nothing was broadcast')
   } finally {
     o.ws.close(); witness.ws.close()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// K1 — `hello` carries the world's id and owner
+// ---------------------------------------------------------------------------
+
+function dbWithUser(id, username) {
+  const db = createDb(join(mkdtempSync(join(tmpdir(), 'atrium-copy-k1-')), 'test.db'))
+  db.database.prepare('INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, ?)')
+    .run(id, username, username, new Date().toISOString())
+  closers.push(async () => db.database.close())
+  return db
+}
+
+test('K1: an owned world\'s hello carries world.id and owner with the current username, and the schema accepts it', async () => {
+  const ownerId = '6c1d2e3f-4a5b-4c6d-8e7f-001122334455'
+  const db = dbWithUser(ownerId, 'commonskeeper')
+  const { port } = await startWorld({ ownerUserId: ownerId, connectAs: null, db, worldId: 'world-commons' })
+  const v = await owner(port, 'k1-visitor')
+  try {
+    assert.deepEqual(v.reply.world, { id: 'world-commons', owner: { id: ownerId, name: 'commonskeeper' } })
+    assert.equal(validate('server', v.reply).valid, true, JSON.stringify(validate('server', v.reply).errors))
+    // the username is read at each hello: a later rename (no route does it today) shows
+    db.database.prepare('UPDATE users SET username = ? WHERE id = ?').run('keeper2', ownerId)
+    const v2 = await owner(port, 'k1-visitor-2')
+    assert.equal(v2.reply.world.owner.name, 'keeper2', 'the current username')
+    v2.ws.close()
+  } finally {
+    v.ws.close()
+  }
+})
+
+test('K1: with db: null an owned world\'s owner has an id and no name, and the schema accepts it', async () => {
+  const { port } = await startWorld({ ownerUserId: 'user-a', worldId: 'w-null' })
+  const o = await owner(port, 'k1-owner')
+  try {
+    assert.deepEqual(o.reply.world, { id: 'w-null', owner: { id: 'user-a' } })
+    assert.equal(o.reply.canEdit, true, 'the owner still edits')
+    assert.equal(validate('server', o.reply).valid, true)
+  } finally {
+    o.ws.close()
+  }
+})
+
+test('K1: an owner the database doesn\'t know has an id and no name; the hello is never refused for it', async () => {
+  const db = dbWithUser('someone-else', 'bob')
+  const { port } = await startWorld({ ownerUserId: 'user-unknown', connectAs: null, db, worldId: 'w-x' })
+  const v = await owner(port, 'k1-unknown')
+  try {
+    assert.deepEqual(v.reply.world, { id: 'w-x', owner: { id: 'user-unknown' } })
+    assert.equal(validate('server', v.reply).valid, true)
+  } finally {
+    v.ws.close()
+  }
+})
+
+test('K1: a failed lookup leaves the name out and still answers', async () => {
+  const db = dbWithUser('user-a', 'alice')
+  db.database.close()   // every query now throws
+  const { port } = await startWorld({ ownerUserId: 'user-a', connectAs: null, db, worldId: 'w-closed' })
+  const v = await owner(port, 'k1-failed')
+  try {
+    assert.deepEqual(v.reply.world, { id: 'w-closed', owner: { id: 'user-a' } })
+  } finally {
+    v.ws.close()
+  }
+})
+
+test('K1: a file world\'s hello carries world.id and no owner, and the schema accepts it', async () => {
+  const { port } = await startWorld({ ownerUserId: null, connectAs: null, mutationPolicy: 'open' })
+  const v = await owner(port, 'k1-file')
+  try {
+    assert.deepEqual(v.reply.world, { id: 'default' }, 'attachSessionHandlers\' default world id')
+    assert.equal(validate('server', v.reply).valid, true)
+  } finally {
+    v.ws.close()
   }
 })
