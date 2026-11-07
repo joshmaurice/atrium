@@ -1,0 +1,1761 @@
+{
+  "note": "copy-objects K2/K3: the credit's form. Shared by the server's checkAtriumExtras (send-policy.js), Duplicate's atriumProblem (edit-duplicate.js) and, for 'forms', AtriumClient's hello check (K1) and copy-paste.js. 'credit' entries are extras.atrium values; 'field' is the field the refusal names. 'forms': id (world, creator, refs id/was), name (creatorName, refs name), server, date (at), address.",
+  "credit": [
+    {
+      "label": "no credit",
+      "atrium": {
+        "objectId": "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f809a1b"
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, the required fields only",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, every field",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "creator": "u-1",
+          "creatorName": "alice",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, an http server (DEV)",
+      "atrium": {
+        "origin": {
+          "server": "http://localhost:3000",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, a server with a port",
+      "atrium": {
+        "origin": {
+          "server": "https://h.example:8443",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, creatorName without creator (Library)",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "Library"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, creator without creatorName",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": "w-1",
+          "creator": "u-1"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, a non-ASCII creatorName with a space",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "Zo\u00eb \u00c5ngstr\u00f6m"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, a leap day",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2024-02-29"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, server of exactly 256 characters",
+      "atrium": {
+        "origin": {
+          "server": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, world of exactly 128 characters",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, creatorName of exactly 64 characters",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "copiedFrom, the required fields only",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "copiedFrom, every field",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": "Front door"
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "copiedFrom, address \"/\" (the commons)",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "copiedFrom, address of exactly 2048 characters",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "copiedFrom, a refs entry without a name",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1"
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "copiedFrom, 40 refs",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "fresh-0",
+              "was": "old-0"
+            },
+            {
+              "id": "fresh-1",
+              "was": "old-1"
+            },
+            {
+              "id": "fresh-2",
+              "was": "old-2"
+            },
+            {
+              "id": "fresh-3",
+              "was": "old-3"
+            },
+            {
+              "id": "fresh-4",
+              "was": "old-4"
+            },
+            {
+              "id": "fresh-5",
+              "was": "old-5"
+            },
+            {
+              "id": "fresh-6",
+              "was": "old-6"
+            },
+            {
+              "id": "fresh-7",
+              "was": "old-7"
+            },
+            {
+              "id": "fresh-8",
+              "was": "old-8"
+            },
+            {
+              "id": "fresh-9",
+              "was": "old-9"
+            },
+            {
+              "id": "fresh-10",
+              "was": "old-10"
+            },
+            {
+              "id": "fresh-11",
+              "was": "old-11"
+            },
+            {
+              "id": "fresh-12",
+              "was": "old-12"
+            },
+            {
+              "id": "fresh-13",
+              "was": "old-13"
+            },
+            {
+              "id": "fresh-14",
+              "was": "old-14"
+            },
+            {
+              "id": "fresh-15",
+              "was": "old-15"
+            },
+            {
+              "id": "fresh-16",
+              "was": "old-16"
+            },
+            {
+              "id": "fresh-17",
+              "was": "old-17"
+            },
+            {
+              "id": "fresh-18",
+              "was": "old-18"
+            },
+            {
+              "id": "fresh-19",
+              "was": "old-19"
+            },
+            {
+              "id": "fresh-20",
+              "was": "old-20"
+            },
+            {
+              "id": "fresh-21",
+              "was": "old-21"
+            },
+            {
+              "id": "fresh-22",
+              "was": "old-22"
+            },
+            {
+              "id": "fresh-23",
+              "was": "old-23"
+            },
+            {
+              "id": "fresh-24",
+              "was": "old-24"
+            },
+            {
+              "id": "fresh-25",
+              "was": "old-25"
+            },
+            {
+              "id": "fresh-26",
+              "was": "old-26"
+            },
+            {
+              "id": "fresh-27",
+              "was": "old-27"
+            },
+            {
+              "id": "fresh-28",
+              "was": "old-28"
+            },
+            {
+              "id": "fresh-29",
+              "was": "old-29"
+            },
+            {
+              "id": "fresh-30",
+              "was": "old-30"
+            },
+            {
+              "id": "fresh-31",
+              "was": "old-31"
+            },
+            {
+              "id": "fresh-32",
+              "was": "old-32"
+            },
+            {
+              "id": "fresh-33",
+              "was": "old-33"
+            },
+            {
+              "id": "fresh-34",
+              "was": "old-34"
+            },
+            {
+              "id": "fresh-35",
+              "was": "old-35"
+            },
+            {
+              "id": "fresh-36",
+              "was": "old-36"
+            },
+            {
+              "id": "fresh-37",
+              "was": "old-37"
+            },
+            {
+              "id": "fresh-38",
+              "was": "old-38"
+            },
+            {
+              "id": "fresh-39",
+              "was": "old-39"
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "both keys",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "creator": "u-1",
+          "creatorName": "alice",
+          "at": "2026-11-06"
+        },
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": "Front door"
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "both keys beside other Atrium keys",
+      "atrium": {
+        "objectId": "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f809a1b",
+        "teleporter": {
+          "destination": "/"
+        },
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06"
+        },
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "an unknown Atrium key stays unchecked",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06"
+        },
+        "somethingLater": {
+          "any": 1
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin is a string",
+      "atrium": {
+        "origin": "alice"
+      },
+      "ok": false,
+      "field": "origin"
+    },
+    {
+      "label": "origin is null",
+      "atrium": {
+        "origin": null
+      },
+      "ok": false,
+      "field": "origin"
+    },
+    {
+      "label": "origin is an array",
+      "atrium": {
+        "origin": []
+      },
+      "ok": false,
+      "field": "origin"
+    },
+    {
+      "label": "copiedFrom is null",
+      "atrium": {
+        "copiedFrom": null
+      },
+      "ok": false,
+      "field": "copiedFrom"
+    },
+    {
+      "label": "copiedFrom is a number",
+      "atrium": {
+        "copiedFrom": 1
+      },
+      "ok": false,
+      "field": "copiedFrom"
+    },
+    {
+      "label": "origin has an extra key",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "licence": "CC0"
+        }
+      },
+      "ok": false,
+      "field": "origin"
+    },
+    {
+      "label": "origin has copiedFrom's address",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "address": "/"
+        }
+      },
+      "ok": false,
+      "field": "origin"
+    },
+    {
+      "label": "origin has refs",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "fresh-0",
+              "was": "old-0"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "origin"
+    },
+    {
+      "label": "copiedFrom has origin's creator",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "creator": "u-1"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom"
+    },
+    {
+      "label": "copiedFrom has creatorName",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "creatorName": "alice"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom"
+    },
+    {
+      "label": "origin without server",
+      "atrium": {
+        "origin": {
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "origin without at",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "copiedFrom without address",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "copiedFrom without server",
+      "atrium": {
+        "copiedFrom": {
+          "address": "/",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.server"
+    },
+    {
+      "label": "copiedFrom without at",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.at"
+    },
+    {
+      "label": "server is a number",
+      "atrium": {
+        "origin": {
+          "server": 443,
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server is empty",
+      "atrium": {
+        "origin": {
+          "server": "",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server has a path",
+      "atrium": {
+        "origin": {
+          "server": "https://h.example/x",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server has a trailing slash",
+      "atrium": {
+        "origin": {
+          "server": "https://h.example/",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server is ftp:",
+      "atrium": {
+        "origin": {
+          "server": "ftp://h.example",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server is wss:",
+      "atrium": {
+        "origin": {
+          "server": "wss://h.example",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server is not normalised (upper case)",
+      "atrium": {
+        "origin": {
+          "server": "https://H.example",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server with a default port spelled out",
+      "atrium": {
+        "origin": {
+          "server": "https://h.example:443",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server is not a URL",
+      "atrium": {
+        "origin": {
+          "server": "atrium",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server of 257 characters",
+      "atrium": {
+        "origin": {
+          "server": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "server has credentials",
+      "atrium": {
+        "origin": {
+          "server": "https://u:p@h.example",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    },
+    {
+      "label": "at is not a real date",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-02-30"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at is not a leap day",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-02-29"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at without padding",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-1-6"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at with a time",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06T00:00:00Z"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at is a number",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": 20261106
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at month 13",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-13-01"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.at"
+    },
+    {
+      "label": "world is empty",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": ""
+        }
+      },
+      "ok": false,
+      "field": "origin.world"
+    },
+    {
+      "label": "world is null",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": null
+        }
+      },
+      "ok": false,
+      "field": "origin.world"
+    },
+    {
+      "label": "world of 129 characters",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+        }
+      },
+      "ok": false,
+      "field": "origin.world"
+    },
+    {
+      "label": "world with a space",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": "a b"
+        }
+      },
+      "ok": false,
+      "field": "origin.world"
+    },
+    {
+      "label": "world with a newline",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "world": "a\nb"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.world"
+    },
+    {
+      "label": "world is a number",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "world": 7
+        }
+      },
+      "ok": false,
+      "field": "origin.world"
+    },
+    {
+      "label": "creator is empty",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creator": ""
+        }
+      },
+      "ok": false,
+      "field": "origin.creator"
+    },
+    {
+      "label": "creator with a tab",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creator": "u\t1"
+        }
+      },
+      "ok": false,
+      "field": "origin.creator"
+    },
+    {
+      "label": "creatorName is empty",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": ""
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName is null",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": null
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName of 65 characters",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with a newline",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "ali\nce"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+0000",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "ali\u0000ce"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+007F",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "ali\u007fce"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+2028",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "ali\u2028ce"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+2029",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "ali\u2029ce"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+202A",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "\u202aalice"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+202E",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "ecila\u202e"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+2066",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "\u2066alice"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "creatorName with U+2069",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "2026-11-06",
+          "creatorName": "alice\u2069"
+        }
+      },
+      "ok": false,
+      "field": "origin.creatorName"
+    },
+    {
+      "label": "address without its leading slash",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "worlds/alice/garden",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address is empty",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address of 2049 characters",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address with a space",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/a b/c",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address with a tab",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/a\tb",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address is a number",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": 1,
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "refs is empty",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": []
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs"
+    },
+    {
+      "label": "refs is an object",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": {
+            "id": "a",
+            "was": "b"
+          }
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs"
+    },
+    {
+      "label": "refs of 41 entries",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "fresh-0",
+              "was": "old-0"
+            },
+            {
+              "id": "fresh-1",
+              "was": "old-1"
+            },
+            {
+              "id": "fresh-2",
+              "was": "old-2"
+            },
+            {
+              "id": "fresh-3",
+              "was": "old-3"
+            },
+            {
+              "id": "fresh-4",
+              "was": "old-4"
+            },
+            {
+              "id": "fresh-5",
+              "was": "old-5"
+            },
+            {
+              "id": "fresh-6",
+              "was": "old-6"
+            },
+            {
+              "id": "fresh-7",
+              "was": "old-7"
+            },
+            {
+              "id": "fresh-8",
+              "was": "old-8"
+            },
+            {
+              "id": "fresh-9",
+              "was": "old-9"
+            },
+            {
+              "id": "fresh-10",
+              "was": "old-10"
+            },
+            {
+              "id": "fresh-11",
+              "was": "old-11"
+            },
+            {
+              "id": "fresh-12",
+              "was": "old-12"
+            },
+            {
+              "id": "fresh-13",
+              "was": "old-13"
+            },
+            {
+              "id": "fresh-14",
+              "was": "old-14"
+            },
+            {
+              "id": "fresh-15",
+              "was": "old-15"
+            },
+            {
+              "id": "fresh-16",
+              "was": "old-16"
+            },
+            {
+              "id": "fresh-17",
+              "was": "old-17"
+            },
+            {
+              "id": "fresh-18",
+              "was": "old-18"
+            },
+            {
+              "id": "fresh-19",
+              "was": "old-19"
+            },
+            {
+              "id": "fresh-20",
+              "was": "old-20"
+            },
+            {
+              "id": "fresh-21",
+              "was": "old-21"
+            },
+            {
+              "id": "fresh-22",
+              "was": "old-22"
+            },
+            {
+              "id": "fresh-23",
+              "was": "old-23"
+            },
+            {
+              "id": "fresh-24",
+              "was": "old-24"
+            },
+            {
+              "id": "fresh-25",
+              "was": "old-25"
+            },
+            {
+              "id": "fresh-26",
+              "was": "old-26"
+            },
+            {
+              "id": "fresh-27",
+              "was": "old-27"
+            },
+            {
+              "id": "fresh-28",
+              "was": "old-28"
+            },
+            {
+              "id": "fresh-29",
+              "was": "old-29"
+            },
+            {
+              "id": "fresh-30",
+              "was": "old-30"
+            },
+            {
+              "id": "fresh-31",
+              "was": "old-31"
+            },
+            {
+              "id": "fresh-32",
+              "was": "old-32"
+            },
+            {
+              "id": "fresh-33",
+              "was": "old-33"
+            },
+            {
+              "id": "fresh-34",
+              "was": "old-34"
+            },
+            {
+              "id": "fresh-35",
+              "was": "old-35"
+            },
+            {
+              "id": "fresh-36",
+              "was": "old-36"
+            },
+            {
+              "id": "fresh-37",
+              "was": "old-37"
+            },
+            {
+              "id": "fresh-38",
+              "was": "old-38"
+            },
+            {
+              "id": "fresh-39",
+              "was": "old-39"
+            },
+            {
+              "id": "fresh-40",
+              "was": "old-40"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs"
+    },
+    {
+      "label": "a refs entry is a string",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            "r-1"
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0]"
+    },
+    {
+      "label": "a refs entry is null",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "a",
+              "was": "b"
+            },
+            null
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[1]"
+    },
+    {
+      "label": "a refs entry with an extra key",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "kind": "node"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0]"
+    },
+    {
+      "label": "a refs entry without id",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "was": "door-1"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0].id"
+    },
+    {
+      "label": "a refs entry without was",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1"
+            },
+            {
+              "id": "r-2"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[1].was"
+    },
+    {
+      "label": "a refs entry with an id with a space",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r 1",
+              "was": "door-1"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0].id"
+    },
+    {
+      "label": "a refs entry with an empty name",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": ""
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0].name"
+    },
+    {
+      "label": "a refs entry with U+202E in its name",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": "rood\u202e"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0].name"
+    },
+    {
+      "label": "a refs entry with a 65-character name",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/alice/garden",
+          "at": "2026-11-06",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.refs[0].name"
+    },
+    {
+      "label": "both keys: a good origin, a bad copiedFrom",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "creator": "u-1",
+          "creatorName": "alice",
+          "at": "2026-11-06"
+        },
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "address": "/worlds/alice/garden",
+          "at": "yesterday",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": "Front door"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.at"
+    },
+    {
+      "label": "both keys: a bad origin is named first",
+      "atrium": {
+        "origin": {
+          "server": "x",
+          "world": "w-1",
+          "creator": "u-1",
+          "creatorName": "alice",
+          "at": "2026-11-06"
+        },
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "world": "w-1",
+          "address": "/worlds/alice/garden",
+          "at": "x",
+          "refs": [
+            {
+              "id": "r-1",
+              "was": "door-1",
+              "name": "Front door"
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "field": "origin.server"
+    }
+  ],
+  "forms": [
+    {
+      "form": "id",
+      "label": "\"default\"",
+      "value": "default",
+      "ok": true
+    },
+    {
+      "form": "id",
+      "label": "\"user-a\"",
+      "value": "user-a",
+      "ok": true
+    },
+    {
+      "form": "id",
+      "label": "\"3f2a9c1e-0000-4000-8000-000000000000\"",
+      "value": "3f2a9c1e-0000-4000-8000-000000000000",
+      "ok": true
+    },
+    {
+      "form": "id",
+      "label": "\"wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\"",
+      "value": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "ok": true
+    },
+    {
+      "form": "id",
+      "label": "\"\"",
+      "value": "",
+      "ok": false
+    },
+    {
+      "form": "id",
+      "label": "\"wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\"",
+      "value": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "ok": false
+    },
+    {
+      "form": "id",
+      "label": "\"a b\"",
+      "value": "a b",
+      "ok": false
+    },
+    {
+      "form": "id",
+      "label": "\"a\\u0000\"",
+      "value": "a\u0000",
+      "ok": false
+    },
+    {
+      "form": "id",
+      "label": "null",
+      "value": null,
+      "ok": false
+    },
+    {
+      "form": "id",
+      "label": "42",
+      "value": 42,
+      "ok": false
+    },
+    {
+      "form": "id",
+      "label": "\"\u00e9\"",
+      "value": "\u00e9",
+      "ok": true
+    },
+    {
+      "form": "name",
+      "label": "\"alice\"",
+      "value": "alice",
+      "ok": true
+    },
+    {
+      "form": "name",
+      "label": "\"commonskeeper\"",
+      "value": "commonskeeper",
+      "ok": true
+    },
+    {
+      "form": "name",
+      "label": "\"Zo\u00eb \u00c5ngstr\u00f6m\"",
+      "value": "Zo\u00eb \u00c5ngstr\u00f6m",
+      "ok": true
+    },
+    {
+      "form": "name",
+      "label": "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"",
+      "value": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "ok": true
+    },
+    {
+      "form": "name",
+      "label": "\"\"",
+      "value": "",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"",
+      "value": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "\"a\\nb\"",
+      "value": "a\nb",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "\"a\u007f\"",
+      "value": "a\u007f",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "\"a\u202e\"",
+      "value": "a\u202e",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "\"\u2066a\"",
+      "value": "\u2066a",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "\"a\u2029\"",
+      "value": "a\u2029",
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "null",
+      "value": null,
+      "ok": false
+    },
+    {
+      "form": "name",
+      "label": "7",
+      "value": 7,
+      "ok": false
+    },
+    {
+      "form": "server",
+      "label": "\"https://atrium.example\"",
+      "value": "https://atrium.example",
+      "ok": true
+    },
+    {
+      "form": "server",
+      "label": "\"http://localhost:3000\"",
+      "value": "http://localhost:3000",
+      "ok": true
+    },
+    {
+      "form": "server",
+      "label": "\"https://h.example/\"",
+      "value": "https://h.example/",
+      "ok": false
+    },
+    {
+      "form": "server",
+      "label": "\"wss://h.example\"",
+      "value": "wss://h.example",
+      "ok": false
+    },
+    {
+      "form": "server",
+      "label": "\"\"",
+      "value": "",
+      "ok": false
+    },
+    {
+      "form": "server",
+      "label": "\"https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+      "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": false
+    },
+    {
+      "form": "date",
+      "label": "\"2026-11-06\"",
+      "value": "2026-11-06",
+      "ok": true
+    },
+    {
+      "form": "date",
+      "label": "\"2024-02-29\"",
+      "value": "2024-02-29",
+      "ok": true
+    },
+    {
+      "form": "date",
+      "label": "\"2026-02-29\"",
+      "value": "2026-02-29",
+      "ok": false
+    },
+    {
+      "form": "date",
+      "label": "\"2026-11-6\"",
+      "value": "2026-11-6",
+      "ok": false
+    },
+    {
+      "form": "date",
+      "label": "\"\"",
+      "value": "",
+      "ok": false
+    },
+    {
+      "form": "address",
+      "label": "\"/\"",
+      "value": "/",
+      "ok": true
+    },
+    {
+      "form": "address",
+      "label": "\"/worlds/a/b\"",
+      "value": "/worlds/a/b",
+      "ok": true
+    },
+    {
+      "form": "address",
+      "label": "\"worlds/a/b\"",
+      "value": "worlds/a/b",
+      "ok": false
+    },
+    {
+      "form": "address",
+      "label": "\"/a b\"",
+      "value": "/a b",
+      "ok": false
+    },
+    {
+      "form": "address",
+      "label": "\"\"",
+      "value": "",
+      "ok": false
+    }
+  ]
+}

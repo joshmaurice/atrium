@@ -202,7 +202,147 @@ export function checkAtriumExtras(extras) {
   // object id is refused here, before the first world change.
   const behaviorCheckResult = checkAtriumBehavior(extras)
   if (!behaviorCheckResult.ok) return behaviorCheckResult
+  // copy-objects K3 — the credit (`origin`, `copiedFrom`) is checked when
+  // either key is PRESENT: form and bounds only (CP-L4). It is claimed, never
+  // verified; `send` can't write it afterwards (no leaf names it).
+  const credit = creditProblem(atrium)
+  if (credit) return deny(SEND_INVALID, credit.message)
   return allow()
+}
+
+// ---------------------------------------------------------------------------
+// copy-objects K2/K3 — the credit's form
+//
+// One rule, two implementations: this and the client's `creditProblem`
+// (`apps/client/src/edit-duplicate.js`), pinned to each other by
+// `tests/fixtures/credit-vectors.json`, which both read. Exactly the keys K2
+// defines, each a bounded string of its form; an optional field is absent,
+// never `null` or `""`. Fields are checked in one fixed order (object, unknown
+// keys, then server, world, creator, creatorName, address, at, refs), so both
+// sides name the same field.
+// ---------------------------------------------------------------------------
+
+export const CREDIT_SERVER_MAX = 256
+export const CREDIT_ID_MAX = 128
+export const CREDIT_NAME_MAX = 64
+export const CREDIT_ADDRESS_MAX = 2048
+export const CREDIT_REFS_MAX = 40
+
+const CREDIT_KEYS = Object.freeze({
+  origin:     { allowed: ['server', 'world', 'creator', 'creatorName', 'at'], required: ['server', 'at'] },
+  copiedFrom: { allowed: ['server', 'world', 'address', 'at', 'refs'],       required: ['server', 'address', 'at'] },
+})
+const CREDIT_FIELD_ORDER = ['server', 'world', 'creator', 'creatorName', 'address', 'at', 'refs']
+const REF_KEYS = ['id', 'was', 'name']
+
+function hasCharBelow(s, limit) {
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) < limit) return true
+  return false
+}
+
+/** `world`, `creator`, a ref's `id` and `was`: 1–128 characters, none below U+0021. */
+export function creditIdOk(v) {
+  return typeof v === 'string' && v.length >= 1 && v.length <= CREDIT_ID_MAX && !hasCharBelow(v, 0x21)
+}
+
+/**
+ * `creatorName`, a ref's `name`: 1–64 characters (a username's own limit),
+ * none below U+0020, nor U+007F, U+2028–U+2029, U+202A–U+202E, U+2066–U+2069.
+ */
+export function creditNameOk(v) {
+  if (typeof v !== 'string' || v.length < 1 || v.length > CREDIT_NAME_MAX) return false
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i)
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029 ||
+        (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) return false
+  }
+  return true
+}
+
+/** `server`: an `https:` or `http:` origin, exactly as `new URL(v).origin` spells it. */
+export function creditServerOk(v) {
+  if (typeof v !== 'string' || v.length < 1 || v.length > CREDIT_SERVER_MAX) return false
+  let url
+  try { url = new URL(v) } catch { return false }
+  return (url.protocol === 'https:' || url.protocol === 'http:') && url.origin === v
+}
+
+/** `at`: `YYYY-MM-DD`, a real date (UTC). */
+export function creditDateOk(v) {
+  if (typeof v !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v)) return false
+  const [y, m, d] = v.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d))
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d
+}
+
+/** `address`: a path starting with `/`, at most 2,048 characters, none below U+0021. */
+export function creditAddressOk(v) {
+  return typeof v === 'string' && v.startsWith('/') && v.length <= CREDIT_ADDRESS_MAX && !hasCharBelow(v, 0x21)
+}
+
+const CREDIT_FIELD_RULES = Object.freeze({
+  server:      [creditServerOk, `must be an http(s) origin of at most ${CREDIT_SERVER_MAX} characters`],
+  world:       [creditIdOk, `must be 1–${CREDIT_ID_MAX} characters with no spaces or control characters`],
+  creator:     [creditIdOk, `must be 1–${CREDIT_ID_MAX} characters with no spaces or control characters`],
+  creatorName: [creditNameOk, `must be 1–${CREDIT_NAME_MAX} characters with no control or text-direction characters`],
+  address:     [creditAddressOk, `must be a path starting with "/", at most ${CREDIT_ADDRESS_MAX} characters, with no spaces or control characters`],
+  at:          [creditDateOk, 'must be a real date, YYYY-MM-DD'],
+})
+
+function refsProblem(refs, path) {
+  if (!Array.isArray(refs) || refs.length < 1 || refs.length > CREDIT_REFS_MAX) {
+    return { field: path, message: `${path} must be a list of 1–${CREDIT_REFS_MAX} entries` }
+  }
+  for (let i = 0; i < refs.length; i++) {
+    const entry = refs[i]
+    const at = `${path}[${i}]`
+    if (!isPlainObject(entry)) return { field: at, message: `${at} must be an object` }
+    const extra = Object.keys(entry).find((k) => !REF_KEYS.includes(k))
+    if (extra !== undefined) return { field: at, message: `${at} has an unknown key "${extra}"` }
+    for (const k of ['id', 'was']) {
+      if (!creditIdOk(entry[k])) return { field: `${at}.${k}`, message: `${at}.${k} ${CREDIT_FIELD_RULES.world[1]}` }
+    }
+    if (Object.hasOwn(entry, 'name') && !creditNameOk(entry.name)) {
+      return { field: `${at}.name`, message: `${at}.name ${CREDIT_FIELD_RULES.creatorName[1]}` }
+    }
+  }
+  return null
+}
+
+/**
+ * The credit's verdict on an `extras.atrium` object: null when neither key is
+ * present or both pass, else `{ field, message }` naming the first field that
+ * fails. Pure.
+ *
+ * @param {object} atrium  a plain `extras.atrium` object
+ * @returns {null | {field: string, message: string}}
+ */
+export function creditProblem(atrium) {
+  for (const key of ['origin', 'copiedFrom']) {
+    if (!Object.hasOwn(atrium, key)) continue
+    const value = atrium[key]
+    if (!isPlainObject(value)) return { field: key, message: `extras.atrium.${key} must be an object` }
+    const { allowed, required } = CREDIT_KEYS[key]
+    const extra = Object.keys(value).find((k) => !allowed.includes(k))
+    if (extra !== undefined) return { field: key, message: `extras.atrium.${key} has an unknown key "${extra}"` }
+    for (const field of CREDIT_FIELD_ORDER) {
+      if (!allowed.includes(field)) continue
+      const present = Object.hasOwn(value, field)
+      const path = `${key}.${field}`
+      if (!present) {
+        if (required.includes(field)) return { field: path, message: `extras.atrium.${path} is required` }
+        continue
+      }
+      if (field === 'refs') {
+        const p = refsProblem(value.refs, path)
+        if (p) return { field: p.field, message: `extras.atrium.${p.message}` }
+        continue
+      }
+      const [ok, text] = CREDIT_FIELD_RULES[field]
+      if (!ok(value[field])) return { field: path, message: `extras.atrium.${path} ${text}` }
+    }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
