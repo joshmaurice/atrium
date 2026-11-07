@@ -7,7 +7,7 @@ Read-only: don't push, don't open PRs, don't touch any deployed site.
 
 Repository: https://github.com/joshmaurice/atrium (public)
 Branch: claude/copy-objects
-Reviewed commit (the tip): __SHA__
+Reviewed commit (the tip): 2971a440906487b6e3089755f7a96e93fe5daac3
 Its base (main, code identical to PROD 3fcc296c): ace29de
 The contract: devtasks/PREBRIEF-copy-objects.md, FINAL Rev 2 (§4 K0–K10, §5, §6).
 The implementer's notes: devtasks/HANDOFF-copy-objects.md (§4 lists where the
@@ -19,11 +19,11 @@ Please put the reviewed 40-character SHA in the FIRST LINE of your review.
 
 STEP 1 — GET THE CODE
   git clone https://github.com/joshmaurice/atrium && cd atrium
-  git fetch origin claude/copy-objects && git checkout __SHA__
+  git fetch origin claude/copy-objects && git checkout 2971a440906487b6e3089755f7a96e93fe5daac3
   git diff ace29de HEAD
 Say whether the clone worked; if not, quote the error and use
-  https://github.com/joshmaurice/atrium/compare/ace29de...__SHA__
-and raw files at https://raw.githubusercontent.com/joshmaurice/atrium/__SHA__/<path>
+  https://github.com/joshmaurice/atrium/compare/ace29de...2971a440906487b6e3089755f7a96e93fe5daac3
+and raw files at https://raw.githubusercontent.com/joshmaurice/atrium/2971a440906487b6e3089755f7a96e93fe5daac3/<path>
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
   pnpm install --frozen-lockfile --ignore-scripts
@@ -68,7 +68,11 @@ WHAT TO CHECK, in order
 3. K2/K3: are the server's and the client's credit checks identical in
    behaviour (prototype keys, non-plain objects, lone surrogates, null vs
    absent)? K2's fill order at Paste; a malformed credit not stopping Copy
-   (your M2); `at` the Copy's day (your S4).
+   (your M2); `at` the Copy's day (your S4). And one question the fresh check
+   raised about the contract itself (handoff §7 item 2): K2's `address` form
+   allows text-direction characters (U+202A–U+202E, U+2066–U+2069), which
+   `creatorName` refuses; the code shows a stored one escaped rather than
+   changing the form. Should the form refuse them too?
 4. K1: the field-by-field client check and every reset; the owner lookup never
    refusing a hello.
 5. K0: any WebSocketServer on the registry path without the cap.
