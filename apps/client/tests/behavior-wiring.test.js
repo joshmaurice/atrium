@@ -299,9 +299,12 @@ describe('scripting-4d-1 (G6) — the importer\'s panel', () => {
   test('the form renders the runner\'s lines and the G6 notes', () => {
     const form = readSrc('behavior-form.js')
     assert.match(form, /renderList\(elements\.lines, reported\.lines\)/)
-    assert.match(form, /renderList\(elements\.notes, reported\.notes\)/)
+    // copy-objects K7 — the notes are led by a pasted behaviour's record, and
+    // the Enable question names a grant not in the world.
+    assert.match(form, /renderList\(elements\.notes, \[\.\.\.\(Array\.isArray\(record\) \? record : \[\]\), \.\.\.\(Array\.isArray\(reported\.notes\) \? reported\.notes : \[\]\)\]\)/)
+    assert.match(form, /const record = deps\.recordLines\?\.\(state\.node\) \?\? \[\]/)
     assert.match(form, /shouldPromptEnable\(state\.saved\)/)
-    assert.match(form, /enablePromptText\(state\.saved, \{ nameOf: deps\.nodeName \}\)/)
+    assert.match(form, /enablePromptText\(state\.saved, \{ nameOf: deps\.nodeName, inWorld: deps\.objectInWorld \}\)/)
     assert.match(source, /lines: epBehaviorLines, notes: epBehaviorNotes,/)
   })
 

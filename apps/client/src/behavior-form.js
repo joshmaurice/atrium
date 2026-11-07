@@ -698,7 +698,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   function askEnable() {
     const asker = deps.confirm ?? (typeof globalThis === 'undefined' ? null : globalThis.confirm)
     if (typeof asker !== 'function') return false
-    try { return asker(enablePromptText(state.saved, { nameOf: deps.nodeName })) === true } catch { return false }
+    // copy-objects K7 — `inWorld` names a grant whose object isn't here (a
+    // pasted behaviour's fresh id) "an object not in this world".
+    try { return asker(enablePromptText(state.saved, { nameOf: deps.nodeName, inWorld: deps.objectInWorld })) === true } catch { return false }
   }
 
   /**
@@ -1119,7 +1121,10 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     // writes them. Both are lists of graph-derived strings, written as text.
     const reported = deps.status?.() ?? {}
     renderList(elements.lines, reported.lines)
-    renderList(elements.notes, reported.notes)
+    // copy-objects K7 — a pasted behaviour's record ("It referred to Front
+    // door, Lamp in the world it was copied from") leads the notes. Text only.
+    const record = deps.recordLines?.(state.node) ?? []
+    renderList(elements.notes, [...(Array.isArray(record) ? record : []), ...(Array.isArray(reported.notes) ? reported.notes : [])])
     if (elements.logLines) {
       const lines = deps.logLines?.(state.node?.name) ?? []
       while (elements.logLines.firstChild) elements.logLines.removeChild(elements.logLines.firstChild)

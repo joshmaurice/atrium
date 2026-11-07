@@ -15,9 +15,15 @@
  *
  * The avatar-ready gate (trigger.setReady) is separate and unchanged.
  *
- * Pointer lock: entering Edit mode suspends the M-key preference (clicks must
- * land where the pointer is), M is ignored while editing, and leaving Edit mode
- * restores the preference.
+ * copy-objects K4 — Inspect, the read-only mode for anyone who can't edit.
+ * It is EXCLUSIVE with Edit (turning one on turns the other off). It changes
+ * clicks only: walking onto a pad still teleports, so the trigger stays as
+ * outside Edit mode. It suspends pointer lock as Edit does, so the picker's
+ * clientX/Y is the real pointer.
+ *
+ * Pointer lock: entering Edit or Inspect mode suspends the M-key preference
+ * (clicks must land where the pointer is), M is ignored while either is on,
+ * and leaving restores the preference.
  *
  * @param {object} opts
  * @param {(active: boolean) => void} opts.setTriggerActive  trigger.setActive
@@ -25,33 +31,44 @@
  */
 export function createEditModes({ setTriggerActive, pointerLock = false }) {
   let edit = false
+  let inspect = false
   let pointerLockPref = pointerLock
 
   const sync = () => setTriggerActive(!edit)
 
   return {
     get edit()      { return edit },
+    get inspect()   { return inspect },
     get triggerActive() { return !edit },
 
-    /** The effective pointer-lock setting: the preference, unless editing. */
-    get usePointerLock() { return pointerLockPref && !edit },
+    /** The effective pointer-lock setting: the preference, unless editing or inspecting. */
+    get usePointerLock() { return pointerLockPref && !edit && !inspect },
 
-    /** Turn Edit mode on or off. */
+    /** Turn Edit mode on or off. On turns Inspect off. */
     setEdit(on) {
       edit = !!on
+      if (edit) inspect = false
       sync()
     },
 
-    /** The M key. Ignored (returns false) while Edit mode is on. */
+    /** K4 — turn Inspect mode on or off. On turns Edit off. */
+    setInspect(on) {
+      inspect = !!on
+      if (inspect) edit = false
+      sync()
+    },
+
+    /** The M key. Ignored (returns false) while Edit or Inspect mode is on. */
     togglePointerLock() {
-      if (edit) return false
+      if (edit || inspect) return false
       pointerLockPref = !pointerLockPref
       return true
     },
 
-    /** Connection lifecycle: Edit mode off. The pointer preference is kept. */
+    /** Connection lifecycle: Edit and Inspect off. The pointer preference is kept. */
     reset() {
       edit = false
+      inspect = false
       sync()
     },
   }

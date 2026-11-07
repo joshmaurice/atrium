@@ -438,6 +438,16 @@ export function behaviorSummary(atrium, { nameOf = null, templateLabel = null } 
   }
 }
 
+/** The summary as the Inspect panel's lines, plain text for `textContent`. */
+export function behaviorSummaryLines(summary) {
+  if (!summary) return []
+  const lines = [`${summary.label}, ${summary.enabled ? 'enabled' : 'disabled'}`]
+  if (summary.refers.length > 0) lines.push(`Refers to ${summary.refers.join(', ')}`)
+  if (summary.note) lines.push(summary.note)
+  if (summary.record) lines.push(summary.record)
+  return lines
+}
+
 /**
  * K7's record, as the Behaviour panel shows it: "It referred to Front door,
  * Lamp in that world". Null when there is no valid record.

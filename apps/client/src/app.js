@@ -46,6 +46,7 @@ import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
 import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animation-panel.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
+import { copyObject, preparePaste, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, VISIBILITY_NOTE } from './copy-paste.js'   // copy-objects K4–K9
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
@@ -301,6 +302,9 @@ function renderWorldList(worlds) {
     if (isCommons) {
       toggle.disabled = true
       toggleLabel.title = 'The commons is always public'
+    } else {
+      // copy-objects K9 — C2's note, beside the toggle (and above the list).
+      toggleLabel.title = VISIBILITY_NOTE
     }
     toggle.addEventListener('change', async () => {
       toggle.disabled = true
@@ -646,6 +650,12 @@ function updateHintText() {
 
   if (modes.edit) {
     hudHintEl.textContent = `Edit mode · Click to select · Alt-click selects a part · Esc to deselect · Drag to look · WASD to move${camSuffix}`
+    return
+  }
+
+  // copy-objects K4 — Inspect changes clicks only: pads still teleport.
+  if (modes.inspect) {
+    hudHintEl.textContent = `Inspect mode · Click an object to see it and copy it · Drag to look · WASD to move${camSuffix}`
     return
   }
 
@@ -1657,6 +1667,19 @@ epTeleporter.addEventListener('click', () => {
 
 const editToggleBtn  = document.getElementById('edit-toggle-btn')
 const editPanel      = document.getElementById('edit-panel')
+// copy-objects K4 — the Inspect toggle and its read-only panel.
+const inspectToggleBtn = document.getElementById('inspect-toggle-btn')
+const inspectPanel     = document.getElementById('inspect-panel')
+const ipEmpty          = document.getElementById('ip-empty')
+const ipFields         = document.getElementById('ip-fields')
+const ipName           = document.getElementById('ip-name')
+const ipCreditRow      = document.getElementById('ip-credit-row')
+const ipCredit         = document.getElementById('ip-credit')
+const ipBehaviorRow    = document.getElementById('ip-behavior-row')
+const ipBehavior       = document.getElementById('ip-behavior')
+const ipCopy           = document.getElementById('ip-copy')
+const ipReason         = document.getElementById('ip-reason')
+const ipStatus         = document.getElementById('ip-status')
 const epHostStatus   = document.getElementById('ep-host-status')
 const epModes        = document.getElementById('ep-modes')
 const epSpaceBtn     = document.getElementById('ep-space')
@@ -1755,6 +1778,9 @@ let lastAnimationOptions = null
 let modelAnimations = null
 let animationControls = null
 const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
+const epCopy         = document.getElementById('ep-copy')           // copy-objects K5
+const epPaste        = document.getElementById('ep-paste')          // copy-objects K6
+const epPasteNotes   = document.getElementById('ep-paste-notes')    // copy-objects K6
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
 const epRedo         = document.getElementById('ep-redo')           // step 2, Y5
@@ -1906,7 +1932,128 @@ function updateEditControls() {
   // Z4 — a pad's save no longer disables the Edit toggle: the structural request
   // is one at a time like any other, and the button's state follows `modes`.
   if (!allowed && modes.edit) setEditMode(false)
+  updateInspectControls()
 }
+
+// ── Inspect (copy-objects K4) ────────────────────────────────────────────
+//
+// A read-only mode for anyone who can't edit: select an object (hidden ones
+// excluded), read its name, credit and behaviour, and Copy it. One gate both
+// ways: offered exactly when `canEditNow()` is false and the world is
+// connected, and left when either changes.
+
+/** The object an Inspect click selected, or null. */
+let inspected = null
+let inspectOutline = null
+
+/** copy-objects K2/K5 — the clipboard: one snapshot, in memory (CP-L2). */
+let clipboard = null
+
+function canInspectNow() {
+  return !canEditNow() && client.connected === true
+}
+
+function updateInspectControls() {
+  const allowed = canInspectNow()
+  if (inspectToggleBtn) inspectToggleBtn.style.display = allowed ? '' : 'none'
+  if (!allowed && modes.inspect) setInspectMode(false)
+}
+
+function setInspectMode(on) {
+  if (on) {
+    if (modes.inspect || !canInspectNow()) return
+    modes.setInspect(true)
+    // Pointer lock is suspended, as in Edit mode: the picker reads clientX/Y.
+    if (document.pointerLockElement) document.exitPointerLock()
+    inspectPanel.style.display = ''
+    inspectToggleBtn.classList.add('active')
+  } else {
+    if (!modes.inspect) return
+    modes.setInspect(false)
+    inspectPanel.style.display = 'none'
+    inspectToggleBtn.classList.remove('active')
+  }
+  inspectSelect(null)
+  ipStatus.textContent = ''
+  updateHintText()
+}
+
+inspectToggleBtn?.addEventListener('click', () => setInspectMode(!modes.inspect))
+
+/** An object's name in THIS world, by its id; null when it isn't here. */
+function objectNameHere(id) {
+  const name = client.som?.resolveObjectId?.(id)?.node?.name
+  return typeof name === 'string' && name !== '' ? name : null
+}
+
+function inspectSelect(node) {
+  inspected = node ?? null
+  if (inspectOutline) {
+    threeScene.remove(inspectOutline)
+    inspectOutline.geometry.dispose()
+    inspectOutline.material.dispose()
+    inspectOutline = null
+  }
+  const obj = inspected && sceneGroup ? findNodeObject(sceneGroup, inspected.name) : null
+  if (obj) {
+    obj.updateWorldMatrix(true, false)
+    obj.updateMatrixWorld(true)
+    inspectOutline = new THREE.BoxHelper(obj, 0x22d3ee)
+    threeScene.add(inspectOutline)
+  }
+  renderInspectPanel()
+}
+
+/**
+ * K4 — the panel's ONE writer. Everything another user wrote (the name, the
+ * credit, the graph's labels) is set with `textContent`.
+ */
+function renderInspectPanel() {
+  const node = inspected
+  ipEmpty.style.display = node ? 'none' : ''
+  ipFields.style.display = node ? '' : 'none'
+  if (!node) return
+  ipName.textContent = node.name
+  const atrium = node.extras?.atrium
+  const credit = creditLines(atrium)
+  ipCreditRow.style.display = credit.length > 0 ? '' : 'none'
+  ipCredit.textContent = credit.join('\n')
+  const summary = behaviorSummary(atrium, { nameOf: objectNameHere, templateLabel: (id) => TEMPLATE_LABELS[id] ?? id })
+  ipBehaviorRow.style.display = summary ? '' : 'none'
+  ipBehavior.textContent = summary ? behaviorSummaryLines(summary).join('\n') : ''
+  const reason = copyHint(node)
+  ipCopy.disabled = !!reason
+  ipCopy.title = reason ?? 'Copy this object'
+  ipReason.textContent = reason ?? ''
+}
+
+/** Copy's reason it can't, Duplicate's rule with the credit skipped (K5). A hint: the click checks again. */
+function copyHint(node) {
+  const gltfNode = node?._node
+  if (!gltfNode) return 'Select an object first'
+  return duplicateRuleProblem(gltfNode, { credit: false })?.reason ?? null
+}
+
+/**
+ * K5 — Copy, from the live node at click time, with where it came from taken
+ * from the live connection (`client.wsUrl`, never the File box's base) and
+ * K1's `client.world`. A refusal leaves the clipboard as it was.
+ */
+function copyNode(node) {
+  const gltfNode = node?._node
+  if (!gltfNode) return { ok: false, reason: 'Select an object first' }
+  const result = copyObject(gltfNode, { wsUrl: client.wsUrl, world: client.world }, { nameOf: objectNameHere })
+  if (result.ok) clipboard = result.snapshot
+  return result
+}
+
+ipCopy?.addEventListener('click', () => {
+  if (!modes.inspect || !inspected) return
+  const result = copyNode(inspected)
+  ipStatus.textContent = result.ok
+    ? `Copied “${inspected.name}”. Paste it in a world you can edit.`
+    : result.reason
+})
 
 // scripting-4b-1 E8 (E-L6) — the ONE writer of the Edit panel's host line. The
 // text is a pure function of the three facts, so a test reads it without a DOM.
@@ -1923,6 +2070,8 @@ function setEditMode(on) {
   if (on) {
     if (!canEditNow() || modes.edit) return
     refreshHostStatus()
+    // copy-objects K4 — Inspect and Edit are exclusive.
+    if (modes.inspect) setInspectMode(false)
     modes.setEdit(true)
     if (document.pointerLockElement) document.exitPointerLock()
     ensureGizmo()
@@ -1975,6 +2124,11 @@ function setEditMode(on) {
 // only this, clears the undo and redo stacks.
 function endEditSession() {
   setEditMode(false)
+  // copy-objects K4 — leaving the world leaves Inspect; the clipboard is kept
+  // (CP-L2: it survives a teleport and a sign-in, not a reload).
+  setInspectMode(false)
+  if (epPasteNotes) epPasteNotes.textContent = ''
+  updateInspectControls()
   editTracker.reset()
   // R2 (round 2) — the session's end clears the hold, after the tracker's
   // reset: a reset reports no idle, so nothing else would release a hold still
@@ -2071,6 +2225,7 @@ function tickEditMode() {
   if (!modes.edit) return
   if (gizmo && gizmo.camera !== stage.camera) gizmo.camera = stage.camera
   if (outline) outline.update()
+  if (inspectOutline) inspectOutline.update()
 }
 
 // ── Selection (B2) ──────────────────────────────────────────────────────
@@ -2118,7 +2273,7 @@ function attachSelected() {
 }
 
 // The SOM node an Edit-mode click lands on, resolved per B2.
-function pickEditTarget(e) {
+function pickEditTarget(e, { includeHidden = true } = {}) {
   if (!sceneGroup || !client.som) return null
   const rect = viewportEl.getBoundingClientRect()
   const ndc = new THREE.Vector2(
@@ -2135,7 +2290,10 @@ function pickEditTarget(e) {
   // select one, its outline shows, and the Visible checkbox un-hides it), so
   // this call keeps the hidden hits (`includeHidden: true`). Outside Edit mode
   // `PointerInputBridge._hitTest` is what skips them.
-  for (const hit of visibleHits(raycaster.intersectObjects(sceneGroup.children, true), { includeHidden: true })) {
+  //
+  // copy-objects K4 — Inspect passes `includeHidden: false`: what a visitor is
+  // offered is what they see.
+  for (const hit of visibleHits(raycaster.intersectObjects(sceneGroup.children, true), { includeHidden })) {
     const node = nodeForHitObject(hit.object, lookup)
     if (node) hits.push(node)
   }
@@ -2166,6 +2324,19 @@ viewportEl.addEventListener('mousedown', (e) => {
 }, true)
 
 viewportEl.addEventListener('click', (e) => {
+  // copy-objects K4 — an Inspect click selects with Edit mode's rules, hidden
+  // objects excluded, and NEVER sends `activate`. Pointer lock is suspended in
+  // Inspect, so clientX/Y is the real pointer.
+  if (modes.inspect) {
+    if (e.target !== canvas) return
+    const down = pressDown
+    pressDown = null
+    if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: false })) return
+    const { node } = pickEditTarget(e, { includeHidden: false }) ?? { node: null }
+    inspectSelect(node)
+    ipStatus.textContent = ''
+    return
+  }
   // F5/M3 (scripting-4b-2) — OUTSIDE Edit mode a click is the host's `select`:
   // the same slop and button rules as a selection (M3: a SOM `click` fires on
   // any button and any distance, so it is not used), and the same hit
@@ -2615,6 +2786,17 @@ function refreshEditActions() {
   if (!dupReason) dupReason = duplicateHint(selected)
   epDuplicate.disabled = !!dupReason
   epDuplicate.title = dupReason ?? 'Duplicate the selected object'
+  // copy-objects K5/K6 — Copy follows the selection (Duplicate's rule, the
+  // credit skipped); Paste needs Edit mode, a clipboard and nothing blocking.
+  if (epCopy) {
+    const copyReason = copyHint(selected)
+    epCopy.disabled = !!copyReason
+    epCopy.title = copyReason ?? 'Copy the selected object'
+  }
+  if (epPaste) {
+    epPaste.disabled = blocked || !modes.edit || !clipboard
+    epPaste.title = clipboard ? `Paste “${clipboard.descriptor.name}” in front of you` : 'Nothing has been copied'
+  }
   // Y5 — Undo and Redo, beside Duplicate and Delete. The tooltip is the Y1
   // label, or the Y4 reason (`Nothing to undo`, `Waiting for the server…`).
   const undoReason = undo.reason('undo')
@@ -2737,6 +2919,80 @@ epDuplicate.addEventListener('click', () => {
   refreshEditActions()
 })
 
+// copy-objects K5 — Copy in Edit mode, for Paste here or in another world.
+epCopy?.addEventListener('click', () => {
+  if (!modes.edit || !selected) return
+  const result = copyNode(selected)
+  if (!result.ok) {
+    showEditError(result.reason)
+  } else {
+    clearEditError()
+    epPasteNotes.textContent = `Copied “${selected.name}”.`
+  }
+  refreshEditActions()
+})
+
+// copy-objects K6 — Paste: an ordinary world `add` at the palette's spot ahead
+// of you, prepared from a copy of the clipboard (never the clipboard itself),
+// with its own answer branch in onStructureAnswer and an Undo entry.
+epPaste?.addEventListener('click', () => {
+  if (!modes.edit || !clipboard || editDispatchBlocked()) return
+  const origin = avatar.localNode?.translation ?? [0, 0, 0]
+  const forward = new THREE.Vector3()
+  stage.camera.getWorldDirection(forward)
+  const { position } = palettePlacement(origin, forward.toArray())
+  const prepared = preparePaste(clipboard, {
+    isFree: isNameFree,
+    position,
+    destOrigin: AtriumClient.wsOriginToHttpOrigin(client.wsUrl),
+    destWorldId: client.world?.id ?? null,
+    // K8 — the other-host question, through the page's own confirm; none declines.
+    confirm: (question) => (typeof window === 'undefined' || typeof window.confirm !== 'function'
+      ? false
+      : window.confirm(question)),
+  })
+  if (!prepared.ok) {
+    if (!prepared.declined) showEditError(`Couldn’t paste: ${prepared.reason}`)
+    return
+  }
+  if (!modes.edit || editDispatchBlocked()) return     // the question paused the page
+  const name = prepared.descriptor.name
+  let seq
+  try {
+    seq = client.addNode(prepared.descriptor)
+  } catch (err) {
+    showEditError(`Couldn’t paste: ${err.message}`)
+    return
+  }
+  structure.begin('add', seq, { name, descriptor: prepared.descriptor, paste: true, baseName: clipboard.descriptor.name })
+  // Y7 — recorded from its answer: a refused paste records nothing.
+  undo.registerAdd(seq, { name, duplicate: false })
+  clearEditError()
+  epPasteNotes.textContent = prepared.notes.join('\n')
+  refreshEditActions()
+})
+
+/** copy-objects K6 — the paste branch's error, or null for an accepted answer. */
+function pasteAnswerError(status, message) {
+  if (status === 'accepted') return null
+  return `Couldn’t paste: ${message ?? 'the world did not answer'}`
+}
+
+// K6 — one retry of a paste whose name another tab took first, with the next
+// `copyName`, as the palette's retry; never retried twice.
+function retryPaste(request, name) {
+  const descriptor = { ...request.descriptor, name }
+  let seq
+  try {
+    seq = client.addNode(descriptor)
+  } catch {
+    return false
+  }
+  const begun = structure.begin('add', seq, { name, descriptor, paste: true, baseName: request.baseName, retried: true })
+  if (begun) undo.registerAdd(seq, { name, duplicate: false })
+  return begun
+}
+
 // N2 — a delete of a node that can come back asks nothing; one that can't
 // asks, and says so (W6 supersedes design §4.1 for restorable nodes).
 // The pause after the dialog lets messages that arrived meanwhile be handled.
@@ -2804,6 +3060,23 @@ function onStructureAnswer(seq, status, message) {
       // S1: ours was already gone; the server removed a newer object of that name.
       showEditError(`This object was removed elsewhere, and a newer “${request.name}” was deleted instead.`)
     }
+    refreshEditActions()
+    return
+  }
+  if (request.paste) {
+    // copy-objects K6 — the paste's own branch. "Already in use" (another tab
+    // took the name) retries once with the next copyName; a refusal is
+    // "Couldn’t paste: <the server's text>"; an unknown answer is "Couldn’t
+    // paste: the world did not answer"; an accepted one is selected, as
+    // Duplicate's copy is. It returns either way, so the palette's retry and
+    // the generic text never run for a paste.
+    if (status === 'rejected' && !request.retried && modes.edit && /already in use/.test(message ?? '')) {
+      const name = copyName(request.baseName, isNameFree)
+      if (name && retryPaste(request, name)) { refreshEditActions(); return }
+    }
+    const error = pasteAnswerError(status, message)
+    if (error) showEditError(error)
+    else if (modes.edit) selectAdded(request.name)
     refreshEditActions()
     return
   }
@@ -2916,6 +3189,11 @@ function selectAddedNode(node) {
 
 // S1 — a new node named like our held delete: our delete-by-name may hit it.
 client.on('som:add', ({ nodeName }) => structure.addSeen(nodeName))
+
+// copy-objects K4 — the inspected object went away: the panel says so.
+client.on('som:remove', ({ nodeName } = {}) => {
+  if (inspected && inspected.name === nodeName && client.som?.getNodeByName(nodeName) !== inspected) inspectSelect(null)
+})
 
 // Z4 — the document's own sky write. The picker owns the select's wait and the
 // rejection's rollback; a seq the picker does not own is ignored here.
@@ -3249,6 +3527,13 @@ behaviorForm = createBehaviorForm({
       ? false
       : window.confirm(prompt)),
     nodeName: (id) => objectNameOf(client.som, id),
+    // copy-objects K7 — a grant not in this world is named so in the Enable
+    // question, and a pasted behaviour's record is shown in the form.
+    objectInWorld: (id) => objectNameHere(id) !== null,
+    recordLines: (node) => {
+      const text = refsRecordText(node?.extras?.atrium)
+      return text ? [text] : []
+    },
     write: {
       setObjectId: (name, id) => client.setObjectId(name, id),
       sendField: (name, field, value) => client.sendField(name, field, value),

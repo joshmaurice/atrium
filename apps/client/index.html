@@ -431,6 +431,27 @@
 
   /* ── Edit mode (Phase 3 step 1b-1) ─────────────────── */
   #edit-toggle-btn.active { background: #5b21b6; border-color: #7c3aed; }
+  /* copy-objects K4 — the Inspect toggle and its read-only panel, styled as Edit's. */
+  #inspect-toggle-btn.active { background: #0e7490; border-color: #22d3ee; }
+  #inspect-panel {
+    position: absolute; top: 10px; right: 12px; width: 250px;
+    background: rgba(0,0,0,0.85); border: 1px solid #444; border-radius: 8px;
+    padding: 10px; font-size: 12px; z-index: 10;
+    max-height: calc(100% - 20px); overflow-y: auto; box-sizing: border-box;
+  }
+  #inspect-panel .ep-title { color: #67e8f9; font-weight: 600; margin-bottom: 8px; }
+  #inspect-panel .ep-empty { color: #64748b; font-style: italic; }
+  #inspect-panel .ep-row { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 4px; }
+  #inspect-panel .ep-row > span { width: 58px; color: #94a3b8; flex-shrink: 0; }
+  #inspect-panel .ip-value { overflow-wrap: anywhere; white-space: pre-line; }
+  #inspect-panel .ep-status { color: #94a3b8; font-size: 11px; margin-top: 4px; white-space: pre-line; }
+  #inspect-panel .ep-status:empty { display: none; }
+  #inspect-panel .ep-buttons { display: flex; gap: 4px; margin: 6px 0; }
+  #inspect-panel .ep-buttons button { padding: 3px 8px; font-size: 11px; }
+  #inspect-panel .ep-buttons button:disabled { opacity: 0.45; cursor: default; }
+  #inspect-panel .ip-note { color: #94a3b8; font-size: 10px; margin-top: 8px; }
+  #edit-panel #ep-paste-notes { white-space: pre-line; }
+  .wb-note { color: #94a3b8; font-size: 11px; padding: 4px 10px; }
   #edit-panel {
     position: absolute;
     top: 10px;
@@ -633,11 +654,16 @@
          gone. A pad is added from the Edit panel's Teleporter button, moved
          with the handles and deleted with Delete, all in Edit mode. -->
     <button id="edit-toggle-btn" style="display:none" title="Move, rotate, scale and rename this world's objects">Edit</button>
+    <!-- copy-objects K4 — Inspect, for anyone who can't edit this world: select
+         an object, read about it, Copy it. Offered exactly when Edit isn't. -->
+    <button id="inspect-toggle-btn" style="display:none" title="Select an object to see what it is and copy it">Inspect</button>
   </div>
 </div>
 
 <!-- World Browser (shown when logged in) -->
 <div id="world-browser" style="display:none">
+  <!-- copy-objects K9 — C2's note, beside the Public/Private toggles. -->
+  <div class="wb-note" id="wb-visibility-note">When this world is public, visitors can see and copy anything in it</div>
   <div id="wb-error"></div>
   <div class="wb-list" id="wb-list"></div>
 </div>
@@ -757,7 +783,11 @@
     <div class="ep-buttons ep-actions" id="ep-history">
       <button id="ep-undo" title="Nothing to undo">Undo</button>
       <button id="ep-redo" title="Nothing to redo">Redo</button>
+      <!-- copy-objects K6 — Paste, beside Undo and Redo: it needs no selection.
+           It places the copied object at the palette's spot ahead of you. -->
+      <button id="ep-paste" title="Nothing has been copied">Paste</button>
     </div>
+    <div class="ep-status" id="ep-paste-notes"></div>
     <div class="ep-empty" id="ep-empty">Click an object to select it.</div>
     <div id="ep-fields" style="display:none">
       <div class="ep-row"><span>Name</span><input type="text" id="ep-name" spellcheck="false" autocomplete="off" /></div>
@@ -880,10 +910,29 @@
       </div>
       <div class="ep-buttons ep-actions" id="ep-actions">
         <button id="ep-duplicate" title="Duplicate the selected object">Duplicate</button>
+        <!-- copy-objects K5 — Copy, for Paste here or in another world. -->
+        <button id="ep-copy" title="Copy the selected object">Copy</button>
         <button id="ep-delete" class="ep-danger" title="Delete the selected object">Delete</button>
       </div>
     </div>
     <div class="ep-error" id="ep-error"></div>
+  </div>
+
+  <!-- copy-objects K4 — the Inspect panel. Read-only: everything in it that
+       another user wrote is set with textContent. -->
+  <div id="inspect-panel" style="display:none">
+    <div class="ep-title">Inspect</div>
+    <div class="ep-empty" id="ip-empty">Click an object to see what it is.</div>
+    <div id="ip-fields" style="display:none">
+      <div class="ep-row"><span>Name</span><div class="ip-value" id="ip-name"></div></div>
+      <div class="ep-row" id="ip-credit-row" style="display:none"><span>Credit</span><div class="ip-value" id="ip-credit"></div></div>
+      <div class="ep-row" id="ip-behavior-row" style="display:none"><span>Behaviour</span><div class="ip-value" id="ip-behavior"></div></div>
+      <div class="ep-buttons"><button id="ip-copy" title="Copy this object">Copy</button></div>
+      <div class="ep-status" id="ip-reason"></div>
+    </div>
+    <div class="ep-status" id="ip-status"></div>
+    <div class="ip-note" id="ip-note">Visitors can see and copy anything in this world.</div>
+    <div class="ip-note" id="ip-host-note">A model loaded from another host lets that host see your address.</div>
   </div>
 
   <!-- Teleporter failure panel (U2) -->

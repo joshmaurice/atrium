@@ -85,10 +85,10 @@ describe('edit-modes: teleport triggers', () => {
     assert.equal(Reflect.get(modes, 'delete'), undefined)
   })
 
-  test('the object exposes only Edit mode and pointer lock', () => {
+  test('the object exposes only Edit mode, Inspect mode (copy-objects K4) and pointer lock', () => {
     const { modes } = setup()
     assert.deepEqual(Object.keys(modes).sort(),
-      ['edit', 'reset', 'setEdit', 'togglePointerLock', 'triggerActive', 'usePointerLock'])
+      ['edit', 'inspect', 'reset', 'setEdit', 'setInspect', 'togglePointerLock', 'triggerActive', 'usePointerLock'])
   })
 })
 
