@@ -752,6 +752,23 @@ attribution: an `origin` fixed at the first copy, plus the most recent
 7. A subtree `add`, which would make deleting multi-part objects undoable
    (§4.5).
 8. Script-host health checks and heartbeat (§5.2).
+9. **Remote data for behaviours** (added 2026-11-06, operator's question in
+   the `copy-objects` pre-brief). Today no graph operation reaches the network
+   (`EXECUTABLE`, `packages/behaviors/src/behavior-spec.js`), and the JS
+   runner removes network access (§5.7), so a behaviour sees only what's in
+   the world. If it's wanted, design it as a **declared data source** on an
+   object, shaped like models by URL (§4.3), not as a graph operation:
+   - an `https://` URL the owner sets and can see, with size, rate and
+     frequency limits;
+   - fetched by the owner's browser (the script host), which writes the result
+     into the world as ordinary edits, so visitors see the result and fetch
+     nothing themselves;
+   - read by a graph like any other property.
+   
+   Its own pre-brief would settle: privacy (the data's host sees who fetches,
+   as §4.3's model note); what a copy carries (the same "ask before using
+   another host" as `copy-objects` CP-L6); whether a visitor's `activate` may
+   trigger a fetch; and what runs while the owner is away (item 2).
 
 ---
 

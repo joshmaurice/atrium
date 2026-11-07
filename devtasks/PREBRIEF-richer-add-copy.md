@@ -1,7 +1,9 @@
 # Pre-brief: the `add` check, the richer `add`, and copying objects
 
-Status: **DRAFT, Revision 0.4 (2026-11-05), the draft for `copy-objects`.**
-Its first two rounds now have contracts of their own: **`add-check`**,
+Status: **DRAFT, Revision 0.4 (2026-11-05). Superseded for `copy-objects` on
+2026-11-06 by `PREBRIEF-copy-objects.md` (DRAFT Rev 1), which carries
+CP-L1–CP-L7 on, rechecked at `f286d283`: read that file, not §3's CP items or
+§6 here.** All three rounds now have contracts of their own: **`add-check`**,
 `PREBRIEF-add-check.md` FINAL Rev 1.1 (shipped to PROD as `cdfe88a8`, §4), and
 **`richer-add`**, `PREBRIEF-richer-add.md` FINAL Rev 2 (§5), which holds
 RA-L2, RA-L3 and RA-L6. **Still open here: CP-L1–CP-L7,** each with a
