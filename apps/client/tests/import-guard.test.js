@@ -49,10 +49,17 @@ function getExportNames(source) {
 
 // True if `name` appears as a standalone identifier anywhere in `lines`
 // after the given import line offset. Excludes member access (X.name).
+// copy-objects: a whole-line `//` comment and an object-literal key
+// (`  buildDescriptor: buildTeleporterDescriptor,`) are not references; app.js
+// has both for `buildDescriptor`, which edit-duplicate.js now exports.
 function isUsedAfterImport(lines, name, importLineIdx) {
   const re = new RegExp(`(?<!\\.)\\b${name}\\b`)
+  const key = new RegExp(`^\\s*${name}\\s*:(?!:)`)
   for (let i = importLineIdx + 1; i < lines.length; i++) {
-    if (re.test(lines[i])) return true
+    const line = lines[i]
+    if (/^\s*\/\//.test(line)) continue
+    const rest = line.replace(key, '')
+    if (re.test(rest)) return true
   }
   return false
 }

@@ -398,7 +398,7 @@ export function hasSharedMaterial(node) {
  * `offsetX` is 0 for a restore (Y2): the node's own translation, bit for bit
  * — never `x + 1.5 − 1.5`, which is not always `x` in floating point (U5).
  */
-function buildDescriptor(node, name, offsetX) {
+export function buildDescriptor(node, name, offsetX) {
   const t = node.getTranslation()
   const descriptor = {
     name,

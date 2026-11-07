@@ -542,16 +542,27 @@ export function shouldPromptEnable(value) {
   return report.startsOnLoad === true || report.perFrame === true
 }
 
+/** copy-objects K7 — how the prompt names a grant whose object isn't in this world. */
+export const NOT_IN_WORLD = 'an object not in this world'
+
 /**
  * G6 / Q3 — the confirmation's text, character for character as G6 writes it.
  * `<the grants outside its own subtree>` is the `targets` list, named through
  * `nameOf` when the caller can resolve an object id to a name.
+ *
+ * copy-objects K7: a grant `inWorld` says isn't in the world (a pasted
+ * behaviour's fresh id) is named "an object not in this world", and with no
+ * grants at all the "It can also change: …" sentence is left out.
  */
-export function enablePromptText(value, { nameOf = null } = {}) {
-  const grants = grantsOf(value).map((id) => (nameOf ? nameOf(id) : id))
+export function enablePromptText(value, { nameOf = null, inWorld = null } = {}) {
+  const grants = grantsOf(value).map((id) => {
+    if (inWorld && !inWorld(id)) return NOT_IN_WORLD
+    return nameOf ? nameOf(id) : id
+  })
+  const change = grants.length > 0 ? `It can also change: ${grants.join(', ')}. ` : ''
   return 'This graph runs again whenever you reconnect or your host tab changes, '
     + 'and it may overwrite what visitors changed. '
-    + `It can also change: ${grants.join(', ')}. Enable it?`
+    + `${change}Enable it?`
 }
 
 /** G6 — the three notes the owner sees, exactly as G6 writes them. */
