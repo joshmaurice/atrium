@@ -2222,10 +2222,12 @@ epSpaceBtn.addEventListener('click', () => {
 // Every frame: the handles follow the active camera (Space cycles cameras),
 // and the outline follows the object.
 function tickEditMode() {
+  // copy-objects K4 — Inspect's outline follows its object too (Inspect and
+  // Edit are never on together, so this comes before Edit's guard).
+  if (inspectOutline) inspectOutline.update()
   if (!modes.edit) return
   if (gizmo && gizmo.camera !== stage.camera) gizmo.camera = stage.camera
   if (outline) outline.update()
-  if (inspectOutline) inspectOutline.update()
 }
 
 // ── Selection (B2) ──────────────────────────────────────────────────────
@@ -3529,7 +3531,12 @@ behaviorForm = createBehaviorForm({
     nodeName: (id) => objectNameOf(client.som, id),
     // copy-objects K7 — a grant not in this world is named so in the Enable
     // question, and a pasted behaviour's record is shown in the form.
-    objectInWorld: (id) => objectNameHere(id) !== null,
+    // An ambiguous or unaddressable id is still an object here: only
+    // `not-found` is "not in this world".
+    objectInWorld: (id) => {
+      const found = client.som?.resolveObjectId?.(id)
+      return !!found && found.problem !== 'not-found'
+    },
     recordLines: (node) => {
       const text = refsRecordText(node?.extras?.atrium)
       return text ? [text] : []

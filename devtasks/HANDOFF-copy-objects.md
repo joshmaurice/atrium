@@ -3,14 +3,20 @@
 **Contract:** `devtasks/PREBRIEF-copy-objects.md` FINAL Rev 2 (operator, 2026-11-06).
 **Base:** `main` at `ace29de` (code identical to PROD `3fcc296c`; since `db9efc4`
 only `devtasks/` moved). **Implemented by Claude in the fast lane** (CP-L8 (a)),
-no OpenRouter. Not yet checked by a fresh agent, not reviewed outside, not
-published or deployed.
+no OpenRouter. **Checked by a fresh Claude agent** (§7: no must-fix; its
+should-fix and nits taken in commit 5). Not yet reviewed outside; not published
+or deployed.
 
-**Operator answers so far:** the DEV commons has an owner, `commonskeeper`, and
-so does PROD's (2026-11-06, evening). So the DEV acceptance expects the pasted
-crate's credit to read "Made by commonskeeper, it says". **Still open before
-DEV:** does the host's proxy (Caddy) cap WebSocket frames? (It says how exposed
-PROD is until K0 ships.)
+**The operator's two answers before DEV** (passdown §4), both in:
+- **the DEV commons has an owner, `commonskeeper`, and so does PROD's.** So the
+  DEV acceptance expects the pasted crate's credit to read "Made by
+  commonskeeper, it says (dev.ewwb.dev, <the day>)";
+- **Caddy caps no WebSocket frame.** `/etc/caddy/Caddyfile` has no
+  `request_body` (only the `@websocket` matchers), and the probe
+  (`devtasks/spike-copy-objects/caddy-frame-probe.mjs`, run on the host against
+  `wss://dev.ewwb.dev/apps/client` at `9ff511f`): "big (1.20 MiB junk): the server
+  answered; socket still open". So **PROD accepts any visitor's message up to
+  `ws`'s 100 MiB until K0 ships.**
 
 ## 1. The five commits
 | Commit | What (contract items) |
@@ -19,15 +25,20 @@ PROD is until K0 ships.)
 | 1 `8a90c1b` | K2–K3: `creditProblem` in `send-policy.js` (server, through `checkAtriumExtras`) and `edit-duplicate.js` (client, through `atriumProblem`, `{ credit: false }` for Copy); `tests/fixtures/credit-vectors.json`; the server test file's K3 part |
 | 2 `09ba2aa` | K1: `hello.world` (server, schema, protocol tests); `AtriumClient`'s `worldFromHello` and `client.world`, reset with `signedIn`; the server test file's K1 part |
 | 3 `0aba28a` | K5–K8: `apps/client/src/copy-paste.js` and its 61 tests; `buildDescriptor` exported; `enablePromptText`'s K7 text |
-| 4 (this) | K4, K6, K9 glue (`edit-modes.js`, `app.js`, `index.html`, `behavior-form.js`); the end-to-end and wiring tests; `p6`'s counters; proofs; this file |
+| 4 `4a64969` | K4, K6, K9 glue (`edit-modes.js`, `app.js`, `index.html`, `behavior-form.js`); the end-to-end and wiring tests; `p6`'s counters; proofs; this file |
+| `9ff511f` | the Caddy frame probe (`devtasks/` only) |
+| 5 (see §7) | the fresh check's fixes: same-server K7 tests (unit and e2e), escaped display of a stored address and of dropped key names, bounded notes, per-entry chains, Copy's refusal texts, the Inspect outline, the Enable question's `inWorld` |
 
-Files touched are exactly §6's list, plus three test files outside it that
-pinned old text (§4 below): `import-guard.test.js`, `behavior-wiring.test.js`,
-`edit-modes.test.js`, all under `apps/client/tests/` (which §6 allows).
+Code files touched are exactly §6's list. Three existing test files that pinned
+old text changed with it (§4 below): `import-guard.test.js`,
+`behavior-wiring.test.js`, `edit-modes.test.js` (all under `apps/client/tests/`,
+which §6 allows). Outside §6's list: only `devtasks/` (this file, the probe, the
+review prompt).
 
 ## 2. Tests
 - **All suites, each server file alone under `timeout 180`:** 64 suites,
-  **4,204 passing, 0 failing, 1 named skip** (richer-add's R7 skip, unchanged).
+  **4,223 passing, 0 failing, 1 named skip** at commit 5 (4,204 at commit 4;
+  richer-add's R7 skip, unchanged).
   Baseline at `ace29de`: 61 suites, 4,046 passing, the same skip.
   (`better-sqlite3` built in this session, so the database suites ran.)
 - **New checks fail on today's code** (the code reverted, the tests kept):
@@ -68,6 +79,7 @@ pinned old text (§4 below): `import-guard.test.js`, `behavior-wiring.test.js`,
 | (p3) | K3's check removed on the server | the handler's malformed-credit test; the vectors through `checkAtriumExtras` |
 | (p4) | the snapshot's translation and extras are the live node's | the snapshot test |
 | (p5) | Inspect picks with `includeHidden: true` | the Inspect click wiring test |
+| (p6, commit 5) | "same world" ignores the world ids (any two worlds on one server) | 11 of `copy-paste.test.js` (the same-server matrix) and the one-server hostile e2e test; before commit 5 only an unrelated Library test failed (the fresh check's finding 1) |
 
 The proofs are scripted (`/home/claude/scripts/proofs.sh`, not in the repo):
 each saves the file, makes one replacement, runs the tests, restores.
@@ -148,3 +160,31 @@ rollback stores nothing to undo (§6 of the pre-brief). Before the PROD deploy
 the operator runs `p6` (its new counters: behaviours by kind, root-path model
 URLs, path pad destinations, objects already credited, expected 0). Host
 commands with the real SHA come with the round's release notes.
+
+## 7. The fresh-agent check (of `ace29de..4a64969`)
+No must-fix. It reproduced (p0) per socket and (p1) with the write, fuzzed both
+credit checks with 200,000 random credits (0 differences), probed seven
+same-world edge cases, and found every §4 departure sound. Claude reproduced
+each finding below before taking it. All taken in commit 5:
+1. **should-fix, reproduced:** no test covered a hostile world on the SAME
+   server (one origin, two world ids), PROD's likely case: making "same world"
+   ignore the ids failed only an unrelated test. Now a K7 matrix on one server
+   (10 cases) and an e2e test with one real server routing two worlds by path;
+   both fail under that break (proof p6 in §2.1).
+2. **should-fix, reproduced (a gap in K2, not the code):** K2's `address` form
+   allows text-direction characters, and the Inspect panel printed a stored one
+   raw in "Copied from <address> …". Not changed in the form (the contract's
+   table); **shown escaped** (`shownText` percent-encodes K2's `creatorName`
+   set). A paste's own address comes from `URL.pathname` and can't carry one.
+   **For the outside review:** should K2's `address` form refuse that set too?
+3. **nit, reproduced:** a note per unknown key (2,001 lines). Now one note,
+   at most 5 names, each shown escaped and cut to 40 characters, "and N more".
+4. **nit:** the Inspect outline never updated (`tickEditMode` returned at Edit's
+   guard first). Moved before the guard.
+5. **nit:** one bad `refs` entry discarded the whole earlier record in a chain.
+   Now per entry, as K2 words it.
+6. **nit:** the Enable question called an ambiguous id "not in this world".
+   Now only `not-found` is.
+7. **nit:** a source origin over 256 or a path over 2,048 characters was refused
+   at Paste with the wrong text. Now refused at Copy, saying which.
+8. **nit:** §1 said three test files were outside §6; they are inside. Fixed.

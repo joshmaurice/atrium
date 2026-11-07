@@ -160,6 +160,16 @@ describe('K4 — Inspect is offered and left on canEditNow(), the same gate both
       /updateEditControls\(\)/)
   })
 
+  test('the Inspect outline follows its object: updated before tickEditMode\'s Edit guard', () => {
+    const tick = flatten(body('tickEditMode'))
+    assert.ok(tick.indexOf('if (inspectOutline) inspectOutline.update()') >= 0, tick)
+    assert.ok(tick.indexOf('if (inspectOutline) inspectOutline.update()') < tick.indexOf('if (!modes.edit) return'), tick)
+  })
+
+  test('the Enable question counts an ambiguous id as in the world; only not-found is not', () => {
+    assert.match(flatten(source), /objectInWorld: \(id\) => \{ const found = client\.som\?\.resolveObjectId\?\.\(id\) return !!found && found\.problem !== 'not-found' \}/)
+  })
+
   test('Edit turning on leaves Inspect; Inspect turning on exits pointer lock', () => {
     assert.match(flatten(body('setEditMode')), /if \(modes\.inspect\) setInspectMode\(false\)/)
     assert.match(flatten(body('setInspectMode')), /modes\.setInspect\(true\) if \(document\.pointerLockElement\) document\.exitPointerLock\(\)/)

@@ -385,3 +385,63 @@ test('in one tab a Paste after Undo clears Redo, so the one-tab Redo sequence ca
   assert.ok(await waitFor(() => undo1.undo.undoCount === 1 && undo1.undo.redoCount === 0), 'the paste is recorded and Redo is gone')
   assert.ok(!JSON.stringify(B.world.som.getNodeByName(r.descriptor.name).extras.atrium.behavior).includes(LAMP))
 })
+
+// ---------------------------------------------------------------------------
+// The fresh-agent check's finding 1: the hostile world on the SAME server
+// ---------------------------------------------------------------------------
+
+/** One HTTP server, two worlds routed by path (as the registry does): one origin. */
+async function startTwoWorldsOneServer() {
+  const http = createServer()
+  const port = await new Promise((res) => http.listen(0, '127.0.0.1', () => res(http.address().port)))
+  const hosts = {}
+  for (const [prefix, worldId, ownerUserId] of [['/worlds/mal/', 'world-mal', 'user-mal'], ['/worlds/bob/', 'world-b', 'user-bob']]) {
+    const world = await createWorld(SPACE)
+    const wss = new WebSocketServer({ noServer: true })
+    const { closeKeepalive } = attachSessionHandlers({
+      wss, world, sessions: new Map(), presence: createPresence(), worldOwnerUserId: ownerUserId, worldId,
+    })
+    hosts[prefix] = { world, wss }
+    closers.push(async () => { closeKeepalive(); wss.close() })
+  }
+  http.on('upgrade', (req, socket, head) => {
+    const u = new URL(req.url, 'http://x')
+    const host = Object.entries(hosts).find(([prefix]) => u.pathname.startsWith(prefix))?.[1]
+    if (!host) { socket.destroy(); return }
+    host.wss.handleUpgrade(req, socket, head, (ws) => host.wss.emit('connection', ws, req, u.searchParams.get('as') || null))
+  })
+  closers.push(async () => http.close())
+  const url = (path, as) => `ws://127.0.0.1:${port}${path}${as ? `?as=${as}` : ''}`
+  return { A: { world: hosts['/worlds/mal/'].world, url }, B: { world: hosts['/worlds/bob/'].world, url } }
+}
+
+test('hostile, one server: a world beside yours on the same origin is another world; the pasted button can\'t write your door', async () => {
+  const { A, B } = await startTwoWorldsOneServer()
+  const setup = tab()
+  await setup.go(B.url('/worlds/bob/yard', 'user-bob'))
+  assert.equal(await answers(setup.client)(setup.client.addNode(cube('Door', DOOR))), 'accepted')
+  setup.client.disconnect()
+
+  const mal = tab()
+  await mal.go(A.url('/worlds/mal/trap', 'user-mal'))
+  const hostile = cube('Free button', EVIL, {
+    behavior: templateGraph('select-visibility', { target: DOOR, action: 'hide' }, { ownId: EVIL }),
+  })
+  assert.equal(await answers(mal.client)(mal.client.addNode(hostile)), 'accepted')
+
+  const tab1 = tab({ scriptRunner: true })
+  const me = { name: 'me', translation: [0, 0, 0] }
+  const runner = createBehaviorRunner({ client: tab1.client, position: (n) => n?.translation, localAvatar: () => me })
+  closers.push(async () => runner.dispose?.())
+  await tab1.go(A.url('/worlds/mal/trap'))
+  const clip = copyFrom(tab1.client, 'Free button')
+  await tab1.go(B.url('/worlds/bob/yard', 'user-bob'))
+  assert.ok(await waitFor(() => tab1.client.scriptHost?.active === true))
+  assert.equal(clip.source.origin, AtriumClient.wsOriginToHttpOrigin(tab1.client.wsUrl), 'one origin')
+  assert.notEqual(clip.source.world.id, tab1.client.world.id, 'two worlds')
+
+  const r = pasteInto(tab1.client, clip)
+  assert.equal(r.sameWorld, false)
+  assert.equal(await answers(tab1.client)(wireUndo(tab1.client).add(r.descriptor)), 'accepted')
+  await enableAndClick({ B, tab1, runner, name: r.descriptor.name, targetName: 'Door' })
+})

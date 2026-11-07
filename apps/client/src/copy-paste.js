@@ -25,7 +25,7 @@ import { newObjectId } from '@atrium/client/object-id'
 import { isRootRelative, resolveModelUrl, modelUrlProblem, modelReasonText } from '@atrium/client/model-spec'
 import {
   duplicateRuleProblem, buildDescriptor, addMessageBytes, remapBehaviorTargets, atriumProblem,
-  creditProblem, creditIdOk, creditNameOk, creditServerOk, MAX_ADD_BYTES, DUPLICATE_REASONS,
+  creditProblem, creditIdOk, creditNameOk, creditServerOk, creditAddressOk, MAX_ADD_BYTES, DUPLICATE_REASONS,
 } from './edit-duplicate.js'
 import { withNewObjectId } from './object-identity.js'
 import { copyName } from './edit-palette.js'
@@ -51,6 +51,8 @@ export const PASTE_TEXT = Object.freeze({
   padNoBase: 'This pad’s destination can’t be worked out from the world it was copied from',
   padLength: `This pad’s destination would be over ${URL_MAX.toLocaleString('en-US')} characters on this server`,
   noSource: 'This world’s address can’t be read, so nothing here can be copied',
+  serverTooLong: 'This world’s server address is too long to record in a copy’s credit',
+  addressTooLong: 'This world’s address is too long to record in a copy’s credit',
   declined: 'Not pasted',
   empty: 'Nothing has been copied',
   selfless: 'Its behaviour doesn’t name its own object, so it can’t be pasted',
@@ -67,6 +69,40 @@ export const NOTE_TEXT = Object.freeze({
 export const VISITOR_NOTE = 'Visitors can see and copy anything in this world.'
 export const VISIBILITY_NOTE = 'When this world is public, visitors can see and copy anything in it'
 export const MODEL_HOST_NOTE = 'A model loaded from another host lets that host see your address.'
+
+/** How many unknown keys a paste note names before "and N more". */
+export const NOTE_KEYS_MAX = 5
+const NOTE_KEY_CHARS = 40
+
+/**
+ * Text another user wrote, made safe to SHOW beside our own words: every
+ * control, line-separator and text-direction character (K2's `creatorName`
+ * set) is percent-encoded, so "Copied from <address>" can't be reordered by a
+ * U+202E, and the result is cut to `max` characters. Display only: stored
+ * values are never changed by this.
+ */
+export function shownText(value, max = Infinity) {
+  let out = ''
+  for (const ch of String(value)) {
+    const c = ch.codePointAt(0)
+    const unsafe = c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029 ||
+      (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)
+    out += unsafe ? encodeURIComponent(ch) : ch
+  }
+  return out.length > max ? `${out.slice(0, max - 1)}…` : out
+}
+
+/** "“a”, “b” and 3 more": a bounded list of key names for a note. */
+function keyList(keys) {
+  const shown = keys.slice(0, NOTE_KEYS_MAX).map((k) => `“${shownText(k, NOTE_KEY_CHARS)}”`).join(', ')
+  return keys.length > NOTE_KEYS_MAX ? `${shown} and ${(keys.length - NOTE_KEYS_MAX).toLocaleString('en-US')} more` : shown
+}
+
+/** One K3-valid `refs` entry (K2: an entry that fails is treated as absent, the rest kept). */
+function refEntryOk(r) {
+  return isPlainObject(r) && Object.keys(r).every((k) => k === 'id' || k === 'was' || k === 'name') &&
+    creditIdOk(r.id) && creditIdOk(r.was) && (!Object.hasOwn(r, 'name') || creditNameOk(r.name))
+}
 
 function isPlainObject(v) {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
@@ -155,10 +191,12 @@ export function copyObject(node, source, { date = new Date(), nameOf = null } = 
   const baseUrl = AtriumClient.wsOriginToHttpOrigin(wsUrl ?? null)
   const origin = originOf(baseUrl)
   if (!origin) return { ok: false, rule: 'source', reason: PASTE_TEXT.noSource }
+  if (!creditServerOk(origin)) return { ok: false, rule: 'source', reason: PASTE_TEXT.serverTooLong }
   let address = source?.address
   if (typeof address !== 'string') {
     try { address = new URL(wsUrl).pathname || '/' } catch { address = '/' }
   }
+  if (!creditAddressOk(address)) return { ok: false, rule: 'source', reason: PASTE_TEXT.addressTooLong }
   const descriptor = buildDescriptor(node, node.getName(), 0)
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) {
@@ -257,14 +295,17 @@ export function preparePaste(clipboard, { name, isFree = () => true, position, d
   const extras = { ...descriptor.extras }
   delete extras[HIDDEN_MARKER]
   const atrium = {}
+  const dropped = []
   for (const [key, value] of Object.entries(extras.atrium)) {
     if (ATRIUM_KEYS.includes(key)) atrium[key] = value
-    else notes.push(`Dropped its Atrium data “${key}”, which this version doesn’t use`)
+    else dropped.push(key)
   }
+  // One note, however many keys a source planted, each name shown safely.
+  if (dropped.length > 0) notes.push(`Dropped its Atrium data ${keyList(dropped)}, which this version doesn’t use`)
   if (Object.hasOwn(atrium, 'teleporter')) {
     const tp = atrium.teleporter
     const extra = isPlainObject(tp) ? Object.keys(tp).filter((k) => k !== 'destination') : []
-    if (extra.length > 0) notes.push(`Dropped its pad data ${extra.map((k) => `“${k}”`).join(', ')}, which this version doesn’t use`)
+    if (extra.length > 0) notes.push(`Dropped its pad data ${keyList(extra)}, which this version doesn’t use`)
     atrium.teleporter = { destination: tp?.destination }
   }
 
@@ -278,8 +319,9 @@ export function preparePaste(clipboard, { name, isFree = () => true, position, d
       if (old.length > 0) {
         const map = new Map(old.map((id) => [id, newId()]))
         behavior = swapIds(behavior, map)
-        const priorRefs = Array.isArray(atrium.copiedFrom?.refs) && creditProblem(atrium, { key: 'copiedFrom' }) === null
-          ? atrium.copiedFrom.refs : []
+        // K2: a refs entry that fails K3 is treated as absent; the others are kept.
+        const priorRefs = isPlainObject(atrium.copiedFrom) && Array.isArray(atrium.copiedFrom.refs)
+          ? atrium.copiedFrom.refs.filter(refEntryOk) : []
         snapshot.refs = old.map((was) => {
           const prior = priorRefs.find((r) => r.id === was)
           const entry = { id: map.get(was), was: prior ? prior.was : was }
@@ -395,7 +437,8 @@ export function creditLines(atrium) {
     lines.push('Its credit is malformed')
   }
   if (Object.hasOwn(atrium, 'copiedFrom') && creditProblem(atrium, { key: 'copiedFrom' }) === null) {
-    lines.push(`Copied from ${cf.address} on ${hostOf(cf.server)}, ${cf.at}, it says`)
+    // K2's address form allows text-direction characters; they are shown escaped.
+    lines.push(`Copied from ${shownText(cf.address, 200)} on ${hostOf(cf.server)}, ${cf.at}, it says`)
   } else if (Object.hasOwn(atrium, 'copiedFrom') && !lines.includes('Its credit is malformed')) {
     lines.push('Its credit is malformed')
   }

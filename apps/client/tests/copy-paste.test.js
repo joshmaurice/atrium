@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 
 import {
   copyObject, preparePaste, foreignIds, behaviorSummary, creditLines, refsRecordText,
-  NOTE_TEXT, PASTE_TEXT, ATRIUM_KEYS, LIBRARY_CREATOR,
+  NOTE_TEXT, PASTE_TEXT, ATRIUM_KEYS, LIBRARY_CREATOR, NOTE_KEYS_MAX, shownText,
 } from '../src/copy-paste.js'
 import { MAX_ADD_BYTES, creditProblem, DUPLICATE_REASONS } from '../src/edit-duplicate.js'
 import { matchesTemplate, createBehaviorForm, CHOOSE_TARGET } from '../src/behavior-form.js'
@@ -474,6 +474,22 @@ for (const [label, make] of CASES) {
   })
 }
 
+// Fresh-agent check, finding 1: the most likely PROD case — a hostile world on
+// the SAME server as yours (one origin, two world ids) is another world.
+for (const [label, make] of CASES) {
+  test(`K7 another world on the same server — ${label}: replaced and disabled exactly as across servers`, () => {
+    const behavior = make()
+    const r = paste(copy(withBehavior(behavior)), { destOrigin: SRC.origin, destWorldId: 'world-b' })
+    assert.equal(r.ok, true, r.reason)
+    assert.equal(r.sameWorld, false)
+    const out = atriumOf(r).behavior
+    assert.equal(out.enabled, false, 'disabled')
+    for (const id of [DOOR, LAMP]) assert.ok(!JSON.stringify(out).includes(id), `${id} is gone`)
+    assert.equal((atriumOf(r).copiedFrom.refs ?? []).length, foreignIds(behavior, OWN).length)
+    assertValid(out, atriumOf(r).objectId)
+  })
+}
+
 test('K7: an unknown source world id, or a client.world without an id, is another world', () => {
   const behavior = customGraph([OWN, DOOR])
   const noWorld = paste(copy(withBehavior(behavior), { world: null }), { destOrigin: SRC.origin, destWorldId: WORLD_A.id })
@@ -726,4 +742,58 @@ test('behaviorSummary and the record: names where the world has them, the K7 not
   assert.equal(tpl.kind, 'template')
   assert.equal(tpl.note, null)
   assert.equal(behaviorSummary({ objectId: OWN }), null)
+})
+
+// ---------------------------------------------------------------------------
+// The fresh-agent check's findings 2, 3, 5 and 7
+// ---------------------------------------------------------------------------
+
+test('a stored address with a text-direction character is shown escaped; the stored value is unchanged', () => {
+  const atrium = { copiedFrom: { server: 'https://h.example', address: '/worlds/\u202eeilcom/x', at: DAY } }
+  assert.equal(creditProblem(atrium), null, 'K2\'s form accepts it (the contract\'s rule)')
+  const [line] = creditLines(atrium)
+  assert.ok(!/[\u202a-\u202e\u2066-\u2069]/.test(line), line)
+  assert.ok(line.includes('/worlds/%E2%80%AEeilcom/x'), line)
+  assert.equal(atrium.copiedFrom.address, '/worlds/\u202eeilcom/x')
+  assert.equal(shownText('a\u2066b\nc', 100), 'a%E2%81%A6b%0Ac')
+  assert.equal(shownText('x'.repeat(50), 10), `${'x'.repeat(9)}…`)
+})
+
+test('thousands of planted extras.atrium keys give one bounded note, each name shown safely', () => {
+  const planted = { objectId: OWN }
+  for (let i = 0; i < 2000; i++) planted[`k${i}`] = 1
+  planted['\u202eevil' + 'z'.repeat(100)] = 1
+  const r = paste(copy(node({ extras: { atrium: planted, }, })))
+  assert.equal(r.ok, true, r.reason)
+  const dropped = r.notes.filter((t) => t.startsWith('Dropped its Atrium data'))
+  assert.equal(dropped.length, 1, 'one note')
+  assert.ok(dropped[0].includes(`and ${(2001 - NOTE_KEYS_MAX).toLocaleString('en-US')} more`), dropped[0])
+  assert.ok(dropped[0].length < 400, `bounded (${dropped[0].length})`)
+  const tp = paste(copy(node({ extras: { atrium: { objectId: OWN, teleporter: { destination: '', a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, '\u202ex': 1 } } } })))
+  const pad = tp.notes.find((t) => t.startsWith('Dropped its pad data'))
+  assert.ok(pad.includes('and 2 more') && !/[\u202a-\u202e]/.test(pad), pad)
+})
+
+test('a chain keeps the valid refs entries of an otherwise malformed earlier record', () => {
+  const behavior = customGraph([OWN, DOOR, LAMP])
+  const first = paste(copy(withBehavior(behavior)))
+  const extras = structuredClone(first.descriptor.extras)
+  // the middle world's record: one entry broken, the copiedFrom's `at` broken too
+  extras.atrium.copiedFrom.at = 'yesterday'
+  const broken = extras.atrium.copiedFrom.refs.find((x) => x.was === LAMP)
+  broken.name = 'bad\u202e'
+  const second = paste(copy(node({ extras }), { wsUrl: 'wss://b.example/worlds/bob/yard', world: { id: 'world-b' }, names: () => null }),
+    { destOrigin: 'https://c.example', destWorldId: 'world-c' })
+  const refs = atriumOf(second).copiedFrom.refs
+  assert.deepEqual(refs.find((x) => x.was === DOOR)?.name, 'Front door', 'the valid entry carries the first world\'s id and name')
+  assert.ok(!refs.some((x) => x.was === LAMP), 'the broken one is treated as absent (its was is the middle world\'s id)')
+})
+
+test('Copy refuses a source whose server or address can\'t be recorded in a credit, saying which', () => {
+  const longHost = copyObject(node(), { wsUrl: `wss://${'a'.repeat(260)}.example/` }, { date: DAY })
+  assert.equal(longHost.ok, false)
+  assert.equal(longHost.reason, PASTE_TEXT.serverTooLong)
+  const longPath = copyObject(node(), { wsUrl: `wss://a.example/${'p'.repeat(2100)}` }, { date: DAY })
+  assert.equal(longPath.ok, false)
+  assert.equal(longPath.reason, PASTE_TEXT.addressTooLong)
 })
