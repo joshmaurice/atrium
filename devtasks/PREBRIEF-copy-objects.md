@@ -1,13 +1,14 @@
 # Pre-brief: copying objects between worlds (`copy-objects`)
 
-Status: **DRAFT, Revision 1.3 (2026-11-06, evening), after two outside reviews
-of Rev 1.2 (§7), both CHANGES REQUESTED. Decided (operator, 2026-11-06): PC
-(b), the cap fix as this round's first commit (K0); CP-L3 (c); **CP-L5 (d),
-swap every foreign id and keep a record** (replacing Rev 1.2's (c), §3); and,
-"no preference", so the recommendations: CP-L1 (a), CP-L2 (a), CP-L4 (a),
-CP-L6 (a), CP-L7 (a), CP-L8 (a).** PC is outside the copy feature: PROD's path
-has no 1 MiB message cap (§2.6). **Next: the operator's approval to finalize,
-then the round (CP-L8).** The contract for the third of the three rounds in
+Status: **FINAL, Revision 2 (2026-11-06): approved by the operator ("push it
+and mark the pre-brief final, so the round can start plz", 17:09 PT) after Rev
+1.3, which took both outside reviews of Rev 1.2 (§7). Decided (operator,
+2026-11-06): PC (b), the cap fix as this round's first commit (K0); CP-L3 (c);
+CP-L5 (d), swap every foreign id and keep a record (§3); and, "no preference",
+so the recommendations: CP-L1 (a), CP-L2 (a), CP-L4 (a), CP-L6 (a), CP-L7 (a),
+CP-L8 (a), the fast lane (§6).** PC is outside the copy feature: PROD's path
+has no 1 MiB message cap (§2.6). Rev 1.3 wasn't reviewed again: its changes
+are the two reviews' own findings. The contract for the third of the three rounds in
 `PREBRIEF-richer-add-copy.md`, carved out of that file's Rev 0.4 (§3 CP-L1–CP-L7,
 §6), as `add-check` and `richer-add` were. CP-L8 (how the round runs) is new.
 - **What it builds on.** `PREBRIEF-richer-add.md` FINAL Rev 2 (shipped as
@@ -864,6 +865,9 @@ As `richer-add` (`PREBRIEF-richer-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2, FINAL** (2026-11-06): Rev 1.3 approved by the operator; no text
+  changed. Implementation on `claude/copy-objects` (§6, CP-L8 (a)): Claude's
+  fast lane, a fresh-agent check of the code, then one ChatGPT code review.
 - **Rev 1.3** (2026-11-06, evening): two outside reviews of Rev 1.2 at
   `2746d663`, both naming that commit: `REVIEW-copy-objects-rev1.2-chatgpt.md`
   (source-only) and `REVIEW-copy-objects-rev1.2-claude.md` (runtime: ran the
