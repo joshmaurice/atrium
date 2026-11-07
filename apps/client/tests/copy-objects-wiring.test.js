@@ -217,6 +217,17 @@ describe('K4 — the Inspect click and panel', () => {
     assert.ok(!/worldBaseUrl/.test(copy))
   })
 
+  test('post-review: the Edit panel shows the selected object\'s credit, as claimed, by textContent', () => {
+    const row = flatten(body('refreshCreditRow'))
+    assert.match(row, /const lines = selected \? creditLines\(selected\.extras\?\.atrium\) : \[\]/)
+    assert.match(row, /epCreditRow\.style\.display = lines\.length > 0 \? '' : 'none' epCredit\.textContent = lines\.join\('\\n'\)/)
+    assert.ok(!/innerHTML/.test(row))
+    assert.match(flatten(body('refreshEditPanel')), /refreshNameField\(\) refreshCreditRow\(\)/, 'refreshed with the selection')
+    for (const id of ['ep-credit-row', 'ep-credit']) {
+      assert.match(html, new RegExp(`id="${id}"`)); assert.match(source, new RegExp(`getElementById\\('${id}'\\)`))
+    }
+  })
+
   test('index.html has the toggle, the panel and its notes (K9)', () => {
     for (const id of ['inspect-toggle-btn', 'inspect-panel', 'ip-empty', 'ip-fields', 'ip-name', 'ip-credit', 'ip-behavior', 'ip-copy', 'ip-reason', 'ip-status', 'ep-copy', 'ep-paste', 'ep-paste-notes']) {
       assert.match(html, new RegExp(`id="${id}"`), `#${id}`)

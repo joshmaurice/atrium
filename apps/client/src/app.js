@@ -1781,6 +1781,8 @@ const epDuplicate    = document.getElementById('ep-duplicate')      // 1b-2 N3
 const epCopy         = document.getElementById('ep-copy')           // copy-objects K5
 const epPaste        = document.getElementById('ep-paste')          // copy-objects K6
 const epPasteNotes   = document.getElementById('ep-paste-notes')    // copy-objects K6
+const epCreditRow    = document.getElementById('ep-credit-row')     // copy-objects, post-review
+const epCredit       = document.getElementById('ep-credit')
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
 const epRedo         = document.getElementById('ep-redo')           // step 2, Y5
@@ -2459,8 +2461,20 @@ function refreshEditPanel() {
   epFields.style.display = ''
   refreshEditVectors()
   refreshNameField()
+  refreshCreditRow()
   refreshModelRow()
   refreshBehaviorRow()
+}
+
+// copy-objects (post-review, from the DEV acceptance) — the selected object's
+// credit, as the Inspect panel words it (claimed, never verified), set with
+// textContent. Hidden when it carries none. `send` can't change a credit, so
+// the selection is the only thing that moves it.
+function refreshCreditRow() {
+  if (!epCreditRow || !epCredit) return
+  const lines = selected ? creditLines(selected.extras?.atrium) : []
+  epCreditRow.style.display = lines.length > 0 ? '' : 'none'
+  epCredit.textContent = lines.join('\n')
 }
 
 // Position, rotation (degrees) and scale. A field being typed in is left alone.

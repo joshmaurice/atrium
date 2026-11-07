@@ -206,3 +206,20 @@ nits before taking them:
   refused, the percent-encoded form a paste records accepted) fail on the old
   check; the pre-brief's K2 row is Rev 2.1. The escaped display stays as a
   second guard.
+
+## 9. Post-review addition: the credit in the Edit panel (from the DEV acceptance)
+At step 2 of the DEV acceptance (`a3f457c4`) the operator pasted the crate and
+saw no credit anywhere. **The credit was stored correctly** (read from the
+console: `origin` `{ server: "https://dev.ewwb.dev", world, creator,
+creatorName: "commonskeeper", at: "2026-11-07" }`, `copiedFrom` with
+`address: "/"`), but **K4 shows it only in Inspect, which is never offered to
+someone who can edit**: an owner had no way to see a credit in their own world.
+A gap in the pre-brief, found by its own acceptance.
+
+Added after the outside review, by the operator's choice ("record it in the
+handoff as a post-review addition"): a read-only **Credit** row in the Edit
+panel, under Name, for a selected object that carries a credit, worded as
+Inspect words it (`creditLines`: claimed, `textContent`), hidden otherwise
+(`refreshCreditRow`, called from `refreshEditPanel`). `app.js` and
+`index.html` only (§6's list); a wiring test, which fails without the call.
+The outside review didn't see this change.
