@@ -27,8 +27,10 @@ const KEEPALIVE_INTERVAL = 30_000
 
 // L9/K7 — the WebSocket payload cap. `ws` closes a connection that exceeds it
 // with 1009, before the message is parsed or ingested. The largest legitimate
-// client message today is an avatar or teleporter `add` of a few KB.
-const MAX_PAYLOAD_BYTES = 1048576
+// client message is a Duplicate, Undo or Paste world `add`, which the client
+// caps at 1,000,000 bytes (`MAX_ADD_BYTES`). Exported for copy-objects K0:
+// `createWorldHost` and the registry's refusal socket set it too.
+export const MAX_PAYLOAD_BYTES = 1048576
 
 let serverSeq = 0
 

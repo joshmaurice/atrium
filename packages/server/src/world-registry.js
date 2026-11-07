@@ -3,6 +3,7 @@
 
 import { isOriginAllowed, resolveUpgradeAuth } from './http-routes.js'
 import { createWorldHost } from './world-host.js'
+import { MAX_PAYLOAD_BYTES } from './session.js'
 import { createWorld, createWorldFromDocument } from './world.js'
 import { createAutoSaveCoordinator } from './autosave.js'
 import { WebSocketServer } from 'ws'
@@ -64,7 +65,9 @@ export function createWorldRegistry(opts = {}) {
   // for admission refusals (V2/V3). Never becomes a session.
   // ---------------------------------------------------------------------------
   const REFUSAL_TIMEOUT = 5000
-  const refusalWss = new WebSocketServer({ noServer: true })
+  // copy-objects K0: the same 1 MiB cap; the socket reads frames until the
+  // close handshake completes or the timer below terminates it.
+  const refusalWss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
 
   function sendRefusal(request, socket, head) {
     refusalWss.handleUpgrade(request, socket, head, (ws) => {

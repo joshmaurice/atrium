@@ -3,7 +3,7 @@
 
 import { WebSocketServer } from 'ws'
 import { createPresence } from './presence.js'
-import { attachSessionHandlers } from './session.js'
+import { attachSessionHandlers, MAX_PAYLOAD_BYTES } from './session.js'
 
 /**
  * Create a per-world host that owns its own WebSocketServer, sessions map,
@@ -43,7 +43,9 @@ export function createWorldHost(opts = {}) {
 
   const sessions = new Map()
   const presence = createPresence()
-  const wss = new WebSocketServer({ noServer: true })
+  // copy-objects K0: the 1 MiB cap, as on createSessionServer. Every world the
+  // registry hosts comes through here; without it `ws`'s 100 MiB default applies.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
 
   // Wire up the session handlers for this host's wss
   const { closeKeepalive, evictNonOwners, getPreHelloSocketCount, closeAuthSessionSockets } = attachSessionHandlers({
