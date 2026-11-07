@@ -1131,6 +1131,65 @@
       "field": "copiedFrom.address"
     },
     {
+      "label": "address with U+202E (Rev 2.1)",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/\u202eeilcom/x",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address with U+2066 (Rev 2.1)",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/\u2066a",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address with U+007F (Rev 2.1)",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/a\u007f",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address with U+2028 (Rev 2.1)",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/a\u2028b",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": false,
+      "field": "copiedFrom.address"
+    },
+    {
+      "label": "address percent-encoded, as URL.pathname gives it",
+      "atrium": {
+        "copiedFrom": {
+          "server": "https://atrium.example",
+          "address": "/worlds/%E2%80%AEeilcom/x",
+          "at": "2026-11-06"
+        }
+      },
+      "ok": true
+    },
+    {
       "label": "refs is empty",
       "atrium": {
         "copiedFrom": {
@@ -1816,6 +1875,24 @@
       "label": "\"\"",
       "value": "",
       "ok": false
+    },
+    {
+      "form": "address",
+      "label": "\"/a\u202eb\"",
+      "value": "/a\u202eb",
+      "ok": false
+    },
+    {
+      "form": "address",
+      "label": "\"/a\u2069\"",
+      "value": "/a\u2069",
+      "ok": false
+    },
+    {
+      "form": "address",
+      "label": "\"/%E2%80%AE\"",
+      "value": "/%E2%80%AE",
+      "ok": true
     }
   ]
 }

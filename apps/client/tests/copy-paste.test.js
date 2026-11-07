@@ -748,13 +748,14 @@ test('behaviorSummary and the record: names where the world has them, the K7 not
 // The fresh-agent check's findings 2, 3, 5 and 7
 // ---------------------------------------------------------------------------
 
-test('a stored address with a text-direction character is shown escaped; the stored value is unchanged', () => {
+test('Rev 2.1: an address with a text-direction character is refused by K2\'s form; the display escapes as a second guard', () => {
   const atrium = { copiedFrom: { server: 'https://h.example', address: '/worlds/\u202eeilcom/x', at: DAY } }
-  assert.equal(creditProblem(atrium), null, 'K2\'s form accepts it (the contract\'s rule)')
-  const [line] = creditLines(atrium)
-  assert.ok(!/[\u202a-\u202e\u2066-\u2069]/.test(line), line)
-  assert.ok(line.includes('/worlds/%E2%80%AEeilcom/x'), line)
-  assert.equal(atrium.copiedFrom.address, '/worlds/\u202eeilcom/x')
+  assert.equal(creditProblem(atrium)?.field, 'copiedFrom.address', 'refused (the operator, after both code reviews)')
+  assert.deepEqual(creditLines(atrium), ['Its credit is malformed'], 'so the raw address is never shown')
+  // the percent-encoded form a real paste records is accepted, and shown as it is
+  const real = { copiedFrom: { server: 'https://h.example', address: '/worlds/%E2%80%AEeilcom/x', at: DAY } }
+  assert.equal(creditProblem(real), null)
+  assert.ok(creditLines(real)[0].includes('/worlds/%E2%80%AEeilcom/x'))
   assert.equal(shownText('a\u2066b\nc', 100), 'a%E2%81%A6b%0Ac')
   assert.equal(shownText('x'.repeat(50), 10), `${'x'.repeat(9)}…`)
 })

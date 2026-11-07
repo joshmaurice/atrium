@@ -516,7 +516,7 @@ nothing.
   |---|---|---|---|
   | `server` | both | yes | an `https:` or `http:` origin (`new URL(v).origin === v`), at most 256 characters |
   | `at` | both | yes | `YYYY-MM-DD`, a real date (UTC): **the day of the Copy**, held in the snapshot (ChatGPT review of Rev 1.2, S4) |
-  | `address` | `copiedFrom` | yes | a path starting with `/`, at most 2,048 characters, no character below U+0021 |
+  | `address` | `copiedFrom` | yes | a path starting with `/`, at most 2,048 characters, no character below U+0021, **nor U+007F, U+2028–U+2029, U+202A–U+202E or U+2066–U+2069** (Rev 2.1, as `creatorName`) |
   | `world` | both | no | 1–128 characters, no character below U+0021 (K1's id) |
   | `creator` | `origin` | no | as `world` (K1's owner id) |
   | `creatorName` | `origin` | no | 1–64 characters (a username's own limit, `normalizeUsername`, `auth.js` L93–95), **none of them** below U+0020, U+007F, U+2028–U+2029, or the text-direction controls U+202A–U+202E and U+2066–U+2069 (Claude review of Rev 1.2, F5: `textContent` stops markup, not a direction override in "Made by …") |
@@ -865,6 +865,12 @@ As `richer-add` (`PREBRIEF-richer-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2.1** (2026-11-06, evening, after the implementation's two code
+  reviews): K2's `address` row also refuses `creatorName`'s control and
+  text-direction set. The fresh-agent code check (handoff §7 item 2) found a
+  stored address could carry U+202E into "Copied from …"; the ChatGPT code
+  review (N1) recommended this; the operator chose it ("Take it now"). No real
+  paste changes: its address is a URL path, percent-encoded.
 - **Rev 2, FINAL** (2026-11-06): Rev 1.3 approved by the operator; no text
   changed. Implementation on `claude/copy-objects` (§6, CP-L8 (a)): Claude's
   fast lane, a fresh-agent check of the code, then one ChatGPT code review.

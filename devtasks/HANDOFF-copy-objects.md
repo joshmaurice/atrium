@@ -37,7 +37,7 @@ review prompt).
 
 ## 2. Tests
 - **All suites, each server file alone under `timeout 180`:** 64 suites,
-  **4,223 passing, 0 failing, 1 named skip** at commit 5 (4,204 at commit 4;
+  **4,223 passing, 0 failing, 1 named skip** at commit 5 and after the review's N1 and N2 (4,204 at commit 4;
   richer-add's R7 skip, unchanged).
   Baseline at `ace29de`: 61 suites, 4,046 passing, the same skip.
   (`better-sqlite3` built in this session, so the database suites ran.)
@@ -200,7 +200,9 @@ nits before taking them:
   copies (`Date.UTC` maps years 0–99 to 1900–1999). Now `setUTCFullYear`;
   four vectors added (0001-01-01, 0004-02-29 accepted; 0001-02-29, 1900-02-29
   refused), which fail on the old check.
-- **N1 (the operator's call):** the fresh check's §7 item 2. The review
-  recommends K2's `address` form refuse U+007F, U+2028–U+2029, U+202A–U+202E
-  and U+2066–U+2069 as `creatorName` does, in both checks and the vectors.
-  Not a release blocker: the display is escaped already.
+- **N1 (taken, the operator: "Take it now"):** the fresh check's §7 item 2.
+  K2's `address` form now refuses U+007F, U+2028–U+2029, U+202A–U+202E and
+  U+2066–U+2069 as `creatorName` does, in both checks; five vectors (four
+  refused, the percent-encoded form a paste records accepted) fail on the old
+  check; the pre-brief's K2 row is Rev 2.1. The escaped display stays as a
+  second guard.

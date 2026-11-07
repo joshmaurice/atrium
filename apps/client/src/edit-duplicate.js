@@ -199,9 +199,20 @@ export function creditDateOk(v) {
   return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d
 }
 
-/** `address`: a path starting with `/`, at most 2,048 characters, none below U+0021. */
+/**
+ * `address`: a path starting with `/`, at most 2,048 characters, none below
+ * U+0021, nor U+007F, U+2028–U+2029, U+202A–U+202E or U+2066–U+2069 (Rev 2.1,
+ * the operator after both code reviews: as `creatorName`, so a stored address
+ * can't reorder "Copied from …"; a real one is a URL path, percent-encoded).
+ */
 export function creditAddressOk(v) {
-  return typeof v === 'string' && v.startsWith('/') && v.length <= CREDIT_ADDRESS_MAX && !hasCharBelow(v, 0x21)
+  if (typeof v !== 'string' || !v.startsWith('/') || v.length > CREDIT_ADDRESS_MAX) return false
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i)
+    if (c < 0x21 || c === 0x7f || c === 0x2028 || c === 0x2029 ||
+        (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) return false
+  }
+  return true
 }
 
 const CREDIT_FIELD_RULES = Object.freeze({
@@ -209,7 +220,7 @@ const CREDIT_FIELD_RULES = Object.freeze({
   world:       [creditIdOk, `must be 1–${CREDIT_ID_MAX} characters with no spaces or control characters`],
   creator:     [creditIdOk, `must be 1–${CREDIT_ID_MAX} characters with no spaces or control characters`],
   creatorName: [creditNameOk, `must be 1–${CREDIT_NAME_MAX} characters with no control or text-direction characters`],
-  address:     [creditAddressOk, `must be a path starting with "/", at most ${CREDIT_ADDRESS_MAX} characters, with no spaces or control characters`],
+  address:     [creditAddressOk, `must be a path starting with "/", at most ${CREDIT_ADDRESS_MAX} characters, with no spaces, control or text-direction characters`],
   at:          [creditDateOk, 'must be a real date, YYYY-MM-DD'],
 })
 
