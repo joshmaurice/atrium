@@ -96,6 +96,26 @@
       "ok": true
     },
     {
+      "label": "origin, an early year (0001)",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "0001-01-01"
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "origin, an early leap day (0004)",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "0004-02-29"
+        }
+      },
+      "ok": true
+    },
+    {
       "label": "origin, server of exactly 256 characters",
       "atrium": {
         "origin": {
@@ -725,6 +745,28 @@
         "origin": {
           "server": "https://atrium.example",
           "at": "2026-02-29"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at is not a leap day in an early year (0001)",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "0001-02-29"
+        }
+      },
+      "ok": false,
+      "field": "origin.at"
+    },
+    {
+      "label": "at 1900 is not a leap year",
+      "atrium": {
+        "origin": {
+          "server": "https://atrium.example",
+          "at": "1900-02-29"
         }
       },
       "ok": false,
@@ -1725,6 +1767,24 @@
       "form": "date",
       "label": "\"\"",
       "value": "",
+      "ok": false
+    },
+    {
+      "form": "date",
+      "label": "\"0001-01-01\"",
+      "value": "0001-01-01",
+      "ok": true
+    },
+    {
+      "form": "date",
+      "label": "\"0099-12-31\"",
+      "value": "0099-12-31",
+      "ok": true
+    },
+    {
+      "form": "date",
+      "label": "\"1900-02-29\"",
+      "value": "1900-02-29",
       "ok": false
     },
     {

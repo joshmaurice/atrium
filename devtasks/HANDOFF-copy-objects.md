@@ -188,3 +188,19 @@ each finding below before taking it. All taken in commit 5:
 7. **nit:** a source origin over 256 or a path over 2,048 characters was refused
    at Paste with the wrong text. Now refused at Copy, saying which.
 8. **nit:** §1 said three test files were outside §6; they are inside. Fixed.
+
+## 8. The outside code review (ChatGPT, of `2971a440`)
+`devtasks/REVIEW-copy-objects-code-chatgpt.md`: **APPROVE WITH NITS**, naming
+`2971a440906487b6e3089755f7a96e93fe5daac3` in its first line. Source only: its
+clone failed on DNS ("Could not resolve host: github.com"), as last round, so
+it ran none of the project's tests; it ran one isolated date probe. No
+must-fix; K7's earlier must-fix confirmed addressed. Claude reproduced both
+nits before taking them:
+- **N2 (taken):** `creditDateOk` refused real dates in years 0001–0099 in both
+  copies (`Date.UTC` maps years 0–99 to 1900–1999). Now `setUTCFullYear`;
+  four vectors added (0001-01-01, 0004-02-29 accepted; 0001-02-29, 1900-02-29
+  refused), which fail on the old check.
+- **N1 (the operator's call):** the fresh check's §7 item 2. The review
+  recommends K2's `address` form refuse U+007F, U+2028–U+2029, U+202A–U+202E
+  and U+2066–U+2069 as `creatorName` does, in both checks and the vectors.
+  Not a release blocker: the display is escaped already.

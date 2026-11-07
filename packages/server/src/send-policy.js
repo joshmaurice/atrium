@@ -271,7 +271,9 @@ export function creditServerOk(v) {
 export function creditDateOk(v) {
   if (typeof v !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v)) return false
   const [y, m, d] = v.split('-').map(Number)
-  const t = new Date(Date.UTC(y, m - 1, d))
+  // setUTCFullYear, not Date.UTC: Date.UTC maps years 0–99 to 1900–1999.
+  const t = new Date(0)
+  t.setUTCFullYear(y, m - 1, d)
   return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d
 }
 
