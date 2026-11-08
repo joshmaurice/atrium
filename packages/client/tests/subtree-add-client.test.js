@@ -75,7 +75,7 @@ test('T4: a tree arrives as one add: every member in the SOM, under its parent',
   assert.deepEqual(lamp.children.map((n) => n.name), ['body', 'stand'])
   assert.deepEqual(client.som.getNodeByName('body').children.map((n) => n.name), ['shade'])
   const mat = (n) => client.som.getNodeByName(n)._node.getMesh().listPrimitives()[0].getMaterial()
-  assert.equal(mat('shade'), mat('stand'), 'T12: one shared material')
+  assert.ok(mat('shade') === mat('stand'), 'T12: one shared material') // `ok`: a failing `equal` would inspect the document graph
 })
 
 test('T4: one som:add per member, the root first, each naming the root, then edit:accepted', () => {

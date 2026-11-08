@@ -17,6 +17,15 @@
  * - `behaviorSummary` and `creditLines` are what the Inspect panel and the
  *   Behaviour panel show (K4, K7). The credit is CLAIMED, never verified: its
  *   wording says so.
+ *
+ * subtree-add T6 (devtasks/PREBRIEF-subtree-add.md FINAL Rev 2): with
+ * `{ trees: true }` (the source server keeps add level 3) a group is copied
+ * whole, and Paste applies every step to every member: names, one fresh id
+ * per member through ONE map (a member's reference to another member stays a
+ * reference to its copy), the extras rule, the behaviour rule, the URL rule
+ * and the credit per member; the hidden marker is removed from the ROOT only.
+ * A destination below level 3 (`destAddFields`) takes no group, and a
+ * snapshot's material refs are turned back into materials for it.
  */
 
 import { AtriumClient } from '@atrium/client'
@@ -24,8 +33,9 @@ import { checkAddNode } from '@atrium/client/add-spec'
 import { newObjectId } from '@atrium/client/object-id'
 import { isRootRelative, resolveModelUrl, modelUrlProblem, modelReasonText } from '@atrium/client/model-spec'
 import {
-  duplicateRuleProblem, buildDescriptor, addMessageBytes, remapBehaviorTargets, atriumProblem,
+  duplicateRuleProblem, buildDescriptor, addMessageBytes, remapBehaviorIds, atriumProblem,
   creditProblem, creditIdOk, creditNameOk, creditServerOk, creditAddressOk, MAX_ADD_BYTES, DUPLICATE_REASONS,
+  subtreeMembers,
 } from './edit-duplicate.js'
 import { withNewObjectId } from './object-identity.js'
 import { copyName } from './edit-palette.js'
@@ -56,6 +66,9 @@ export const PASTE_TEXT = Object.freeze({
   declined: 'Not pasted',
   empty: 'Nothing has been copied',
   selfless: 'Its behaviour doesn’t name its own object, so it can’t be pasted',
+  // subtree-add T6
+  noTrees: 'This server can’t take objects with parts yet',
+  noNames: 'No free name for the copy or one of its parts',
 })
 
 export const NOTE_TEXT = Object.freeze({
@@ -63,6 +76,8 @@ export const NOTE_TEXT = Object.freeze({
   refersCustom: 'Its behaviour referred to other objects in that world. It won’t run here, and a custom graph can’t be re-aimed yet.',
   creditReplaced: 'Its credit was malformed and has been replaced',
   disabled: 'Its behaviour arrives turned off',
+  // subtree-add T12 (S5) — a snapshot's refs turned back into materials for a server below level 3
+  ownMaterials: 'It comes with its own materials',
 })
 
 /** K9 — C2's note and the models-by-url host note. */
@@ -174,6 +189,11 @@ export function isTemplateBehavior(behavior, ownId) {
  * Copy a node: Duplicate's rule (the credit skipped), the descriptor built now,
  * and where it came from. Never holds the node.
  *
+ * subtree-add T6: with `trees`, a group is copied whole (its material refs
+ * built, T12), and `names` holds the source names of the ids ANY member's
+ * behaviour refers to outside the tree (a member's reference to another
+ * member isn't foreign).
+ *
  * @param {object} node  the live glTF-Transform Node
  * @param {object} source
  * @param {string} source.wsUrl     the live connection's URL (never the File box base)
@@ -182,10 +202,11 @@ export function isTemplateBehavior(behavior, ownId) {
  * @param {object} [opts]
  * @param {Date|string} [opts.date]  the Copy's day (K2's `at`)
  * @param {(id: string) => string|null} [opts.nameOf]  an object's name in the source world, or null
+ * @param {boolean} [opts.trees=false]  the source server keeps add level 3 (subtree-add T7)
  * @returns {{ok: true, snapshot: object} | {ok: false, rule: string, reason: string}}
  */
-export function copyObject(node, source, { date = new Date(), nameOf = null } = {}) {
-  const problem = duplicateRuleProblem(node, { credit: false })
+export function copyObject(node, source, { date = new Date(), nameOf = null, trees = false } = {}) {
+  const problem = duplicateRuleProblem(node, { credit: false, trees })
   if (problem) return problem
   const wsUrl = source?.wsUrl
   const baseUrl = AtriumClient.wsOriginToHttpOrigin(wsUrl ?? null)
@@ -197,7 +218,7 @@ export function copyObject(node, source, { date = new Date(), nameOf = null } = 
     try { address = new URL(wsUrl).pathname || '/' } catch { address = '/' }
   }
   if (!creditAddressOk(address)) return { ok: false, rule: 'source', reason: PASTE_TEXT.addressTooLong }
-  const descriptor = buildDescriptor(node, node.getName(), 0)
+  const descriptor = buildDescriptor(node, node.getName(), 0, { refs: trees })
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) {
     return {
@@ -205,13 +226,19 @@ export function copyObject(node, source, { date = new Date(), nameOf = null } = 
       reason: `${DUPLICATE_REASONS.size} (${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')})`,
     }
   }
+  const members = treeMembers(descriptor)
+  const memberIds = new Set(members.map((d) => d.extras?.atrium?.objectId).filter((id) => typeof id === 'string'))
   const atrium = descriptor.extras?.atrium
   const sourceId = typeof atrium?.objectId === 'string' ? atrium.objectId : null
   const names = {}
-  for (const id of foreignIds(atrium?.behavior, sourceId)) {
-    let name = null
-    try { name = nameOf ? nameOf(id) : null } catch { name = null }
-    if (typeof name === 'string' && name.length > 0) names[id] = name
+  for (const d of members) {
+    const own = d.extras?.atrium?.objectId
+    for (const id of foreignIds(d.extras?.atrium?.behavior, own)) {
+      if (memberIds.has(id) || Object.hasOwn(names, id)) continue
+      let name = null
+      try { name = nameOf ? nameOf(id) : null } catch { name = null }
+      if (typeof name === 'string' && name.length > 0) names[id] = name
+    }
   }
   const snapshot = {
     descriptor,
@@ -227,6 +254,68 @@ export function copyObject(node, source, { date = new Date(), nameOf = null } = 
     },
   }
   return { ok: true, snapshot }
+}
+
+/** Every descriptor of a tree, the root first, in message order (pre-order). */
+export function treeMembers(root) {
+  const out = []
+  const stack = [root]
+  while (stack.length > 0) {
+    const d = stack.pop()
+    if (!isPlainObject(d)) continue
+    out.push(d)
+    const children = Array.isArray(d.children) ? d.children : []
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+  }
+  return out
+}
+
+/**
+ * subtree-add T6 — the names for a paste: the root's `rootName` when given (the
+ * retry's), else the original's if free, else `copyName`; every member its
+ * own if free and not already chosen, else `copyName`. Mutates `root`'s tree
+ * (a prepared descriptor, never the clipboard). False when no name is free.
+ */
+export function chooseTreeNames(root, { rootName = null, original = root.name, isFree = () => true, members = treeMembers(root), originals = null } = {}) {
+  const chosen = new Set()
+  const pick = (name) => {
+    const free = (x) => isFree(x) && !chosen.has(x)
+    return free(name) ? name : copyName(name, free)
+  }
+  const first = typeof rootName === 'string' ? rootName : pick(original)
+  if (first == null) return false
+  root.name = first
+  chosen.add(first)
+  for (let i = 1; i < members.length; i++) {
+    const next = pick(originals ? originals[i] : members[i].name)
+    if (next == null) return false
+    members[i].name = next
+    chosen.add(next)
+  }
+  return true
+}
+
+/**
+ * subtree-add T12 (S5) — a descriptor tree with every `{ ref: n }` replaced by
+ * a copy of the material it names (message order), for a server below level 3.
+ * Mutates the (prepared) tree; returns true when it replaced any.
+ */
+function inlineMaterialRefs(root) {
+  const given = []
+  let replaced = false
+  for (const d of treeMembers(root)) {
+    for (const prim of d.mesh?.primitives ?? []) {
+      const m = prim?.material
+      if (!isPlainObject(m)) continue
+      if (Object.hasOwn(m, 'ref')) {
+        prim.material = structuredClone(given[m.ref])
+        replaced = true
+      } else {
+        given.push(m)
+      }
+    }
+  }
+  return replaced
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +344,11 @@ function fillOrigin(existing, { snapshot, library }) {
 /**
  * Prepare the `add` for a paste. Never changes `clipboard`.
  *
+ * subtree-add T6: every step applies to every member of a group (see the
+ * module's note). One fresh id per member, through one map; one fresh id per
+ * foreign reference, through one map for the whole tree, recorded on the
+ * member that holds it; one model question for every host.
+ *
  * @param {object} clipboard  a snapshot from `copyObject`
  * @param {object} opts
  * @param {string} [opts.name]          the name to use (the retry's); else from `isFree`
@@ -262,12 +356,13 @@ function fillOrigin(existing, { snapshot, library }) {
  * @param {number[]} opts.position      the palette's spot ahead of you, `[x, 0, z]`
  * @param {string} opts.destOrigin      the destination's origin (its connection, read as http(s))
  * @param {string|null} opts.destWorldId  the destination's `client.world.id`, or null
+ * @param {number|null} [opts.destAddFields]  the destination server's add level (subtree-add T7)
  * @param {(text: string) => boolean} [opts.confirm]  asks the owner; absent declines
  * @param {() => string} [opts.newId]   the id source (tests)
  * @returns {{ok: true, descriptor: object, bytes: number, notes: string[], sameWorld: boolean}
  *          | {ok: false, reason: string, declined?: true}}
  */
-export function preparePaste(clipboard, { name, isFree = () => true, position, destOrigin, destWorldId = null, confirm = null, newId = newObjectId } = {}) {
+export function preparePaste(clipboard, { name, isFree = () => true, position, destOrigin, destWorldId = null, destAddFields = null, confirm = null, newId = newObjectId } = {}) {
   if (!clipboard || !isPlainObject(clipboard.descriptor) || !isPlainObject(clipboard.source)) return refuse(PASTE_TEXT.empty)
   const snapshot = structuredClone(clipboard)
   const notes = []
@@ -277,136 +372,228 @@ export function preparePaste(clipboard, { name, isFree = () => true, position, d
   const sameOrigin = originOf(src.origin) === dest
   const sameWorld = sameOrigin && typeof src.world?.id === 'string' && typeof destWorldId === 'string' &&
     src.world.id === destWorldId
+  const level3 = Number.isInteger(destAddFields) && destAddFields >= 3
 
-  // 1. the name
-  const original = snapshot.descriptor.name
-  const chosen = typeof name === 'string' ? name : (isFree(original) ? original : copyName(original, isFree))
-  if (chosen == null) return refuse('No free name for the copy')
+  const root = snapshot.descriptor
+  const members = treeMembers(root)
+  const isTree = members.length > 1
+  // T6/T7 — a destination below level 3 takes no group.
+  if (isTree && !level3) return refuse(PASTE_TEXT.noTrees)
+  // T12 (S5) — and gets every material inline.
+  if (!level3 && inlineMaterialRefs(root)) notes.push(NOTE_TEXT.ownMaterials)
+  const partLabel = (d) => (d === root ? null : `“${shownText(d.name, NOTE_KEY_CHARS)}”`)
+  const originals = members.map((d) => d.name)
+  const oldIds = members.map((d) => (typeof d.extras?.atrium?.objectId === 'string' ? d.extras.atrium.objectId : null))
 
-  // 2. the translation: x and z from the palette, y the original's own
-  const t = snapshot.descriptor.translation ?? [0, 0, 0]
-  const translation = [position?.[0] ?? t[0], t[1], position?.[2] ?? t[2]]
-
-  // 3. a new objectId
-  const copyId = newId()
-  let descriptor = withNewObjectId({ ...snapshot.descriptor, name: chosen, translation }, () => copyId)
-
-  // 4. extras: the hidden marker gone; only Atrium's keys; the teleporter exactly { destination }
-  const extras = { ...descriptor.extras }
-  delete extras[HIDDEN_MARKER]
-  const atrium = {}
-  const dropped = []
-  for (const [key, value] of Object.entries(extras.atrium)) {
-    if (ATRIUM_KEYS.includes(key)) atrium[key] = value
-    else dropped.push(key)
-  }
-  // One note, however many keys a source planted, each name shown safely.
-  if (dropped.length > 0) notes.push(`Dropped its Atrium data ${keyList(dropped)}, which this version doesn’t use`)
-  if (Object.hasOwn(atrium, 'teleporter')) {
-    const tp = atrium.teleporter
-    const extra = isPlainObject(tp) ? Object.keys(tp).filter((k) => k !== 'destination') : []
-    if (extra.length > 0) notes.push(`Dropped its pad data ${keyList(extra)}, which this version doesn’t use`)
-    atrium.teleporter = { destination: tp?.destination }
+  // 1. the names
+  if (!chooseTreeNames(root, { rootName: typeof name === 'string' ? name : null, isFree, members, originals })) {
+    return refuse(isTree ? PASTE_TEXT.noNames : 'No free name for the copy')
   }
 
-  // 5. the behaviour (K7)
-  if (Object.hasOwn(atrium, 'behavior') && atrium.behavior !== null) {
-    let behavior = remapBehaviorTargets(atrium.behavior, snapshot.sourceId, copyId)
+  // 2. the translation: x and z from the palette, y the original's own (the root's)
+  const t = root.translation ?? [0, 0, 0]
+  root.translation = [position?.[0] ?? t[0], t[1], position?.[2] ?? t[2]]
+
+  // 3. a new objectId for every member, through one map
+  const copyIds = members.map(() => newId())
+  const memberMap = new Map()
+  members.forEach((d, i) => {
+    if (oldIds[i] !== null) memberMap.set(oldIds[i], copyIds[i])
+    d.extras = withNewObjectId(d, () => copyIds[i]).extras
+  })
+  const copyIdSet = new Set(copyIds)
+
+  // 4. extras: the hidden marker gone from the ROOT (a paste is visible as a
+  // whole; a hidden part is the author's design); only Atrium's keys, on every
+  // member; the teleporter exactly { destination }
+  delete root.extras[HIDDEN_MARKER]
+  const atriums = members.map((d) => {
+    const atrium = {}
+    const dropped = []
+    for (const [key, value] of Object.entries(d.extras.atrium)) {
+      if (ATRIUM_KEYS.includes(key)) atrium[key] = value
+      else dropped.push(key)
+    }
+    const where = partLabel(d)
+    // One note per member, however many keys a source planted, each name shown safely.
+    if (dropped.length > 0) notes.push(`Dropped ${where ? `its part ${where}’s` : 'its'} Atrium data ${keyList(dropped)}, which this version doesn’t use`)
+    if (Object.hasOwn(atrium, 'teleporter')) {
+      const tp = atrium.teleporter
+      const extra = isPlainObject(tp) ? Object.keys(tp).filter((k) => k !== 'destination') : []
+      if (extra.length > 0) notes.push(`Dropped ${where ? `its part ${where}’s` : 'its'} pad data ${keyList(extra)}, which this version doesn’t use`)
+      atrium.teleporter = { destination: tp?.destination }
+    }
+    return atrium
+  })
+
+  // 5. the behaviours (K7), every member: the member map first (a member's
+  // reference to another member stays one, to its copy), then, from another
+  // world, disabled and every other id replaced through ONE map for the tree
+  const foreignMap = new Map()
+  const refsOf = members.map(() => null)
+  let disabledAny = false
+  members.forEach((d, i) => {
+    const atrium = atriums[i]
+    if (!Object.hasOwn(atrium, 'behavior') || atrium.behavior === null) return
+    const original = atrium.behavior
+    let behavior = remapBehaviorIds(original, memberMap)
+    if (behavior === original) behavior = structuredClone(original)
     if (!sameWorld) {
-      const template = isTemplateBehavior(atrium.behavior, snapshot.sourceId)
+      const template = isTemplateBehavior(original, oldIds[i])
       behavior = { ...behavior, enabled: false }
-      const old = foreignIds(behavior, copyId)
+      const old = foreignIds(behavior, copyIds[i]).filter((id) => !copyIdSet.has(id))
       if (old.length > 0) {
-        const map = new Map(old.map((id) => [id, newId()]))
+        for (const id of old) if (!foreignMap.has(id)) foreignMap.set(id, newId())
+        const map = new Map(old.map((id) => [id, foreignMap.get(id)]))
         behavior = swapIds(behavior, map)
         // K2: a refs entry that fails K3 is treated as absent; the others are kept.
         const priorRefs = isPlainObject(atrium.copiedFrom) && Array.isArray(atrium.copiedFrom.refs)
           ? atrium.copiedFrom.refs.filter(refEntryOk) : []
-        snapshot.refs = old.map((was) => {
+        refsOf[i] = old.map((was) => {
           const prior = priorRefs.find((r) => r.id === was)
           const entry = { id: map.get(was), was: prior ? prior.was : was }
           const n = prior ? prior.name : snapshot.names?.[was]
           if (creditNameOk(n)) entry.name = n
           return entry
         })
-        notes.push(template ? NOTE_TEXT.refersTemplate : NOTE_TEXT.refersCustom)
+        const note = template ? NOTE_TEXT.refersTemplate : NOTE_TEXT.refersCustom
+        const where = partLabel(d)
+        notes.push(where ? note.replace(/^Its behaviour/, `Its part ${where}’s behaviour`) : note)
       }
-      if (atrium.behavior.enabled === true) notes.push(NOTE_TEXT.disabled)
+      if (original.enabled === true) disabledAny = true
     }
     atrium.behavior = behavior
+  })
+  if (disabledAny) notes.push(NOTE_TEXT.disabled)
+
+  // 6. URLs (K8), every member; one question for every other host
+  const library = members.map(() => false)
+  const hosts = []
+  for (let i = 0; i < members.length; i++) {
+    const atrium = atriums[i]
+    if (isPlainObject(atrium.model) && typeof atrium.model.url === 'string') {
+      let url = atrium.model.url
+      if (!sameOrigin && isRootRelative(url)) {
+        const r = resolveModelUrl(url, src.baseUrl)
+        if (!r.ok) return refuse(PASTE_TEXT.noBase)
+        const problem = modelUrlProblem(r.url)
+        if (problem) return refuse(modelReasonText(problem))
+        url = r.url
+        atrium.model = { ...atrium.model, url }
+      }
+      // "resolved": a root path means the destination's own server.
+      let resolved = null
+      try { resolved = new URL(url, dest) } catch { resolved = null }
+      const resolvedOrigin = resolved ? resolved.origin : null
+      if (resolvedOrigin !== dest) {
+        const host = resolved ? resolved.host : url
+        if (!hosts.includes(host)) hosts.push(host)
+      }
+      library[i] = resolved !== null && resolvedOrigin === dest && resolved.pathname.startsWith(LIBRARY_PREFIX)
+    }
+    if (!sameOrigin && isPlainObject(atrium.teleporter)) {
+      const dd = atrium.teleporter.destination
+      if (typeof dd === 'string' && dd !== '' && !dd.startsWith('ws://') && !dd.startsWith('wss://')) {
+        const resolvedDest = resolveWorldAddress(dd, src.wsUrl)
+        if (resolvedDest == null) return refuse(PASTE_TEXT.padNoBase)
+        if (resolvedDest.length > URL_MAX) return refuse(PASTE_TEXT.padLength)
+        atrium.teleporter = { destination: resolvedDest }
+      }
+    }
+  }
+  if (hosts.length > 0) {
+    const question = hosts.length === 1
+      ? `This model is loaded from ${hosts[0]}. Pasting it makes your browser, and your visitors’, fetch from there. Paste?`
+      : `Its models are loaded from ${hosts.join(', ')}. Pasting it makes your browser, and your visitors’, fetch from there. Paste?`
+    let yes = false
+    try { yes = typeof confirm === 'function' && confirm(question) === true } catch { yes = false }
+    if (!yes) return refuse(PASTE_TEXT.declined, { declined: true })
   }
 
-  // 6. URLs (K8)
-  let library = false
-  if (isPlainObject(atrium.model) && typeof atrium.model.url === 'string') {
-    let url = atrium.model.url
-    if (!sameOrigin && isRootRelative(url)) {
-      const r = resolveModelUrl(url, src.baseUrl)
-      if (!r.ok) return refuse(PASTE_TEXT.noBase)
-      const problem = modelUrlProblem(r.url)
-      if (problem) return refuse(modelReasonText(problem))
-      url = r.url
-      atrium.model = { ...atrium.model, url }
-    }
-    // "resolved": a root path means the destination's own server.
-    let resolved = null
-    try { resolved = new URL(url, dest) } catch { resolved = null }
-    const resolvedOrigin = resolved ? resolved.origin : null
-    if (resolvedOrigin !== dest) {
-      const host = resolved ? resolved.host : url
-      const question = `This model is loaded from ${host}. Pasting it makes your browser, and your visitors’, fetch from there. Paste?`
-      let yes = false
-      try { yes = typeof confirm === 'function' && confirm(question) === true } catch { yes = false }
-      if (!yes) return refuse(PASTE_TEXT.declined, { declined: true })
-    }
-    library = resolved !== null && resolvedOrigin === dest && resolved.pathname.startsWith(LIBRARY_PREFIX)
-  }
-  if (!sameOrigin && isPlainObject(atrium.teleporter)) {
-    const d = atrium.teleporter.destination
-    if (typeof d === 'string' && d !== '' && !d.startsWith('ws://') && !d.startsWith('wss://')) {
-      const resolvedDest = resolveWorldAddress(d, src.wsUrl)
-      if (resolvedDest == null) return refuse(PASTE_TEXT.padNoBase)
-      if (resolvedDest.length > URL_MAX) return refuse(PASTE_TEXT.padLength)
-      atrium.teleporter = { destination: resolvedDest }
-    }
-  }
-
-  // 7. the credit (K2); a same-world paste is a Duplicate and changes none
+  // 7. the credit (K2), every member; a same-world paste is a Duplicate and changes none
   if (!sameWorld) {
-    const originOk = Object.hasOwn(atrium, 'origin') && creditProblem(atrium, { key: 'origin' }) === null
-    const malformed = (Object.hasOwn(atrium, 'origin') && !originOk) ||
-      (Object.hasOwn(atrium, 'copiedFrom') && creditProblem(atrium, { key: 'copiedFrom' }) !== null)
-    if (malformed) notes.push(NOTE_TEXT.creditReplaced)
-    atrium.origin = fillOrigin(originOk ? atrium.origin : undefined, { snapshot, library })
-    const copiedFrom = { server: src.origin }
-    if (creditIdOk(src.world?.id)) copiedFrom.world = src.world.id
-    copiedFrom.address = src.address
-    copiedFrom.at = snapshot.date
-    if (Array.isArray(snapshot.refs) && snapshot.refs.length > 0) copiedFrom.refs = snapshot.refs
-    atrium.copiedFrom = copiedFrom
-    if (!creditServerOk(copiedFrom.server)) return refuse(PASTE_TEXT.noSource)
+    let malformedAny = false
+    for (let i = 0; i < members.length; i++) {
+      const atrium = atriums[i]
+      const originOk = Object.hasOwn(atrium, 'origin') && creditProblem(atrium, { key: 'origin' }) === null
+      const malformed = (Object.hasOwn(atrium, 'origin') && !originOk) ||
+        (Object.hasOwn(atrium, 'copiedFrom') && creditProblem(atrium, { key: 'copiedFrom' }) !== null)
+      if (malformed) malformedAny = true
+      atrium.origin = fillOrigin(originOk ? atrium.origin : undefined, { snapshot, library: library[i] })
+      const copiedFrom = { server: src.origin }
+      if (creditIdOk(src.world?.id)) copiedFrom.world = src.world.id
+      copiedFrom.address = src.address
+      copiedFrom.at = snapshot.date
+      if (Array.isArray(refsOf[i]) && refsOf[i].length > 0) copiedFrom.refs = refsOf[i]
+      atrium.copiedFrom = copiedFrom
+      if (!creditServerOk(copiedFrom.server)) return refuse(PASTE_TEXT.noSource)
+    }
+    if (malformedAny) notes.push(NOTE_TEXT.creditReplaced)
   }
 
-  extras.atrium = atrium
-  descriptor = { ...descriptor, extras }
+  members.forEach((d, i) => { d.extras.atrium = atriums[i] })
+  const descriptor = root
 
-  // 8. size, then add-spec (A7), then atriumProblem with the credit
+  // 8. size, then add-spec (A7, the whole tree), then per member the entry-0
+  // rule and atriumProblem with the credit
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) {
     return refuse(`${DUPLICATE_REASONS.size} (${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')})`)
   }
   const spec = checkAddNode(descriptor)
   if (spec) return refuse(`${DUPLICATE_REASONS.add} (${spec.code}: ${spec.message})`)
-  // K7 — the behaviour must name the copy as its own object (entry 0). Copy
-  // accepts a behaviour on a node with no own id; only another server can send
-  // one (a real Atrium server heals it at load), and Paste refuses it.
-  const pasted = atrium.behavior
-  if (isPlainObject(pasted) && Array.isArray(pasted.nodeMap) && pasted.nodeMap[0] !== copyId) {
-    return refuse(PASTE_TEXT.selfless)
+  for (let i = 0; i < members.length; i++) {
+    // K7 — the behaviour must name the copy as its own object (entry 0). Copy
+    // accepts a behaviour on a node with no own id; only another server can send
+    // one (a real Atrium server heals it at load), and Paste refuses it.
+    const pasted = atriums[i].behavior
+    if (isPlainObject(pasted) && Array.isArray(pasted.nodeMap) && pasted.nodeMap[0] !== copyIds[i]) {
+      return refuse(PASTE_TEXT.selfless)
+    }
+    const a = atriumProblem(members[i].extras)
+    if (a) return refuse(`${DUPLICATE_REASONS.atrium} (${a})`)
   }
-  const a = atriumProblem(descriptor.extras)
-  if (a) return refuse(`${DUPLICATE_REASONS.atrium} (${a})`)
   return { ok: true, descriptor, bytes, notes, sameWorld }
+}
+
+/**
+ * subtree-add T6 (the fresh-agent check's S4) — the one "already in use" retry:
+ * the names only, re-chosen against the world as it now is, on the prepared
+ * descriptor. The position, the ids and K8's answers stay as they were.
+ *
+ * @param {object} descriptor  the prepared paste's descriptor (never the clipboard)
+ * @param {object} opts
+ * @param {string} opts.rootName   the root's next copy name
+ * @param {string[]} opts.originals  every member's original name, in message order
+ * @param {(name: string) => boolean} opts.isFree
+ * @returns {object|null}  a new descriptor, or null when no name is free
+ */
+export function renamePaste(descriptor, { rootName, originals, isFree }) {
+  const copy = structuredClone(descriptor)
+  const members = treeMembers(copy)
+  return chooseTreeNames(copy, { rootName, isFree, members, originals }) ? copy : null
+}
+
+/**
+ * subtree-add T6 — what the Inspect panel says about a group: its parts (the
+ * members below the root) and how many of them carry the hidden marker as
+ * hidden. Pure, from the live glTF-Transform node.
+ *
+ * @param {object} node  a glTF-Transform Node
+ * @returns {{ parts: number, hidden: number }}
+ */
+export function partsSummary(node) {
+  const members = subtreeMembers(node).slice(1)
+  const hidden = members.filter((m) => m.node.getExtras()?.[HIDDEN_MARKER] === false).length
+  return { parts: members.length, hidden }
+}
+
+/** The group's lines for the Inspect panel, plain text. Empty for a single object. */
+export function partsLines({ parts, hidden }) {
+  if (parts === 0) return []
+  const lines = [`${parts.toLocaleString('en-US')} part${parts === 1 ? '' : 's'}`]
+  if (hidden > 0) lines.push(`Includes ${hidden.toLocaleString('en-US')} hidden part${hidden === 1 ? '' : 's'}`)
+  return lines
 }
 
 // ---------------------------------------------------------------------------

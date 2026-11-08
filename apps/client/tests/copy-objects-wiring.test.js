@@ -198,7 +198,8 @@ describe('K4 — the Inspect click and panel', () => {
   })
 
   test('Copy\'s refusal reason is Duplicate\'s, the credit skipped', () => {
-    assert.match(flatten(body('copyHint')), /duplicateRuleProblem\(gltfNode, \{ credit: false \}\)\?\.reason \?\? null/)
+    // subtree-add T6/T7 — at the server's level, so a group's reason is its own
+    assert.match(flatten(body('copyHint')), /duplicateRuleProblem\(gltfNode, \{ credit: false, trees: treesAllowed\(\) \}\)\?\.reason \?\? null/)
     assert.match(flatten(body('renderInspectPanel')), /const reason = copyHint\(node\) ipCopy\.disabled = !!reason/)
   })
 
@@ -213,7 +214,7 @@ describe('K4 — the Inspect click and panel', () => {
 
   test('Copy reads the live connection, never the File box base', () => {
     const copy = flatten(body('copyNode'))
-    assert.match(copy, /copyObject\(gltfNode, \{ wsUrl: client\.wsUrl, world: client\.world \}, \{ nameOf: objectNameHere \}\)/)
+    assert.match(copy, /copyObject\(gltfNode, \{ wsUrl: client\.wsUrl, world: client\.world \}, \{ nameOf: objectNameHere, trees: treesAllowed\(\) \}\)/)
     assert.ok(!/worldBaseUrl/.test(copy))
   })
 
@@ -267,7 +268,9 @@ describe('K6 — app.js\'s paste branch', () => {
     assert.match(branch, /const error = pasteAnswerError\(status, message\) if \(error\) showEditError\(error\) else if \(modes\.edit\) selectAdded\(request\.name\)/)
     assert.match(branch, /refreshEditActions\(\) return \}\s*$/)
     const retry = flatten(body('retryPaste'))
-    assert.match(retry, /structure\.begin\('add', seq, \{ name, descriptor, paste: true, baseName: request\.baseName, retried: true \}\)/, 'never retried twice')
+    // subtree-add T6 (S4) — the names only, re-chosen for every member
+    assert.match(retry, /const descriptor = renamePaste\(request\.descriptor, \{ rootName: name, originals: request\.originals \?\? \[request\.baseName\], isFree: isNameFree \}\) if \(!descriptor\) return false/)
+    assert.match(retry, /structure\.begin\('add', seq, \{ name, descriptor, paste: true, baseName: request\.baseName, originals: request\.originals, retried: true \}\)/, 'never retried twice')
     assert.match(retry, /if \(begun\) undo\.registerAdd\(seq, \{ name, duplicate: false \}\)/)
   })
 
@@ -277,7 +280,8 @@ describe('K6 — app.js\'s paste branch', () => {
     assert.match(paste, /preparePaste\(clipboard, \{/)
     assert.match(paste, /destOrigin: AtriumClient\.wsOriginToHttpOrigin\(client\.wsUrl\)/)
     assert.match(paste, /destWorldId: client\.world\?\.id \?\? null/)
-    assert.match(paste, /structure\.begin\('add', seq, \{ name, descriptor: prepared\.descriptor, paste: true, baseName: clipboard\.descriptor\.name \}\)/)
+    assert.match(paste, /destAddFields: client\.serverAddFields/, 'subtree-add T7: the server’s level')
+    assert.match(paste, /const originals = treeMembers\(clipboard\.descriptor\)\.map\(\(d\) => d\.name\) structure\.begin\('add', seq, \{ name, descriptor: prepared\.descriptor, paste: true, baseName: clipboard\.descriptor\.name, originals \}\)/)
     assert.match(paste, /undo\.registerAdd\(seq, \{ name, duplicate: false \}\)/)
     assert.ok(!/clipboard = /.test(paste), 'a paste never replaces the clipboard')
     assert.ok(!/worldBaseUrl/.test(paste))

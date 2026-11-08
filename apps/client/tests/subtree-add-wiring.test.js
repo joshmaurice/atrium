@@ -14,6 +14,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Document } from '../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js'
+import { SOMDocument, worldPosition } from '@atrium/som'
+import { AtriumClient } from '@atrium/client'
+import { isTeleporter, teleporterDestination } from '../src/teleporter-marker.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const code = readFileSync(resolve(__dirname, '../src/app.js'), 'utf-8')
@@ -59,4 +63,66 @@ test('SA-L4 (a): Delete asks only when the capture fails, and then with the coun
   const start = code.indexOf("epDelete.addEventListener('click'")
   const body = code.slice(start, code.indexOf('\n})', start))
   assert.match(body, /const capture = undo\.capture\(node\)\s*if \(!capture\.ok\) \{\s*const n = countDescendants\(node\)/)
+})
+
+// ---------------------------------------------------------------------------
+// T4, run (proof (p3)'s apps/client half): the pad handler and derivePads,
+// lifted from app.js and run on a real AtriumClient receiving a tree
+// ---------------------------------------------------------------------------
+
+/** `function <name>() { … }`'s text in app.js, braces matched. */
+function functionText(name) {
+  const at = code.search(new RegExp(`function ${name}\\s*\\(`))
+  assert.ok(at >= 0, `app.js has a function ${name}()`)
+  const open = code.indexOf('{', code.indexOf(')', at))
+  let depth = 0
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === '{') depth++
+    else if (code[i] === '}' && --depth === 0) return code.slice(at, i + 1)
+  }
+  throw new Error(`unbalanced ${name}`)
+}
+
+class MockWebSocket {
+  constructor() { this.readyState = 1; this.sent = []; this._handlers = {} }
+  on(event, fn) { (this._handlers[event] ??= []).push(fn); return this }
+  send(data) { this.sent.push(JSON.parse(data)) }
+  close() { this.readyState = 3 }
+  simulateMessage(msg) { for (const fn of this._handlers.message ?? []) fn(JSON.stringify(msg)) }
+}
+
+test('T4, run: a pad that arrives as a PART of a remote tree is in derivePads\u2019 result after app.js\u2019s som:add handler, at its world position', () => {
+  const mocks = []
+  const client = new AtriumClient({
+    WebSocket: class { constructor() { const m = new MockWebSocket(); mocks.push(m); return m } },
+    connectTimeout: 0,
+  })
+  client.connect('ws://mock', {})
+  const doc = new Document()
+  doc.createScene('Scene').addChild(doc.createNode('Crate'))
+  Object.assign(client, { _sessionId: 'session-aabbccdd', _displayName: 'User-sess', _connected: true, _worldReady: true, _som: new SOMDocument(doc) })
+  client._attachMutationListeners()
+
+  const derivePads = new Function('client', 'isTeleporter', 'worldPosition', 'teleporterDestination',
+    `${functionText('derivePads')}; return derivePads`)(client, isTeleporter, worldPosition, teleporterDestination)
+  const built = []
+  const rebuildPads = () => built.push(derivePads())
+  const reCaptures = []
+  const undo = { reCapture: () => reCaptures.push(1) }
+  new Function('client', 'isTeleporter', 'rebuildPads', 'undo', `${handler('som:add', '\\{ nodeName, root \\}')}\n})`)(client, isTeleporter, rebuildPads, undo)
+
+  const TRI = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+  const kiosk = {
+    name: 'kiosk', translation: [10, 0, 0],
+    children: [{ name: 'kiosk-pad', translation: [0, 0, 2], extras: { atrium: { teleporter: { destination: '/worlds/bob/yard' } } },
+      mesh: { primitives: [{ attributes: { POSITION: TRI } }] } }],
+  }
+  mocks[0].simulateMessage({ type: 'add', seq: 7, node: kiosk, session: 'session-other000' })
+  assert.ok(client.som.getNodeByName('kiosk-pad'), 'the tree arrived')
+  assert.ok(built.length >= 1, 'the handler rebuilt the pads for the part')
+  const pad = built.at(-1).find((p) => p.name === 'kiosk-pad')
+  assert.ok(pad, `the pad part is a pad: ${JSON.stringify(built.at(-1))}`)
+  assert.deepEqual([...pad.position], [10, 0, 2], 'at its world position (under the moved root)')
+  assert.equal(pad.destination, '/worlds/bob/yard')
+  assert.equal(reCaptures.length, 1, 'and the pending delete re-captured once, for the message')
 })

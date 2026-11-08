@@ -96,8 +96,9 @@ describe('T12: shared materials within a message', () => {
       ],
     })
     // pre-order: R, A, A1 (Wood = 0, Metal = 1), B
-    assert.equal(materialOf(som, 'B', 0), materialOf(som, 'A1', 1), 'B’s ref 1 is A1’s Metal')
-    assert.equal(materialOf(som, 'B', 1), materialOf(som, 'A1', 0), 'B’s ref 0 is A1’s Wood')
+    // identity, by `ok`: a failing `equal` on two glTF-Transform objects inspects the whole document graph
+    assert.ok(materialOf(som, 'B', 0) === materialOf(som, 'A1', 1), `B’s ref 1 is A1’s Metal (B has ${materialOf(som, 'B', 0)?.getName()})`)
+    assert.ok(materialOf(som, 'B', 1) === materialOf(som, 'A1', 0), `B’s ref 0 is A1’s Wood (B has ${materialOf(som, 'B', 1)?.getName()})`)
     assert.equal(som._document.getRoot().listMaterials().length, 2)
     const sharedSom = som.getNodeByName('B').mesh.primitives[0].material
     assert.equal(sharedSom, som.getNodeByName('A1').mesh.primitives[1].material, 'one SOMMaterial wrapper too')
@@ -132,7 +133,7 @@ describe('T12: shared materials within a message', () => {
     som.ingestNode({
       name: 'R', children: [{ name: 'A', children: [{ name: 'A1', mesh: { primitives: [prim(MAT('Deep'))] } }] }, { name: 'B', mesh: { primitives: [prim({ ref: 0 })] } }],
     })
-    assert.equal(materialOf(som, 'B'), materialOf(som, 'A1'))
+    assert.ok(materialOf(som, 'B') === materialOf(som, 'A1'), `B shares A1’s material (B has ${materialOf(som, 'B')?.getName()})`)
   })
 
   test('a save keeps one shared material, and a reload gives every sharer the same one', async () => {

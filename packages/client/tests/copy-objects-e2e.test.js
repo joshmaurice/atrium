@@ -116,8 +116,10 @@ function wireUndo(client) {
   const messages = []
   const undo = createEditUndo({
     getNodeByName: (name) => client.som.getNodeByName(name),
+    getObjectByName: (name) => client.som?.getObjectByName(name) ?? null,
+    trees: () => client.serverAddFields >= 3,
     checkNewName: (name, node) => client.som.checkNewName(name, node),
-    prepareRestore: (gltfNode) => prepareRestore(gltfNode),
+    prepareRestore: (gltfNode, opts) => prepareRestore(gltfNode, opts),
     sendTransform: () => null,
     rename: () => null,
     structural: (req, direction) => {
@@ -444,4 +446,86 @@ test('hostile, one server: a world beside yours on the same origin is another wo
   assert.equal(r.sameWorld, false)
   assert.equal(await answers(tab1.client)(wireUndo(tab1.client).add(r.descriptor)), 'accepted')
   await enableAndClick({ B, tab1, runner, name: r.descriptor.name, targetName: 'Door' })
+})
+
+// ---------------------------------------------------------------------------
+// subtree-add T6 (devtasks/PREBRIEF-subtree-add.md §5): a group, two worlds
+// ---------------------------------------------------------------------------
+
+test('subtree-add: a visitor copies a lamp with parts in A, pastes it in B; the joiner sees every part credited, the shared material shared, the hidden part hidden; one Undo removes the group', async () => {
+  const A = await startWorld({ worldId: 'world-a', ownerUserId: 'user-alice', db: dbWith([['user-alice', 'alice']]) })
+  const B = await startWorld({ worldId: 'world-b', ownerUserId: 'user-bob' })
+  const ROOT = 'a1000000-0000-4000-8000-000000000011'
+  const SHADE = 'a1000000-0000-4000-8000-000000000012'
+  const STAND = 'a1000000-0000-4000-8000-000000000013'
+  const brass = { name: 'Brass', pbrMetallicRoughness: { baseColorFactor: [1, 0.8, 0.2, 1] } }
+  const lamp = {
+    name: 'Lamp', translation: [2, 0, 2],
+    extras: { atrium: { objectId: ROOT } },
+    children: [
+      { name: 'Shade', translation: [0, 1.6, 0],
+        extras: { atrium: { objectId: SHADE, behavior: templateGraph('select-visibility', { target: STAND, action: 'toggle' }, { ownId: SHADE }) } },
+        mesh: { primitives: [{ attributes: { POSITION: pos3 }, material: brass }] } },
+      { name: 'Stand', extras: { __atrium_visible: false, atrium: { objectId: STAND, behavior: templateGraph('select-visibility', { target: DOOR, action: 'hide' }, { ownId: STAND }) } },
+        mesh: { primitives: [{ attributes: { POSITION: pos3 }, material: { ref: 0 } }] } },
+    ],
+  }
+  const alice = tab()
+  await alice.go(A.url('/worlds/alice/garden', 'user-alice'))
+  assert.equal(alice.client.serverAddFields, 3, 'the hello says level 3')
+  const aliceAnswer = answers(alice.client)
+  assert.equal(await aliceAnswer(alice.client.addNode(cube('Front door', DOOR))), 'accepted')
+  assert.equal(await aliceAnswer(alice.client.addNode(lamp)), 'accepted', 'the tree, in one add')
+
+  // Bob visits A and copies the lamp (its server is level 3: trees allowed).
+  const bob = tab()
+  await bob.go(A.url('/worlds/alice/garden'))
+  const node = bob.client.som.getNodeByName('Lamp')
+  const c = copyObject(node._node, { wsUrl: bob.client.wsUrl, world: bob.client.world }, { nameOf: nameIn(bob.client), trees: bob.client.serverAddFields >= 3 })
+  assert.equal(c.ok, true, c.reason)
+  assert.deepEqual(c.snapshot.names, { [DOOR]: 'Front door' }, 'only the foreign id is named')
+
+  // Home to B; paste.
+  await bob.go(B.url('/worlds/bob/yard', 'user-bob'))
+  const bobUndo = wireUndo(bob.client)
+  const r = preparePaste(c.snapshot, {
+    isFree: (n) => bob.client.som.checkNewName(n).ok, position: [0, 0, 3],
+    destOrigin: AtriumClient.wsOriginToHttpOrigin(bob.client.wsUrl), destWorldId: bob.client.world.id,
+    destAddFields: bob.client.serverAddFields, confirm: () => true,
+  })
+  assert.equal(r.ok, true, r.reason)
+  assert.equal(await answers(bob.client)(bobUndo.add(r.descriptor)), 'accepted')
+  assert.ok(await waitFor(() => bobUndo.undo.undoCount === 1), 'one entry for the group')
+
+  // B's next joiner.
+  const joiner = tab()
+  await joiner.go(B.url('/worlds/bob/yard'))
+  const som = joiner.client.som
+  const serverA = `http://127.0.0.1:${A.port}`
+  const parts = ['Lamp', 'Shade', 'Stand'].map((n) => som.getNodeByName(n))
+  assert.ok(parts.every(Boolean), 'every part is in B')
+  assert.deepEqual(parts[0]._node.listChildren().map((k) => k.getName()), ['Shade', 'Stand'], 'the parts are the lamp\u2019s children')
+  for (const p of parts) {
+    const a = p.extras.atrium
+    assert.equal(a.copiedFrom.server, serverA, `${p.name}: copiedFrom`)
+    assert.equal(a.origin.creatorName, 'alice', `${p.name}: origin`)
+    assert.ok(![ROOT, SHADE, STAND, DOOR].includes(a.objectId), `${p.name}: a new objectId`)
+  }
+  const shade = som.getNodeByName('Shade').extras.atrium
+  const stand = som.getNodeByName('Stand').extras.atrium
+  assert.equal(shade.behavior.enabled, false)
+  assert.equal(shade.behavior.template.params.target, stand.objectId, 'the shade still aims at the stand: its copy')
+  assert.equal(Object.hasOwn(shade.copiedFrom, 'refs'), false)
+  assert.ok(!idsIn(stand.behavior).includes(DOOR), 'the stand’s reference to A’s door is gone')
+  assert.deepEqual({ was: stand.copiedFrom.refs[0].was, name: stand.copiedFrom.refs[0].name }, { was: DOOR, name: 'Front door' })
+  const mat = (n) => som.getNodeByName(n)._node.getMesh().listPrimitives()[0].getMaterial()
+  assert.ok(mat('Shade') === mat('Stand'), 'one material, shared, as in A') // `ok`: a failing `equal` would inspect the document graph
+  assert.equal(mat('Stand').getName(), 'Brass')
+  assert.equal(som.getNodeByName('Stand').visible, false, 'the hidden part stays hidden')
+  assert.notEqual(som.getNodeByName('Lamp').visible, false, 'the root is visible')
+
+  // One Undo removes the group, everywhere.
+  bobUndo.undo.run('undo')
+  assert.ok(await waitFor(() => ['Lamp', 'Shade', 'Stand'].every((n) => B.world.som.getNodeByName(n) === null)), 'Undo removed the group on the server')
+  assert.ok(await waitFor(() => ['Lamp', 'Shade', 'Stand'].every((n) => som.getNodeByName(n) === null)), 'and for the joiner')
 })

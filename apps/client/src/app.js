@@ -46,7 +46,7 @@ import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
 import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animation-panel.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
-import { copyObject, preparePaste, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, VISIBILITY_NOTE } from './copy-paste.js'   // copy-objects K4–K9
+import { copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsLines, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, shownText, VISIBILITY_NOTE } from './copy-paste.js'   // copy-objects K4–K9; subtree-add T6
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
@@ -2035,9 +2035,22 @@ function renderInspectPanel() {
   const credit = creditLines(atrium)
   ipCreditRow.style.display = credit.length > 0 ? '' : 'none'
   ipCredit.textContent = credit.join('\n')
+  // subtree-add T6 — a group: "N parts" (the members below the root), hidden
+  // parts said (a Copy carries them), and every member's behaviour, each named.
+  const behaviorLines = []
   const summary = behaviorSummary(atrium, { nameOf: objectNameHere, templateLabel: (id) => TEMPLATE_LABELS[id] ?? id })
-  ipBehaviorRow.style.display = summary ? '' : 'none'
-  ipBehavior.textContent = summary ? behaviorSummaryLines(summary).join('\n') : ''
+  if (summary) behaviorLines.push(...behaviorSummaryLines(summary))
+  const gltfNode = node._node
+  const parts = gltfNode ? partsSummary(gltfNode) : { parts: 0, hidden: 0 }
+  if (parts.parts > 0) {
+    for (const part of collectSubtree(node).slice(1)) {
+      const s = behaviorSummary(part.extras?.atrium, { nameOf: objectNameHere, templateLabel: (id) => TEMPLATE_LABELS[id] ?? id })
+      if (s) behaviorLines.push(`Its part “${shownText(part.name, 40)}”: ${behaviorSummaryLines(s).join('; ')}`)
+    }
+  }
+  ipBehaviorRow.style.display = behaviorLines.length > 0 ? '' : 'none'
+  ipBehavior.textContent = behaviorLines.join('\n')
+  ipName.textContent = parts.parts > 0 ? `${node.name} (${partsLines(parts).join('; ')})` : node.name
   const reason = copyHint(node)
   ipCopy.disabled = !!reason
   ipCopy.title = reason ?? 'Copy this object'
@@ -2048,7 +2061,7 @@ function renderInspectPanel() {
 function copyHint(node) {
   const gltfNode = node?._node
   if (!gltfNode) return 'Select an object first'
-  return duplicateRuleProblem(gltfNode, { credit: false })?.reason ?? null
+  return duplicateRuleProblem(gltfNode, { credit: false, trees: treesAllowed() })?.reason ?? null
 }
 
 /**
@@ -2059,7 +2072,7 @@ function copyHint(node) {
 function copyNode(node) {
   const gltfNode = node?._node
   if (!gltfNode) return { ok: false, reason: 'Select an object first' }
-  const result = copyObject(gltfNode, { wsUrl: client.wsUrl, world: client.world }, { nameOf: objectNameHere })
+  const result = copyObject(gltfNode, { wsUrl: client.wsUrl, world: client.world }, { nameOf: objectNameHere, trees: treesAllowed() })
   if (result.ok) clipboard = result.snapshot
   return result
 }
@@ -2985,6 +2998,8 @@ epPaste?.addEventListener('click', () => {
     position,
     destOrigin: AtriumClient.wsOriginToHttpOrigin(client.wsUrl),
     destWorldId: client.world?.id ?? null,
+    // subtree-add T7 — this server's add level: no group, and no material ref, below 3
+    destAddFields: client.serverAddFields,
     // K8 — the other-host question, through the page's own confirm; none declines.
     confirm: (question) => (typeof window === 'undefined' || typeof window.confirm !== 'function'
       ? false
@@ -3003,7 +3018,9 @@ epPaste?.addEventListener('click', () => {
     showEditError(`Couldn’t paste: ${err.message}`)
     return
   }
-  structure.begin('add', seq, { name, descriptor: prepared.descriptor, paste: true, baseName: clipboard.descriptor.name })
+  // subtree-add T6 — every member's original name, for the retry's re-choice
+  const originals = treeMembers(clipboard.descriptor).map((d) => d.name)
+  structure.begin('add', seq, { name, descriptor: prepared.descriptor, paste: true, baseName: clipboard.descriptor.name, originals })
   // Y7 — recorded from its answer: a refused paste records nothing.
   undo.registerAdd(seq, { name, duplicate: false })
   clearEditError()
@@ -3018,16 +3035,20 @@ function pasteAnswerError(status, message) {
 }
 
 // K6 — one retry of a paste whose name another tab took first, with the next
-// `copyName`, as the palette's retry; never retried twice.
+// `copyName`, as the palette's retry; never retried twice. subtree-add T6 (S4):
+// the NAMES only are chosen again, every member's, against the world as it
+// now is (the taken name may be a part's); the position, the ids and K8's
+// answers stay as prepared.
 function retryPaste(request, name) {
-  const descriptor = { ...request.descriptor, name }
+  const descriptor = renamePaste(request.descriptor, { rootName: name, originals: request.originals ?? [request.baseName], isFree: isNameFree })
+  if (!descriptor) return false
   let seq
   try {
     seq = client.addNode(descriptor)
   } catch {
     return false
   }
-  const begun = structure.begin('add', seq, { name, descriptor, paste: true, baseName: request.baseName, retried: true })
+  const begun = structure.begin('add', seq, { name, descriptor, paste: true, baseName: request.baseName, originals: request.originals, retried: true })
   if (begun) undo.registerAdd(seq, { name, duplicate: false })
   return begun
 }

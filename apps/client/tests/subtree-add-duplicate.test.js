@@ -218,7 +218,7 @@ describe('T12: shared materials within a message', () => {
     const live = ingest(r.descriptor)
     const copies = r.descriptor.children.map((c) => nodeIn(live.doc, c.name).getMesh().listPrimitives()[0].getMaterial())
     assert.equal(new Set(copies).size, 1, 'one material for the eight copies')
-    assert.notEqual(copies[0], nodeIn(doc, 'Column-1').getMesh().listPrimitives()[0].getMaterial(), 'not the original’s')
+    assert.ok(copies[0] !== nodeIn(doc, 'Column-1').getMesh().listPrimitives()[0].getMaterial(), 'not the original’s') // `ok`: a failing `notEqual` would inspect the document graph
   })
   test('without refs (an older server) every material is inline', async () => {
     const { doc } = await load('atrium.gltf')
@@ -269,6 +269,7 @@ describe('T12: shared materials within a message', () => {
     assert.deepEqual(d.children[1].mesh.primitives[0].material, { ref: 0 }, 'B refers back to it')
     assert.equal(checkAddNode(d), null, 'the rule agrees')
     const live = ingest(d)
-    assert.equal(nodeIn(live.doc, 'B').getMesh().listPrimitives()[0].getMaterial(), nodeIn(live.doc, 'A1').getMesh().listPrimitives()[0].getMaterial(), 'and the ingest')
+    // identity by `ok`: a failing `equal` on two glTF-Transform objects inspects the whole document graph
+    assert.ok(nodeIn(live.doc, 'B').getMesh().listPrimitives()[0].getMaterial() === nodeIn(live.doc, 'A1').getMesh().listPrimitives()[0].getMaterial(), 'and the ingest')
   })
 })

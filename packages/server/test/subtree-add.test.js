@@ -233,12 +233,13 @@ for (const kind of Object.keys(KINDS)) {
       assert.deepEqual(shapeOf(root._node), expected, 'a present client builds the same tree')
       const shade = nodeIn(doc, `${kind}-shade`).getMesh().listPrimitives()[0].getMaterial()
       const stand = nodeIn(doc, `${kind}-stand`).getMesh().listPrimitives()[0].getMaterial()
-      assert.equal(shade, stand, 'T12: the shade and the stand share one material')
+      // identity by `ok` (here and below): a failing `equal` on two glTF-Transform objects inspects the whole document graph
+      assert.ok(shade === stand, `T12: the shade and the stand share one material (${shade?.getName()}, ${stand?.getName()})`)
 
       // a later joiner
       const dumpDoc = await readDump(await joinAndReadDump(port, `joiner-${kind}`))
       assert.deepEqual(shapeOf(nodeIn(dumpDoc, `${kind}-lamp`)), expected, 'a joiner’s som-dump holds the tree')
-      assert.equal(nodeIn(dumpDoc, `${kind}-shade`).getMesh().listPrimitives()[0].getMaterial(),
+      assert.ok(nodeIn(dumpDoc, `${kind}-shade`).getMesh().listPrimitives()[0].getMaterial() ===
         nodeIn(dumpDoc, `${kind}-stand`).getMesh().listPrimitives()[0].getMaterial(), 'and the shared material')
 
       // a save and a reload
