@@ -1,10 +1,10 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1.3 (2026-11-07): parts inside a group added as
-SA-L7 (the operator's question, 17:50 PT). Decided (operator, 2026-11-07,
-17:37: "no preference", so the recommendations): SA-L2 (a), SA-L3 (a), SA-L6
-(a).** Open: SA-L1, SA-L4, SA-L5, and SA-L7 (the operator leans to (a),
-include). The next placement round after `copy-objects` (RA-L6 (a),
+Status: **DRAFT, Revision 1.4 (2026-11-07). Decided (operator, 2026-11-07):
+SA-L2 (a) and SA-L3 (a) (17:37: "no preference", so the recommendations);
+SA-L6 (d), a selection round of its own next (19:13: "separate round").**
+Open: SA-L1, SA-L4, SA-L5, and SA-L7 (added in Rev 1.3; the operator leans to
+(a), include). The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
 children**, so a group can be duplicated, deleted and undone, and copied
 between worlds, and (SA-L7) so can anything inside a group. **Still to come:**
@@ -318,6 +318,19 @@ node, nested).
     through Duplicate and Undo, and T6 keeps it on a part through Paste (it
     is removed from the root only).
 
+  **What this does and doesn't show** (the operator, 18:36 PT: PROD and DEV
+  are "very embryonic"): new worlds start with a `Ground` node only
+  (`newWorldDocument`, `home-world.js` L51–56, from `DEFAULT_HOME_DOCUMENT`
+  L13–34), and **no user can make a group today** (no grouping control; the
+  app never sends `parent`, §2.8). So PROD's 9 groups are seed content, the
+  commons' lamp or copies of it, and say nothing about what users' content
+  will look like. They show the round works on what exists; they don't argue
+  for SA-L2's, SA-L3's or SA-L6's choices, which the round that **creates or
+  imports** groups (grouping in the Edit panel, step 7's import), where
+  nesting and shared materials are common in exported scenes, revisits (§8).
+  Models by URL are unaffected either way: a placed model is one node with a
+  URL, and its insides never become SOM nodes.
+
   So PROD's groups are far inside SA-L2 (a) and (b) alike, and SA-L1 (a)'s
   byte cap never binds on PROD today. Every name collision T5 handles comes
   from the copy itself (a Duplicate of `lamp-01` in its own world meets
@@ -468,7 +481,9 @@ Binding from earlier rounds: RA-L1–RA-L8, C1–C4, CP-L1–CP-L8, PC.
   under what §2.1's measurement allows (10 at the 32 ceiling); 256 is eight
   times the largest fixture group (33) and 85 times PROD's (3), and keeps the
   per-member checks' cost named; the byte cap is the one that binds in
-  practice. PROD's `p6` (§2.5) is far inside it.
+  practice. PROD's `p6` (§2.5) is far inside it, but that's seed content
+  (§2.5): **revisit at step 7's import**, where an exported scene can pass
+  256 nodes or 8 levels.
 - (b) 64 nodes and 4 generations: twice the fixtures' largest, and nothing
   more. PROD fits this too.
 - (c) Only the byte cap and the depth: no node count. Simpler, but then the
@@ -484,7 +499,9 @@ copy or a restore gives each primitive its own (RA-L3 (a)).
   members, or by a member and an outsider, gives the entry "(it comes back
   with its own material)". PROD has no shared material or mesh (`p6` at
   `3fcc296`), and RA-L3's revisit trigger (step 7's import, material identity,
-  or `p6` finding sharing) stands.
+  or `p6` finding sharing) stands. The real argument isn't PROD's content
+  (seed only, §2.5) but that **nothing in Atrium can make sharing**: it can
+  arrive only by import, where the trigger already reopens it.
 - (b) Carry sharing **within one message**: a primitive's `material` may be
   `{ "ref": i }`, the i-th material defined earlier in the same tree, and
   `ingestNode` reuses it. It keeps a group's own sharing (recolour one column,
@@ -518,6 +535,28 @@ sub-groups) can't be selected as a whole, and its sub-groups are refused
 - (c) A "Select the group it's in" control in the Edit panel when the
   selection has a parent. Reaches everything, at a new control (`index.html`)
   and its wiring.
+- **(d) Decided (operator, 2026-11-07, 19:13: "separate round"): a selection
+  round of its own, straight after this one.** This round keeps today's
+  clicks (as (a)). The next round makes every level reachable, top-down:
+  - **click** selects the top-level group under the pointer;
+  - **each further click on the same object in a rapid burst** (`event.detail`
+    2, 3…), or a later double-click, goes one level deeper toward what's
+    under the pointer, so a triple-click is two levels down;
+  - **Alt-click** goes straight to the leaf, as today;
+  - **a breadcrumb** in the Edit and Inspect panels (`Furniture › Bench-NE ›
+    seat`), each name clickable, shows where the selection is and jumps to
+    any level; it replaces (c)'s button, which it makes redundant; maybe a
+    key for "up one level".
+  
+  Why separate (Claude's recommendation, taken): it changes every click in
+  Edit and Inspect and is judged by trying it on DEV; drill-down must happen
+  on a click without movement so a double-click never starts dragging the
+  top group (its own tests, and a regression there would reach every editing
+  session); this round is already the protocol change, the skew bump, trees
+  through Undo and Copy, and parts. **Nothing is lost by waiting:** on today's
+  content (depth 1) click-top selects what a click selects now, and T11's
+  parts are reached by Alt-click today. With (d), (b)'s objection (sub-groups
+  unreachable) is answered by the drill-down and the breadcrumb.
 
 **SA-L7. Parts inside a group** (new in Rev 1.3; the operator's question:
 "if Bench-NE is selected, why wouldn't we want it copyable"). Today a part
@@ -1109,6 +1148,15 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.4** (2026-11-07, evening): **SA-L6 decided: (d), a selection round
+  of its own next** (operator, 19:13, after Claude's recommendation): the
+  top-down scheme (click the top group, multi-click to drill, Alt to the
+  leaf, a breadcrumb) recorded in SA-L6 and §8. This round keeps today's
+  clicks. **§2.5 gains the caveat** that PROD's and DEV's content is seed
+  content (operator, 18:36: "very embryonic"; no user can make a group
+  today), so SA-L2's and SA-L3's arguments rest on what Atrium can create,
+  not on what PROD holds, and are revisited when groups can be created or
+  imported.
 - **Rev 1.3** (2026-11-07, evening): **SA-L7 added**, on the operator's
   question (17:50 PT: "if Bench-NE is selected, why wouldn't we want it
   copyable"). Claude's answer: the `parent` refusal is a holdover from
@@ -1198,9 +1246,14 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
   scratch database); `/tmp/depth-probe.mjs` for §2.1's numbers (not kept).
 
 ## 8. Follow-ups this file records
-- **Nested groups' selection** (SA-L6 (a)): `Furniture`-shaped content can't
-  be selected whole by a click. If nested groups ever reach PROD (step 7's
-  import), SA-L6 (b) or (c).
+- **Next: the selection round** (SA-L6 (d)): click selects the top-level
+  group, repeated or multi-clicks drill one level deeper each, Alt-click the
+  leaf, a breadcrumb in the Edit and Inspect panels. Client only
+  (`app.js`, `packages/interaction`'s policy, `index.html`), with the drag
+  gesture's tests. Its own short pre-brief.
+- **When groups can be created or imported** (grouping in the Edit panel;
+  step 7): revisit SA-L2's bounds and SA-L3's sharing against real content
+  (§2.5's caveat).
 - **Parts, if SA-L7 is (b):** T11 as written, as a small round after this
   one.
 - Grouping and ungrouping in the Edit panel (a `parent` change on a live
