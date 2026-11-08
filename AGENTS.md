@@ -65,6 +65,20 @@ open apps/playground/index.html        # pointer-event test bench
 - Batched `pnpm --filter @atrium/server test` hangs because
   `session.test.js` doesn't tear down its WebSocket port between files.
   Run server test files individually.
+- `better-sqlite3` is a native module: `pnpm install --ignore-scripts` leaves
+  it unbuilt, and every test that opens a database (the server's, and
+  `packages/client`'s e2e tests) fails with "Could not locate the bindings
+  file". `pnpm rebuild better-sqlite3` doesn't fix it (pnpm 10 skips the
+  build and exits 0). From the repo root, run the package's own install script:
+  `(cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run install)`
+  (it fetches a prebuilt binary, else compiles; checked on a fresh clone,
+  2026-11-07). If the compile can't find Node's headers in a cloud session:
+  `node /opt/node22/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js rebuild --release --nodedir=/opt/node22`
+  in that directory.
+- Don't compare two glTF-Transform objects (a `Material`, a `Node`) with
+  `assert.equal`/`notEqual`. When they differ, the failure message inspects
+  the whole document graph and can exhaust memory, so the test file is killed
+  instead of failing. Use `assert.ok(a === b, 'what and which names')`.
 
 ## Test Ports Used
 

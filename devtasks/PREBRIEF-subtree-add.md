@@ -1,6 +1,8 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **FINAL, Revision 2 (2026-11-07): approved by the operator ("yes
+Status: **FINAL, Revision 2.1 (2026-11-07):** Rev 2 plus one DEV acceptance
+step (§5 step 6, the operator, 23:45 PT: "approve all", after the outside
+code review's S-1). **Revision 2 (2026-11-07): approved by the operator ("yes
 plz", 20:18 PT) after Rev 1.9, which took the ChatGPT review of Rev 1.8 (§7). Decided (operator, 2026-11-07):
 SA-L2 (a) (17:37: "no preference", so the recommendation); SA-L6 (d), a
 selection round of its own next (19:13: "separate round"); SA-L4 (a), as
@@ -1257,7 +1259,17 @@ distance below the root.
      add each show "this page is older than the server: reload it to keep
      editing"; Delete of the lamp **asks first** (its old rules), and on
      OK shows the same refusal; the lamp is still there; a reload fixes it;
-  6. **On PROD after the deploy:** the operator duplicates one of the 9
+  6. **(Rev 2.1) A hidden part, two tabs** (the outside code review's S-1:
+     before its fix, a part that arrived hidden was drawn in every tab
+     already open). Tabs A and B, both opened after the deploy, both in the
+     commons in Edit mode. In A, Alt-click `lamp-01`'s stand and untick
+     Visible: the stand disappears in both tabs. In A, click the lamp and
+     Duplicate. In B: the copy's stand is **not drawn**, and clicking where it
+     would be doesn't select it. In A: Delete the copy, Undo; in B, the
+     copy's stand is still not drawn; Redo, Undo again, and check B once
+     more. Then, in A, delete the copy and tick the original stand's Visible
+     again;
+  7. **On PROD after the deploy:** the operator duplicates one of the 9
      groups, deletes the copy and presses Undo.
 
 ## 6. Worker rules and release path
@@ -1317,6 +1329,10 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2.1** (2026-11-07, 23:45): §5's DEV acceptance gains step 6 (a
+  hidden part across two tabs), after the outside code review
+  (`REVIEW-subtree-add-code-fable.md`, S-1, fixed in the implementation's
+  commit 8). The PROD step is now 7. Nothing else changed.
 - **Rev 2, FINAL** (2026-11-07, 20:18): Rev 1.9 approved by the operator; no
   text changed. Implementation in Claude's fast lane on `claude/subtree-add`,
   in §6's commits, then a fresh-agent code check and one ChatGPT code review.
@@ -1522,6 +1538,10 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
   prints counts only, as the rest does.
 
 ## 9. Carried to the selection round: parts (SA-L7 (c))
+**First item for that round's pre-brief (operator, 2026-11-07):** split
+`message-depth-measure.test.js`, which took 134.6 s of its 180 s limit in
+this round's full run, before that round adds deeper messages.
+
 Drafted in Rev 1.3 for this round and moved by SA-L7 (c). **Not part of this
 round's contract.** It is the starting point for the selection round's
 pre-brief, with §2.8's facts; that pre-brief rechecks every line against the

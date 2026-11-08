@@ -32,7 +32,10 @@ Say whether the clone worked. If it didn't, quote the error and use
 and the raw files at https://raw.githubusercontent.com/joshmaurice/atrium/02b5554bb9e7bccb57bc5ed1829976108abab300/<path>
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
+(Next rounds' prompts: copy this step as it is. The `better-sqlite3` line was
+added after this round's review, N-1; `pnpm rebuild` doesn't build it.)
   pnpm install --frozen-lockfile --ignore-scripts
+  (cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run install)   # builds the native module; without it the database tests fail
   (cd packages/server && timeout 180 node --test test/subtree-add.test.js)
   (cd packages/server && timeout 180 node --test test/add-node-boundaries.test.js)
   (cd packages/server && timeout 180 node --test test/add-node-vectors.test.js)

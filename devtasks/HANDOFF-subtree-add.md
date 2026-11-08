@@ -264,9 +264,12 @@ what was done (commit 8):
   visibility pass (the hidden part's object hidden, its siblings drawn); and
   the retry's frames, its limit, and its stop when the node is gone.
 - **N-1, the prompt's `--ignore-scripts` leaves `better-sqlite3` unbuilt**,
-  so two e2e tests fail on a fresh clone. For the next prompt: run
-  `pnpm rebuild better-sqlite3` (or drop `--ignore-scripts`). A line for
-  AGENTS.md's gotchas, with §2.2's `assert.equal` one, is the operator's call.
+  so two e2e tests fail on a fresh clone. Taken (operator, 2026-11-07):
+  AGENTS.md's gotchas now say to run the package's own install script
+  (`pnpm rebuild better-sqlite3` exits 0 and builds nothing: tried on a fresh
+  clone; the install script built it and the e2e file passed 7 of 7), with
+  §2.2's `assert.equal` gotcha; this round's prompt carries the line for the
+  next round to copy.
 - **N-2, the e2e's Undo wiring had no re-captures**, so the in-flight case
   never ran end to end. Taken: `wireUndo(client, { recaptures: true })` wires
   `app.js`'s two (on `som:add`, the root's event; on every `som:remove`), and
