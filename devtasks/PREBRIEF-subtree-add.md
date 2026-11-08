@@ -1,12 +1,12 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1 (2026-11-07).** The next placement round after
+Status: **DRAFT, Revision 1.1 (2026-11-07): PROD's `p6` folded in (§2.5); it
+reopens nothing.** The next placement round after
 `copy-objects` (RA-L6 (a), `PREBRIEF-richer-add.md` §3): **an `add` that
 carries a node and its children**, so a group can be duplicated, deleted and
 undone, and copied between worlds. Decisions SA-L1–SA-L5 are open (§3), each
 with a recommendation. **Still to come:** a fresh-agent check of this draft
-against the code, the operator's `p6` run on PROD (§2.5, §6), the operator's
-decisions, and one ChatGPT review.
+against the code, the operator's decisions, and one ChatGPT review.
 - **What it builds on.** `PREBRIEF-add-check.md` FINAL Rev 1.1 (A1–A10),
   `PREBRIEF-richer-add.md` FINAL Rev 2 (R1–R10) and `PREBRIEF-copy-objects.md`
   FINAL Rev 2.1 (K0–K10) hold here unchanged for every node of a subtree: a
@@ -20,8 +20,8 @@ decisions, and one ChatGPT review.
 - **How it was checked.** Claude read every cited line at `70a30bd2`, ran a new
   probe on the fixtures (`p10`, §2.5) and the depth probe of §2.6, and extended
   `p6` with the counters this round needs, tested on a scratch database of
-  five fixture worlds (§2.5). **`p6` hasn't run on PROD since `42aa56ff`:** the
-  shape of PROD's 9 groups (§2.5) is this file's one open fact. The app wasn't
+  five fixture worlds (§2.5). **The operator ran it on PROD** (2026-11-07,
+  16:57 PT, at `530c636`, this file's Rev 1 commit): §2.5. The app wasn't
   opened in a browser.
 - **Sources:** `docs/DESIGN-phase3-placement-scripting.md` §3.2 item 2 ("`add`
   carries one node, not a subtree"), §4.5 (no undo for a node with children),
@@ -41,7 +41,7 @@ decisions, and one ChatGPT review.
   it as one tree;
 - **Duplicate, Delete-and-Undo and Redo** accept a group when every member
   passes today's per-object rules: the 13 fixture groups (§2.5) and PROD's 9
-  (the passdown §1.1: 455 top-level objects, 445 copy today, 9 are refused for
+  (`p6`, 2026-11-07: 460 top-level objects, 450 copy today, 9 are refused for
   children, 1 for a non-unit rotation);
 - **Copy and Paste** accept a group: the credit, the behaviour rule and the
   URL rule apply to every member, and a member's reference to another member
@@ -247,25 +247,38 @@ node, nested).
   (`p5`, richer-add §2.3), and `p2` counted 40 primitives with a shared
   material across the seven files, in groups and not. RA-L3 (a) gives each
   primitive its own material on a copy or a restore (SA-L3).
-- **PROD (the passdown §1.1, `p6` at `42aa56ff`):** 24 worlds, 455 top-level
-  objects, **9 with children**; no credits; 4 behaviours (2 with one foreign
-  reference each); 38 root-path model URLs; 47 path pad destinations. **Not
-  known:** the 9 groups' members, depth, size, whether any member is refused
-  by a per-node rule, carries an id, a behaviour, a pad or a model, has an
-  empty or non-unique name, or whether a root has its own mesh. **`p6` now
-  counts all of these** (counts only, as before: no names), tested on a
-  scratch database of five fixture worlds (10 groups: 9 of depth 1, 1 of
-  depth 2, the largest 33 nodes, 8 under 250 KB as one message, 2 with a
-  refused member, 1 pad member). Its run on PROD is the first step after this
-  draft (§6): a group over 1,000,000 bytes, deeper than 8, or over 256 nodes
-  reopens SA-L1 and SA-L2; a member with a non-unique or empty name decides
-  T3's renaming.
+- **PROD (`p6`, run by the operator 2026-11-07 at `530c636`, its
+  subtree-add section new):** 24 worlds, none unreadable, **460** top-level
+  objects (455 at `42aa56ff`): 450 copy today, **9 have children**, 1 has a
+  non-unit rotation. **The 9 groups:**
+  - **every one is 3 nodes (root and two parts), depth 1**, and every member
+    passes the per-node rule; as one message the largest is **16,656 bytes**
+    (all nine together 149,039): the commons' lamp's shape and size
+    (`lamp-01`, 16,529 bytes in `p10`);
+  - **no root has its own mesh** (a click on any part selects the group,
+    §2.4); no member carries an object id, a behaviour, a pad or a model; no
+    member has an empty name or a name another node in its world holds;
+  - **one member carries the hidden marker**: a group with a hidden part. T5
+    keeps it hidden through Duplicate and Undo (the marker is `extras`, kept
+    as today), and T6 keeps it hidden through Paste (the marker is removed
+    from the root only).
+
+  So PROD's groups are far inside SA-L2 (a) and (b) alike, and SA-L1 (a)'s
+  byte cap never binds on PROD today. Every name collision T5 handles comes
+  from the copy itself (a Duplicate of `lamp-01` in its own world meets
+  `lamp-shade` and `lamp-stand`), never from legacy content.
+- **Elsewhere in that run:** 5 objects now carry a credit (pastes made since
+  `42aa56ff`; `p6`'s label said "expected 0", written before that round, and
+  is reworded); model URLs 39 root-path and 16 absolute (38 and 14 before); 1
+  double-sided primitive (none at `3fcc296`; carried since `richer-add`);
+  behaviours, pads and material counts as before; nothing refused by
+  `add-check`'s ranges.
 
 ### 2.6 What an `add` with children costs
 - **Bytes:** the socket's 1 MiB (`MAX_PAYLOAD_BYTES`, everywhere since K0)
   and the client's 1,000,000 bound the whole message, children included: a
   group over it can't be duplicated, restored or pasted as one message
-  (SA-L1 (a)). Fixtures: 113 KB at most; PROD: `p6` says.
+  (SA-L1 (a)). Fixtures: 113 KB at most; PROD: 16,656 bytes at most (§2.5).
 - **Ingest:** `ingestNode` is 0.38 s for 20,000 primitives (richer-add R4's
   `q2`); a subtree within the byte cap is far smaller. One buffer per call is
   the R4 rule; for a tree it's one buffer per message (T2), pruned when the
@@ -557,7 +570,8 @@ distance below the root.
   reason is the member's); a model member with a mesh; a member with every
   R1 field (accepted); `children: []` (refused: `children-count`); the tree
   bounds checked before a member's mesh (a 257-member tree whose last member
-  has a malformed mesh is refused `children-count`).
+  has a malformed mesh is refused `children-count`); a member carrying
+  `__atrium_visible: false` (accepted: PROD has one, §2.5).
 - **A new server test file, port 0, through the real `attachSessionHandlers`:**
   - a 3-generation tree with a mesh member, a pad member, a model member and
     a behaviour member: accepted, broadcast as one message; a present client's
@@ -596,7 +610,8 @@ distance below the root.
     member's reason and name; a part is still refused `parent`; a tree of 257
     and a chain of 9 are refused `tree`; two members named alike, `names`;
   - **the fixed point** over every fixture group that passes, live and after
-    a save and reload, children in order;
+    a save and reload, children in order, and over a group with a hidden
+    part (PROD's one, §2.5): Duplicate and Undo keep the part hidden;
   - Duplicate of `lamp-01` in `space.gltf`: the copy is `lamp-01 copy` with
     members `lamp-shade copy` and `lamp-stand copy` (their names are in use),
     each member a fresh id, the root 1.5 along x, members' local TRS kept;
@@ -667,11 +682,9 @@ distance below the root.
 
 ## 6. Worker rules and release path
 As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
-- **Before anything else, the operator runs `p6` on PROD at this file's
-  commit or later** (its subtree-add section, §2.5), with the host commands
-  below. Its counts go into Rev 1.1; a group over the cap or the bounds, or a
-  member with a non-unique or empty name, reopens SA-L1/SA-L2 or settles
-  T5's `names` handling before the contract is final.
+- **`p6` on PROD: done for the pre-brief** (Rev 1.1, §2.5). **Rerun before
+  the PROD deploy,** at the round's commit or later, as every round; a group
+  whose shape differs from §2.5's is shown to Claude before PROD. On the host:
   ```bash
   sqlite3 /var/lib/atrium/atrium.db ".backup /tmp/atrium-survey.db"
   rm -rf /root/tmp-survey && git clone -q --depth 1 https://github.com/joshmaurice/atrium /root/tmp-survey && cd /root/tmp-survey
@@ -717,6 +730,14 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.1** (2026-11-07, 17:00 PT): the operator's `p6` run on PROD at
+  `530c636` (§2.5). The 9 groups are all 3 nodes, depth 1, at most 16,656
+  bytes as one message, every member passing the per-node rule; no root mesh,
+  no member id, behaviour, pad, model or name collision; one hidden part.
+  **Reopens nothing:** SA-L1 and SA-L2 stand, and T5's renaming is needed
+  only for the copy's own names. Added: the hidden part to §5's vectors and
+  the fixed point; §6's `p6` step is now the usual pre-PROD rerun. `p6`'s
+  credit label reworded (5 pastes on PROD carry one).
 - **Rev 1, DRAFT** (2026-11-07, against `70a30bd2`): written from the
   passdown's item (§5 item 1) and the design doc's item 7. Facts found while
   writing it:

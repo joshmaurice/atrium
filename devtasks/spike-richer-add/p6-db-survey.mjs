@@ -126,7 +126,7 @@ for (const row of db.rows('SELECT document FROM worlds')) {
     if (typeof d === 'string') {
       bump(copying, d === '' ? 'pad destination empty' : (d.startsWith('ws://') || d.startsWith('wss://')) ? 'pad destination ws(s)://' : 'pad destination a path (K8 resolves it across servers)')
     }
-    if (Object.hasOwn(atrium, 'origin') || Object.hasOwn(atrium, 'copiedFrom')) bump(copying, 'object already carrying origin or copiedFrom (expected 0)')
+    if (Object.hasOwn(atrium, 'origin') || Object.hasOwn(atrium, 'copiedFrom')) bump(copying, 'object carrying origin or copiedFrom (a paste, since 42aa56ff)')
   }
   // Every mesh node, at any depth: what a richer `add` would still have to carry.
   for (const n of doc.getRoot().listNodes()) {
