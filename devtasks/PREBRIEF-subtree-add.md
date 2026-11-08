@@ -1,16 +1,16 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1.4 (2026-11-07). Decided (operator, 2026-11-07):
-SA-L2 (a) (17:37: "no preference", so the recommendation);
-SA-L6 (d), a selection round of its own next (19:13: "separate round");
-SA-L4 (a), as recommended (19:26); SA-L3 (b), sharing kept within a message
-(19:29: "(b) now plz", after Claude's revised lean).** Open: SA-L1, SA-L5, and
-SA-L7 (added in Rev 1.3; the operator leans to
-(a), include). The next placement round after `copy-objects` (RA-L6 (a),
+Status: **DRAFT, Revision 1.6 (2026-11-07). Decided (operator, 2026-11-07):
+SA-L2 (a) (17:37: "no preference", so the recommendation); SA-L6 (d), a
+selection round of its own next (19:13: "separate round"); SA-L4 (a), as
+recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
+(c), parts go with the selection round (19:39: "second option").** Open:
+SA-L1 and SA-L5. The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
-children**, so a group can be duplicated, deleted and undone, and copied
-between worlds, and (SA-L7) so can anything inside a group. **Still to come:**
-the remaining decisions and one ChatGPT review.
+children**, so a top-level group can be duplicated, deleted and undone, and
+copied between worlds. **Still to come:** the remaining decisions, a
+fresh-agent check of T12 (and of §9's T11, for the next round), and one
+ChatGPT review.
 - **What it builds on.** `PREBRIEF-add-check.md` FINAL Rev 1.1 (A1–A10),
   `PREBRIEF-richer-add.md` FINAL Rev 2 (R1–R10) and `PREBRIEF-copy-objects.md`
   FINAL Rev 2.1 (K0–K10) hold here unchanged for every node of a subtree: a
@@ -59,16 +59,14 @@ the remaining decisions and one ChatGPT review.
   columns and the eight copies share one new marble, so recolouring one
   recolours the eight; delete the furniture and Undo it, and its benches'
   wood is still one material (T12);
-- **(SA-L7) a part works too:** an Alt-clicked part (a lamp shade) or a
-  sub-group (`Furniture`'s `Bench-NE`) can be duplicated beside itself in its
-  group, deleted and undone back into its group, and copied out to another
-  world. On PROD that's the 18 parts of the 9 lamps;
 - an unreloaded tab can't silently store a childless copy of a group (R6
   widened, §2.7), and a new tab on an older server can't silently lose a
   group (T7's server level).
 
-**Not in this round:** selecting a nested group as a whole (SA-L6 (a): a
-click on `Furniture` selects its sub-group); grouping or ungrouping objects in
+**Not in this round:** duplicating, restoring or copying a **part** of a
+group on its own (an Alt-clicked lamp shade, a sub-group like `Bench-NE`):
+SA-L7 (c) moves it to the selection round, whose contract is drafted in §9;
+selecting a nested group as a whole (SA-L6 (d), the same round); grouping or ungrouping objects in
 the Edit panel; reparenting (`parent` on the message is
 unchanged); sharing a material with objects **outside** the message (that
 needs material identity, RA-L3 (c)) and sharing a mesh (SA-L3); lights,
@@ -263,7 +261,8 @@ fires once per member** (T4): the second needs no listener to change.
 - So **parts are editable today:** an Alt-clicked part can be moved, renamed,
   recoloured, hidden (`epVisible`, L1696, L2585–2588) and deleted
   (permanently: `prepareRestore` refuses `parent`). Duplicate and Copy of a
-  part are refused with `parent`'s text. SA-L7 changes that (T11). K6's
+  part are refused with `parent`'s text. The selection round changes that
+  (SA-L7 (c), §9's T11). K6's
   hidden-marker rule applies to the copied root only (T6): a hidden part
   inside it is the author's design, and the paster can reach it.
 - **A visitor's Copy of a group carries its hidden parts**, though Inspect
@@ -436,7 +435,7 @@ node, nested).
   reaches an older client harmlessly (it doesn't validate), and an older
   server simply doesn't send it. T7 uses it.
 
-### 2.8 Parts (SA-L7; at `70a30bd2`)
+### 2.8 Parts (SA-L7; at `70a30bd2`; for §9, the selection round)
 - **Putting a node under a parent already works on the wire** (§2.1: the
   `add` message's `parent`, honoured by the server, its `isBlockedParent`
   check, and every client's `_onAdd`). **The client API doesn't expose it:**
@@ -601,7 +600,8 @@ sub-groups) can't be selected as a whole, and its sub-groups are refused
 can be moved, recoloured, renamed and deleted, but not duplicated or copied,
 and its delete can't be undone (§2.4). Rev 1.2 kept that, recording parts as
 a later round (§8).
-- **(a) Recommended: include them (T11).** No server or protocol change:
+- (a) Include them in this round (T11, now §9; Claude's first
+  recommendation). No server or protocol change:
   `parent` already travels both ways (§2.8). Duplicate puts the copy beside
   the original in the same group; Undo and Redo put a part back into its
   group, or refuse when the group is gone; Copy carries the part out with its
@@ -611,8 +611,14 @@ a later round (§8).
   every piece reachable, only the top group not. **Claude's reason:** once
   groups work, "Only top-level objects can be duplicated yet" on a lamp shade
   reads as a bug, and it's the same machinery as the rest of the round.
-- (b) The next round: this one ships top-level groups only, and a small round
-  after it adds parts (§8). Smaller now; the `parent` refusal stays a round
+- (b) A small round of its own after this one.
+- **(c) Decided (operator, 2026-11-07, 19:39: "second option"): with the
+  selection round** (SA-L6 (d)). T11 needs no server or protocol change, like
+  the selection work, so the next round is one client-only round about
+  working inside groups: reaching any level and acting on it. This round
+  stays the protocol and trees, where the risk is. T11's text, tests and
+  proofs move to §9 as drafted, for that round's pre-brief; the `parent`
+  refusal ("Only top-level objects can be duplicated yet") stays one release
   longer.
 
 **SA-L5. How the round runs.**
@@ -871,59 +877,6 @@ distance below the root.
   new tab on the old server handle groups as today (§2.7). A tab on the new
   client still connects to the old server (its `addFields: 3` passes the old
   schema and `isStaleEditor`).
-- **T11, parts (SA-L7 (a)).** A **part** is a node whose parent is a node: an
-  Alt-clicked mesh part, or a sub-group with members of its own (then also a
-  tree, T1–T6).
-  - **The rule:** `duplicateRuleProblem`'s `parent` rule is replaced by an
-    **`ancestors`** rule: no ancestor carries `extras.atrium.source`
-    (`external`'s reason, as for the node itself) or is an avatar
-    (`isEditExcluded`). Every other per-node rule holds for the part, and
-    T5's tree rules for a sub-group. At the click, `app.js` also requires the
-    **parent addressable by its name** (`getObjectByName(parent.name) ===
-    parent`), else "Its group can't be found by its name". The server's own
-    `isBlockedParent` and parent-exists checks are unchanged;
-  - **the client API:** `AtriumClient.addNode(descriptor, { parent } = {})`
-    sends `parent` when it is a string; Duplicate, `structural` and the paste
-    branch pass it (a paste never does: it lands at the top level);
-  - **Duplicate in place:** the copy goes under the same parent (`parent`:
-    the parent's current name), named and given ids by T5's rules, with the
-    offset `+1.5` on its **local** x, as today's descriptor does (so in a
-    rotated or scaled group the offset turns and scales with the group:
-    stated, not changed);
-  - **Undo and Redo:** a part's delete entry records its **parent as a
-    handle** (`handleFor(parent)`), so a rename of the group, or the group's
-    own delete and Undo, keeps it pointing at the live group (T5's
-    re-pointing). A re-add sends `parent`: the handle's current name.
-    `checkEntry` refuses a re-add whose parent isn't alive ("Can’t undo:
-    “X” its group was removed."), and the entry is dropped as any refused
-    entry is. A part's descriptor holds its **local** TRS, so the fixed point
-    is unchanged. A part whose capture succeeds is deleted without the
-    question (W6), as a top-level object is;
-  - **child order:** T5's tree comparison (`sameDescriptor` over a capture)
-    treats `children` as a set keyed by member name (names are unique within
-    a tree, T1), so a part's re-add, which appends it (§2.8), doesn't make
-    its group "changed elsewhere". The re-added part comes back last among
-    its siblings, which nothing shows: stated;
-  - **Copy:** the snapshot's root takes the part's **world** transform:
-    `worldMatrix(node)` decomposed into a translation, a unit rotation and a
-    positive scale. The copy is refused, with "Its group’s rotation and scale
-    can’t be carried with it", when recomposing that TRS doesn't reproduce
-    the matrix within 1e-5 per element (a shear: a non-uniform scale on an
-    ancestor with a rotation below it), or when the TRS fails K6 (`transform`,
-    as today). The members below the root keep their local TRS. Paste then
-    treats the snapshot as a top-level object: x and z from the palette, y
-    the root's **world** y;
-  - **references outside the copied tree** (to the part's parent or
-    siblings) are like any other id outside the tree: a Duplicate in place
-    keeps them as grants (F-L10, T5's map leaves them alone); a Paste into
-    another world replaces and records them (K7); a Paste into the same world
-    keeps them, as Duplicate does;
-  - **the server level** (T7): a part with no children uses only `parent`,
-    which every released server honours, so its Duplicate and Undo work
-    whatever the server's level; a sub-group is a tree and needs level 3, as
-    any group;
-  - **Inspect:** a click still lifts to the nearest container (§2.4), and
-    Alt-click picks a part; Copy is offered for either.
 - **T12, shared materials within a message (SA-L3 (b)).**
   - **The form:** a primitive's `material` is either today's object or
     exactly `{ "ref": i }`, `i` an integer. Materials are numbered in **message
@@ -1106,29 +1059,6 @@ distance below the root.
   - `app.js` wiring (as text, as the existing wiring tests do): the delete
     question is skipped for a restorable group and asked, with the count,
     for one that isn't.
-- **T11, parts** (`apps/client`, pure, and `packages/client`):
-  - `addNode(d, { parent: 'lamp-01' })` puts `parent` on the wire, and
-    without it nothing changes (the existing `addNode` tests pass);
-  - Duplicate of the lamp shade: `lamp-shade copy` under `lamp-01`, local x
-    + 1.5, a fresh id; of `Bench-NE` in `atrium.gltf`: a tree under
-    `Furniture`, every member renamed;
-  - Delete of the shade asks nothing and Undo puts it back under `lamp-01`
-    with its name, id and local TRS; the lamp's own older Add entry still
-    undoes afterwards (child order ignored); Undo after the lamp was renamed
-    sends the new name as `parent`; Undo after the lamp was deleted refuses
-    with "its group was removed"; Undo after the lamp was deleted and
-    restored puts the shade into the restored lamp;
-  - Copy of a part of a group moved, rotated 90° about y and uniformly scaled
-    2: the pasted root's world placement equals the part's (within 1e-5);
-    Copy of a part under a non-uniformly scaled, rotated group is refused
-    with the shear sentence; a behaviour on the shade that targets the stand
-    keeps it on a same-world Duplicate and has it replaced and recorded on a
-    Paste into another world;
-  - an `ancestors` refusal for a part of an externally loaded node, and for
-    a part whose parent isn't addressable by its name;
-  - **the server test file** (both world kinds): a Duplicate-in-place `add`
-    with `parent` is accepted and broadcast with `parent`, and a present
-    client has it under the parent.
 - **Proofs** (each break made, the named tests seen failing, the file restored
   from a saved copy):
   - (p1) T2's per-member name check **and** `world.addNode`'s per-member
@@ -1154,10 +1084,6 @@ distance below the root.
     tests fail;
   - (p10) T12's ref ingested as a new default material: the shared-seat
     tests fail (five materials, and the recolour reaches one seat);
-  - (p9) T11's Copy keeps the part's local transform: the world-placement
-    Copy test (a part of a moved and rotated group pasted where it appeared)
-    fails; (p9b) T11's re-add without `parent`: the part-Undo test fails (the
-    shade comes back at the top level).
 - **Claude's checks before DEV acceptance:** on the published SHA, `p10`
   rerun (every passing group's one-message size unchanged), `p1`/`p2`
   (richer-add) unchanged for single objects, `add-check`'s `p3`, `p4`, `p7`
@@ -1172,11 +1098,10 @@ distance below the root.
   2. Delete the copy: **no question**; the Undo button's title reads "Undo
      Delete “lamp-01 copy”"; Undo: the lamp is back, shade and stand; Redo:
      gone;
-  3. (SA-L7) Alt-click the original's shade: the panel shows `lamp-shade`
-     alone, Duplicate is enabled; Duplicate: `lamp-shade copy` appears 1.5 m
-     beside the shade **and** a click on it selects the whole lamp (it's in
-     the lamp); Undo removes it. Delete the shade: **no question**; Undo: the
-     shade is back on the lamp;
+  3. Alt-click the original's shade: the panel shows `lamp-shade` alone and
+     Duplicate is disabled with "Only top-level objects can be duplicated
+     yet" (parts are the selection round's, SA-L7 (c)); Delete asks
+     `Delete "lamp-shade"? This can’t be undone.` Cancel;
   4. Sign out, Inspect the lamp: the panel offers Copy (not the children
      reason) and says "2 parts"; Copy; sign in, teleport home (a document
      world), Edit, Paste: the lamp appears ahead with its parts, the Edit
@@ -1216,10 +1141,8 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
      `edit-undo.js`, the delete question in `app.js`, the renderer test,
      their tests;
   5. T6: `copy-paste.js`, the Inspect summary and paste notes in `app.js`,
-     the end-to-end tests;
-  6. T11 (SA-L7): `addNode`'s `parent`, the `ancestors` rule, Duplicate in
-     place, the part's Undo, Copy's world placement, their tests; the full
-     suites, proofs (p1)–(p9) and the handoff.
+     the end-to-end tests, the full suites, proofs (p1)–(p8) and (p10), and
+     the handoff.
 - **Files:** `packages/server/src/send-policy.js`, `session.js` (T2, T7's
   `isStaleEditor` and the server hello's level), `world.js` (both `addNode`
   copies); `packages/som/src/SOMDocument.js`;
@@ -1249,6 +1172,13 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.6** (2026-11-07, evening): **SA-L7 decided: (c), parts go with the
+  selection round** (operator, 19:39, after Claude's slight lean: both are
+  client-only, and this round stays the protocol and trees). T11, its tests
+  and proofs (p9, p9b) move to §9 unchanged, for that round's pre-brief; DEV
+  step 3 back to Rev 1.2's (Duplicate of a part refused, Delete asks); §1,
+  §2.4, §6's commits and §8 follow. Also: the status line had stayed at Rev
+  1.4 through Rev 1.5; fixed.
 - **Rev 1.5** (2026-11-07, evening): **SA-L3 decided: (b)** (operator, 19:29),
   after the operator asked for the rationale of losing sharing and Claude
   answered that it's a limit of the message (no material identity), not a
@@ -1356,15 +1286,16 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
   scratch database); `/tmp/depth-probe.mjs` for §2.1's numbers (not kept).
 
 ## 8. Follow-ups this file records
-- **Next: the selection round** (SA-L6 (d)): click selects the top-level
-  group, repeated or multi-clicks drill one level deeper each, Alt-click the
-  leaf, a breadcrumb in the Edit and Inspect panels. Client only
-  (`app.js`, `packages/interaction`'s policy, `index.html`), with the drag
-  gesture's tests. Its own short pre-brief.
+- **Next: the selection round** (SA-L6 (d), SA-L7 (c)): click selects the
+  top-level group, repeated or multi-clicks drill one level deeper each,
+  Alt-click the leaf, a breadcrumb in the Edit and Inspect panels; **and
+  parts**: Duplicate in place, Undo back into the group, Copy out with the
+  world placement (§9's T11). Client only (`app.js`, `packages/interaction`'s
+  policy, `index.html`, `AtriumClient.addNode`'s `parent`, `edit-duplicate.js`,
+  `edit-undo.js`, `copy-paste.js`), with the drag gesture's tests. Its own
+  short pre-brief, starting from §9.
 - **When groups can be created or imported** (grouping in the Edit panel;
   step 7): revisit SA-L2's bounds against real content (§2.5's caveat).
-- **Parts, if SA-L7 is (b):** T11 as written, as a small round after this
-  one.
 - Grouping and ungrouping in the Edit panel (a `parent` change on a live
   node: a new message or a `send` leaf), after that.
 - **Showing sharing in the Edit panel** ("shared with 7 other parts"), now
@@ -1374,3 +1305,103 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
   still use) needs material identity: RA-L3 (c), with its trigger.
 - `p6`'s heading "by richer property" is current; its subtree-add section
   prints counts only, as the rest does.
+
+## 9. Carried to the selection round: parts (SA-L7 (c))
+Drafted in Rev 1.3 for this round and moved by SA-L7 (c). **Not part of this
+round's contract.** It is the starting point for the selection round's
+pre-brief, with §2.8's facts; that pre-brief rechecks every line against the
+code of its own day. The fresh-agent check of T11 under way at Rev 1.5 reports
+here.
+
+### 9.1 The contract (as drafted)
+- **T11, parts (SA-L7 (a)).** A **part** is a node whose parent is a node: an
+  Alt-clicked mesh part, or a sub-group with members of its own (then also a
+  tree, T1–T6).
+  - **The rule:** `duplicateRuleProblem`'s `parent` rule is replaced by an
+    **`ancestors`** rule: no ancestor carries `extras.atrium.source`
+    (`external`'s reason, as for the node itself) or is an avatar
+    (`isEditExcluded`). Every other per-node rule holds for the part, and
+    T5's tree rules for a sub-group. At the click, `app.js` also requires the
+    **parent addressable by its name** (`getObjectByName(parent.name) ===
+    parent`), else "Its group can't be found by its name". The server's own
+    `isBlockedParent` and parent-exists checks are unchanged;
+  - **the client API:** `AtriumClient.addNode(descriptor, { parent } = {})`
+    sends `parent` when it is a string; Duplicate, `structural` and the paste
+    branch pass it (a paste never does: it lands at the top level);
+  - **Duplicate in place:** the copy goes under the same parent (`parent`:
+    the parent's current name), named and given ids by T5's rules, with the
+    offset `+1.5` on its **local** x, as today's descriptor does (so in a
+    rotated or scaled group the offset turns and scales with the group:
+    stated, not changed);
+  - **Undo and Redo:** a part's delete entry records its **parent as a
+    handle** (`handleFor(parent)`), so a rename of the group, or the group's
+    own delete and Undo, keeps it pointing at the live group (T5's
+    re-pointing). A re-add sends `parent`: the handle's current name.
+    `checkEntry` refuses a re-add whose parent isn't alive ("Can’t undo:
+    “X” its group was removed."), and the entry is dropped as any refused
+    entry is. A part's descriptor holds its **local** TRS, so the fixed point
+    is unchanged. A part whose capture succeeds is deleted without the
+    question (W6), as a top-level object is;
+  - **child order:** T5's tree comparison (`sameDescriptor` over a capture)
+    treats `children` as a set keyed by member name (names are unique within
+    a tree, T1), so a part's re-add, which appends it (§2.8), doesn't make
+    its group "changed elsewhere". The re-added part comes back last among
+    its siblings, which nothing shows: stated;
+  - **Copy:** the snapshot's root takes the part's **world** transform:
+    `worldMatrix(node)` decomposed into a translation, a unit rotation and a
+    positive scale. The copy is refused, with "Its group’s rotation and scale
+    can’t be carried with it", when recomposing that TRS doesn't reproduce
+    the matrix within 1e-5 per element (a shear: a non-uniform scale on an
+    ancestor with a rotation below it), or when the TRS fails K6 (`transform`,
+    as today). The members below the root keep their local TRS. Paste then
+    treats the snapshot as a top-level object: x and z from the palette, y
+    the root's **world** y;
+  - **references outside the copied tree** (to the part's parent or
+    siblings) are like any other id outside the tree: a Duplicate in place
+    keeps them as grants (F-L10, T5's map leaves them alone); a Paste into
+    another world replaces and records them (K7); a Paste into the same world
+    keeps them, as Duplicate does;
+  - **the server level** (T7): a part with no children uses only `parent`,
+    which every released server honours, so its Duplicate and Undo work
+    whatever the server's level; a sub-group is a tree and needs level 3, as
+    any group;
+  - **Inspect:** a click still lifts to the nearest container (§2.4), and
+    Alt-click picks a part; Copy is offered for either.
+
+### 9.2 Tests
+- **T11, parts** (`apps/client`, pure, and `packages/client`):
+  - `addNode(d, { parent: 'lamp-01' })` puts `parent` on the wire, and
+    without it nothing changes (the existing `addNode` tests pass);
+  - Duplicate of the lamp shade: `lamp-shade copy` under `lamp-01`, local x
+    + 1.5, a fresh id; of `Bench-NE` in `atrium.gltf`: a tree under
+    `Furniture`, every member renamed;
+  - Delete of the shade asks nothing and Undo puts it back under `lamp-01`
+    with its name, id and local TRS; the lamp's own older Add entry still
+    undoes afterwards (child order ignored); Undo after the lamp was renamed
+    sends the new name as `parent`; Undo after the lamp was deleted refuses
+    with "its group was removed"; Undo after the lamp was deleted and
+    restored puts the shade into the restored lamp;
+  - Copy of a part of a group moved, rotated 90° about y and uniformly scaled
+    2: the pasted root's world placement equals the part's (within 1e-5);
+    Copy of a part under a non-uniformly scaled, rotated group is refused
+    with the shear sentence; a behaviour on the shade that targets the stand
+    keeps it on a same-world Duplicate and has it replaced and recorded on a
+    Paste into another world;
+  - an `ancestors` refusal for a part of an externally loaded node, and for
+    a part whose parent isn't addressable by its name;
+  - **the server test file** (both world kinds): a Duplicate-in-place `add`
+    with `parent` is accepted and broadcast with `parent`, and a present
+    client has it under the parent.
+
+### 9.3 Proofs
+- (p9) T11's Copy keeps the part's local transform: the world-placement
+    Copy test (a part of a moved and rotated group pasted where it appeared)
+    fails; (p9b) T11's re-add without `parent`: the part-Undo test fails (the
+    shade comes back at the top level).
+
+### 9.4 DEV acceptance (as drafted)
+- Alt-click the original's shade: the panel shows `lamp-shade` alone,
+  Duplicate is enabled; Duplicate: `lamp-shade copy` appears 1.5 m beside the
+  shade **and** a click on it selects the whole lamp (it's in the lamp); Undo
+  removes it. Delete the shade: **no question**; Undo: the shade is back on
+  the lamp.
