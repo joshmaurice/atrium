@@ -50,7 +50,8 @@
           "additionalProperties": false
         },
         "physics": { "type": "boolean" },
-        "chat": { "type": "boolean" }
+        "chat": { "type": "boolean" },
+        "addFields": { "type": "integer", "minimum": 1, "description": "subtree-add T7: the `add` field set this server keeps (3 = children and material refs). A client handles a group (Duplicate, restore, Paste, material refs) only when it is 3 or more; an older server sends none." }
       },
       "additionalProperties": false
     }

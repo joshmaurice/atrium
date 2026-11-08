@@ -596,3 +596,73 @@ test('T12: a send to one sharer’s material recolours every sharer, on the serv
     o.ws.close(); witness.ws.close()
   }
 })
+
+// ---------------------------------------------------------------------------
+// T7 — version skew, both ways
+// ---------------------------------------------------------------------------
+
+describe('T7: the level', () => {
+  const STALE_MESSAGE = 'this page is older than the server: reload it to keep editing'
+  async function session(port, capabilities) {
+    const { ws, messages } = await connect(port)
+    const reply = await hello(ws, messages, `t7-${randomUUID().slice(0, 6)}`, capabilities)
+    return { ws, messages, reply }
+  }
+
+  test('the server’s hello carries capabilities.addFields 3, valid against hello.server.json', async () => {
+    const { validate } = await import('@atrium/protocol')
+    const { port } = await startWorld()
+    const s = await session(port, CAPS)
+    try {
+      assert.equal(s.reply.capabilities.addFields, 3)
+      assert.equal(validate('server', s.reply).valid, true)
+    } finally {
+      s.ws.close()
+    }
+  })
+
+  test('a 42aa56ff tab (scriptRunner 3, addFields 2): its world add and remove are refused with R6’s text; its avatar add is accepted', async () => {
+    const { world, port } = await startWorld()
+    const s = await session(port, { tick: { interval: 5000 }, scriptRunner: 3, addFields: 2 })
+    try {
+      const a = await sendAdd(s, { name: 'from-stale' })
+      assert.equal(a?.type, 'error')
+      assert.equal(a.message, STALE_MESSAGE)
+      const r = ++seq
+      s.ws.send(JSON.stringify({ type: 'remove', seq: r, node: 'crate-01' }))
+      const rm = await waitFor(s.messages, (m) => m.type === 'error' && m.seq === r)
+      assert.equal(rm?.message, STALE_MESSAGE)
+      assert.ok(world.som.getNodeByName('crate-01'), 'the object stays')
+      const av = ++seq
+      s.ws.send(JSON.stringify({
+        type: 'add', id: s.reply.id, seq: av,
+        node: { name: s.reply.avatarNodeName, mesh: { primitives: [prim()] }, extras: { atrium: { ephemeral: true } } },
+      }))
+      await delay(50)
+      assert.equal(s.messages.find((m) => m.type === 'error' && m.seq === av), undefined, 'the avatar add is not refused')
+      assert.ok(world.som.getNodeByName(s.reply.avatarNodeName), 'and the avatar is in the world')
+    } finally {
+      s.ws.close()
+    }
+  })
+
+  for (const [label, capabilities] of [
+    ['addFields 3', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 3 }],
+    ['addFields 4', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }],
+    ['neither capability', { tick: { interval: 5000 } }],
+  ]) {
+    test(`a session with ${label} adds a tree and removes it`, async () => {
+      const { port } = await startWorld()
+      const s = await session(port, capabilities)
+      try {
+        const a = await sendAdd(s, { name: `ok-${label.replace(/\W/g, '')}`, children: [{ name: `okc-${label.replace(/\W/g, '')}` }] })
+        assert.equal(a?.type, 'add', JSON.stringify(a))
+        const r = ++seq
+        s.ws.send(JSON.stringify({ type: 'remove', seq: r, node: a.node.name }))
+        assert.ok(await waitFor(s.messages, (m) => m.type === 'remove' && m.requestSeq === r))
+      } finally {
+        s.ws.close()
+      }
+    })
+  }
+})

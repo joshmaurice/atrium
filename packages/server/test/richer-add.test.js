@@ -395,14 +395,16 @@ test('R2: an avatar add with any richer field is refused with avatar-fields, bro
 // ---------------------------------------------------------------------------
 
 const STALE = { tick: { interval: 5000 }, scriptRunner: 3 }
-const CURRENT = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 2 }
+// subtree-add T7 — a current tab is addFields 3 now; a richer-add tab (2) is stale.
+const CURRENT = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 3 }
 
-test('R6: isStaleEditor is exactly scriptRunner without addFields of 2 or more', () => {
+test('R6 (subtree-add T7): isStaleEditor is exactly scriptRunner without addFields of 3 or more', () => {
   assert.equal(isStaleEditor(STALE), true)
   assert.equal(isStaleEditor({ scriptRunner: 2 }), true, 'a 4c tab')
   assert.equal(isStaleEditor({ scriptRunner: 1, addFields: 1 }), true, 'a field set older than 2')
+  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 2 }), true, 'a richer-add tab (42aa56ff): older than 3')
   assert.equal(isStaleEditor(CURRENT), false)
-  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 3 }), false, 'a later page')
+  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 4 }), false, 'a later page')
   assert.equal(isStaleEditor({ tick: { interval: 5000 } }), false, 'neither capability: tests, the inspector')
   assert.equal(isStaleEditor({}), false)
   assert.equal(isStaleEditor(undefined), false)
@@ -456,9 +458,9 @@ test('R6 (review M1): a stale tab\u2019s Delete then Undo leaves the object wher
   }
 })
 
-test('R6: a current session (addFields 2 or 3) and a session with neither capability add and remove as before', async () => {
+test('R6: a current session (addFields 3 or 4) and a session with neither capability add and remove as before', async () => {
   const { world, port } = await startOwnerWorld()
-  const caps = [['current', CURRENT], ['later', { ...CURRENT, addFields: 3 }], ['neither', { tick: { interval: 5000 } }]]
+  const caps = [['current', CURRENT], ['later', { ...CURRENT, addFields: 4 }], ['neither', { tick: { interval: 5000 } }]]
   let seq = 20
   for (const [label, capabilities] of caps) {
     const { ws, messages } = await connect(port)

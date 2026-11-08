@@ -325,7 +325,7 @@ async function hello(ws, messages, id) {
   // is NEVER the host (the election requires 3). These tests only send edits
   // on the owner's own connection, so no session here needs the role.
   // richer-add R6 — a current tab carries addFields beside scriptRunner.
-  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2, addFields: 2 } }))
+  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2, addFields: 3 } }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
   return reply

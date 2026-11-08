@@ -288,6 +288,12 @@ export class AtriumClient extends EventEmitter {
     // or null when the server didn't say or its id isn't in the credit's form.
     // Reset wherever `signedIn` is.
     this.world = null
+    // subtree-add T7 — the `add` field set the SERVER keeps, from
+    // `hello.capabilities.addFields` (an integer >= 1), or null when it didn't
+    // say (a 42aa56ff server). Below 3 a group is handled as before the round:
+    // no Duplicate, its Delete asks, no Paste, no material refs. Reset wherever
+    // `world` is.
+    this.serverAddFields = null
     this._transmitName = null
 
     // 4b-1 E6 — the script-host role this client believes it holds. Set ONLY
@@ -698,6 +704,7 @@ export class AtriumClient extends EventEmitter {
     this.signedIn = undefined
     this.userId = undefined
     this.world = null
+    this.serverAddFields = null
 
     // ---- Create new session identity ----
     const sessionId      = globalThis.crypto.randomUUID()
@@ -813,15 +820,16 @@ export class AtriumClient extends EventEmitter {
       // know, and PROD ran one. Nothing is lost — a cross-origin connection is
       // always anonymous (signin-sync I1), so it could never be the host anyway.
       //
-      // richer-add R6 — `addFields: 2` rides exactly where `scriptRunner` does:
-      // it names the `add` field set this client keeps (2 = richer-add's). A
+      // richer-add R6 — `addFields` rides exactly where `scriptRunner` does:
+      // it names the `add` field set this client keeps (2 = richer-add's;
+      // subtree-add T7: 3 = children and material refs). A
       // server refuses a world `add` or a `remove` from a session that sends
       // `scriptRunner` without it (an unreloaded tab), and an older server
       // refuses any capability it doesn't know, hence the same condition.
       const capabilities = { tick: { interval: 5000 } }
       if (scriptRunner) {
         capabilities.scriptRunner = 3
-        capabilities.addFields = 2
+        capabilities.addFields = 3
       }
       const helloMsg = {
         type: 'hello',
@@ -909,6 +917,7 @@ export class AtriumClient extends EventEmitter {
       this.signedIn = undefined
       this.userId = undefined
       this.world = null
+      this.serverAddFields = null
       // A3 — a socket close ends the connection with any pending edit.
       this._resolveAllPendingAsUnknown(record)
       this.emit('disconnected', {
@@ -968,6 +977,7 @@ export class AtriumClient extends EventEmitter {
         this.signedIn = undefined
         this.userId = undefined
         this.world = null
+        this.serverAddFields = null
         // A3 — a connect timeout ends the connection with any pending edit.
         this._resolveAllPendingAsUnknown(record)
         // 4) Close the socket (which may fire error/close later)
@@ -1034,6 +1044,7 @@ export class AtriumClient extends EventEmitter {
     this.signedIn = undefined
     this.userId = undefined
     this.world = null
+    this.serverAddFields = null
     this._clearPointerState()
 
     // A3 — every pending edit on this connection becomes edit:unknown at once.
@@ -1227,6 +1238,9 @@ export class AtriumClient extends EventEmitter {
     // copy-objects K1 — the world, checked here: another server can send
     // anything, and the client validates no incoming message.
     this.world = worldFromHello(msg.world)
+    // subtree-add T7 — the server's add level (checked: an integer >= 1).
+    const level = msg.capabilities?.addFields
+    this.serverAddFields = Number.isInteger(level) && level >= 1 ? level : null
 
     // 4b-1 E6 — the role from `hello`, read with E5's rules and AFTER canEdit
     // is set, so ONE listener covers both `hello` and `script-host`. A hello

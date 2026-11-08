@@ -177,13 +177,23 @@ export function addSetsAtriumSource(node) {
 export const STALE_CLIENT_MESSAGE = 'this page is older than the server: reload it to keep editing'
 
 /**
+ * subtree-add T7 — the `add` field set this server keeps: 3 = children and
+ * material refs (2 was richer-add's). The server's `hello` sends it in
+ * `capabilities.addFields`, so a client knows what it may send (a client on an
+ * older server, after a rollback, sees no key and handles groups as before),
+ * and `isStaleEditor` refuses an editing session below it.
+ */
+export const ADD_FIELDS_LEVEL = 3
+
+/**
  * richer-add R6 — is this session an unreloaded first-party tab? Every app tab
  * since 4b-2 sends `scriptRunner` on every connection that can edit, and a
- * richer-add tab sends `addFields` (2 or more) beside it. A session with
- * `scriptRunner` and no such `addFields` runs an older `ingestNode`, which drops
- * the richer fields, so its Undo would restore a poorer copy. A session with
- * neither capability (tests, the protocol inspector, a cross-origin client in
- * an open world) is not judged here.
+ * current tab sends `addFields` (subtree-add T7: 3 or more) beside it. A session
+ * with `scriptRunner` and no such `addFields` runs an older `ingestNode`, which
+ * drops fields (richer-add's, then the children and the material refs), so its
+ * Duplicate or Undo would store a poorer copy. A session with neither capability
+ * (tests, the protocol inspector, a cross-origin client in an open world) is not
+ * judged here.
  *
  * @param {object|null|undefined} capabilities  the session's `hello` capabilities
  * @returns {boolean}
@@ -192,7 +202,7 @@ export function isStaleEditor(capabilities) {
   if (capabilities == null || typeof capabilities !== 'object') return false
   if (capabilities.scriptRunner === undefined) return false
   const level = capabilities.addFields
-  return !(Number.isInteger(level) && level >= 2)
+  return !(Number.isInteger(level) && level >= ADD_FIELDS_LEVEL)
 }
 
 /**
@@ -914,6 +924,8 @@ export function attachSessionHandlers({
               world: helloWorld,
               capabilities: {
                 tick: { interval: negotiated, minInterval: MIN_TICK_INTERVAL },
+                // subtree-add T7 — the add level this server keeps.
+                addFields: ADD_FIELDS_LEVEL,
               },
             }))
 

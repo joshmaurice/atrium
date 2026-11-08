@@ -131,7 +131,7 @@ test('R6 (review M1): a stale tab’s Delete is refused by the real server; noth
 test('R6: a current tab’s Delete and Undo work through the real server', async () => {
   const { world, port } = await startWorld()
   const { client, hellos } = await ownerTab(port, { stale: false })
-  assert.equal(hellos[0].capabilities.addFields, 2)
+  assert.equal(hellos[0].capabilities.addFields, 3)
   const { undo, clickDelete } = wireUndo(client)
   const before = prepareRestore(world.som.getNodeByName('crate-01')._node).descriptor
   clickDelete('crate-01')
