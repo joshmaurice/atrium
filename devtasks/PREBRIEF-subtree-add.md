@@ -1,6 +1,6 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1.6 (2026-11-07). Decided (operator, 2026-11-07):
+Status: **DRAFT, Revision 1.7 (2026-11-07). Decided (operator, 2026-11-07):
 SA-L2 (a) (17:37: "no preference", so the recommendation); SA-L6 (d), a
 selection round of its own next (19:13: "separate round"); SA-L4 (a), as
 recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
@@ -8,9 +8,9 @@ recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
 SA-L1 and SA-L5. The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
 children**, so a top-level group can be duplicated, deleted and undone, and
-copied between worlds. **Still to come:** the remaining decisions, a
-fresh-agent check of T12 (and of §9's T11, for the next round), and one
-ChatGPT review.
+copied between worlds. **Still to come:** the remaining decisions and one
+ChatGPT review. (A second fresh-agent check, of T11 and T12, is folded in:
+§7, Rev 1.7.)
 - **What it builds on.** `PREBRIEF-add-check.md` FINAL Rev 1.1 (A1–A10),
   `PREBRIEF-richer-add.md` FINAL Rev 2 (R1–R10) and `PREBRIEF-copy-objects.md`
   FINAL Rev 2.1 (K0–K10) hold here unchanged for every node of a subtree: a
@@ -56,8 +56,9 @@ ChatGPT review.
 - deleting a group is undoable, so the "This can't be undone" question goes
   away for a restorable group (SA-L4);
 - **(SA-L3 (b)) a group's own shared materials stay shared:** duplicate the
-  columns and the eight copies share one new marble, so recolouring one
-  recolours the eight; delete the furniture and Undo it, and its benches'
+  columns and the eight copies share one new marble, so a recolour of one
+  (through the SOM Inspector or any `send`: the Edit panel has no colour
+  control) recolours the eight; delete the furniture and Undo it, and its benches'
   wood is still one material (T12);
 - an unreloaded tab can't silently store a childless copy of a group (R6
   widened, §2.7), and a new tab on an older server can't silently lose a
@@ -538,9 +539,11 @@ whether there's a good reason for sharing to be lost.
 - (a) RA-L3 (a) across the tree: every primitive its own material, the Undo
   note for any sharing. Claude's first recommendation, resting partly on
   "PROD has none", which the operator rightly discounted (§2.5's caveat).
-- **What it means for editing:** a recolour of one shared copy recolours its
+- **What it means for editing:** a recolour of one shared copy (a `send` to
+  a material path, from the SOM Inspector or a script; the Edit panel has no
+  colour control, and behaviours don't write materials) recolours its
   sharers, live, for everyone, exactly as the original columns behave today
-  (`p5`); nothing in the Edit panel shows that a material is shared (a
+  (`p5`; the fresh-agent check confirmed it for `Furniture`'s seats); nothing in the Edit panel shows that a material is shared (a
   follow-up, §8). And **Atrium can now make a new shared material**: by
   copying a group that already shares one. RA-L3's revisit trigger is
   unchanged (it's about sharing *across* messages).
@@ -683,8 +686,11 @@ distance below the root.
      saved ids, built once per message** in one pass over `_savedNodes()`
      (not `objectIdInUse` per member, which scans the world each time; the
      root's single-node check may keep `objectIdInUse`);
-     `checkTransformValues` per member; `checkAddNode` (which re-runs the
-     shape pass, cheap), `checkAtriumExtras` and `checkModelHost` per member,
+     `checkTransformValues` per member; **`checkAddNode` once, on the root,
+     over the whole message** (it re-runs the shape pass, cheap, and runs
+     T12's ref pass across every member: called per member it would refuse
+     every reference into another member), then `checkAtriumExtras` and
+     `checkModelHost` per member,
      in the V9 `try`; the behaviour caps count **every member's** leaf: the
      world's existing count plus the tree's must stay within 64, and the
      bytes within 1 MiB. The first refusal is answered with that member's
@@ -880,23 +886,45 @@ distance below the root.
 - **T12, shared materials within a message (SA-L3 (b)).**
   - **The form:** a primitive's `material` is either today's object or
     exactly `{ "ref": i }`, `i` an integer. Materials are numbered in **message
-    order**: members depth-first, the root first, children in order; within a
-    member, its primitives in order; each inline material takes the next
-    number from 0. A ref must name a number **already given** (backwards
-    only), so the check is one pass with a counter and the ingest one pass
-    with an array;
+    order**: members depth-first **pre-order** (a member, then each of its
+    children's subtrees in array order: the root, then the first child and
+    everything under it, then the second child…); within a member, its
+    primitives in order; each inline material takes the next number from 0,
+    and a primitive with no material or a ref takes none. A ref must name a
+    number **already given** (backwards only), so the check is one pass with
+    a counter and the ingest one pass with an array. **One walk for all
+    three** (fresh-agent check, M3: breadth-first, pre-order and a naive
+    stack give three orders): each copy of the rule, `ingestNode` and
+    `buildDescriptor` walk with an explicit stack that pushes children in
+    reverse (no recursion over untrusted input), and the vectors, a SOM test
+    and a client test pin all three to the same order, with cross-branch
+    cases;
   - **the rule** (T1, both copies): a ref that isn't exactly `{ ref }`, isn't
-    an integer, or names a number not yet given is refused, new code
-    **`material-ref`** ("a material reference must be { ref: n }, naming a
+    a non-negative integer, or names a number not yet given is refused, new
+    code **`material-ref`** ("a material reference must be { ref: n }, naming a
     material given earlier in the same message"); an avatar may not carry
-    one (`avatar-fields`, R2); a referenced material's values were checked
+    one: `ref` counts as an R1 field, so R2's **`avatar-fields`** is checked
+    before `material-keys`; a referenced material's values were checked
     where it was given, so a ref has none to check. The vectors gain the
     cases (§5). The schema's material item becomes `oneOf` the object and
-    `{ ref }` (T8);
+    `{ ref }`, **the `{ ref }` branch with `required: ["ref"]`** (without it
+    today's legal `material: {}` matches both branches and `oneOf` refuses
+    it: fresh-agent check, S7, reproduced with the repo's Ajv). The schema
+    therefore refuses a non-integer, negative or extra-key ref first
+    (`UNKNOWN_MESSAGE`, A8); only a **forward** ref reaches `material-ref` in
+    a server test;
   - **`ingestNode`** keeps the array of the materials it made in this call,
     and a ref sets the primitive's material (and its `SOMMaterial` wrapper)
     to the referenced one. Removing one sharer keeps the material for the
-    others; removing the last prunes it (`removeSubtree`, L454);
+    others; removing the last prunes it (`removeSubtree`, L454; the
+    fresh-agent check prototyped both). **It is atomic:** it walks the whole
+    message once for its ref numbering **before creating anything**, and
+    throws then, with nothing created, on a ref it can't resolve. (It
+    registers each node's name before building its mesh, L788–793, so a
+    throw half-way through a tree would leave members registered and their
+    names "in use" for good: fresh-agent check, M3, reproduced in the
+    source.) The server's check runs first, so this is a client's defence
+    against another server;
   - **`buildDescriptor`** walks the members in message order with a map from
     each glTF `Material` to its number: the first use is emitted inline in
     today's canonical form, every later use as `{ ref }`. A material shared
@@ -906,11 +934,21 @@ distance below the root.
     `prepareRestore(ingest(d))` gives the same refs;
   - **Duplicate and Paste** carry the refs as built: copies share among
     themselves, never with the original (a copy is a new object). Paste's
-    per-member steps don't touch materials;
+    per-member steps don't touch materials, except for the level below;
   - **the server level** (T7): refs are emitted only when
     `client.serverAddFields` is 3 or more; against an older server every
     material is inline, as today (the old server's schema would refuse a
-    ref);
+    ref). **Two consequences** (fresh-agent check, S4, S5):
+    - `hasSharedMaterial`'s narrowing follows the same flag: below level 3 a
+      restore loses even sharing inside the object, and the Undo note says
+      so, as today;
+    - **a snapshot made at level 3 and pasted into a world whose server is
+      below it** (a single object with its own shared material, copied on a
+      new server, pasted on an old one: T6's level gate is for groups)
+      has its refs **inlined** by `preparePaste`, each ref replaced by a copy
+      of the material it names, with the note "It comes with its own
+      materials". `preparePaste` takes the destination's level
+      (`destAddFields`);
   - **version skew:** a `42aa56ff` tab that sees a broadcast with a ref
     ingests that primitive with a default material (its `ingestNode` reads no
     `ref`): a white part in that tab's view until it reloads. It can't save
@@ -923,7 +961,9 @@ distance below the root.
   Behaviour panel; the runner; the model bridge; K0–K10 for a single object
   (a tree of one is today's `add`: no `children` key is emitted for a node
   without children, so a single object's descriptor is byte-for-byte today's,
-  and the vectors' accepted cases stay accepted).
+  **except a single object whose own primitives share a material**, which
+  now carries a ref (T12; no fixture has one), and the vectors' accepted
+  cases stay accepted).
 
 ## 5. Tests and proofs
 - **Run on today's code first, and keep the failures in the handoff:** the
@@ -939,7 +979,11 @@ distance below the root.
   has a malformed mesh is refused `children-count`); a member carrying
   `__atrium_visible: false` (accepted: PROD may have one, §2.5); member names
   `__document__` and 257 characters (both refused, the T1 name form, pinned
-  to `checkNewName` by a server unit test); **T12's refs:** a ref to
+  to `checkNewName` by a server unit test); **T12's refs:** a member in a
+  later branch referring to a material in an earlier sibling's subtree
+  (accepted), the reverse (refused `material-ref`: the order is pre-order,
+  not breadth-first); `material: {}` still accepted by the schema and the
+  rule; a ref to
   material 0 from a later primitive (accepted), from a later member
   (accepted), to the material being defined or a later one (refused
   `material-ref`), a non-integer, a negative, an extra key beside `ref`
@@ -1036,7 +1080,14 @@ distance below the root.
     Duplicate of `Columns` gives eight copies one new material, not the
     original's; removing one sharer keeps the material, removing all prunes
     it; with `serverAddFields: null`, `buildDescriptor` emits every material
-    inline;
+    inline and a group sharing only internally **gets** the Undo note (S4);
+    a single object with an internal shared material copied at level 3 and
+    pasted with `destAddFields: null` arrives with every material inline and
+    the note (S5); `ingestNode` given a message with a forward ref throws
+    **before** creating any node, and every member's name is still free
+    afterwards (M3); a SOM test and a client test that `ingestNode` and
+    `buildDescriptor` number a two-branch tree in the same pre-order as the
+    vectors;
   - **the existing tests that encode today's group rules are rewritten, not
     kept green** (fresh-agent check, S12): `edit-undo.test.js` L710–865
     ("a group … can never come back", "grew a child …" → `DELETE_CHANGED`),
@@ -1083,11 +1134,21 @@ distance below the root.
   - (p8) the `som:remove` re-capture removed: the member-removed-meanwhile
     tests fail;
   - (p10) T12's ref ingested as a new default material: the shared-seat
-    tests fail (five materials, and the recolour reaches one seat);
+    tests fail (five materials, and the recolour reaches one seat); (p10b)
+    `buildDescriptor` numbering breadth-first: the cross-branch fixed-point
+    and pre-order tests fail; (p10c) `ingestNode`'s first pass removed: the
+    forward-ref atomicity test fails (a member's name stays in use);
 - **Claude's checks before DEV acceptance:** on the published SHA, `p10`
   rerun (every passing group's one-message size unchanged), `p1`/`p2`
   (richer-add) unchanged for single objects, `add-check`'s `p3`, `p4`, `p7`
-  and `review-q/q2` still refused; `h1`–`h6` and `c2`.
+  and `review-q/q2` still refused; `h1`–`h6` and `c2`. **T12's acceptance is
+  here, not at DEV:** no DEV or PROD content shares a material (the commons
+  lamp's two materials are separate; `p6`, §2.5), so on the published SHA
+  Claude reruns the fresh-agent check's `t12-fixedpoint.mjs`,
+  `t12-shared.mjs` and `t12-prune.mjs` against the real code on
+  `atrium.gltf` (`Furniture`'s fixed point with refs live and after a reload,
+  a `send` to one seat recolouring all five, a Duplicate of `Columns` sharing
+  one new material, prune one sharer at a time).
 - **The operator's DEV acceptance** (each step names the screen, passdown §3
   lesson 1):
   1. In the commons (a file world), Edit mode, click the lamp (`lamp-01`,
@@ -1141,8 +1202,8 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
      `edit-undo.js`, the delete question in `app.js`, the renderer test,
      their tests;
   5. T6: `copy-paste.js`, the Inspect summary and paste notes in `app.js`,
-     the end-to-end tests, the full suites, proofs (p1)–(p8) and (p10), and
-     the handoff.
+     the end-to-end tests, the full suites, proofs (p1)–(p8) and
+     (p10)–(p10c), and the handoff.
 - **Files:** `packages/server/src/send-policy.js`, `session.js` (T2, T7's
   `isStaleEditor` and the server hello's level), `world.js` (both `addNode`
   copies); `packages/som/src/SOMDocument.js`;
@@ -1172,6 +1233,35 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.7** (2026-11-07, evening): a second fresh Claude agent checked T11,
+  T12 and §2.8 (Rev 1.5) against the code at `516757bc` (prototyped
+  `ingestNode` with children and refs and a tree builder with refs in a
+  scratch copy; ran a `42aa56ff` server end to end; eight probes in
+  `/tmp/t11t12/probes/`). 31 of 36 facts confirmed. **For this round
+  (T12), taken,** Claude reproducing each in the source or with the repo's
+  Ajv first:
+  - **M3, must-fix:** "message order" wasn't one walk, and `ingestNode`
+    registers names before meshes, so a mismatch would leave members' names
+    in use for good: one pre-order walk for the rule, the ingest and the
+    builder, pinned by vectors and tests with cross-branch cases;
+    `checkAddNode` once over the whole message; `ingestNode` resolves its
+    refs before creating anything; proofs (p10b), (p10c);
+  - **S7:** the `{ ref }` schema branch needs `required: ["ref"]`, or
+    `material: {}` fails `oneOf` (reproduced); which layer refuses which ref;
+  - **S4, S5:** below server level 3 the Undo note covers internal sharing,
+    and a level-3 snapshot pasted onto an older server has its refs inlined;
+  - **S9:** no DEV content shares a material, so T12's acceptance is Claude's
+    probe run on the published SHA (§5);
+  - **nits:** the Edit panel has no colour control (recolour is a `send`:
+    §1, SA-L3, checked); T10's byte-for-byte claim excepts internal sharing;
+    an avatar's ref is `avatar-fields`, checked before `material-keys`.
+  
+  **For §9 (T11, the selection round): recorded, not taken** (M1 Redo at the
+  top level, M2 the set comparison against refs, S1–S3, S6, S8, S9's step
+  changes, nits): §9.5. Confirmed sound by the check: refs' fixed point on
+  `Furniture` live and after a reload; `send` to one sharer; prune; the
+  narrowed `hasSharedMaterial` for `Columns` and an internal-only group; a
+  `42aa56ff` client's white-part skew; no amplification from refs.
 - **Rev 1.6** (2026-11-07, evening): **SA-L7 decided: (c), parts go with the
   selection round** (operator, 19:39, after Claude's slight lean: both are
   client-only, and this round stays the protocol and trees). T11, its tests
@@ -1405,3 +1495,50 @@ here.
   shade **and** a click on it selects the whole lamp (it's in the lamp); Undo
   removes it. Delete the shade: **no question**; Undo: the shade is back on
   the lamp.
+
+### 9.5 The fresh-agent check of T11 (Rev 1.5, at `516757bc`): for that pre-brief
+Not taken into this round; the selection round's pre-brief starts from these.
+Reproduction is that round's. The checker's prototypes and probes are in
+`/tmp/t11t12/` (this session only).
+- **M1, must-fix:** Redo of a part's Duplicate re-adds it at the **top level**
+  with its local TRS: only the delete entry was given a parent handle, and
+  `acceptAdd` (`edit-undo.js` L360–372) records none. Fix: every structural
+  entry records `parent: handleFor(node.parent)` or null; `checkEntry`'s
+  re-add checks it for both kinds; a Redo test, proof (p9c), and a Redo in
+  §9.4.
+- **M2, must-fix:** "children compared as a set keyed by name" doesn't
+  survive T12: refs are numbered in child order, so a part's re-add
+  renumbers later members' refs (probe: `ref: 1 -> 0`). Fix: compare with
+  refs resolved (each ref replaced by the material it names, and the
+  sharing compared as a partition), or capture with children sorted by
+  name; and state that restoring a part that shared with its siblings
+  correctly makes the group's older entries "changed elsewhere" (the
+  sharing really was lost).
+- **should-fix:** `worldMatrix` reads SOM nodes, and `copyObject` has a glTF
+  node (given one it returns identity): specify the input, and keep a
+  top-level node's TRS verbatim, no decomposition (S1); a mirrored ancestor
+  (det < 0, legal under K6) must negate one scale before extracting the
+  rotation, not be refused as a shear (S2); §9.2's shear test needs a
+  rotation **below** the non-uniform scale (S3); the part's **capture** must
+  refuse a parent that isn't `getNodeByName(parent.name)` (as the server and
+  `_onAdd` resolve it), so Delete asks, and the Duplicate hint runs the same
+  check (S6); re-point members by **name**, not by child-index path, since
+  T11 makes order mutable (S8); §9.4 re-selects the shade before Delete,
+  checks the restored shade by "a click selects lamp-01", and adds Redo
+  (S9).
+- **nits:** the client-API bullet should read "Duplicate and `structural`
+  pass `parent`; the paste branch and `retryPaste` never do"; the
+  `DUPLICATE_OFFSET_X` comment (`edit-duplicate.js` L43); consider the offset
+  in world x through the parent's inverse 3×3 (a ×1000 parent puts a copy
+  1.5 km away); the SOM Inspector's tree does show child order
+  (`TreeView.js` L149); the avatar half of `ancestors` is a predicate
+  argument (`isEditExcluded` is `app.js` L1927); say where the TRS
+  decomposition lives; a vanished parent shows "NODE_NOT_FOUND: lamp-01"
+  raw; "its group was removed" when another tab restored the group (a new
+  node) could say so; a relative per-column shear tolerance.
+- **Confirmed sound:** a `42aa56ff` server takes a Duplicate-in-place and a
+  restore with `parent` end to end, and keeps them through a save; the
+  parent handle follows a rename, a delete, a delete and our own Undo, and
+  refuses a different node of the same name; the client's `ancestors` rule is
+  stricter than `isBlockedParent`; Duplicate-in-place and Paste don't widen a
+  behaviour's authority.
