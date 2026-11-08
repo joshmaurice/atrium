@@ -1,7 +1,7 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1.9 (2026-11-07): every decision taken; the ChatGPT
-review of Rev 1.8 folded in (§7). Decided (operator, 2026-11-07):
+Status: **FINAL, Revision 2 (2026-11-07): approved by the operator ("yes
+plz", 20:18 PT) after Rev 1.9, which took the ChatGPT review of Rev 1.8 (§7). Decided (operator, 2026-11-07):
 SA-L2 (a) (17:37: "no preference", so the recommendation); SA-L6 (d), a
 selection round of its own next (19:13: "separate round"); SA-L4 (a), as
 recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
@@ -9,7 +9,7 @@ recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
 and SA-L5 (a), as recommended (20:00: "go with the recs").** The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
 children**, so a top-level group can be duplicated, deleted and undone, and
-copied between worlds. **Still to come:** the operator's approval for FINAL. (A second fresh-agent check, of T11 and T12, is folded in:
+copied between worlds. Implementation on `claude/subtree-add` (SA-L5 (a)). (A second fresh-agent check, of T11 and T12, is folded in:
 §7, Rev 1.7.)
 - **What it builds on.** `PREBRIEF-add-check.md` FINAL Rev 1.1 (A1–A10),
   `PREBRIEF-richer-add.md` FINAL Rev 2 (R1–R10) and `PREBRIEF-copy-objects.md`
@@ -1317,6 +1317,9 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2, FINAL** (2026-11-07, 20:18): Rev 1.9 approved by the operator; no
+  text changed. Implementation in Claude's fast lane on `claude/subtree-add`,
+  in §6's commits, then a fresh-agent code check and one ChatGPT code review.
 - **Rev 1.9** (2026-11-07, 20:30): ChatGPT's review of Rev 1.8 at
   `2fbba08f7c7cc7562ca2f7d0c8760b25f06608c3` (the pinned commit, named in its
   first lines): `REVIEW-subtree-add-rev1.8-chatgpt.md`, **CHANGES REQUESTED**,
