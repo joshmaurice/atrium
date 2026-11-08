@@ -59,6 +59,13 @@ test('T5 (M3): a removal re-captures too; T4 (N1): every removed member’s want
   assert.match(body, /for \(const name of Array\.isArray\(removed\) && removed\.length > 0 \? removed : \(goneName \? \[goneName\] : \[\]\)\) \{\s*modelAnimations\?\.set\(name, null\)/)
 })
 
+test('T6 (the fresh-agent code check\u2019s S-2): the Inspect name, both Copy notes and the Paste note summarise a group after its name', () => {
+  assert.match(code, /ipName\.textContent = `\$\{node\.name\}\$\{partsText\(parts\)\}`/)
+  assert.match(code, /`Copied “\$\{inspected\.name\}”\$\{partsText\(descriptorPartsSummary\(result\.snapshot\.descriptor\)\)\}\. Paste it in a world you can edit\.`/)
+  assert.match(code, /epPasteNotes\.textContent = `Copied “\$\{selected\.name\}”\$\{partsText\(descriptorPartsSummary\(result\.snapshot\.descriptor\)\)\}\.`/)
+  assert.match(code, /const pastedLine = prepared\.parts\.parts > 0 \? \[`Pasted “\$\{name\}”\$\{partsText\(prepared\.parts\)\}\.`\] : \[\]\s*epPasteNotes\.textContent = \[\.\.\.pastedLine, \.\.\.prepared\.notes\]\.join\('\\n'\)/)
+})
+
 test('SA-L4 (a): Delete asks only when the capture fails, and then with the count', () => {
   const start = code.indexOf("epDelete.addEventListener('click'")
   const body = code.slice(start, code.indexOf('\n})', start))

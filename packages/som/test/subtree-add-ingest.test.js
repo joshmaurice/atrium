@@ -128,6 +128,23 @@ describe('T12: shared materials within a message', () => {
     for (const name of ['R', 'A', 'A1', 'B']) assert.equal(som.checkNewName(name).ok, true, `${name} is still free`)
   })
 
+  // The fresh-agent code check's nit 1: the first pass numbers exactly what the
+  // build gives a number (a falsy material takes none), and refuses a primitive
+  // the build can't read, so neither throws half-way through the build.
+  for (const [label, tree, pattern] of [
+    ['a falsy material (0) then { ref: 0 }', { name: 'R', children: [{ name: 'a', mesh: { primitives: [prim(0)] } }, { name: 'b', mesh: { primitives: [prim({ ref: 0 })] } }] }, /material ref 0 names no material given earlier/],
+    ['a null primitive after a member', { name: 'R', children: [{ name: 'a', mesh: { primitives: [prim(MAT('M'))] } }, { name: 'b', mesh: { primitives: [null] } }] }, /primitive/],
+    ['primitives that aren’t an array', { name: 'R', children: [{ name: 'a' }, { name: 'b', mesh: { primitives: 7 } }] }, /primitives/],
+  ]) {
+    test(`ATOMIC: ${label} throws before anything is created`, () => {
+      const som = fresh()
+      const before = som._document.getRoot().listNodes().length
+      assert.throws(() => som.ingestNode(tree), pattern)
+      assert.equal(som._document.getRoot().listNodes().length, before, 'no node created')
+      for (const name of ['R', 'a', 'b']) assert.equal(som.checkNewName(name).ok, true, `${name} is still free`)
+    })
+  }
+
   test('the reverse (a later branch referring to an earlier sibling’s subtree) is resolved: pre-order, not breadth-first', () => {
     const som = fresh()
     som.ingestNode({

@@ -273,3 +273,27 @@ describe('T12: shared materials within a message', () => {
     assert.ok(nodeIn(live.doc, 'B').getMesh().listPrimitives()[0].getMaterial() === nodeIn(live.doc, 'A1').getMesh().listPrimitives()[0].getMaterial(), 'and the ingest')
   })
 })
+
+describe('T1/S2: the byte bounds (the fresh-agent code check’s S-1: §5’s client half)', () => {
+  test('a legal two-node tree of 1,000,240 bytes or more, which the server accepts, is refused by prepareDuplicate (size), and by prepareRestore', () => {
+    // the server test's tree (subtree-add.test.js, "S2: the server's bound"),
+    // unindexed so each vertex count is a multiple of 3: steps of 900 numbers
+    const big = (name, n) => ({ name, mesh: { primitives: [{ attributes: { POSITION: Array.from({ length: n }, (_, i) => (i % 3 === 0 ? 0.5 : 0)) } }] } })
+    let n = 3 * 30000
+    let tree
+    const size = () => Buffer.byteLength(JSON.stringify({ type: 'add', seq: 1, node: tree }))
+    do { tree = { name: 'big-root', children: [big('big-a', n), big('big-b', n)] }; n += 900 } while (size() < 1000240)
+    assert.ok(size() > 1000000 && size() < 1048576, `the server test's range: ${size()} bytes`)
+    assert.equal(checkAddNode(tree), null, 'legal')
+    const live = ingest(tree)
+    const root = nodeIn(live.doc, 'big-root')
+    const d = prepareDuplicate(root, { name: 'big-root copy', trees: true })
+    assert.equal(d.ok, false)
+    assert.equal(d.rule, 'size')
+    assert.match(d.reason, /too large to duplicate .*the limit is 1,000,000/)
+    // the restore is an add this client sends, so the same margin (N3's rules, unchanged): Delete asks first
+    const r = prepareRestore(root, { trees: true })
+    assert.equal(r.ok, false)
+    assert.equal(r.rule, 'size')
+  })
+})

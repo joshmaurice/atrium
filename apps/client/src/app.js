@@ -46,7 +46,7 @@ import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
 import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animation-panel.js'
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
-import { copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsLines, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, shownText, VISIBILITY_NOTE } from './copy-paste.js'   // copy-objects K4–K9; subtree-add T6
+import { copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsText, descriptorPartsSummary, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, shownText, VISIBILITY_NOTE } from './copy-paste.js'   // copy-objects K4–K9; subtree-add T6
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
@@ -2050,7 +2050,7 @@ function renderInspectPanel() {
   }
   ipBehaviorRow.style.display = behaviorLines.length > 0 ? '' : 'none'
   ipBehavior.textContent = behaviorLines.join('\n')
-  ipName.textContent = parts.parts > 0 ? `${node.name} (${partsLines(parts).join('; ')})` : node.name
+  ipName.textContent = `${node.name}${partsText(parts)}`
   const reason = copyHint(node)
   ipCopy.disabled = !!reason
   ipCopy.title = reason ?? 'Copy this object'
@@ -2081,7 +2081,7 @@ ipCopy?.addEventListener('click', () => {
   if (!modes.inspect || !inspected) return
   const result = copyNode(inspected)
   ipStatus.textContent = result.ok
-    ? `Copied “${inspected.name}”. Paste it in a world you can edit.`
+    ? `Copied “${inspected.name}”${partsText(descriptorPartsSummary(result.snapshot.descriptor))}. Paste it in a world you can edit.`
     : result.reason
 })
 
@@ -2979,7 +2979,7 @@ epCopy?.addEventListener('click', () => {
     showEditError(result.reason)
   } else {
     clearEditError()
-    epPasteNotes.textContent = `Copied “${selected.name}”.`
+    epPasteNotes.textContent = `Copied “${selected.name}”${partsText(descriptorPartsSummary(result.snapshot.descriptor))}.`
   }
   refreshEditActions()
 })
@@ -3024,7 +3024,9 @@ epPaste?.addEventListener('click', () => {
   // Y7 — recorded from its answer: a refused paste records nothing.
   undo.registerAdd(seq, { name, duplicate: false })
   clearEditError()
-  epPasteNotes.textContent = prepared.notes.join('\n')
+  // subtree-add T6 — the paste note summarises a group after its name
+  const pastedLine = prepared.parts.parts > 0 ? [`Pasted “${name}”${partsText(prepared.parts)}.`] : []
+  epPasteNotes.textContent = [...pastedLine, ...prepared.notes].join('\n')
   refreshEditActions()
 })
 
@@ -3131,7 +3133,9 @@ function onStructureAnswer(seq, status, message) {
     // Duplicate's copy is. It returns either way, so the palette's retry and
     // the generic text never run for a paste.
     if (status === 'rejected' && !request.retried && modes.edit && /already in use/.test(message ?? '')) {
-      const name = copyName(request.baseName, isNameFree)
+      // subtree-add T6 (the fresh-agent code check's nit 2): a group refused for
+      // a PART's name keeps its root's name when that is still free
+      const name = isNameFree(request.name) ? request.name : copyName(request.baseName, isNameFree)
       if (name && retryPaste(request, name)) { refreshEditActions(); return }
     }
     const error = pasteAnswerError(status, message)

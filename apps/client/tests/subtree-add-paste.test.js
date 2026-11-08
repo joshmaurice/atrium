@@ -11,7 +11,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsLines,
+  copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsLines, partsText, descriptorPartsSummary,
   PASTE_TEXT, NOTE_TEXT,
 } from '../src/copy-paste.js'
 import { DUPLICATE_REASONS } from '../src/edit-duplicate.js'
@@ -98,9 +98,24 @@ describe('T6: Copy of a group', () => {
   test('the Inspect panel: "4 parts" (the members below the root) and one hidden', () => {
     const summary = partsSummary(lampWorld().lamp)
     assert.deepEqual(summary, { parts: 4, hidden: 1 })
-    assert.deepEqual(partsLines(summary), ['4 parts', 'Includes 1 hidden part'])
+    assert.deepEqual(partsLines(summary), ['4 parts', 'includes 1 hidden part'], 'T6\u2019s words')
     assert.deepEqual(partsLines({ parts: 0, hidden: 0 }), [], 'a single object: nothing')
     assert.deepEqual(partsLines({ parts: 2, hidden: 0 }), ['2 parts'], 'the lamp of §5’s DEV step 4')
+    assert.equal(partsText(summary), ' (4 parts; includes 1 hidden part)', 'after the name')
+    assert.equal(partsText({ parts: 1, hidden: 0 }), ' (1 part)')
+    assert.equal(partsText({ parts: 0, hidden: 0 }), '', 'a single object: nothing after its name')
+  })
+  test('the Copy and Paste notes\u2019 summary (the fresh-agent code check\u2019s S-2): the snapshot\u2019s and the prepared paste\u2019s agree with the live node\u2019s', () => {
+    const w = lampWorld()
+    const s = copy(w)
+    assert.deepEqual(descriptorPartsSummary(s.descriptor), partsSummary(w.lamp))
+    w.lamp.setExtras({ ...w.lamp.getExtras(), __atrium_visible: false })
+    const r = paste(copy(w))
+    assert.deepEqual(r.parts, { parts: 4, hidden: 1 }, 'the root\u2019s marker is gone and isn\u2019t a part; the stand is still hidden')
+    const one = lampWorld().lamp
+    for (const child of one.listChildren()) one.removeChild(child)
+    const solo = paste(copy({ ...w, lamp: one }))
+    assert.deepEqual(solo.parts, { parts: 0, hidden: 0 })
   })
 })
 

@@ -818,13 +818,22 @@ export class SOMDocument extends SOMObject {
       }
     }
 
-    // T12 — the first pass: every ref names a material given earlier.
+    // T12 — the first pass: every ref names a material given earlier. It
+    // numbers exactly what the build below gives a number (`else if (m)`: a
+    // falsy material takes none) and refuses what the build can't read, so
+    // the build never throws half-way (the fresh-agent code check's nit 1).
     let given = 0
     for (const { desc } of order) {
-      const prims = isObject(desc) && isObject(desc.mesh) && Array.isArray(desc.mesh.primitives) ? desc.mesh.primitives : []
-      for (const primDesc of prims) {
-        const m = isObject(primDesc) ? primDesc.material : undefined
-        if (m === undefined || m === null) continue
+      const mesh = isObject(desc) ? desc.mesh : undefined
+      if (!mesh) continue
+      const listed = mesh.primitives
+      if (listed !== undefined && listed !== null && !Array.isArray(listed)) {
+        throw new Error('ingestNode: a mesh\'s primitives must be an array')
+      }
+      for (const primDesc of listed ?? []) {
+        if (!isObject(primDesc)) throw new Error('ingestNode: a primitive must be an object')
+        const m = primDesc.material
+        if (!m) continue
         if (isRef(m)) {
           if (!(Number.isInteger(m.ref) && m.ref >= 0 && m.ref < given)) {
             throw new Error(`ingestNode: material ref ${JSON.stringify(m.ref)} names no material given earlier in the message`)

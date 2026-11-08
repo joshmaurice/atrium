@@ -3,8 +3,9 @@
 **Contract:** `devtasks/PREBRIEF-subtree-add.md` FINAL Rev 2 (operator, 2026-11-06).
 **Base:** `main` at `99ed7a8` (the pre-brief's FINAL commit; code identical to
 `70a30bd2`, the SHA §2's facts were verified at). **Implemented by Claude in the
-fast lane** (SA-L5 (a)), no OpenRouter. Not yet checked by a fresh agent or
-reviewed outside; not published or deployed.
+fast lane** (SA-L5 (a)), no OpenRouter. **Checked by a fresh Claude agent**
+(§7: no must-fix; its two should-fix and three of its nits taken in commit 6).
+Not yet reviewed outside; not published or deployed.
 
 The decisions it implements: SA-L1 (a) one `add` carries the tree; SA-L2 (a)
 256 nodes, 8 generations, 1,024 primitives, the socket's 1,048,576 bytes as the
@@ -12,14 +13,15 @@ server's byte bound; SA-L3 (b) materials shared within a message (`{ ref: n }`);
 SA-L4 (a) Delete asks nothing for a group that can come back; SA-L6 (d) and
 SA-L7 (c): selection and parts (T11) are the next round's, §9.
 
-## 1. The five commits
+## 1. The commits
 | Commit | What (contract items) |
 |---|---|
 | 1 `ab5674c` | T1, T8, T12's form: `definitions.node` (recursive `children`, `minItems: 1`) and the `{ ref }` material in `add.client.json` and `add.server.json`; the tree rule in both copies (`add-spec.js`, `send-policy.js`): `subtreeShapeProblem`, `membersInMessageOrder`, `nodeNameFormOk`, `materialRefsProblem`, the seven new reasons; 34 tree vectors |
 | 2 `19268b8` | T2, T3, T12's ingest: step 0 (`subtreeCountProblem`, before Ajv), the shape pass, every per-member check in `session.js`; one id set per message (`savedObjectIds`); `treeNameTaken` in both `addNode` copies; `ingestNode` (pre-order list, the ref pre-pass, one buffer, the call's materials) |
 | 3 `650c1af` | T7: the client sends `addFields` 3; `ADD_FIELDS_LEVEL` 3 in `isStaleEditor` and the server hello; `client.serverAddFields`; both hello schemas; the moved tests and `c1.py` |
 | 4 `96584a2` | T4, T5, T12's builder: `_onAdd` (one `som:add` per member, `som:desync` on a failed ingest), `som:remove`'s `removed`; Duplicate and Undo of trees (`edit-duplicate.js`, `edit-undo.js`); the `som:add`/`som:remove` re-captures and the delete question in `app.js` |
-| 5 (this commit) | T6: Copy and Paste of trees (`copy-paste.js`), the Inspect panel's parts line and the paste's level, notes and retry (`app.js`); the two-world end-to-end group test; the full suites; the proofs; this file |
+| 5 `fd0bb88` | T6: Copy and Paste of trees (`copy-paste.js`), the Inspect panel's parts line and the paste's level, notes and retry (`app.js`); the two-world end-to-end group test; the full suites; the proofs; this file |
+| 6 (see §7) | the fresh check's fixes: the Copy and Paste notes' parts summary, T6's lowercase "includes", the paste retry keeping a free root name, `ingestNode`'s first pass numbering exactly what the build numbers, the client half of the byte-bound test |
 
 Code files touched are §6's list. Outside it: only `devtasks/` (this file).
 
@@ -28,7 +30,7 @@ Code files touched are §6's list. Outside it: only `devtasks/` (this file).
   **4,451 passing, 0 failing, 1 named skip** (richer-add's R7 skip, unchanged),
   at commit 5's code before the proofs. The proofs added one test (the run-time
   pad wiring test, §2.2) and changed nine assertions in five test files (§4,
-  item 9); each touched file was rerun alone and passes: **4,452**.
+  item 9); each touched file was rerun alone and passes: **4,452** (a full run confirmed it). After commit 6: **4,460**, 0 failing.
   Baseline at `99ed7a8`: 64 suites, 4,234 passing, the same skip.
 - **`message-depth-measure.test.js`**: the deepest message is now 27 levels
   (an 8-generation tree with a template leaf on its deepest member; the guard
@@ -181,3 +183,55 @@ inlines refs). Before the PROD deploy the operator reruns `p6` on PROD (§6 of
 the pre-brief, its subtree-add counters); a group whose shape differs from
 §2.5's is shown to Claude first. Host commands with the real SHA come with the
 round's release notes.
+
+## 7. The fresh-agent check (of `99ed7a8..fd0bb88`)
+No must-fix. It reran the suites, and probed against the real code: the
+numbering of refs across a cross-branch tree (builder, both rules, ingest:
+the fixed point holds); version skew both ways with real servers at
+`99ed7a8` and `fd0bb88`; the cost of 256 `som:add` events through the real
+runner (28.9 ms). It found the server's order, atomicity, Undo/Redo of groups
+and Copy/Paste ids, references, credit, marker and URLs sound. Its findings,
+each reproduced here before anything changed, and what was done (commit 6):
+
+- **S-1, two §5 tests.** (a) §5's client half of the byte bounds was missing:
+  now a legal two-node tree of 1,000,240 bytes or more is refused by
+  `prepareDuplicate` (`size`) and by `prepareRestore` (the restore is an add
+  this client sends, so Delete asks first: N3's rules, unchanged). The
+  behaviour was already right, so the test was proved by a break (Duplicate's
+  byte check removed: it fails). (b) The T2-order test refuses on
+  `children-names`, not §5's 257-member `children-count` (step 0 now refuses
+  that before Ajv), and spies on the SOM methods, not `checkTransformValues`
+  (an imported function, not a method): **kept** — §5 names the three spies as
+  alternatives, and (p1b) fails on the `checkNewName` and id-set spies.
+- **S-2, T6's paste note.** Taken. The Copy note (Edit and Inspect) and the
+  Paste note now summarise a group after its name, as the Inspect name line
+  does: `Copied “lamp-01” (2 parts).`, `Pasted “lamp-01” (2 parts;
+  includes 1 hidden part).` (`partsText`, `descriptorPartsSummary`; a prepared
+  paste returns `parts`). A single object's notes are unchanged.
+- **Nit 1, `ingestNode`'s first pass and the build disagreed** on a message
+  no conforming server sends (a falsy material numbered by the first pass,
+  not by the build; a `null` primitive or a non-array `primitives` read only
+  by the build), so the build could throw half-way and leave names taken.
+  Taken: the first pass numbers what the build numbers and refuses what the
+  build can't read; three atomicity tests (all failed before). The tab's own
+  add left pending by `som:desync` is cleared by the resync's reconnect
+  (`app.js` L1120): no change.
+- **Nit 2, the paste retry renamed a root whose name was still free** (a
+  part's name was taken). Taken: the retry keeps the root's name when free.
+- **Nit 3, Undo re-points parts by name, not by child-index path** as T5
+  words it: names are unique within a tree and the members are re-captured
+  with the descriptor, so the two are equivalent. Kept; recorded here.
+- **Nit 4, wording.** The Inspect line's "Includes" mid-parenthesis: taken
+  (T6's lowercase "includes"). The K7 note reads "Its part “X”’s behaviour
+  referred to…" where T6 quotes "Its part “Button” referred to…" (elided):
+  kept, as it says what refers.
+- **Nit 5, the S6 test** uses a shadowed duplicate name, not the animation
+  name §5 names: on load nodes register before animations, so that case can't
+  arise from a loaded file. Kept.
+- **Nit 6, the measure test's 134.6 s:** already in §2.
+- **Unconfirmed, the per-member listeners it couldn't run in Node.**
+  `modelBridge.reconcile()` per member, measured here
+  (`/home/claude/notes/probes/reconcile-per-member.mjs`): 256 calls over a
+  1,020-node world take 21 ms; no change. The SOM inspector's
+  `treeView.rebuild` per member is in `tools/`, outside §6's file list: a
+  follow-up if it shows.

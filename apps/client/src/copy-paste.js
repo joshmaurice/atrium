@@ -553,7 +553,7 @@ export function preparePaste(clipboard, { name, isFree = () => true, position, d
     const a = atriumProblem(members[i].extras)
     if (a) return refuse(`${DUPLICATE_REASONS.atrium} (${a})`)
   }
-  return { ok: true, descriptor, bytes, notes, sameWorld }
+  return { ok: true, descriptor, bytes, notes, sameWorld, parts: descriptorPartsSummary(descriptor) }
 }
 
 /**
@@ -588,12 +588,31 @@ export function partsSummary(node) {
   return { parts: members.length, hidden }
 }
 
-/** The group's lines for the Inspect panel, plain text. Empty for a single object. */
+/**
+ * T6 — the same summary from a descriptor (a snapshot's, or a prepared
+ * paste's): the members below the root, and those carrying the hidden marker.
+ */
+export function descriptorPartsSummary(descriptor) {
+  const members = treeMembers(descriptor).slice(1)
+  const hidden = members.filter((d) => d?.extras?.[HIDDEN_MARKER] === false).length
+  return { parts: members.length, hidden }
+}
+
+/** The group's lines, plain text (T6's words: "2 parts", "includes 1 hidden part"). Empty for a single object. */
 export function partsLines({ parts, hidden }) {
   if (parts === 0) return []
   const lines = [`${parts.toLocaleString('en-US')} part${parts === 1 ? '' : 's'}`]
-  if (hidden > 0) lines.push(`Includes ${hidden.toLocaleString('en-US')} hidden part${hidden === 1 ? '' : 's'}`)
+  if (hidden > 0) lines.push(`includes ${hidden.toLocaleString('en-US')} hidden part${hidden === 1 ? '' : 's'}`)
   return lines
+}
+
+/**
+ * T6 — the summary "after the name", for the Inspect panel and the Copy and
+ * Paste notes: " (2 parts; includes 1 hidden part)", or "" for a single object.
+ */
+export function partsText(summary) {
+  const lines = partsLines(summary)
+  return lines.length > 0 ? ` (${lines.join('; ')})` : ''
 }
 
 // ---------------------------------------------------------------------------
