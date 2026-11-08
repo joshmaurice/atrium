@@ -778,7 +778,82 @@ export class SOMDocument extends SOMObject {
   // ingestNode — create node + full mesh geometry, register everything in maps
   // ---------------------------------------------------------------------------
 
+  /**
+   * Create a node, and (subtree-add T3) every node under it, with full mesh
+   * geometry, and register everything in the maps. Returns the root's SOMNode;
+   * the caller attaches it to its parent or the scene.
+   *
+   * subtree-add T3/T12 (devtasks/PREBRIEF-subtree-add.md FINAL Rev 2):
+   * - `descriptor.children`, when an array, are ingested too, in **message
+   *   order** (depth-first pre-order, walked with an explicit stack that pushes
+   *   children in reverse: the same walk as `checkAddNode`'s and Duplicate's
+   *   builder), each added to its parent in array order;
+   * - ONE buffer for the whole call (richer-add R4's rule, per message now),
+   *   created at the first accessor of any member;
+   * - materials are numbered in message order: each inline material takes the
+   *   next number, and a primitive's `{ ref: n }` reuses the n-th;
+   * - ATOMIC: a first pass resolves the numbering for the whole message BEFORE
+   *   anything is created, and throws then, with nothing created, on a ref
+   *   that names no material given earlier. (Names are registered as each
+   *   node is made, so a throw half-way through would leave members
+   *   registered and their names in use.) The server's checkAddNode runs
+   *   first; this is a client's defence against another server.
+   *
+   * It doesn't otherwise check: a client ingests only what a server broadcast.
+   */
   ingestNode(descriptor = {}) {
+    const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+    const isRef = (m) => isObject(m) && Object.hasOwn(m, 'ref')
+
+    // Message order, once: [{ desc, parentIndex }], the root first.
+    const order = []
+    const stack = [{ desc: descriptor, parentIndex: -1 }]
+    while (stack.length > 0) {
+      const entry = stack.pop()
+      const index = order.length
+      order.push(entry)
+      const children = isObject(entry.desc) ? entry.desc.children : undefined
+      if (Array.isArray(children)) {
+        for (let i = children.length - 1; i >= 0; i--) stack.push({ desc: children[i], parentIndex: index })
+      }
+    }
+
+    // T12 — the first pass: every ref names a material given earlier.
+    let given = 0
+    for (const { desc } of order) {
+      const prims = isObject(desc) && isObject(desc.mesh) && Array.isArray(desc.mesh.primitives) ? desc.mesh.primitives : []
+      for (const primDesc of prims) {
+        const m = isObject(primDesc) ? primDesc.material : undefined
+        if (m === undefined || m === null) continue
+        if (isRef(m)) {
+          if (!(Number.isInteger(m.ref) && m.ref >= 0 && m.ref < given)) {
+            throw new Error(`ingestNode: material ref ${JSON.stringify(m.ref)} names no material given earlier in the message`)
+          }
+        } else {
+          given += 1
+        }
+      }
+    }
+
+    // One buffer for the whole call, and the call's materials in message order.
+    let buf = null
+    const accessor = (type, array) => {
+      if (buf === null) buf = this._document.createBuffer()
+      return this._document.createAccessor().setType(type).setArray(array).setBuffer(buf)
+    }
+    const materials = []
+    const made = []
+    for (const { desc, parentIndex } of order) {
+      const somNode = this._ingestOneNode(isObject(desc) ? desc : {}, accessor, materials)
+      made.push(somNode)
+      // Members join their parent in array order (pre-order visits them so).
+      if (parentIndex >= 0) made[parentIndex]._node.addChild(somNode._node)
+    }
+    return made[0]
+  }
+
+  /** subtree-add T3 — one node of an `ingestNode` call: its own fields and mesh. */
+  _ingestOneNode(descriptor, accessor, materials) {
     const node = this._document.createNode(descriptor.name ?? '')
     if (descriptor.translation) node.setTranslation(descriptor.translation)
     if (descriptor.rotation)    node.setRotation(descriptor.rotation)
@@ -799,16 +874,6 @@ export class SOMDocument extends SOMObject {
       somMesh._prims = []
       this._meshMap.set(mesh, somMesh)
       somNode._mesh = somMesh
-
-      // richer-add R4 (CR-M2) — ONE buffer per ingestNode call, created on the
-      // first accessor and shared by every accessor of this call. Ingest cost
-      // grows with the document's buffer count; pruning a removed node still
-      // disposes it, since only this node's accessors use it.
-      let buf = null
-      const accessor = (type, array) => {
-        if (buf === null) buf = this._document.createBuffer()
-        return this._document.createAccessor().setType(type).setArray(array).setBuffer(buf)
-      }
 
       for (const primDesc of descriptor.mesh.primitives ?? []) {
         const prim = this._document.createPrimitive()
@@ -844,8 +909,13 @@ export class SOMDocument extends SOMObject {
         this._primitiveMap.set(prim, somPrim)
         somMesh._prims.push(somPrim)
 
-        if (primDesc.material) {
-          const m   = primDesc.material
+        const m = primDesc.material
+        if (m !== undefined && m !== null && typeof m === 'object' && Object.hasOwn(m, 'ref')) {
+          // subtree-add T12 — the n-th material of this call (resolved above).
+          const shared = materials[m.ref]
+          somPrim._material = shared.som
+          prim.setMaterial(shared.mat)
+        } else if (m) {
           const mat = this._document.createMaterial(m.name ?? '')
           const pbr = m.pbrMetallicRoughness
           if (pbr?.baseColorFactor)              mat.setBaseColorFactor(pbr.baseColorFactor)
@@ -862,6 +932,7 @@ export class SOMDocument extends SOMObject {
           this._materialMap.set(mat, somMat)
           somPrim._material = somMat
           prim.setMaterial(mat)
+          materials.push({ mat, som: somMat })
         }
 
         mesh.addPrimitive(prim)
@@ -1109,6 +1180,23 @@ export class SOMDocument extends SOMObject {
    * @param {*} id
    * @returns {boolean}
    */
+  /**
+   * subtree-add T2 — every object id a SAVED node holds, as one Set: the
+   * uniqueness check for a tree, built once per message in one pass (not
+   * `objectIdInUse` per member, which scans the world each time). The same
+   * nodes `objectIdInUse` counts, shadowed duplicates included.
+   *
+   * @returns {Set<*>}
+   */
+  savedObjectIds() {
+    const out = new Set()
+    for (const node of this._savedNodes()) {
+      const id = this._nodeObjectId(node)
+      if (id !== undefined) out.add(id)
+    }
+    return out
+  }
+
   objectIdInUse(id) {
     for (const node of this._savedNodes()) {
       if (this._nodeObjectId(node) === id) return true

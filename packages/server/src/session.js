@@ -14,6 +14,8 @@ import { logId } from './log-id.js'
 import {
   authorizeSend, resolveSendTarget, liveAvatarNames,
   checkAtriumExtras, checkTransformValues, checkModelHost, checkAddNode,
+  // subtree-add T2 — the count before Ajv, the shape pass and the walk.
+  subtreeCountProblem, subtreeShapeProblem, membersInMessageOrder, ADD_REASONS,
   ANIMATION_LEAF, OBJECT_ID_TAKEN, BEHAVIOR_LEAF, BEHAVIOR_NODES_PER_WORLD, behaviorCountIn,
   // scripting-4d G2 — the world behaviour total (Rev 1 S5).
   BEHAVIOR_WORLD_BYTES_MAX, behaviorBytesIn, behaviorLeafBytes,
@@ -736,6 +738,20 @@ export function attachSessionHandlers({
           return
         }
 
+        // ---------------------------------------------------------------------
+        // subtree-add T2 step 0 (the ChatGPT review's M1) — an `add` carrying
+        // `children` is counted BEFORE Ajv walks it: past 256 members, 8
+        // generations or 1,024 primitives it is refused with T1's code, and
+        // nothing else runs. Reads only array lengths; any sender, like the
+        // depth guard above.
+        // ---------------------------------------------------------------------
+        const countProblem = subtreeCountProblem(msg)
+        if (countProblem) {
+          sendError(ws, typeof msg?.seq === 'number' ? msg.seq : null,
+            'INVALID_VALUE', `${countProblem}: ${ADD_REASONS[countProblem]}`)
+          return
+        }
+
         const { valid, errors } = validate('client', msg)
         if (!valid) {
           const detail = errors[0]?.message ?? 'Validation failed'
@@ -1343,10 +1359,37 @@ export function attachSessionHandlers({
               break
             }
 
+            // --- subtree-add T2 step 1 — the tree's shape (count, depth,
+            // primitives, names and ids unique within it), before anything that
+            // scans the world. Fails closed (V9). A single node passes it.
+            // Step 2's S2 half: the members' `source` (the root's own was checked
+            // before the gate, above, on the root only).
+            let members = [msg.node]
+            if (!isAvatar && Object.hasOwn(msg.node, 'children')) {
+              let shape
+              try {
+                shape = subtreeShapeProblem(msg.node)
+                if (!shape) members = membersInMessageOrder(msg.node).map((m) => m.node)
+              } catch (error) {
+                logCheckFailure(session, 'add', error)
+                sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+                break
+              }
+              if (shape) {
+                sendError(ws, msg.seq, 'INVALID_VALUE', `${shape}: ${ADD_REASONS[shape]}`)
+                break
+              }
+              if (members.some((m) => m !== msg.node && addSetsAtriumSource(m))) {
+                sendError(ws, msg.seq, 'PERMISSION_DENIED', 'extras.atrium.source cannot be set by clients')
+                break
+              }
+            }
+
             // --- A4/A5 (non-avatar adds only) ---
             // The parent must not be, or descend from, a live avatar or an
             // externally loaded node, and the new name must pass the D3 rules.
-            // Runs after the gate, as 0c ended up (its §3.1).
+            // Runs after the gate, as 0c ended up (its §3.1). subtree-add T2:
+            // the name and id rules for every member.
             if (!isAvatar) {
               const liveAvatars = liveAvatarNames(sessions.values())
               if (msg.parent != null && isBlockedParent(msg.parent, world, liveAvatars)) {
@@ -1354,9 +1397,9 @@ export function attachSessionHandlers({
                   'a node may not be added under a live avatar or an externally loaded node')
                 break
               }
-              const nameCheck = world.som.checkNewName(msg.node.name)
-              if (!nameCheck.ok) {
-                sendError(ws, msg.seq, nameCheck.code, nameCheck.message)
+              const nameRefusal = members.map((m) => world.som.checkNewName(m.name)).find((c) => !c.ok)
+              if (nameRefusal) {
+                sendError(ws, msg.seq, nameRefusal.code, nameRefusal.message)
                 break
               }
               // 4b-1 E3 — the objectId UNIQUENESS check, which needs the world and
@@ -1364,8 +1407,18 @@ export function attachSessionHandlers({
               // to the world. The value's FORM is `checkAtriumExtras`'s (below).
               // The refusal message is never "already in use": the palette retries
               // any message matching /already in use/ (review S-B).
-              const idValue = msg.node.extras?.atrium?.objectId
-              if (idValue !== undefined && world.som.objectIdInUse(idValue)) {
+              // subtree-add T2 — a tree's ids against ONE set of the world's,
+              // built once (objectIdInUse scans the world on every call).
+              const idOf = (m) => m.extras?.atrium?.objectId
+              let idTaken = false
+              if (members.length === 1) {
+                const idValue = idOf(msg.node)
+                idTaken = idValue !== undefined && world.som.objectIdInUse(idValue)
+              } else {
+                const worldIds = world.som.savedObjectIds()
+                idTaken = members.some((m) => idOf(m) !== undefined && worldIds.has(idOf(m)))
+              }
+              if (idTaken) {
                 sendError(ws, msg.seq, 'INVALID_VALUE', OBJECT_ID_TAKEN)
                 break
               }
@@ -1375,9 +1428,10 @@ export function attachSessionHandlers({
             // A non-unit (or zero) rotation and a zero scale component are
             // refused, never corrected. Runs after the gate, before the first
             // world change.
-            const transformCheck = checkTransformValues(msg.node)
-            if (!transformCheck.ok) {
-              sendError(ws, msg.seq, transformCheck.code, transformCheck.message)
+            // subtree-add T2 — for every member.
+            const transformRefusal = members.map((m) => checkTransformValues(m)).find((c) => !c.ok)
+            if (transformRefusal) {
+              sendError(ws, msg.seq, transformRefusal.code, transformRefusal.message)
               break
             }
 
@@ -1417,12 +1471,17 @@ export function attachSessionHandlers({
               // first world change.
               let checks
               try {
+                // subtree-add T2 — checkAddNode ONCE, on the root, over the whole
+                // message (it walks the tree and runs T12's ref pass across every
+                // member); the extras and model rules per member, the first
+                // refusal winning.
+                const firstRefusal = (results) => results.find((r) => !r.ok) ?? results[0]
                 checks = {
                   // add-check A1/A6 — the whole-node rule, FIRST in the V9 try, so a
                   // model node with a malformed mesh gets the mesh's reason.
                   addNode: checkAddNode(msg.node, { avatar: false }),
-                  extras: checkAtriumExtras(msg.node.extras),
-                  model: checkModelHost(msg.node),
+                  extras: firstRefusal(members.map((m) => checkAtriumExtras(m.extras))),
+                  model: firstRefusal(members.map((m) => checkModelHost(m))),
                 }
               } catch (error) {
                 logCheckFailure(session, 'add', error)
@@ -1450,9 +1509,12 @@ export function attachSessionHandlers({
               // scripting-4b-2 F2 — the 64-behaviour cap on the `add` path, where
               // E3 placed the object-id uniqueness check: after the name rules,
               // before `world.addNode`, so a refusal changes nothing.
-              const addedBehavior = msg.node.extras?.atrium?.behavior
-              if (addedBehavior !== undefined && addedBehavior !== null &&
-                  behaviorCountIn(world.som, null) >= BEHAVIOR_NODES_PER_WORLD) {
+              // subtree-add T2 — every member's leaf counts.
+              const addedBehaviors = members
+                .map((m) => m.extras?.atrium?.behavior)
+                .filter((b) => b !== undefined && b !== null)
+              if (addedBehaviors.length > 0 &&
+                  behaviorCountIn(world.som, null) + addedBehaviors.length > BEHAVIOR_NODES_PER_WORLD) {
                 sendError(ws, msg.seq, 'INVALID_VALUE',
                   `this world already has ${BEHAVIOR_NODES_PER_WORLD} behaviours`)
                 break
@@ -1462,8 +1524,9 @@ export function attachSessionHandlers({
               // node is not in the SOM yet, so the whole world's existing leaves
               // plus the added leaf's own size must stay within 1 MiB. A
               // refusal changes nothing, as the 64-cap refusal above.
-              if (addedBehavior !== undefined && addedBehavior !== null &&
-                  behaviorBytesIn(world.som, null) + behaviorLeafBytes(addedBehavior) > BEHAVIOR_WORLD_BYTES_MAX) {
+              if (addedBehaviors.length > 0 &&
+                  behaviorBytesIn(world.som, null) +
+                    addedBehaviors.reduce((n, b) => n + behaviorLeafBytes(b), 0) > BEHAVIOR_WORLD_BYTES_MAX) {
                 sendError(ws, msg.seq, 'INVALID_VALUE',
                   "this world's behaviours would exceed 1 MiB")
                 break

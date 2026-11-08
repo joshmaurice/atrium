@@ -286,6 +286,22 @@ export function healDocumentOnLoad(document, { log = console } = {}) {
   return { counts, detachedRoots }
 }
 
+/**
+ * subtree-add T2 — the duplicate-name guard of both `addNode` copies, for the
+ * root and every member of a tree (message order; iterative). The handler's
+ * `checkNewName` per member runs first; this is the last line, as T9's was.
+ */
+function treeNameTaken(som, descriptor) {
+  const stack = [descriptor]
+  while (stack.length > 0) {
+    const d = stack.pop()
+    if (d === null || typeof d !== 'object') continue
+    if (som.getNodeByName(d.name)) return true
+    if (Array.isArray(d.children)) for (let i = d.children.length - 1; i >= 0; i--) stack.push(d.children[i])
+  }
+  return false
+}
+
 // ---------------------------------------------------------------------------
 // 4b-1 E3 (B4 (a)) — load healing for extras.atrium.objectId
 // ---------------------------------------------------------------------------
@@ -571,8 +587,8 @@ export async function createWorld(gltfPath, { baseUrl, logId: worldLogId = null 
   }
 
   function addNode(nodeDescriptor, parentName) {
-    // Duplicate-name guard (T9)
-    if (som.getNodeByName(nodeDescriptor.name)) {
+    // Duplicate-name guard (T9). subtree-add T2 — for every member of a tree.
+    if (treeNameTaken(som, nodeDescriptor)) {
       return { ok: false, code: 'INVALID_VALUE' }
     }
     // Check parent exists before ingesting (T9)
@@ -719,8 +735,8 @@ export async function createWorldFromDocument(documentJson, { logId: worldLogId 
   }
 
   function addNode(nodeDescriptor, parentName) {
-    // Duplicate-name guard (T9)
-    if (som.getNodeByName(nodeDescriptor.name)) {
+    // Duplicate-name guard (T9). subtree-add T2 — for every member of a tree.
+    if (treeNameTaken(som, nodeDescriptor)) {
       return { ok: false, code: 'INVALID_VALUE' }
     }
     // Check parent exists before ingesting (T9)

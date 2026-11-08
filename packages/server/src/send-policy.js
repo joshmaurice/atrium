@@ -2519,6 +2519,45 @@ function nodeOwnProblem(node, { avatar }) {
 }
 
 /**
+ * subtree-add T2 step 0 (the ChatGPT review's M1) — the server's count BEFORE
+ * Ajv: for an `add` whose `node` has a `children` key, an iterative walk that
+ * stops at the 257th member, the 9th generation or the 1,025th primitive, and
+ * reads nothing but the `children` and `mesh.primitives` arrays' lengths. It
+ * leaves every malformation to Ajv: a non-array `children`, a member that
+ * isn't an object, a non-array `primitives` contribute nothing here. Server
+ * only (the client's `checkAddNode` has the same bounds, T1).
+ *
+ * @param {*} msg  the parsed inbound message, before validation
+ * @returns {string|null}  a T1 reason code, or null
+ */
+export function subtreeCountProblem(msg) {
+  if (!isPlainObject(msg) || msg.type !== 'add') return null
+  const root = msg.node
+  if (!isPlainObject(root) || !Object.hasOwn(root, 'children')) return null
+  let members = 0
+  let primitives = 0
+  const stack = [root, 0]
+  while (stack.length > 0) {
+    const generation = stack.pop()
+    const member = stack.pop()
+    if (!isPlainObject(member)) continue
+    members += 1
+    if (members > SUBTREE_NODES_MAX) return 'children-count'
+    if (generation > SUBTREE_DEPTH_MAX) return 'children-depth'
+    const prims = isPlainObject(member.mesh) ? member.mesh.primitives : undefined
+    if (Array.isArray(prims)) {
+      primitives += prims.length
+      if (primitives > SUBTREE_PRIMITIVES_MAX) return 'children-primitives'
+    }
+    const children = member.children
+    if (Array.isArray(children)) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i], generation + 1)
+    }
+  }
+  return null
+}
+
+/**
  * A1–A5, richer-add R1–R3 — the `add` node rule. Returns `null` when the node
  * is accepted, or `{ code, message }`. `avatar` selects the avatar budget (A5),
  * the avatar `extras` rule, and add-check's narrower field set (R2).
