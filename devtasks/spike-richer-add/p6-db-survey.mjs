@@ -26,14 +26,41 @@ async function openReadonly(file) {
 const somReq = createRequire(path.resolve('packages/som/package.json'))
 const { NodeIO } = await import(somReq.resolve('@gltf-transform/core'))
 const { ALL_EXTENSIONS } = await import(somReq.resolve('@gltf-transform/extensions'))
-const { duplicateRuleProblem } = await import(path.resolve('apps/client/src/edit-duplicate.js'))
+const { duplicateRuleProblem, buildDescriptor, addMessageBytes } = await import(path.resolve('apps/client/src/edit-duplicate.js'))
 const { foreignIds } = await import(path.resolve('apps/client/src/copy-paste.js'))
 
 const db = await openReadonly(process.argv[2])
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
 const verdicts = new Map(); const inner = new Map(); const checks = new Map(); const copying = new Map()
+const groups = new Map()
 let worlds = 0, unreadable = 0, roots = 0
+let groupCount = 0, groupMaxNodes = 0, groupMaxDepth = 0, groupMaxBytes = 0, groupBytesSum = 0
 const bump = (m, k) => m.set(k, (m.get(k) ?? 0) + 1)
+
+// subtree-add (PREBRIEF-subtree-add.md §2): the per-node Duplicate rule asked of
+// a node with its structural rules (`children`, `parent`) set aside, as a
+// subtree `add` would ask it of every member.
+function perNodeProblem(node) {
+  const view = Object.create(node)
+  view.listChildren = () => []
+  view.listParents = () => node.listParents().filter((p) => p.propertyType !== 'Node')
+  return duplicateRuleProblem(view)
+}
+function subtreeDepth(node) {
+  const kids = node.listChildren()
+  return kids.length === 0 ? 0 : 1 + Math.max(...kids.map(subtreeDepth))
+}
+function subtreeNodes(node, out = []) {
+  out.push(node)
+  for (const c of node.listChildren()) subtreeNodes(c, out)
+  return out
+}
+function subtreeDescriptor(node) {
+  const d = buildDescriptor(node, node.getName(), 0)
+  const kids = node.listChildren()
+  if (kids.length > 0) d.children = kids.map(subtreeDescriptor)
+  return d
+}
 for (const row of db.rows('SELECT document FROM worlds')) {
   worlds++
   let doc
@@ -43,6 +70,45 @@ for (const row of db.rows('SELECT document FROM worlds')) {
     roots++
     const p = duplicateRuleProblem(n)
     bump(verdicts, p ? p.reason : 'OK (copies today)')
+  }
+  // subtree-add (PREBRIEF-subtree-add.md §2.5): the shape of every top-level
+  // object WITH CHILDREN — what a subtree `add` has to carry and bound.
+  {
+    const nameCount = new Map()
+    for (const n of doc.getRoot().listNodes()) nameCount.set(n.getName(), (nameCount.get(n.getName()) ?? 0) + 1)
+    for (const g of scene ? scene.listChildren() : []) {
+      if (g.listChildren().length === 0) continue
+      groupCount++
+      const members = subtreeNodes(g)
+      const depth = subtreeDepth(g)
+      groupMaxNodes = Math.max(groupMaxNodes, members.length)
+      groupMaxDepth = Math.max(groupMaxDepth, depth)
+      bump(groups, `group of ${members.length <= 4 ? members.length : members.length <= 16 ? '5–16' : members.length <= 64 ? '17–64' : 'over 64'} nodes (root included)`)
+      bump(groups, `group depth ${depth}`)
+      if (g.getMesh()) bump(groups, 'root has its own mesh (a click on a part selects the part, not the group)')
+      let refused = false
+      for (const n of members) {
+        const p = perNodeProblem(n)
+        if (p) { refused = true; bump(groups, `${n === g ? 'root' : 'member'} refused by the per-node rule: ${p.rule}`) }
+        if (n !== g && (nameCount.get(n.getName()) ?? 0) > 1) bump(groups, 'member whose name another node in the world also holds')
+        if (n !== g && n.getName() === '') bump(groups, 'member with an empty name')
+        const at = n.getExtras()?.atrium
+        if (at && typeof at === 'object') {
+          if (n !== g && Object.hasOwn(at, 'objectId')) bump(groups, 'member with an objectId')
+          if (at.behavior && typeof at.behavior === 'object') bump(groups, n === g ? 'root with a behaviour' : 'member with a behaviour')
+          if (typeof at.teleporter?.destination === 'string') bump(groups, n === g ? 'root that is a pad' : 'member that is a pad')
+          if (at.model && typeof at.model === 'object') bump(groups, n === g ? 'root that is a model' : 'member that is a model')
+        }
+        if (n !== g && Object.hasOwn(n.getExtras() ?? {}, '__atrium_visible')) bump(groups, 'member carrying the hidden marker')
+      }
+      if (!refused) {
+        try {
+          const bytes = addMessageBytes(subtreeDescriptor(g))
+          groupMaxBytes = Math.max(groupMaxBytes, bytes); groupBytesSum += bytes
+          bump(groups, bytes > 1_000_000 ? 'group over the 1,000,000-byte add cap as ONE message' : bytes > 250_000 ? 'group 250 KB–1 MB as one message' : 'group under 250 KB as one message')
+        } catch { bump(groups, 'group whose descriptor could not be built') }
+      } else bump(groups, 'group with a member the per-node rule refuses (no size measured)')
+    }
   }
   // copy-objects (PREBRIEF-copy-objects.md §6): what K7 and K8 touch, at any depth.
   for (const n of doc.getRoot().listNodes()) {
@@ -147,4 +213,6 @@ console.log('Saved content add-check or send\'s new ranges would refuse (nodes o
 for (const [k, v] of [...checks].sort((a, b) => b[1] - a[1])) console.log(`  ${v}\t${k}`)
 console.log('copy-objects: nodes, at any depth, that Paste\'s behaviour and URL rules touch (none means nothing):')
 for (const [k, v] of [...copying]) console.log(`  ${v}\t${k}`)
+console.log(`subtree-add: top-level objects with children ${groupCount}; the largest has ${groupMaxNodes} nodes (root included), the deepest is depth ${groupMaxDepth}; as ONE add message the largest measured is ${groupMaxBytes.toLocaleString("en-US")} bytes, all measured together ${groupBytesSum.toLocaleString("en-US")}:`)
+for (const [k, v] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) console.log(`  ${v}\t${k}`)
 if (unreadable) console.log(`NOTE: ${unreadable} world(s) can't be read back (review M1): such a world fails to load. Tell Claude; don't delete anything.`)
