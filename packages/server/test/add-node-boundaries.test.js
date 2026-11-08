@@ -178,3 +178,102 @@ describe('richer-add R3: the two copies share their codes and constants', () => 
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// subtree-add T1 (SA-L2, the ChatGPT review's M2) — the primitive budget and
+// the tree's lengths-first rule, too large for the vectors file, through both
+// copies.
+// ---------------------------------------------------------------------------
+
+const TRIANGLE = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+/** A meshless root and `members` children, each a mesh of `per` one-triangle primitives. */
+function denseTree(members, per, extra = 0) {
+  const children = []
+  for (let i = 0; i < members; i++) {
+    children.push({ name: `m${i}`, mesh: { primitives: Array.from({ length: per }, () => ({ attributes: { POSITION: [...TRIANGLE] } })) } })
+  }
+  if (extra > 0) children.push({ name: 'extra', mesh: { primitives: Array.from({ length: extra }, () => ({ attributes: { POSITION: [...TRIANGLE] } })) } })
+  return { name: 'root', children }
+}
+
+describe('subtree-add T1: the primitive budget, both copies', () => {
+  for (const [label, check] of COPIES) {
+    test(`${label}: 1,024 primitives across a tree are accepted`, () => {
+      assert.equal(check(denseTree(16, 64)), null)
+    })
+    test(`${label}: 1,025 primitives are refused children-primitives`, () => {
+      assert.equal(check(denseTree(16, 64, 1))?.code, 'children-primitives')
+    })
+    test(`${label}: the review's dense tree (255 members of 64 primitives) is refused children-primitives`, () => {
+      assert.equal(check(denseTree(255, 64))?.code, 'children-primitives')
+    })
+    test(`${label}: the budget is counted before any primitive is read`, () => {
+      // 1,025 primitives whose POSITION arrays throw when an element is read:
+      // the budget refuses first, from the lengths alone.
+      const tree = denseTree(16, 64, 1)
+      for (const child of tree.children) {
+        for (const prim of child.mesh.primitives) prim.attributes.POSITION = untouchable(9)
+      }
+      assert.equal(check(tree)?.code, 'children-primitives')
+    })
+    test(`${label}: the member count is checked before any member's mesh`, () => {
+      const children = Array.from({ length: 256 }, (_, i) => ({ name: `c${i}` }))
+      children[255].mesh = { primitives: [{ attributes: { POSITION: untouchable(9) } }] }
+      assert.equal(check({ name: 'root', children })?.code, 'children-count')
+    })
+    test(`${label}: a single node keeps its own codes (A3's 64-primitive cap, not the budget)`, () => {
+      const node = { name: 'flat', mesh: { primitives: Array.from({ length: 1100 }, () => ({ attributes: { POSITION: [...TRIANGLE] } })) } }
+      assert.equal(check(node)?.code, 'primitives-count')
+    })
+  }
+  test('the two copies agree on the generated trees', () => {
+    for (const tree of [denseTree(16, 64), denseTree(16, 64, 1), denseTree(255, 64)]) {
+      assert.equal(server.checkAddNode(tree)?.code ?? null, client.checkAddNode(tree)?.code ?? null)
+    }
+  })
+})
+
+describe('subtree-add T1, T12: the two copies share their new codes, constants and walk', () => {
+  test('the new codes are in both ADD_REASONS', () => {
+    for (const code of ['avatar-children', 'children-count', 'children-depth', 'children-primitives', 'children-names', 'children-ids', 'material-ref']) {
+      assert.equal(typeof server.ADD_REASONS[code], 'string', code)
+      assert.equal(server.ADD_REASONS[code], client.ADD_REASONS[code], code)
+    }
+  })
+  test('the bounds are identical in both copies', () => {
+    for (const name of ['SUBTREE_NODES_MAX', 'SUBTREE_DEPTH_MAX', 'SUBTREE_PRIMITIVES_MAX']) {
+      assert.equal(client[name], server[name], name)
+    }
+    assert.equal(server.SUBTREE_NODES_MAX, 256)
+    assert.equal(server.SUBTREE_DEPTH_MAX, 8)
+    assert.equal(server.SUBTREE_PRIMITIVES_MAX, 1024)
+  })
+  test('message order is depth-first pre-order in both copies', () => {
+    const tree = { name: 'R', children: [{ name: 'A', children: [{ name: 'A1' }, { name: 'A2' }] }, { name: 'B', children: [{ name: 'B1' }] }] }
+    const order = ['R', 'A', 'A1', 'A2', 'B', 'B1']
+    assert.deepEqual(server.membersInMessageOrder(tree).map((m) => m.node.name), order)
+    assert.deepEqual(client.membersInMessageOrder(tree).map((m) => m.node.name), order)
+    assert.deepEqual(server.membersInMessageOrder(tree).map((m) => m.generation), [0, 1, 2, 2, 1, 2])
+  })
+})
+
+describe('subtree-add T1: the D3 name form is checkNewName\'s, less "in use"', () => {
+  test('nodeNameFormOk agrees with SOMDocument.checkNewName on an empty world', async () => {
+    const { SOMDocument } = await import('../../som/src/index.js')
+    const { Document } = await import('../../som/node_modules/@gltf-transform/core/dist/index.modern.js')
+    const doc = new Document()
+    doc.createScene()
+    const som = new SOMDocument(doc)
+    const names = ['a', 'lamp-shade', 'n'.repeat(256), 'n'.repeat(257), '', '__document__', '__document__x',
+      'cam.camera', 'lamp.light', 'lamp.lights', 'a/b', '/', ' ', 'Ünïcødé', 'x.camera.y']
+    for (const name of names) {
+      const expected = som.checkNewName(name).ok
+      assert.equal(server.nodeNameFormOk(name), expected, `server: ${JSON.stringify(name)}`)
+      assert.equal(client.nodeNameFormOk(name), expected, `client: ${JSON.stringify(name)}`)
+    }
+    for (const notString of [undefined, null, 7, {}]) {
+      assert.equal(server.nodeNameFormOk(notString), false)
+      assert.equal(som.checkNewName(notString).ok, false)
+    }
+  })
+})

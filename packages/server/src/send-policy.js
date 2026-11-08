@@ -2037,6 +2037,13 @@ export const VERTEX_MAX = 65535
 export const MESH_NAME_MAX = 256
 /** A2 — non-Atrium `extras` carries at most 16 KiB of UTF-8. */
 export const NODE_EXTRAS_BYTES_MAX = 16 * 1024
+/** subtree-add T1 (SA-L2) — at most this many members in one `add`, the root included. */
+export const SUBTREE_NODES_MAX = 256
+/** subtree-add T1 (SA-L2) — no member deeper than this many generations below the root. */
+export const SUBTREE_DEPTH_MAX = 8
+/** subtree-add T1 (SA-L2, the ChatGPT review's M2) — at most this many primitives in one `add`. */
+export const SUBTREE_PRIMITIVES_MAX = 1024
+
 
 /** A4/A9 — a finite number in [0, 1]. */
 export function isUnitRange(v) {
@@ -2105,6 +2112,14 @@ export const ADD_REASONS = Object.freeze({
   'avatar-primitives': `an avatar mesh must have exactly ${AVATAR_PRIMITIVES} primitive`,
   'avatar-vertices':   `an avatar primitive must have at most ${AVATAR_VERTEX_MAX} vertices`,
   'avatar-indices':    `an avatar mesh must have at most ${AVATAR_INDEX_MAX} indices`,
+  // subtree-add T1, T12
+  'avatar-children':     'an avatar carries no children',
+  'children-count':      `children must be a non-empty array, and a tree at most ${SUBTREE_NODES_MAX} nodes, the root included`,
+  'children-depth':      `no member of a tree may be more than ${SUBTREE_DEPTH_MAX} generations below its root`,
+  'children-primitives': `a tree may carry at most ${SUBTREE_PRIMITIVES_MAX} primitives in all`,
+  'children-names':      'every member of a tree needs a name of the form a new name takes, and no two members may share one',
+  'children-ids':        'no two members of a tree may carry the same object id',
+  'material-ref':        'a material reference must be { ref: n }, naming a material given earlier in the same message',
 })
 
 /** The plain text for an `add`-rule reason code. */
@@ -2203,6 +2218,14 @@ function partExtrasProblem(extras) {
 function materialShapeProblem(material, { avatar }) {
   if (material === undefined) return null
   if (!isPlainObject(material)) return 'material-keys'
+  // subtree-add T12 — `{ ref: n }`, exactly. `ref` counts as a richer field, so
+  // an avatar's is `avatar-fields` (R2), before any other key is looked at.
+  if (Object.hasOwn(material, 'ref')) {
+    if (avatar) return 'avatar-fields'
+    const keys = Object.keys(material)
+    if (keys.length !== 1 || !Number.isInteger(material.ref) || material.ref < 0) return 'material-ref'
+    return null
+  }
   for (const key of Object.keys(material)) {
     if (key === 'pbrMetallicRoughness') continue
     if (RICHER_MATERIAL_KEYS.has(key)) {
@@ -2227,6 +2250,8 @@ function materialShapeProblem(material, { avatar }) {
  */
 function materialValuesProblem(material) {
   if (material === undefined) return null
+  // subtree-add T12 — a reference's material was checked where it was given.
+  if (isMaterialRef(material)) return null
   const pbr = material.pbrMetallicRoughness
   if (pbr !== undefined) {
     if (pbr.baseColorFactor !== undefined && !isUnitRangeVec4(pbr.baseColorFactor)) return 'material-value'
@@ -2365,6 +2390,134 @@ function meshAddProblem(mesh, { avatar }) {
   return partExtrasProblem(mesh.extras)
 }
 
+// ---------------------------------------------------------------------------
+// subtree-add T1, T12 — the tree rule (PREBRIEF-subtree-add.md FINAL Rev 2)
+//
+// An `add` may carry `children`: nodes of the same form, nested. "Message
+// order" is depth-first PRE-ORDER (a member, then each of its children's
+// subtrees in array order), walked with an explicit stack that pushes children
+// in reverse. The same order numbers a message's materials (T12): each inline
+// material takes the next number from 0; a primitive's `{ ref: n }` reuses the
+// n-th, which must already have been given. `ingestNode` (packages/som) and
+// Duplicate's builder walk the same way; the vectors pin all three.
+// ---------------------------------------------------------------------------
+
+/** The D3 name form (SOMDocument.checkNewName, less "in use": that is the world's). */
+export function nodeNameFormOk(name) {
+  return typeof name === 'string' && name.length >= 1 && name.length <= NAME_MAX &&
+    name !== '__document__' && !name.endsWith('.camera') && !name.endsWith('.light') &&
+    !name.includes('/')
+}
+
+/**
+ * Every member of a node, the node first, in message order (pre-order). Pure;
+ * reads only `children`. A non-array `children` contributes nothing.
+ *
+ * @param {object} node
+ * @returns {Array<{ node: object, generation: number }>}
+ */
+export function membersInMessageOrder(node) {
+  const out = []
+  const stack = [{ node, generation: 0 }]
+  while (stack.length > 0) {
+    const entry = stack.pop()
+    out.push(entry)
+    const children = isPlainObject(entry.node) ? entry.node.children : undefined
+    if (Array.isArray(children)) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i], generation: entry.generation + 1 })
+    }
+  }
+  return out
+}
+
+/**
+ * T1 — the tree's shape, the cheap first pass: the member count, the depth and
+ * the primitive budget (stopping at the first bound passed), each member an
+ * object, `children` a non-empty array, and, for a tree, every member's name
+ * in the D3 form and names and object ids unique within it. Reads no mesh
+ * array but `primitives`' length, and no world state. Returns a reason code,
+ * or null. A node without `children` is today's single node, and nothing here
+ * changes for it (its own mesh keeps A3's 64-primitive cap).
+ */
+export function subtreeShapeProblem(node, { avatar = false } = {}) {
+  if (!isPlainObject(node)) return 'node-type'
+  const tree = Object.hasOwn(node, 'children')
+  if (tree && avatar) return 'avatar-children'
+  const names = new Set()
+  const ids = new Set()
+  let members = 0
+  let primitives = 0
+  const stack = [{ node, generation: 0 }]
+  while (stack.length > 0) {
+    const { node: member, generation } = stack.pop()
+    if (!isPlainObject(member)) return 'node-type'
+    members += 1
+    if (members > SUBTREE_NODES_MAX) return 'children-count'
+    if (generation > SUBTREE_DEPTH_MAX) return 'children-depth'
+    const prims = isPlainObject(member.mesh) ? member.mesh.primitives : undefined
+    if (tree && Array.isArray(prims)) {
+      primitives += prims.length
+      if (primitives > SUBTREE_PRIMITIVES_MAX) return 'children-primitives'
+    }
+    if (tree) {
+      if (!nodeNameFormOk(member.name) || names.has(member.name)) return 'children-names'
+      names.add(member.name)
+      const atrium = isPlainObject(member.extras) ? member.extras.atrium : undefined
+      if (isPlainObject(atrium) && Object.hasOwn(atrium, 'objectId')) {
+        if (ids.has(atrium.objectId)) return 'children-ids'
+        ids.add(atrium.objectId)
+      }
+    }
+    if (Object.hasOwn(member, 'children')) {
+      const children = member.children
+      if (!Array.isArray(children) || children.length === 0) return 'children-count'
+      for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i], generation: generation + 1 })
+    }
+  }
+  return null
+}
+
+/** T12 — a primitive's material is a `{ ref }` (by its key, not its validity). */
+export function isMaterialRef(material) {
+  return isPlainObject(material) && Object.hasOwn(material, 'ref')
+}
+
+/**
+ * T12 — every `{ ref: n }` names a material given earlier in the message.
+ * One pass over the whole message, in message order, with a counter. Run
+ * once on the root, never per member (a per-member pass would refuse every
+ * reference into another member).
+ */
+function materialRefsProblem(node) {
+  let given = 0
+  for (const { node: member } of membersInMessageOrder(node)) {
+    const prims = isPlainObject(member.mesh) ? member.mesh.primitives : undefined
+    if (!Array.isArray(prims)) continue
+    for (const prim of prims) {
+      const material = isPlainObject(prim) ? prim.material : undefined
+      if (material === undefined) continue
+      if (isMaterialRef(material)) {
+        if (material.ref >= given) return 'material-ref'
+      } else {
+        given += 1
+      }
+    }
+  }
+  return null
+}
+
+/** A2/A3/A5 — one node's own fields: its extensions, extras and mesh. */
+function nodeOwnProblem(node, { avatar }) {
+  // A2 — `extensions`, when present, must be an empty object.
+  if (node.extensions !== undefined && !isEmptyExtensions(node.extensions)) return 'extensions'
+  // A2/A5 — `extras`.
+  const extrasProblem = avatar ? avatarExtrasProblem(node.extras) : worldExtrasProblem(node.extras)
+  if (extrasProblem) return extrasProblem
+  // A3/A4/A5/R1/R2 — the mesh, when present.
+  if (node.mesh !== undefined) return meshAddProblem(node.mesh, { avatar })
+  return null
+}
+
 /**
  * A1–A5, richer-add R1–R3 — the `add` node rule. Returns `null` when the node
  * is accepted, or `{ code, message }`. `avatar` selects the avatar budget (A5),
@@ -2381,20 +2534,19 @@ export function checkAddNode(node, { avatar = false } = {}) {
   // Round 2 R3: a non-object node is refused here too, not left to the schema.
   if (!isPlainObject(node)) return addDeny('node-type')
 
-  // A2 — `extensions`, when present, must be an empty object.
-  if (node.extensions !== undefined && !isEmptyExtensions(node.extensions)) {
-    return addDeny('extensions')
-  }
+  // subtree-add T1 — the tree's shape first (count, depth, primitives, names,
+  // ids), before any member's mesh. A single node passes it unchanged.
+  const shape = subtreeShapeProblem(node, { avatar })
+  if (shape) return addDeny(shape)
 
-  // A2/A5 — `extras`.
-  const extrasProblem = avatar ? avatarExtrasProblem(node.extras) : worldExtrasProblem(node.extras)
-  if (extrasProblem) return addDeny(extrasProblem)
-
-  // A3/A4/A5/R1/R2 — the mesh, when present.
-  if (node.mesh !== undefined) {
-    const problem = meshAddProblem(node.mesh, { avatar })
+  // A2–A5, R1–R2 — every member's own fields, in message order (for a single
+  // node: its extensions, then its extras, then its mesh, as before).
+  for (const { node: member } of membersInMessageOrder(node)) {
+    const problem = nodeOwnProblem(member, { avatar })
     if (problem) return addDeny(problem)
   }
 
-  return null
+  // T12 — the material references, once over the whole message.
+  const refs = materialRefsProblem(node)
+  return refs ? addDeny(refs) : null
 }

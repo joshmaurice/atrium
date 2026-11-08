@@ -1,5 +1,5 @@
 {
-  "note": "Shared by the server's and the client's tests (add-check A1). Every 'node' goes through `checkAddNode(node, { avatar })`, which returns null or { code, message }. 'reason' is the shared code. 'avatar' selects A5's budget and extras rule. The 20,000-primitive avatar (CR-M2) is not a literal vector: it is exercised by the server test file, which bounds the reply at 500 ms. Round 2 (REVISION-add-check-round-2.md) adds the R1 (__proto__), R3 (fail closed) and small S3 boundary vectors; the large boundaries (1,024 avatar vertices, 6,144 indices, 65,535 vertices) are generated in packages/server/test/add-node-boundaries.test.js, which runs both copies. richer-add (PREBRIEF-richer-add.md R1–R3) flips two world vectors to accepted (TEXCOORD_0, alphaMode BLEND) and adds the 'R1:' vectors; values JSON can't hold (Infinity, NaN in extras) and the 16 KiB edges are in add-node-boundaries.test.js.",
+  "note": "Shared by the server's and the client's tests (add-check A1). Every 'node' goes through `checkAddNode(node, { avatar })`, which returns null or { code, message }. 'reason' is the shared code. 'avatar' selects A5's budget and extras rule. The 20,000-primitive avatar (CR-M2) is not a literal vector: it is exercised by the server test file, which bounds the reply at 500 ms. Round 2 (REVISION-add-check-round-2.md) adds the R1 (__proto__), R3 (fail closed) and small S3 boundary vectors; the large boundaries (1,024 avatar vertices, 6,144 indices, 65,535 vertices) are generated in packages/server/test/add-node-boundaries.test.js, which runs both copies. richer-add (PREBRIEF-richer-add.md R1–R3) flips two world vectors to accepted (TEXCOORD_0, alphaMode BLEND) and adds the 'R1:' vectors; values JSON can't hold (Infinity, NaN in extras) and the 16 KiB edges are in add-node-boundaries.test.js. subtree-add (T1, T12): the tree vectors (the 1,024- and 1,025-primitive trees are generated in add-node-boundaries.test.js), labelled 'subtree-add: …': the bounds (256 members, 8 generations, 1,024 primitives), the D3 name form and names and ids unique within a tree, avatar-children, and material refs in message order (depth-first pre-order; the cross-branch pair tells it from breadth-first).",
   "nodes": [
     {
       "label": "a minimal world add: one primitive, three vertices, no indices",
@@ -14746,6 +14746,3606 @@
       },
       "ok": false,
       "reason": "material-keys"
+    },
+    {
+      "label": "subtree-add: a tree of 2: a meshless root and one mesh child",
+      "avatar": false,
+      "node": {
+        "name": "lamp",
+        "children": [
+          {
+            "name": "shade",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  },
+                  "material": {
+                    "pbrMetallicRoughness": {
+                      "baseColorFactor": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        1
+                      ],
+                      "metallicFactor": 0,
+                      "roughnessFactor": 1
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a tree of 256 members, the root included",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "c0"
+          },
+          {
+            "name": "c1"
+          },
+          {
+            "name": "c2"
+          },
+          {
+            "name": "c3"
+          },
+          {
+            "name": "c4"
+          },
+          {
+            "name": "c5"
+          },
+          {
+            "name": "c6"
+          },
+          {
+            "name": "c7"
+          },
+          {
+            "name": "c8"
+          },
+          {
+            "name": "c9"
+          },
+          {
+            "name": "c10"
+          },
+          {
+            "name": "c11"
+          },
+          {
+            "name": "c12"
+          },
+          {
+            "name": "c13"
+          },
+          {
+            "name": "c14"
+          },
+          {
+            "name": "c15"
+          },
+          {
+            "name": "c16"
+          },
+          {
+            "name": "c17"
+          },
+          {
+            "name": "c18"
+          },
+          {
+            "name": "c19"
+          },
+          {
+            "name": "c20"
+          },
+          {
+            "name": "c21"
+          },
+          {
+            "name": "c22"
+          },
+          {
+            "name": "c23"
+          },
+          {
+            "name": "c24"
+          },
+          {
+            "name": "c25"
+          },
+          {
+            "name": "c26"
+          },
+          {
+            "name": "c27"
+          },
+          {
+            "name": "c28"
+          },
+          {
+            "name": "c29"
+          },
+          {
+            "name": "c30"
+          },
+          {
+            "name": "c31"
+          },
+          {
+            "name": "c32"
+          },
+          {
+            "name": "c33"
+          },
+          {
+            "name": "c34"
+          },
+          {
+            "name": "c35"
+          },
+          {
+            "name": "c36"
+          },
+          {
+            "name": "c37"
+          },
+          {
+            "name": "c38"
+          },
+          {
+            "name": "c39"
+          },
+          {
+            "name": "c40"
+          },
+          {
+            "name": "c41"
+          },
+          {
+            "name": "c42"
+          },
+          {
+            "name": "c43"
+          },
+          {
+            "name": "c44"
+          },
+          {
+            "name": "c45"
+          },
+          {
+            "name": "c46"
+          },
+          {
+            "name": "c47"
+          },
+          {
+            "name": "c48"
+          },
+          {
+            "name": "c49"
+          },
+          {
+            "name": "c50"
+          },
+          {
+            "name": "c51"
+          },
+          {
+            "name": "c52"
+          },
+          {
+            "name": "c53"
+          },
+          {
+            "name": "c54"
+          },
+          {
+            "name": "c55"
+          },
+          {
+            "name": "c56"
+          },
+          {
+            "name": "c57"
+          },
+          {
+            "name": "c58"
+          },
+          {
+            "name": "c59"
+          },
+          {
+            "name": "c60"
+          },
+          {
+            "name": "c61"
+          },
+          {
+            "name": "c62"
+          },
+          {
+            "name": "c63"
+          },
+          {
+            "name": "c64"
+          },
+          {
+            "name": "c65"
+          },
+          {
+            "name": "c66"
+          },
+          {
+            "name": "c67"
+          },
+          {
+            "name": "c68"
+          },
+          {
+            "name": "c69"
+          },
+          {
+            "name": "c70"
+          },
+          {
+            "name": "c71"
+          },
+          {
+            "name": "c72"
+          },
+          {
+            "name": "c73"
+          },
+          {
+            "name": "c74"
+          },
+          {
+            "name": "c75"
+          },
+          {
+            "name": "c76"
+          },
+          {
+            "name": "c77"
+          },
+          {
+            "name": "c78"
+          },
+          {
+            "name": "c79"
+          },
+          {
+            "name": "c80"
+          },
+          {
+            "name": "c81"
+          },
+          {
+            "name": "c82"
+          },
+          {
+            "name": "c83"
+          },
+          {
+            "name": "c84"
+          },
+          {
+            "name": "c85"
+          },
+          {
+            "name": "c86"
+          },
+          {
+            "name": "c87"
+          },
+          {
+            "name": "c88"
+          },
+          {
+            "name": "c89"
+          },
+          {
+            "name": "c90"
+          },
+          {
+            "name": "c91"
+          },
+          {
+            "name": "c92"
+          },
+          {
+            "name": "c93"
+          },
+          {
+            "name": "c94"
+          },
+          {
+            "name": "c95"
+          },
+          {
+            "name": "c96"
+          },
+          {
+            "name": "c97"
+          },
+          {
+            "name": "c98"
+          },
+          {
+            "name": "c99"
+          },
+          {
+            "name": "c100"
+          },
+          {
+            "name": "c101"
+          },
+          {
+            "name": "c102"
+          },
+          {
+            "name": "c103"
+          },
+          {
+            "name": "c104"
+          },
+          {
+            "name": "c105"
+          },
+          {
+            "name": "c106"
+          },
+          {
+            "name": "c107"
+          },
+          {
+            "name": "c108"
+          },
+          {
+            "name": "c109"
+          },
+          {
+            "name": "c110"
+          },
+          {
+            "name": "c111"
+          },
+          {
+            "name": "c112"
+          },
+          {
+            "name": "c113"
+          },
+          {
+            "name": "c114"
+          },
+          {
+            "name": "c115"
+          },
+          {
+            "name": "c116"
+          },
+          {
+            "name": "c117"
+          },
+          {
+            "name": "c118"
+          },
+          {
+            "name": "c119"
+          },
+          {
+            "name": "c120"
+          },
+          {
+            "name": "c121"
+          },
+          {
+            "name": "c122"
+          },
+          {
+            "name": "c123"
+          },
+          {
+            "name": "c124"
+          },
+          {
+            "name": "c125"
+          },
+          {
+            "name": "c126"
+          },
+          {
+            "name": "c127"
+          },
+          {
+            "name": "c128"
+          },
+          {
+            "name": "c129"
+          },
+          {
+            "name": "c130"
+          },
+          {
+            "name": "c131"
+          },
+          {
+            "name": "c132"
+          },
+          {
+            "name": "c133"
+          },
+          {
+            "name": "c134"
+          },
+          {
+            "name": "c135"
+          },
+          {
+            "name": "c136"
+          },
+          {
+            "name": "c137"
+          },
+          {
+            "name": "c138"
+          },
+          {
+            "name": "c139"
+          },
+          {
+            "name": "c140"
+          },
+          {
+            "name": "c141"
+          },
+          {
+            "name": "c142"
+          },
+          {
+            "name": "c143"
+          },
+          {
+            "name": "c144"
+          },
+          {
+            "name": "c145"
+          },
+          {
+            "name": "c146"
+          },
+          {
+            "name": "c147"
+          },
+          {
+            "name": "c148"
+          },
+          {
+            "name": "c149"
+          },
+          {
+            "name": "c150"
+          },
+          {
+            "name": "c151"
+          },
+          {
+            "name": "c152"
+          },
+          {
+            "name": "c153"
+          },
+          {
+            "name": "c154"
+          },
+          {
+            "name": "c155"
+          },
+          {
+            "name": "c156"
+          },
+          {
+            "name": "c157"
+          },
+          {
+            "name": "c158"
+          },
+          {
+            "name": "c159"
+          },
+          {
+            "name": "c160"
+          },
+          {
+            "name": "c161"
+          },
+          {
+            "name": "c162"
+          },
+          {
+            "name": "c163"
+          },
+          {
+            "name": "c164"
+          },
+          {
+            "name": "c165"
+          },
+          {
+            "name": "c166"
+          },
+          {
+            "name": "c167"
+          },
+          {
+            "name": "c168"
+          },
+          {
+            "name": "c169"
+          },
+          {
+            "name": "c170"
+          },
+          {
+            "name": "c171"
+          },
+          {
+            "name": "c172"
+          },
+          {
+            "name": "c173"
+          },
+          {
+            "name": "c174"
+          },
+          {
+            "name": "c175"
+          },
+          {
+            "name": "c176"
+          },
+          {
+            "name": "c177"
+          },
+          {
+            "name": "c178"
+          },
+          {
+            "name": "c179"
+          },
+          {
+            "name": "c180"
+          },
+          {
+            "name": "c181"
+          },
+          {
+            "name": "c182"
+          },
+          {
+            "name": "c183"
+          },
+          {
+            "name": "c184"
+          },
+          {
+            "name": "c185"
+          },
+          {
+            "name": "c186"
+          },
+          {
+            "name": "c187"
+          },
+          {
+            "name": "c188"
+          },
+          {
+            "name": "c189"
+          },
+          {
+            "name": "c190"
+          },
+          {
+            "name": "c191"
+          },
+          {
+            "name": "c192"
+          },
+          {
+            "name": "c193"
+          },
+          {
+            "name": "c194"
+          },
+          {
+            "name": "c195"
+          },
+          {
+            "name": "c196"
+          },
+          {
+            "name": "c197"
+          },
+          {
+            "name": "c198"
+          },
+          {
+            "name": "c199"
+          },
+          {
+            "name": "c200"
+          },
+          {
+            "name": "c201"
+          },
+          {
+            "name": "c202"
+          },
+          {
+            "name": "c203"
+          },
+          {
+            "name": "c204"
+          },
+          {
+            "name": "c205"
+          },
+          {
+            "name": "c206"
+          },
+          {
+            "name": "c207"
+          },
+          {
+            "name": "c208"
+          },
+          {
+            "name": "c209"
+          },
+          {
+            "name": "c210"
+          },
+          {
+            "name": "c211"
+          },
+          {
+            "name": "c212"
+          },
+          {
+            "name": "c213"
+          },
+          {
+            "name": "c214"
+          },
+          {
+            "name": "c215"
+          },
+          {
+            "name": "c216"
+          },
+          {
+            "name": "c217"
+          },
+          {
+            "name": "c218"
+          },
+          {
+            "name": "c219"
+          },
+          {
+            "name": "c220"
+          },
+          {
+            "name": "c221"
+          },
+          {
+            "name": "c222"
+          },
+          {
+            "name": "c223"
+          },
+          {
+            "name": "c224"
+          },
+          {
+            "name": "c225"
+          },
+          {
+            "name": "c226"
+          },
+          {
+            "name": "c227"
+          },
+          {
+            "name": "c228"
+          },
+          {
+            "name": "c229"
+          },
+          {
+            "name": "c230"
+          },
+          {
+            "name": "c231"
+          },
+          {
+            "name": "c232"
+          },
+          {
+            "name": "c233"
+          },
+          {
+            "name": "c234"
+          },
+          {
+            "name": "c235"
+          },
+          {
+            "name": "c236"
+          },
+          {
+            "name": "c237"
+          },
+          {
+            "name": "c238"
+          },
+          {
+            "name": "c239"
+          },
+          {
+            "name": "c240"
+          },
+          {
+            "name": "c241"
+          },
+          {
+            "name": "c242"
+          },
+          {
+            "name": "c243"
+          },
+          {
+            "name": "c244"
+          },
+          {
+            "name": "c245"
+          },
+          {
+            "name": "c246"
+          },
+          {
+            "name": "c247"
+          },
+          {
+            "name": "c248"
+          },
+          {
+            "name": "c249"
+          },
+          {
+            "name": "c250"
+          },
+          {
+            "name": "c251"
+          },
+          {
+            "name": "c252"
+          },
+          {
+            "name": "c253"
+          },
+          {
+            "name": "c254"
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a tree of 257 members",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "c0"
+          },
+          {
+            "name": "c1"
+          },
+          {
+            "name": "c2"
+          },
+          {
+            "name": "c3"
+          },
+          {
+            "name": "c4"
+          },
+          {
+            "name": "c5"
+          },
+          {
+            "name": "c6"
+          },
+          {
+            "name": "c7"
+          },
+          {
+            "name": "c8"
+          },
+          {
+            "name": "c9"
+          },
+          {
+            "name": "c10"
+          },
+          {
+            "name": "c11"
+          },
+          {
+            "name": "c12"
+          },
+          {
+            "name": "c13"
+          },
+          {
+            "name": "c14"
+          },
+          {
+            "name": "c15"
+          },
+          {
+            "name": "c16"
+          },
+          {
+            "name": "c17"
+          },
+          {
+            "name": "c18"
+          },
+          {
+            "name": "c19"
+          },
+          {
+            "name": "c20"
+          },
+          {
+            "name": "c21"
+          },
+          {
+            "name": "c22"
+          },
+          {
+            "name": "c23"
+          },
+          {
+            "name": "c24"
+          },
+          {
+            "name": "c25"
+          },
+          {
+            "name": "c26"
+          },
+          {
+            "name": "c27"
+          },
+          {
+            "name": "c28"
+          },
+          {
+            "name": "c29"
+          },
+          {
+            "name": "c30"
+          },
+          {
+            "name": "c31"
+          },
+          {
+            "name": "c32"
+          },
+          {
+            "name": "c33"
+          },
+          {
+            "name": "c34"
+          },
+          {
+            "name": "c35"
+          },
+          {
+            "name": "c36"
+          },
+          {
+            "name": "c37"
+          },
+          {
+            "name": "c38"
+          },
+          {
+            "name": "c39"
+          },
+          {
+            "name": "c40"
+          },
+          {
+            "name": "c41"
+          },
+          {
+            "name": "c42"
+          },
+          {
+            "name": "c43"
+          },
+          {
+            "name": "c44"
+          },
+          {
+            "name": "c45"
+          },
+          {
+            "name": "c46"
+          },
+          {
+            "name": "c47"
+          },
+          {
+            "name": "c48"
+          },
+          {
+            "name": "c49"
+          },
+          {
+            "name": "c50"
+          },
+          {
+            "name": "c51"
+          },
+          {
+            "name": "c52"
+          },
+          {
+            "name": "c53"
+          },
+          {
+            "name": "c54"
+          },
+          {
+            "name": "c55"
+          },
+          {
+            "name": "c56"
+          },
+          {
+            "name": "c57"
+          },
+          {
+            "name": "c58"
+          },
+          {
+            "name": "c59"
+          },
+          {
+            "name": "c60"
+          },
+          {
+            "name": "c61"
+          },
+          {
+            "name": "c62"
+          },
+          {
+            "name": "c63"
+          },
+          {
+            "name": "c64"
+          },
+          {
+            "name": "c65"
+          },
+          {
+            "name": "c66"
+          },
+          {
+            "name": "c67"
+          },
+          {
+            "name": "c68"
+          },
+          {
+            "name": "c69"
+          },
+          {
+            "name": "c70"
+          },
+          {
+            "name": "c71"
+          },
+          {
+            "name": "c72"
+          },
+          {
+            "name": "c73"
+          },
+          {
+            "name": "c74"
+          },
+          {
+            "name": "c75"
+          },
+          {
+            "name": "c76"
+          },
+          {
+            "name": "c77"
+          },
+          {
+            "name": "c78"
+          },
+          {
+            "name": "c79"
+          },
+          {
+            "name": "c80"
+          },
+          {
+            "name": "c81"
+          },
+          {
+            "name": "c82"
+          },
+          {
+            "name": "c83"
+          },
+          {
+            "name": "c84"
+          },
+          {
+            "name": "c85"
+          },
+          {
+            "name": "c86"
+          },
+          {
+            "name": "c87"
+          },
+          {
+            "name": "c88"
+          },
+          {
+            "name": "c89"
+          },
+          {
+            "name": "c90"
+          },
+          {
+            "name": "c91"
+          },
+          {
+            "name": "c92"
+          },
+          {
+            "name": "c93"
+          },
+          {
+            "name": "c94"
+          },
+          {
+            "name": "c95"
+          },
+          {
+            "name": "c96"
+          },
+          {
+            "name": "c97"
+          },
+          {
+            "name": "c98"
+          },
+          {
+            "name": "c99"
+          },
+          {
+            "name": "c100"
+          },
+          {
+            "name": "c101"
+          },
+          {
+            "name": "c102"
+          },
+          {
+            "name": "c103"
+          },
+          {
+            "name": "c104"
+          },
+          {
+            "name": "c105"
+          },
+          {
+            "name": "c106"
+          },
+          {
+            "name": "c107"
+          },
+          {
+            "name": "c108"
+          },
+          {
+            "name": "c109"
+          },
+          {
+            "name": "c110"
+          },
+          {
+            "name": "c111"
+          },
+          {
+            "name": "c112"
+          },
+          {
+            "name": "c113"
+          },
+          {
+            "name": "c114"
+          },
+          {
+            "name": "c115"
+          },
+          {
+            "name": "c116"
+          },
+          {
+            "name": "c117"
+          },
+          {
+            "name": "c118"
+          },
+          {
+            "name": "c119"
+          },
+          {
+            "name": "c120"
+          },
+          {
+            "name": "c121"
+          },
+          {
+            "name": "c122"
+          },
+          {
+            "name": "c123"
+          },
+          {
+            "name": "c124"
+          },
+          {
+            "name": "c125"
+          },
+          {
+            "name": "c126"
+          },
+          {
+            "name": "c127"
+          },
+          {
+            "name": "c128"
+          },
+          {
+            "name": "c129"
+          },
+          {
+            "name": "c130"
+          },
+          {
+            "name": "c131"
+          },
+          {
+            "name": "c132"
+          },
+          {
+            "name": "c133"
+          },
+          {
+            "name": "c134"
+          },
+          {
+            "name": "c135"
+          },
+          {
+            "name": "c136"
+          },
+          {
+            "name": "c137"
+          },
+          {
+            "name": "c138"
+          },
+          {
+            "name": "c139"
+          },
+          {
+            "name": "c140"
+          },
+          {
+            "name": "c141"
+          },
+          {
+            "name": "c142"
+          },
+          {
+            "name": "c143"
+          },
+          {
+            "name": "c144"
+          },
+          {
+            "name": "c145"
+          },
+          {
+            "name": "c146"
+          },
+          {
+            "name": "c147"
+          },
+          {
+            "name": "c148"
+          },
+          {
+            "name": "c149"
+          },
+          {
+            "name": "c150"
+          },
+          {
+            "name": "c151"
+          },
+          {
+            "name": "c152"
+          },
+          {
+            "name": "c153"
+          },
+          {
+            "name": "c154"
+          },
+          {
+            "name": "c155"
+          },
+          {
+            "name": "c156"
+          },
+          {
+            "name": "c157"
+          },
+          {
+            "name": "c158"
+          },
+          {
+            "name": "c159"
+          },
+          {
+            "name": "c160"
+          },
+          {
+            "name": "c161"
+          },
+          {
+            "name": "c162"
+          },
+          {
+            "name": "c163"
+          },
+          {
+            "name": "c164"
+          },
+          {
+            "name": "c165"
+          },
+          {
+            "name": "c166"
+          },
+          {
+            "name": "c167"
+          },
+          {
+            "name": "c168"
+          },
+          {
+            "name": "c169"
+          },
+          {
+            "name": "c170"
+          },
+          {
+            "name": "c171"
+          },
+          {
+            "name": "c172"
+          },
+          {
+            "name": "c173"
+          },
+          {
+            "name": "c174"
+          },
+          {
+            "name": "c175"
+          },
+          {
+            "name": "c176"
+          },
+          {
+            "name": "c177"
+          },
+          {
+            "name": "c178"
+          },
+          {
+            "name": "c179"
+          },
+          {
+            "name": "c180"
+          },
+          {
+            "name": "c181"
+          },
+          {
+            "name": "c182"
+          },
+          {
+            "name": "c183"
+          },
+          {
+            "name": "c184"
+          },
+          {
+            "name": "c185"
+          },
+          {
+            "name": "c186"
+          },
+          {
+            "name": "c187"
+          },
+          {
+            "name": "c188"
+          },
+          {
+            "name": "c189"
+          },
+          {
+            "name": "c190"
+          },
+          {
+            "name": "c191"
+          },
+          {
+            "name": "c192"
+          },
+          {
+            "name": "c193"
+          },
+          {
+            "name": "c194"
+          },
+          {
+            "name": "c195"
+          },
+          {
+            "name": "c196"
+          },
+          {
+            "name": "c197"
+          },
+          {
+            "name": "c198"
+          },
+          {
+            "name": "c199"
+          },
+          {
+            "name": "c200"
+          },
+          {
+            "name": "c201"
+          },
+          {
+            "name": "c202"
+          },
+          {
+            "name": "c203"
+          },
+          {
+            "name": "c204"
+          },
+          {
+            "name": "c205"
+          },
+          {
+            "name": "c206"
+          },
+          {
+            "name": "c207"
+          },
+          {
+            "name": "c208"
+          },
+          {
+            "name": "c209"
+          },
+          {
+            "name": "c210"
+          },
+          {
+            "name": "c211"
+          },
+          {
+            "name": "c212"
+          },
+          {
+            "name": "c213"
+          },
+          {
+            "name": "c214"
+          },
+          {
+            "name": "c215"
+          },
+          {
+            "name": "c216"
+          },
+          {
+            "name": "c217"
+          },
+          {
+            "name": "c218"
+          },
+          {
+            "name": "c219"
+          },
+          {
+            "name": "c220"
+          },
+          {
+            "name": "c221"
+          },
+          {
+            "name": "c222"
+          },
+          {
+            "name": "c223"
+          },
+          {
+            "name": "c224"
+          },
+          {
+            "name": "c225"
+          },
+          {
+            "name": "c226"
+          },
+          {
+            "name": "c227"
+          },
+          {
+            "name": "c228"
+          },
+          {
+            "name": "c229"
+          },
+          {
+            "name": "c230"
+          },
+          {
+            "name": "c231"
+          },
+          {
+            "name": "c232"
+          },
+          {
+            "name": "c233"
+          },
+          {
+            "name": "c234"
+          },
+          {
+            "name": "c235"
+          },
+          {
+            "name": "c236"
+          },
+          {
+            "name": "c237"
+          },
+          {
+            "name": "c238"
+          },
+          {
+            "name": "c239"
+          },
+          {
+            "name": "c240"
+          },
+          {
+            "name": "c241"
+          },
+          {
+            "name": "c242"
+          },
+          {
+            "name": "c243"
+          },
+          {
+            "name": "c244"
+          },
+          {
+            "name": "c245"
+          },
+          {
+            "name": "c246"
+          },
+          {
+            "name": "c247"
+          },
+          {
+            "name": "c248"
+          },
+          {
+            "name": "c249"
+          },
+          {
+            "name": "c250"
+          },
+          {
+            "name": "c251"
+          },
+          {
+            "name": "c252"
+          },
+          {
+            "name": "c253"
+          },
+          {
+            "name": "c254"
+          },
+          {
+            "name": "c255"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-count"
+    },
+    {
+      "label": "subtree-add: the count before any mesh: 257 members, the last with a malformed mesh",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "c0"
+          },
+          {
+            "name": "c1"
+          },
+          {
+            "name": "c2"
+          },
+          {
+            "name": "c3"
+          },
+          {
+            "name": "c4"
+          },
+          {
+            "name": "c5"
+          },
+          {
+            "name": "c6"
+          },
+          {
+            "name": "c7"
+          },
+          {
+            "name": "c8"
+          },
+          {
+            "name": "c9"
+          },
+          {
+            "name": "c10"
+          },
+          {
+            "name": "c11"
+          },
+          {
+            "name": "c12"
+          },
+          {
+            "name": "c13"
+          },
+          {
+            "name": "c14"
+          },
+          {
+            "name": "c15"
+          },
+          {
+            "name": "c16"
+          },
+          {
+            "name": "c17"
+          },
+          {
+            "name": "c18"
+          },
+          {
+            "name": "c19"
+          },
+          {
+            "name": "c20"
+          },
+          {
+            "name": "c21"
+          },
+          {
+            "name": "c22"
+          },
+          {
+            "name": "c23"
+          },
+          {
+            "name": "c24"
+          },
+          {
+            "name": "c25"
+          },
+          {
+            "name": "c26"
+          },
+          {
+            "name": "c27"
+          },
+          {
+            "name": "c28"
+          },
+          {
+            "name": "c29"
+          },
+          {
+            "name": "c30"
+          },
+          {
+            "name": "c31"
+          },
+          {
+            "name": "c32"
+          },
+          {
+            "name": "c33"
+          },
+          {
+            "name": "c34"
+          },
+          {
+            "name": "c35"
+          },
+          {
+            "name": "c36"
+          },
+          {
+            "name": "c37"
+          },
+          {
+            "name": "c38"
+          },
+          {
+            "name": "c39"
+          },
+          {
+            "name": "c40"
+          },
+          {
+            "name": "c41"
+          },
+          {
+            "name": "c42"
+          },
+          {
+            "name": "c43"
+          },
+          {
+            "name": "c44"
+          },
+          {
+            "name": "c45"
+          },
+          {
+            "name": "c46"
+          },
+          {
+            "name": "c47"
+          },
+          {
+            "name": "c48"
+          },
+          {
+            "name": "c49"
+          },
+          {
+            "name": "c50"
+          },
+          {
+            "name": "c51"
+          },
+          {
+            "name": "c52"
+          },
+          {
+            "name": "c53"
+          },
+          {
+            "name": "c54"
+          },
+          {
+            "name": "c55"
+          },
+          {
+            "name": "c56"
+          },
+          {
+            "name": "c57"
+          },
+          {
+            "name": "c58"
+          },
+          {
+            "name": "c59"
+          },
+          {
+            "name": "c60"
+          },
+          {
+            "name": "c61"
+          },
+          {
+            "name": "c62"
+          },
+          {
+            "name": "c63"
+          },
+          {
+            "name": "c64"
+          },
+          {
+            "name": "c65"
+          },
+          {
+            "name": "c66"
+          },
+          {
+            "name": "c67"
+          },
+          {
+            "name": "c68"
+          },
+          {
+            "name": "c69"
+          },
+          {
+            "name": "c70"
+          },
+          {
+            "name": "c71"
+          },
+          {
+            "name": "c72"
+          },
+          {
+            "name": "c73"
+          },
+          {
+            "name": "c74"
+          },
+          {
+            "name": "c75"
+          },
+          {
+            "name": "c76"
+          },
+          {
+            "name": "c77"
+          },
+          {
+            "name": "c78"
+          },
+          {
+            "name": "c79"
+          },
+          {
+            "name": "c80"
+          },
+          {
+            "name": "c81"
+          },
+          {
+            "name": "c82"
+          },
+          {
+            "name": "c83"
+          },
+          {
+            "name": "c84"
+          },
+          {
+            "name": "c85"
+          },
+          {
+            "name": "c86"
+          },
+          {
+            "name": "c87"
+          },
+          {
+            "name": "c88"
+          },
+          {
+            "name": "c89"
+          },
+          {
+            "name": "c90"
+          },
+          {
+            "name": "c91"
+          },
+          {
+            "name": "c92"
+          },
+          {
+            "name": "c93"
+          },
+          {
+            "name": "c94"
+          },
+          {
+            "name": "c95"
+          },
+          {
+            "name": "c96"
+          },
+          {
+            "name": "c97"
+          },
+          {
+            "name": "c98"
+          },
+          {
+            "name": "c99"
+          },
+          {
+            "name": "c100"
+          },
+          {
+            "name": "c101"
+          },
+          {
+            "name": "c102"
+          },
+          {
+            "name": "c103"
+          },
+          {
+            "name": "c104"
+          },
+          {
+            "name": "c105"
+          },
+          {
+            "name": "c106"
+          },
+          {
+            "name": "c107"
+          },
+          {
+            "name": "c108"
+          },
+          {
+            "name": "c109"
+          },
+          {
+            "name": "c110"
+          },
+          {
+            "name": "c111"
+          },
+          {
+            "name": "c112"
+          },
+          {
+            "name": "c113"
+          },
+          {
+            "name": "c114"
+          },
+          {
+            "name": "c115"
+          },
+          {
+            "name": "c116"
+          },
+          {
+            "name": "c117"
+          },
+          {
+            "name": "c118"
+          },
+          {
+            "name": "c119"
+          },
+          {
+            "name": "c120"
+          },
+          {
+            "name": "c121"
+          },
+          {
+            "name": "c122"
+          },
+          {
+            "name": "c123"
+          },
+          {
+            "name": "c124"
+          },
+          {
+            "name": "c125"
+          },
+          {
+            "name": "c126"
+          },
+          {
+            "name": "c127"
+          },
+          {
+            "name": "c128"
+          },
+          {
+            "name": "c129"
+          },
+          {
+            "name": "c130"
+          },
+          {
+            "name": "c131"
+          },
+          {
+            "name": "c132"
+          },
+          {
+            "name": "c133"
+          },
+          {
+            "name": "c134"
+          },
+          {
+            "name": "c135"
+          },
+          {
+            "name": "c136"
+          },
+          {
+            "name": "c137"
+          },
+          {
+            "name": "c138"
+          },
+          {
+            "name": "c139"
+          },
+          {
+            "name": "c140"
+          },
+          {
+            "name": "c141"
+          },
+          {
+            "name": "c142"
+          },
+          {
+            "name": "c143"
+          },
+          {
+            "name": "c144"
+          },
+          {
+            "name": "c145"
+          },
+          {
+            "name": "c146"
+          },
+          {
+            "name": "c147"
+          },
+          {
+            "name": "c148"
+          },
+          {
+            "name": "c149"
+          },
+          {
+            "name": "c150"
+          },
+          {
+            "name": "c151"
+          },
+          {
+            "name": "c152"
+          },
+          {
+            "name": "c153"
+          },
+          {
+            "name": "c154"
+          },
+          {
+            "name": "c155"
+          },
+          {
+            "name": "c156"
+          },
+          {
+            "name": "c157"
+          },
+          {
+            "name": "c158"
+          },
+          {
+            "name": "c159"
+          },
+          {
+            "name": "c160"
+          },
+          {
+            "name": "c161"
+          },
+          {
+            "name": "c162"
+          },
+          {
+            "name": "c163"
+          },
+          {
+            "name": "c164"
+          },
+          {
+            "name": "c165"
+          },
+          {
+            "name": "c166"
+          },
+          {
+            "name": "c167"
+          },
+          {
+            "name": "c168"
+          },
+          {
+            "name": "c169"
+          },
+          {
+            "name": "c170"
+          },
+          {
+            "name": "c171"
+          },
+          {
+            "name": "c172"
+          },
+          {
+            "name": "c173"
+          },
+          {
+            "name": "c174"
+          },
+          {
+            "name": "c175"
+          },
+          {
+            "name": "c176"
+          },
+          {
+            "name": "c177"
+          },
+          {
+            "name": "c178"
+          },
+          {
+            "name": "c179"
+          },
+          {
+            "name": "c180"
+          },
+          {
+            "name": "c181"
+          },
+          {
+            "name": "c182"
+          },
+          {
+            "name": "c183"
+          },
+          {
+            "name": "c184"
+          },
+          {
+            "name": "c185"
+          },
+          {
+            "name": "c186"
+          },
+          {
+            "name": "c187"
+          },
+          {
+            "name": "c188"
+          },
+          {
+            "name": "c189"
+          },
+          {
+            "name": "c190"
+          },
+          {
+            "name": "c191"
+          },
+          {
+            "name": "c192"
+          },
+          {
+            "name": "c193"
+          },
+          {
+            "name": "c194"
+          },
+          {
+            "name": "c195"
+          },
+          {
+            "name": "c196"
+          },
+          {
+            "name": "c197"
+          },
+          {
+            "name": "c198"
+          },
+          {
+            "name": "c199"
+          },
+          {
+            "name": "c200"
+          },
+          {
+            "name": "c201"
+          },
+          {
+            "name": "c202"
+          },
+          {
+            "name": "c203"
+          },
+          {
+            "name": "c204"
+          },
+          {
+            "name": "c205"
+          },
+          {
+            "name": "c206"
+          },
+          {
+            "name": "c207"
+          },
+          {
+            "name": "c208"
+          },
+          {
+            "name": "c209"
+          },
+          {
+            "name": "c210"
+          },
+          {
+            "name": "c211"
+          },
+          {
+            "name": "c212"
+          },
+          {
+            "name": "c213"
+          },
+          {
+            "name": "c214"
+          },
+          {
+            "name": "c215"
+          },
+          {
+            "name": "c216"
+          },
+          {
+            "name": "c217"
+          },
+          {
+            "name": "c218"
+          },
+          {
+            "name": "c219"
+          },
+          {
+            "name": "c220"
+          },
+          {
+            "name": "c221"
+          },
+          {
+            "name": "c222"
+          },
+          {
+            "name": "c223"
+          },
+          {
+            "name": "c224"
+          },
+          {
+            "name": "c225"
+          },
+          {
+            "name": "c226"
+          },
+          {
+            "name": "c227"
+          },
+          {
+            "name": "c228"
+          },
+          {
+            "name": "c229"
+          },
+          {
+            "name": "c230"
+          },
+          {
+            "name": "c231"
+          },
+          {
+            "name": "c232"
+          },
+          {
+            "name": "c233"
+          },
+          {
+            "name": "c234"
+          },
+          {
+            "name": "c235"
+          },
+          {
+            "name": "c236"
+          },
+          {
+            "name": "c237"
+          },
+          {
+            "name": "c238"
+          },
+          {
+            "name": "c239"
+          },
+          {
+            "name": "c240"
+          },
+          {
+            "name": "c241"
+          },
+          {
+            "name": "c242"
+          },
+          {
+            "name": "c243"
+          },
+          {
+            "name": "c244"
+          },
+          {
+            "name": "c245"
+          },
+          {
+            "name": "c246"
+          },
+          {
+            "name": "c247"
+          },
+          {
+            "name": "c248"
+          },
+          {
+            "name": "c249"
+          },
+          {
+            "name": "c250"
+          },
+          {
+            "name": "c251"
+          },
+          {
+            "name": "c252"
+          },
+          {
+            "name": "c253"
+          },
+          {
+            "name": "c254"
+          },
+          {
+            "name": "bad",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-count"
+    },
+    {
+      "label": "subtree-add: a chain 8 generations deep",
+      "avatar": false,
+      "node": {
+        "name": "g0",
+        "children": [
+          {
+            "name": "g1",
+            "children": [
+              {
+                "name": "g2",
+                "children": [
+                  {
+                    "name": "g3",
+                    "children": [
+                      {
+                        "name": "g4",
+                        "children": [
+                          {
+                            "name": "g5",
+                            "children": [
+                              {
+                                "name": "g6",
+                                "children": [
+                                  {
+                                    "name": "g7",
+                                    "children": [
+                                      {
+                                        "name": "g8"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a chain 9 generations deep",
+      "avatar": false,
+      "node": {
+        "name": "g0",
+        "children": [
+          {
+            "name": "g1",
+            "children": [
+              {
+                "name": "g2",
+                "children": [
+                  {
+                    "name": "g3",
+                    "children": [
+                      {
+                        "name": "g4",
+                        "children": [
+                          {
+                            "name": "g5",
+                            "children": [
+                              {
+                                "name": "g6",
+                                "children": [
+                                  {
+                                    "name": "g7",
+                                    "children": [
+                                      {
+                                        "name": "g8",
+                                        "children": [
+                                          {
+                                            "name": "g9"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-depth"
+    },
+    {
+      "label": "subtree-add: children: [] (a tree has members)",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": []
+      },
+      "ok": false,
+      "reason": "children-count"
+    },
+    {
+      "label": "subtree-add: children not an array",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": {
+          "name": "x"
+        }
+      },
+      "ok": false,
+      "reason": "children-count"
+    },
+    {
+      "label": "subtree-add: a member that is not an object",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          "x"
+        ]
+      },
+      "ok": false,
+      "reason": "node-type"
+    },
+    {
+      "label": "subtree-add: a member with an empty name",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": ""
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: a member name with a slash",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "a/b"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: a member name ending in .light",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "lamp.light"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: a member named __document__",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "__document__"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: a member name of 257 characters",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: a member name of 256 characters",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: two members with one name",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "leg"
+          },
+          {
+            "name": "leg"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: a member named like its root",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "root"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-names"
+    },
+    {
+      "label": "subtree-add: two members with one object id",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "a",
+            "extras": {
+              "atrium": {
+                "objectId": "obj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          },
+          {
+            "name": "b",
+            "extras": {
+              "atrium": {
+                "objectId": "obj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "children-ids"
+    },
+    {
+      "label": "subtree-add: an avatar with children",
+      "avatar": true,
+      "node": {
+        "name": "User-abcd",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            }
+          ]
+        },
+        "children": [
+          {
+            "name": "hat"
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "avatar-children"
+    },
+    {
+      "label": "subtree-add: a member whose mesh A3 refuses: the member's reason",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "ok",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "bad",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "position-length"
+    },
+    {
+      "label": "subtree-add: a member with every richer-add field",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "rich",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ],
+                    "NORMAL": [
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      1
+                    ],
+                    "TEXCOORD_0": [
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      1
+                    ],
+                    "COLOR_0": [
+                      1,
+                      0,
+                      0,
+                      1,
+                      1,
+                      0,
+                      0,
+                      1,
+                      1,
+                      0,
+                      0,
+                      1
+                    ]
+                  },
+                  "indices": [
+                    0,
+                    1,
+                    2
+                  ],
+                  "extras": {
+                    "k": 1
+                  },
+                  "material": {
+                    "name": "Glass",
+                    "extras": {
+                      "tag": "x"
+                    },
+                    "pbrMetallicRoughness": {
+                      "baseColorFactor": [
+                        1,
+                        1,
+                        1,
+                        0.5
+                      ],
+                      "metallicFactor": 0,
+                      "roughnessFactor": 0.2
+                    },
+                    "emissiveFactor": [
+                      0.1,
+                      0,
+                      0
+                    ],
+                    "alphaMode": "BLEND",
+                    "doubleSided": true
+                  }
+                }
+              ],
+              "extras": {
+                "m": 2
+              }
+            }
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a member carrying the hidden marker",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "part",
+            "extras": {
+              "__atrium_visible": false
+            },
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a ref to material 0 from a later primitive of the same node (a single node)",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a ref to an earlier member's material",
+      "avatar": false,
+      "node": {
+        "name": "root",
+        "children": [
+          {
+            "name": "a",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  },
+                  "material": {
+                    "pbrMetallicRoughness": {
+                      "baseColorFactor": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        1
+                      ],
+                      "metallicFactor": 0,
+                      "roughnessFactor": 1
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  },
+                  "material": {
+                    "ref": 0
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: pre-order, not breadth-first: a later branch refers to an earlier sibling's subtree",
+      "avatar": false,
+      "node": {
+        "name": "R",
+        "children": [
+          {
+            "name": "A",
+            "children": [
+              {
+                "name": "A1",
+                "mesh": {
+                  "primitives": [
+                    {
+                      "attributes": {
+                        "POSITION": [
+                          0,
+                          0,
+                          0,
+                          1,
+                          0,
+                          0,
+                          0,
+                          1,
+                          0
+                        ]
+                      },
+                      "material": {
+                        "pbrMetallicRoughness": {
+                          "baseColorFactor": [
+                            0.5,
+                            0.5,
+                            0.5,
+                            1
+                          ],
+                          "metallicFactor": 0,
+                          "roughnessFactor": 1
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "B",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  },
+                  "material": {
+                    "ref": 0
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: pre-order, not breadth-first: the reverse is a forward ref",
+      "avatar": false,
+      "node": {
+        "name": "R",
+        "children": [
+          {
+            "name": "A",
+            "children": [
+              {
+                "name": "A1",
+                "mesh": {
+                  "primitives": [
+                    {
+                      "attributes": {
+                        "POSITION": [
+                          0,
+                          0,
+                          0,
+                          1,
+                          0,
+                          0,
+                          0,
+                          1,
+                          0
+                        ]
+                      },
+                      "material": {
+                        "ref": 0
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "B",
+            "mesh": {
+              "primitives": [
+                {
+                  "attributes": {
+                    "POSITION": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0
+                    ]
+                  },
+                  "material": {
+                    "pbrMetallicRoughness": {
+                      "baseColorFactor": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        1
+                      ],
+                      "metallicFactor": 0,
+                      "roughnessFactor": 1
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ok": false,
+      "reason": "material-ref"
+    },
+    {
+      "label": "subtree-add: a forward ref: the first material is a ref",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-ref"
+    },
+    {
+      "label": "subtree-add: a ref to a number not yet given",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 1
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-ref"
+    },
+    {
+      "label": "subtree-add: a ref that is not an integer",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0.5
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-ref"
+    },
+    {
+      "label": "subtree-add: a negative ref",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": -1
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-ref"
+    },
+    {
+      "label": "subtree-add: a ref with another key beside it",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0,
+                "name": "x"
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "material-ref"
+    },
+    {
+      "label": "subtree-add: material: {} still accepted, and numbered",
+      "avatar": false,
+      "node": {
+        "name": "two",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {}
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: a primitive with no material takes no number",
+      "avatar": false,
+      "node": {
+        "name": "three",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "pbrMetallicRoughness": {
+                  "baseColorFactor": [
+                    0.5,
+                    0.5,
+                    0.5,
+                    1
+                  ],
+                  "metallicFactor": 0,
+                  "roughnessFactor": 1
+                }
+              }
+            },
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0
+              }
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "label": "subtree-add: an avatar with a ref: avatar-fields",
+      "avatar": true,
+      "node": {
+        "name": "User-abcd",
+        "mesh": {
+          "primitives": [
+            {
+              "attributes": {
+                "POSITION": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0
+                ]
+              },
+              "material": {
+                "ref": 0
+              }
+            }
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "avatar-fields"
     }
   ]
 }

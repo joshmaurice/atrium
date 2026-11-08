@@ -12,6 +12,10 @@
     "parent": { "type": ["string", "null"] },
     "requestSeq": { "type": "integer", "minimum": 0, "description": "The seq of the client request this broadcast answers" },
     "session": { "type": "string", "minLength": 1, "description": "The requesting session's id" },
+    "node": { "$ref": "#/definitions/node" }
+  },
+  "additionalProperties": false,
+  "definitions": {
     "node": {
       "type": "object",
       "required": ["name"],
@@ -64,22 +68,10 @@
                         "items": { "type": "number" },
                         "minItems": 9
                       },
-                      "NORMAL": {
-                        "type": "array",
-                        "items": { "type": "number" }
-                      },
-                      "TEXCOORD_0": {
-                        "type": "array",
-                        "items": { "type": "number" }
-                      },
-                      "TEXCOORD_1": {
-                        "type": "array",
-                        "items": { "type": "number" }
-                      },
-                      "COLOR_0": {
-                        "type": "array",
-                        "items": { "type": "number" }
-                      }
+                      "NORMAL": { "type": "array", "items": { "type": "number" } },
+                      "TEXCOORD_0": { "type": "array", "items": { "type": "number" } },
+                      "TEXCOORD_1": { "type": "array", "items": { "type": "number" } },
+                      "COLOR_0": { "type": "array", "items": { "type": "number" } }
                     }
                   },
                   "indices": {
@@ -87,44 +79,60 @@
                     "items": { "type": "integer", "minimum": 0 }
                   },
                   "material": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "name": { "type": "string", "maxLength": 256 },
-                      "extras": { "type": "object" },
-                      "emissiveFactor": {
-                        "type": "array",
-                        "items": { "type": "number" },
-                        "minItems": 3,
-                        "maxItems": 3
-                      },
-                      "alphaMode": { "enum": ["OPAQUE", "MASK", "BLEND"] },
-                      "alphaCutoff": { "type": "number", "minimum": 0 },
-                      "doubleSided": { "type": "boolean" },
-                      "pbrMetallicRoughness": {
+                    "description": "subtree-add T12: a material, or { ref: n } naming the n-th material given earlier in the same message (message order: members depth-first pre-order, primitives in order); the order is checkAddNode's",
+                    "oneOf": [
+                      {
                         "type": "object",
                         "additionalProperties": false,
                         "properties": {
-                          "baseColorFactor": {
+                          "name": { "type": "string", "maxLength": 256 },
+                          "extras": { "type": "object" },
+                          "emissiveFactor": {
                             "type": "array",
                             "items": { "type": "number" },
-                            "minItems": 4,
-                            "maxItems": 4
+                            "minItems": 3,
+                            "maxItems": 3
                           },
-                          "metallicFactor": { "type": "number" },
-                          "roughnessFactor": { "type": "number" }
+                          "alphaMode": { "enum": ["OPAQUE", "MASK", "BLEND"] },
+                          "alphaCutoff": { "type": "number", "minimum": 0 },
+                          "doubleSided": { "type": "boolean" },
+                          "pbrMetallicRoughness": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "baseColorFactor": {
+                                "type": "array",
+                                "items": { "type": "number" },
+                                "minItems": 4,
+                                "maxItems": 4
+                              },
+                              "metallicFactor": { "type": "number" },
+                              "roughnessFactor": { "type": "number" }
+                            }
+                          }
                         }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["ref"],
+                        "properties": { "ref": { "type": "integer", "minimum": 0 } }
                       }
-                    }
+                    ]
                   }
                 }
               }
             }
           }
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/node" },
+          "description": "subtree-add T1/T8: the node's children, each a node of this same form. The bounds (256 members, 8 generations, 1,024 primitives), the names and ids rules and the material-ref order are checkAddNode's"
         }
       },
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  }
 }
