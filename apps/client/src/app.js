@@ -1079,6 +1079,24 @@ client.on('som:set', ({ nodeName, path, origin }) => {
   undo.reCapture()
 })
 
+// subtree-add (the outside code review's S-1) — a node that arrives HIDDEN in
+// a live add (a pasted, duplicated or restored group's hidden part, or a hidden
+// object restored by Undo) is hidden in the view too: applyVisibility runs only
+// at view creation, setNodeVisible only on a som:set. The view object can come
+// a frame after som:add (model-bridge.js, A9), so retry, at most
+// VIEW_FRAME_LIMIT frames, while the node is still the one that arrived.
+const VIEW_FRAME_LIMIT = 10
+client.on('som:add', ({ nodeName: addedName } = {}) => {
+  const node = client.som?.getNodeByName(addedName)
+  if (!node || node.visible !== false) return
+  const hide = (frames) => {
+    if (!docView || client.som?.getNodeByName(addedName) !== node) return
+    if (setNodeVisible(docView, node, node.visible !== false) > 0 || frames >= VIEW_FRAME_LIMIT) return
+    requestAnimationFrame(() => hide(frames + 1))
+  }
+  hide(0)
+})
+
 // Teleporter pad tracking (T4): rebuild pads on add/remove/set of teleporter nodes
 client.on('som:add', ({ nodeName, root }) => {
   if (!client.som) return

@@ -110,8 +110,12 @@ function answers(client) {
   }
 }
 
-/** The real undo engine, wired to the client as app.js wires it (richer-add-lifecycle.test.js). */
-function wireUndo(client) {
+/**
+ * The real undo engine, wired to the client as app.js wires it (richer-add-lifecycle.test.js).
+ * `recaptures`: also app.js's Y2 re-captures (subtree-add T4: on `som:add` once per
+ * message, the root's event; on every `som:remove`) — the outside code review's N-2.
+ */
+function wireUndo(client, { recaptures = false } = {}) {
   const structuralBySeq = new Map()
   const messages = []
   const undo = createEditUndo({
@@ -137,6 +141,10 @@ function wireUndo(client) {
   }
   client.on('edit:accepted', answer('accepted'))
   client.on('edit:rejected', answer('rejected'))
+  if (recaptures) {
+    client.on('som:add', ({ nodeName, root }) => { if (root === undefined || root === nodeName) undo.reCapture() })
+    client.on('som:remove', () => undo.reCapture())
+  }
   return {
     undo, messages,
     /** The palette's or Paste's add (app.js): send, then register from its answer. */
@@ -528,4 +536,37 @@ test('subtree-add: a visitor copies a lamp with parts in A, pastes it in B; the 
   bobUndo.undo.run('undo')
   assert.ok(await waitFor(() => ['Lamp', 'Shade', 'Stand'].every((n) => B.world.som.getNodeByName(n) === null)), 'Undo removed the group on the server')
   assert.ok(await waitFor(() => ['Lamp', 'Shade', 'Stand'].every((n) => som.getNodeByName(n) === null)), 'and for the joiner')
+})
+
+test('subtree-add T5 (the outside code review’s N-2): a part removed in another tab while this tab’s Delete of its group is in flight; one Undo brings back what the server removed', async (t) => {
+  const A = await startWorld({ worldId: 'world-a', ownerUserId: 'user-alice', db: dbWith([['user-alice', 'alice']]) })
+  const TRI = pos3
+  const lamp = { name: 'Lamp', children: [
+    { name: 'Shade', mesh: { primitives: [{ attributes: { POSITION: TRI } }] } },
+    { name: 'Stand', mesh: { primitives: [{ attributes: { POSITION: TRI } }] } },
+  ] }
+  const a = tab()
+  await a.go(A.url('/worlds/alice/garden', 'user-alice'))
+  const b = tab()
+  await b.go(A.url('/worlds/alice/garden', 'user-alice'))
+  assert.equal(await answers(a.client)(a.client.addNode(lamp)), 'accepted')
+  assert.ok(await waitFor(() => b.client.som.getNodeByName('Shade')), 'B sees the lamp')
+  const aUndo = wireUndo(a.client, { recaptures: true })
+
+  // One synchronous block: B's remove is written first, and A's capture is
+  // taken before A can hear of it.
+  const bSeq = b.client.removeNode('Shade')
+  const aSeq = aUndo.remove('Lamp')
+  const [bAnswer, aAnswer] = await Promise.all([answers(b.client)(bSeq), answers(a.client)(aSeq)])
+  assert.equal(aAnswer, 'accepted')
+  assert.ok(await waitFor(() => aUndo.undo.undoCount === 1), 'A’s Delete is recorded')
+  t.diagnostic(`B's remove of the part: ${bAnswer} (accepted = it reached the server first, the case this test is for)`)
+
+  aUndo.undo.run('undo')
+  assert.ok(await waitFor(() => A.world.som.getNodeByName('Lamp') && b.client.som.getNodeByName('Lamp')), 'Undo brought the lamp back, on the server and in B')
+  const expected = bAnswer === 'accepted' ? ['Stand'] : ['Shade', 'Stand']
+  const kids = (som) => som.getNodeByName('Lamp')._node.listChildren().map((k) => k.getName())
+  assert.deepEqual(kids(A.world.som), expected, 'the group as the server held it when A’s Delete removed it')
+  assert.ok(await waitFor(() => JSON.stringify(kids(b.client.som)) === JSON.stringify(expected)), 'and B sees the same')
+  if (bAnswer === 'accepted') assert.equal(A.world.som.getNodeByName('Shade'), null, 'the part B removed stays removed')
 })

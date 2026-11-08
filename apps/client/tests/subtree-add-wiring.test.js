@@ -133,3 +133,80 @@ test('T4, run: a pad that arrives as a PART of a remote tree is in derivePads\u2
   assert.equal(pad.destination, '/worlds/bob/yard')
   assert.equal(reCaptures.length, 1, 'and the pending delete re-captured once, for the message')
 })
+
+// ---------------------------------------------------------------------------
+// The outside code review's S-1: a part that arrives HIDDEN in a live add is
+// hidden in the view too. `applyVisibility` runs only at view creation and
+// `setNodeVisible` only on a `som:set`, so before this every present tab drew
+// (and could click) a pasted, duplicated or restored hidden part until a reload.
+// The page's handler, lifted as text, on a real AtriumClient and DocumentView.
+// ---------------------------------------------------------------------------
+
+test('S-1, run: a hidden part of a remote tree is hidden in the view after app.js’s som:add handler, with no visibility pass; its visible siblings stay drawn', async () => {
+  const { DocumentView } = await import('../../../packages/renderer-three/node_modules/@gltf-transform/view/dist/index.js')
+  const { setNodeVisible } = await import('../../../packages/renderer-three/src/visibility.js')
+  const HEADLESS = { imageProvider: { initTexture() {}, getTexture: async () => null, clear() {}, dispose() {}, setKTX2Loader() { return this } } }
+  const mocks = []
+  const client = new AtriumClient({
+    WebSocket: class { constructor() { const m = new MockWebSocket(); mocks.push(m); return m } },
+    connectTimeout: 0,
+  })
+  client.connect('ws://mock', {})
+  const doc = new Document()
+  const scene = doc.createScene('Scene')
+  scene.addChild(doc.createNode('Crate'))
+  Object.assign(client, { _sessionId: 'session-aabbccdd', _displayName: 'User-sess', _connected: true, _worldReady: true, _som: new SOMDocument(doc) })
+  client._attachMutationListeners()
+  const docView = new DocumentView(doc, HEADLESS)
+  const sceneGroup = docView.view(scene)
+  const frames = []
+  new Function('client', 'setNodeVisible', 'requestAnimationFrame', 'docView', 'VIEW_FRAME_LIMIT',
+    `${handler('som:add', '\\{ nodeName: addedName \\} = \\{\\}')}\n})`)(client, setNodeVisible, (fn) => frames.push(fn), docView, 10)
+
+  const TRI = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+  const lamp = {
+    name: 'lamp',
+    children: [
+      { name: 'shade', mesh: { primitives: [{ attributes: { POSITION: TRI } }] } },
+      { name: 'stand', extras: { __atrium_visible: false }, mesh: { primitives: [{ attributes: { POSITION: TRI } }] } },
+    ],
+  }
+  mocks[0].simulateMessage({ type: 'add', seq: 7, node: lamp, session: 'session-other000' })
+  const view = (name) => { let found = null; sceneGroup.traverse((o) => { if (!found && o.name === name) found = o }); return found }
+  assert.equal(client.som.getNodeByName('stand').visible, false, 'the SOM says hidden')
+  assert.ok(view('stand'), 'the view built the part')
+  assert.equal(view('stand').visible, false, 'and the view hides it')
+  assert.equal(view('shade').visible, true)
+  assert.equal(view('lamp').visible, true)
+  assert.equal(frames.length, 0, 'no retry when the view object is already there')
+})
+
+test('S-1: the hidden part’s view object may come a frame late: the handler retries, at most VIEW_FRAME_LIMIT frames, and stops if the node went', () => {
+  const body = handler('som:add', '\\{ nodeName: addedName \\} = \\{\\}')
+  const node = { name: 'stand', visible: false }
+  let som = { getNodeByName: (n) => (n === 'stand' ? node : null) }
+  const client = { on: (_e, fn) => { client.fn = fn }, get som() { return som } }
+  let built = 0
+  const appear = 3
+  const calls = []
+  const setNodeVisible = (_dv, n, v) => { calls.push(v); return built >= appear ? 1 : 0 }
+  const frames = []
+  new Function('client', 'setNodeVisible', 'requestAnimationFrame', 'docView', 'VIEW_FRAME_LIMIT', `${body}\n})`)(client, setNodeVisible, (fn) => frames.push(fn), {}, 10)
+  client.fn({ nodeName: 'stand' })
+  while (frames.length) { built++; frames.shift()() }
+  assert.deepEqual(calls, [false, false, false, false], 'the add, then three frames until the object exists')
+  calls.length = 0
+  built = -100
+  client.fn({ nodeName: 'stand' })
+  while (frames.length) frames.shift()()
+  assert.equal(calls.length, 11, 'the add and ten frames, then it gives up')
+  calls.length = 0
+  client.fn({ nodeName: 'stand' })
+  som = { getNodeByName: () => null }
+  while (frames.length) frames.shift()()
+  assert.equal(calls.length, 1, 'the node went: no retry touches it')
+  calls.length = 0
+  som = { getNodeByName: () => ({ name: 'shade', visible: true }) }
+  client.fn({ nodeName: 'shade' })
+  assert.equal(calls.length, 0, 'a visible node: nothing to do (the view draws it already)')
+})

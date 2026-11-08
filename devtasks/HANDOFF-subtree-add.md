@@ -6,7 +6,8 @@
 DEV's (`42aa56ff`, `release_status`, 2026-11-07); only `devtasks/` differs. **Implemented by Claude in the
 fast lane** (SA-L5 (a)), no OpenRouter. **Checked by a fresh Claude agent**
 (§7: no must-fix; its two should-fix and three of its nits taken in commit 6).
-Not yet reviewed outside; not published or deployed.
+**Reviewed outside** (Fable, at `02b5554b`: APPROVE WITH NITS; §8: its
+should-fix and N-2 taken in commit 8). Not published or deployed.
 
 The decisions it implements: SA-L1 (a) one `add` carries the tree; SA-L2 (a)
 256 nodes, 8 generations, 1,024 primitives, the socket's 1,048,576 bytes as the
@@ -22,16 +23,18 @@ SA-L7 (c): selection and parts (T11) are the next round's, §9.
 | 3 `650c1af` | T7: the client sends `addFields` 3; `ADD_FIELDS_LEVEL` 3 in `isStaleEditor` and the server hello; `client.serverAddFields`; both hello schemas; the moved tests and `c1.py` |
 | 4 `96584a2` | T4, T5, T12's builder: `_onAdd` (one `som:add` per member, `som:desync` on a failed ingest), `som:remove`'s `removed`; Duplicate and Undo of trees (`edit-duplicate.js`, `edit-undo.js`); the `som:add`/`som:remove` re-captures and the delete question in `app.js` |
 | 5 `fd0bb88` | T6: Copy and Paste of trees (`copy-paste.js`), the Inspect panel's parts line and the paste's level, notes and retry (`app.js`); the two-world end-to-end group test; the full suites; the proofs; this file |
-| 6 (see §7) | the fresh check's fixes: the Copy and Paste notes' parts summary, T6's lowercase "includes", the paste retry keeping a free root name, `ingestNode`'s first pass numbering exactly what the build numbers, the client half of the byte-bound test |
+| 6 `02b5554` | the fresh check's fixes: the Copy and Paste notes' parts summary, T6's lowercase "includes", the paste retry keeping a free root name, `ingestNode`'s first pass numbering exactly what the build numbers, the client half of the byte-bound test |
+| 7 `d2aadc2` | `devtasks/` only: the outside code-review prompt, this file's base line |
+| 8 (see §8) | the outside review's fixes: a part that arrives hidden in a live add is hidden in the view (`app.js`); the e2e's Undo wiring takes `app.js`'s re-captures, and a part removed elsewhere during a group's Delete |
 
 Code files touched are §6's list. Outside it: only `devtasks/` (this file).
 
 ## 2. Tests
 - **All suites, each server file alone under `timeout 180`:** 65 suites,
-  **4,451 passing, 0 failing, 1 named skip** (richer-add's R7 skip, unchanged),
+  **4,451 passing, 0 failing, 1 named skip** (`apps/client`'s richer-add R7 stated-limit test, unchanged; the outside review caught that this said the server's),
   at commit 5's code before the proofs. The proofs added one test (the run-time
   pad wiring test, §2.2) and changed nine assertions in five test files (§4,
-  item 9); each touched file was rerun alone and passes: **4,452** (a full run confirmed it). After commit 6: **4,460**, 0 failing.
+  item 9); each touched file was rerun alone and passes: **4,452** (a full run confirmed it). After commit 6: **4,460**; after commit 8: **4,463**, 0 failing.
   Baseline at `99ed7a8`: 64 suites, 4,234 passing, the same skip.
 - **`message-depth-measure.test.js`**: the deepest message is now 27 levels
   (an 8-generation tree with a template leaf on its deepest member; the guard
@@ -236,3 +239,42 @@ each reproduced here before anything changed, and what was done (commit 6):
   1,020-node world take 21 ms; no change. The SOM inspector's
   `treeView.rebuild` per member is in `tools/`, outside §6's file list: a
   follow-up if it shows.
+
+## 8. The outside code review (Fable, of `02b5554b`)
+`devtasks/REVIEW-subtree-add-code-fable.md`. **APPROVE WITH NITS**, no
+must-fix. It cloned, ran every listed file (after rebuilding `better-sqlite3`,
+N-1), and probed the real server and two real tabs: hostile shapes against
+step 0 and Ajv, the ref numbering across `{}`, no-material primitives and a
+cross-branch ref (server, client and reload), and Undo/Redo of groups across
+two tabs (E2–E6). Each finding reproduced here before anything changed, and
+what was done (commit 8):
+
+- **S-1, a hidden part that arrives in a live add was drawn, and clickable,
+  in every present tab until a reload.** Reproduced: `applyVisibility` runs
+  only at view creation and `setNodeVisible` only on a `som:set`; a pasted,
+  duplicated or restored group keeps its hidden parts on purpose (T6), and a
+  hidden single object restored by Undo had the same gap before this round.
+  **My render test hid it:** it called `applyVisibility` itself ("once
+  Atrium's visibility pass runs"), so it passed for a reason the page never
+  reaches. Taken: `app.js` has a `som:add` handler that hides a node arriving
+  hidden, retrying for at most `VIEW_FRAME_LIMIT` (10) frames while the view
+  object isn't built yet, and only while the node is still the one that came.
+  Two tests in `subtree-add-wiring`, both failing before: the handler lifted
+  as text on a real `AtriumClient` and a headless DocumentView, with no
+  visibility pass (the hidden part's object hidden, its siblings drawn); and
+  the retry's frames, its limit, and its stop when the node is gone.
+- **N-1, the prompt's `--ignore-scripts` leaves `better-sqlite3` unbuilt**,
+  so two e2e tests fail on a fresh clone. For the next prompt: run
+  `pnpm rebuild better-sqlite3` (or drop `--ignore-scripts`). A line for
+  AGENTS.md's gotchas, with §2.2's `assert.equal` one, is the operator's call.
+- **N-2, the e2e's Undo wiring had no re-captures**, so the in-flight case
+  never ran end to end. Taken: `wireUndo(client, { recaptures: true })` wires
+  `app.js`'s two (on `som:add`, the root's event; on every `som:remove`), and
+  a new e2e test removes a part in tab B while tab A's Delete of the group is
+  in flight; one Undo brings back the group as the server held it (without
+  the part) on the server and in B. Without the re-captures it fails (the
+  part comes back). (p8) is now caught at run time too.
+- **N-3, the K7/K6 notes name a part by its pasted name** ("“stand copy”"),
+  since names are chosen first. Kept: it is the name the part has here, the
+  one the person can find. Recorded.
+- **The skip** is `apps/client`'s, as it said: §2 corrected.
