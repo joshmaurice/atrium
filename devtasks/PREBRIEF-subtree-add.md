@@ -1,15 +1,15 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1.7 (2026-11-07). Decided (operator, 2026-11-07):
+Status: **DRAFT, Revision 1.8 (2026-11-07): every decision taken. Decided (operator, 2026-11-07):
 SA-L2 (a) (17:37: "no preference", so the recommendation); SA-L6 (d), a
 selection round of its own next (19:13: "separate round"); SA-L4 (a), as
 recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
-(c), parts go with the selection round (19:39: "second option").** Open:
-SA-L1 and SA-L5. The next placement round after `copy-objects` (RA-L6 (a),
+(c), parts go with the selection round (19:39: "second option"); SA-L1 (a)
+and SA-L5 (a), as recommended (20:00: "go with the recs").** The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
 children**, so a top-level group can be duplicated, deleted and undone, and
-copied between worlds. **Still to come:** the remaining decisions and one
-ChatGPT review. (A second fresh-agent check, of T11 and T12, is folded in:
+copied between worlds. **Still to come:** one ChatGPT review
+(`OUTSIDE-REVIEW-PROMPT-subtree-add.md`), then FINAL. (A second fresh-agent check, of T11 and T12, is folded in:
 §7, Rev 1.7.)
 - **What it builds on.** `PREBRIEF-add-check.md` FINAL Rev 1.1 (A1–A10),
   `PREBRIEF-richer-add.md` FINAL Rev 2 (R1–R10) and `PREBRIEF-copy-objects.md`
@@ -462,7 +462,8 @@ node, nested).
 ## 3. Decisions (for the operator)
 Binding from earlier rounds: RA-L1–RA-L8, C1–C4, CP-L1–CP-L8, PC.
 
-**SA-L1. How a subtree travels.**
+**SA-L1. How a subtree travels.** **Decided (operator, 2026-11-07, 20:00):
+(a), as recommended.**
 - **(a) Recommended: one `add` carries the tree, in and out.** `node` gains
   `children`: an array of node descriptors of the same form, recursively, in
   both schemas. The server checks every member and the tree rules **before
@@ -494,7 +495,8 @@ Binding from earlier rounds: RA-L1–RA-L8, C1–C4, CP-L1–CP-L8, PC.
   bump is a rule that exists and shipped once. (b) trades a protocol change
   for client-side transactions; (c) trades it for echo timing.
 
-**SA-L2. The bounds on one message** (with SA-L1 (a)).
+**SA-L2. The bounds on one message** (with SA-L1 (a)). **Decided (operator,
+2026-11-07, 17:37: "no preference"): (a), as recommended.**
 - **(a) Recommended: at most 256 nodes, root included; at most 8 generations
   below the root; the 1,000,000-byte cap on the whole message.** 8 is two
   under what §2.1's measurement allows (10 at the 32 ceiling); 256 is eight
@@ -624,7 +626,8 @@ a later round (§8).
   refusal ("Only top-level objects can be duplicated yet") stays one release
   longer.
 
-**SA-L5. How the round runs.**
+**SA-L5. How the round runs.** **Decided (operator, 2026-11-07, 20:00): (a),
+as recommended.**
 - **(a) Recommended: the cheap round** (`richer-add` passdown §4; CP-L8 (a)):
   one ChatGPT review of this pre-brief pinned to a SHA, a fresh-agent check,
   Claude's fast lane on `claude/subtree-add` in the commits of §6, a
@@ -1233,6 +1236,11 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.8** (2026-11-07, 20:00): **SA-L1 (a) and SA-L5 (a) decided**, as
+  recommended (operator: "go with the recs for those plz"); SA-L2's decision
+  stated at its heading. Every decision is now taken. Next: one ChatGPT
+  review of this file, pinned to its commit
+  (`OUTSIDE-REVIEW-PROMPT-subtree-add.md`).
 - **Rev 1.7** (2026-11-07, evening): a second fresh Claude agent checked T11,
   T12 and §2.8 (Rev 1.5) against the code at `516757bc` (prototyped
   `ingestNode` with children and refs and a tree builder with refs in a
