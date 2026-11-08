@@ -2,11 +2,14 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 
 import { modelExtrasProblem, modelReasonText } from '@atrium/client/model-spec'
-import { checkAddNode } from '@atrium/client/add-spec'
+import {
+  checkAddNode, nodeNameFormOk, SUBTREE_NODES_MAX, SUBTREE_DEPTH_MAX, SUBTREE_PRIMITIVES_MAX,
+} from '@atrium/client/add-spec'
 import { objectIdProblem } from '@atrium/client/object-id'
 import { withNewObjectId } from './object-identity.js'
 import { newObjectId } from '@atrium/client/object-id'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
+import { copyName } from './edit-palette.js'
 
 /**
  * edit-duplicate.js — whether a node can be duplicated, and the `add`
@@ -31,6 +34,14 @@ import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
  *   accessors (the same values; nothing in Atrium sees or edits the sharing).
  * Not exceptions (a save keeps none of them either): a cutoff outside MASK, and
  * a vector factor within 1e-5 of its default (the writer's own tolerance).
+ *
+ * subtree-add (PREBRIEF-subtree-add.md FINAL Rev 2, T5/T12): with `{ trees:
+ * true }` (the server keeps `add` level 3, `client.serverAddFields`) a node with
+ * children is copied and restored as a TREE: every member must pass the per-node
+ * rules, the tree its bounds and names; the descriptor nests `children`, and a
+ * material shared within the tree travels as `{ ref: n }`, numbered in message
+ * order (depth-first pre-order, as `checkAddNode` and `ingestNode` walk).
+ * Without it (an older server) a node with children is refused as before.
  *
  * It reads the glTF-Transform node itself (`getMesh()`, `listPrimitives()`…):
  * the SOM wrappers don't expose geometry (J4). Call it at click time; nothing
@@ -70,6 +81,9 @@ export const DUPLICATE_REASONS = Object.freeze({
   transform:  'Fix this object’s rotation or scale before duplicating it',
   size:       'This object is too large to duplicate',
   add:        'The server would refuse this object',
+  // subtree-add T5
+  names:      'Its parts don’t all have distinct names',
+  tree:       'This object has too many parts, or parts too deep',
 })
 
 function deny(rule, detail) {
@@ -389,29 +403,72 @@ function materialDescriptor(mat) {
  * primitive, counting only primitives of meshes some node still uses (a file
  * world isn't healed, so an orphan mesh's primitive mustn't count).
  *
+ * subtree-add T5/T12: for a tree, every member counts. With `trees` (the
+ * server keeps add level 3, so the restore carries material refs) only the
+ * sharing the restore LOSES counts: a member's material also used by a
+ * primitive OUTSIDE the tree, or a member's mesh used by any other node (mesh
+ * sharing isn't carried). Without it every sharing counts, as before.
+ *
  * @param {object} node  the glTF-Transform Node
+ * @param {object} [opts]
+ * @param {boolean} [opts.trees=false]
  * @returns {boolean}
  */
-export function hasSharedMaterial(node) {
-  const mesh = node?.getMesh?.()
-  if (!mesh) return false
+export function hasSharedMaterial(node, { trees = false } = {}) {
+  if (!node?.getMesh && !node?.listChildren) return false
+  const members = trees && typeof node.listChildren === 'function' ? subtreeMembers(node).map((m) => m.node) : [node]
   const nodeUsers = (m) => (m.listParents?.() ?? []).filter((p) => p.propertyType === 'Node').length
-  if (nodeUsers(mesh) > 1) return true
-  const liveUsers = (mat) => (mat.listParents?.() ?? []).filter((prim) =>
+  const livePrims = (mat) => (mat.listParents?.() ?? []).filter((prim) =>
     prim.propertyType === 'Primitive' &&
-    (prim.listParents?.() ?? []).some((m) => m.propertyType === 'Mesh' && nodeUsers(m) > 0)).length
-  return mesh.listPrimitives().some((prim) => {
-    const mat = prim.getMaterial()
-    return !!mat && liveUsers(mat) > 1
-  })
+    (prim.listParents?.() ?? []).some((m) => m.propertyType === 'Mesh' && nodeUsers(m) > 0))
+  const inTree = new Set()
+  for (const m of members) for (const prim of m.getMesh?.()?.listPrimitives() ?? []) inTree.add(prim)
+  for (const m of members) {
+    const mesh = m.getMesh?.()
+    if (!mesh) continue
+    if (nodeUsers(mesh) > 1) return true
+    for (const prim of mesh.listPrimitives()) {
+      const mat = prim.getMaterial()
+      if (!mat) continue
+      const users = livePrims(mat)
+      if (trees ? users.some((u) => !inTree.has(u)) : users.length > 1) return true
+    }
+  }
+  return false
 }
 
 /**
  * The descriptor, from current values. Assumes the rules passed.
  * `offsetX` is 0 for a restore (Y2): the node's own translation, bit for bit
  * — never `x + 1.5 − 1.5`, which is not always `x` in floating point (U5).
+ *
+ * subtree-add T5/T12: a node with children nests them in `children`, in
+ * `listChildren()` order, each member with its own name and local TRS (the
+ * root alone takes `name` and the offset). With `refs`, a material used again
+ * within the descriptor is `{ ref: n }`, n its number in message order (each
+ * inline material takes the next); a material shared with anything outside
+ * is inline at its first use here. A node without children builds today's
+ * descriptor exactly, and so does one whose materials are all distinct.
  */
-export function buildDescriptor(node, name, offsetX) {
+export function buildDescriptor(node, name, offsetX, { refs = false } = {}) {
+  const numbering = refs ? new Map() : null
+  let root = null
+  const stack = [{ node, parent: null, index: 0 }]
+  while (stack.length > 0) {
+    const { node: n, parent, index } = stack.pop()
+    const children = n.listChildren()
+    const own = parent ? buildOneDescriptor(n, n.getName(), 0, numbering) : buildOneDescriptor(n, name, offsetX, numbering)
+    // the child slots are made with the object, filled as the walk reaches them
+    const d = children.length > 0 ? { ...own, children: new Array(children.length) } : own
+    if (parent) parent.children[index] = d
+    else root = d
+    for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i], parent: d, index: i })
+  }
+  return root
+}
+
+/** One node's own descriptor (no `children`): today's builder. */
+function buildOneDescriptor(node, name, offsetX, numbering) {
   const t = node.getTranslation()
   const descriptor = {
     name,
@@ -436,7 +493,14 @@ export function buildDescriptor(node, name, offsetX) {
       const primExtras = prim.getExtras()
       if (!isEmptyObject(primExtras)) out.extras = structuredClone(primExtras)
       const mat = prim.getMaterial()
-      if (mat) out.material = materialDescriptor(mat)
+      if (mat) {
+        if (numbering && numbering.has(mat)) {
+          out.material = { ref: numbering.get(mat) }      // T12
+        } else {
+          if (numbering) numbering.set(mat, numbering.size)
+          out.material = materialDescriptor(mat)
+        }
+      }
       return out
     })
     descriptor.mesh = mesh.getName() !== '' ? { name: mesh.getName(), primitives } : { primitives }
@@ -467,20 +531,40 @@ function minGeometryBytes(mesh) {
   return elements * 2
 }
 
+/** A part's name, safe to show in a reason (no control or direction characters, at most 64). */
+function shownName(name) {
+  let out = ''
+  for (const ch of String(name ?? '')) {
+    const c = ch.codePointAt(0)
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029 || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) continue
+    out += ch
+  }
+  return out.length > 64 ? `${out.slice(0, 63)}…` : out
+}
+
 /**
- * Rules 1–8 of N3, and rule 9's lower bound, without building the copy.
- * Cheap enough for the button's hint, which runs on many events (S2); the
- * click runs prepareDuplicate, which measures the real size.
+ * subtree-add T5 — the node and every node below it, in message order
+ * (depth-first pre-order, children in `listChildren()` order, an explicit
+ * stack): the order `checkAddNode`, `ingestNode` and `buildDescriptor` share.
  *
- * @param {object} node  the glTF-Transform Node
- * @param {object} [opts]
- * @param {boolean} [opts.credit=true]  false skips the credit check (copy-objects K5: Copy)
- * @returns {null | {ok: false, rule: string, reason: string}}  null when no rule refuses it
+ * @param {object} node  a glTF-Transform Node
+ * @returns {Array<{ node: object, generation: number }>}
  */
-export function duplicateRuleProblem(node, { credit = true } = {}) {
-  if (node.listChildren().length > 0) return deny('children')
+export function subtreeMembers(node) {
+  const out = []
+  const stack = [{ node, generation: 0 }]
+  while (stack.length > 0) {
+    const entry = stack.pop()
+    out.push(entry)
+    const children = entry.node.listChildren()
+    for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i], generation: entry.generation + 1 })
+  }
+  return out
+}
+
+/** Rules 3–8 of N3: everything about the node itself (not its place in the tree). */
+function nodeRuleProblem(node, { credit }) {
   const parents = node.listParents().map((p) => p.propertyType)
-  if (parents.includes('Node')) return deny('parent')
   if (node.getCamera() || node.getSkin() || node.getExtension?.('KHR_lights_punctual')) return deny('attached')
   if (parents.some((t) => !SCENE_GRAPH_PARENTS.has(t))) return deny('referenced')
   const extras = node.getExtras()
@@ -498,11 +582,56 @@ export function duplicateRuleProblem(node, { credit = true } = {}) {
   if (hasExtensions(node)) return deny('extensions')
   const t = transformProblem(node.getRotation(), node.getScale())
   if (t) return deny('transform', t)
-  if (mesh) {
-    const min = minGeometryBytes(mesh)
-    if (min > MAX_ADD_BYTES) {
-      return deny('size', `at least ${min.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
+  return null
+}
+
+/**
+ * Rules 1–8 of N3, and rule 9's lower bound, without building the copy.
+ * Cheap enough for the button's hint, which runs on many events (S2); the
+ * click runs prepareDuplicate, which measures the real size.
+ *
+ * subtree-add T5: with `trees`, a node with children passes when every member
+ * passes rules 3–8 (a member's refusal names it), the tree is within SA-L2's
+ * bounds (`tree`), and its members' names are in the D3 form and distinct
+ * (`names`). `parent` stays: a part isn't copied or restored on its own.
+ *
+ * @param {object} node  the glTF-Transform Node
+ * @param {object} [opts]
+ * @param {boolean} [opts.credit=true]  false skips the credit check (copy-objects K5: Copy)
+ * @param {boolean} [opts.trees=false]  the server keeps add level 3 (subtree-add T7)
+ * @returns {null | {ok: false, rule: string, reason: string}}  null when no rule refuses it
+ */
+export function duplicateRuleProblem(node, { credit = true, trees = false } = {}) {
+  if (!trees && node.listChildren().length > 0) return deny('children')
+  const parents = node.listParents().map((p) => p.propertyType)
+  if (parents.includes('Node')) return deny('parent')
+  const members = trees ? subtreeMembers(node) : [{ node, generation: 0 }]
+  if (members.length > 1) {
+    if (members.length > SUBTREE_NODES_MAX) return deny('tree')
+    let primitives = 0
+    for (const { node: m, generation } of members) {
+      if (generation > SUBTREE_DEPTH_MAX) return deny('tree')
+      primitives += m.getMesh()?.listPrimitives().length ?? 0
     }
+    if (primitives > SUBTREE_PRIMITIVES_MAX) return deny('tree')
+    const names = new Set()
+    for (const { node: m } of members) {
+      const n = m.getName()
+      if (!nodeNameFormOk(n) || names.has(n)) return deny('names')
+      names.add(n)
+    }
+  }
+  for (const { node: m } of members) {
+    const p = nodeRuleProblem(m, { credit })
+    if (p) return m === node ? p : { ...p, member: m.getName(), reason: `${p.reason} (in “${shownName(m.getName())}”)` }
+  }
+  let min = 0
+  for (const { node: m } of members) {
+    const mesh = m.getMesh()
+    if (mesh) min += minGeometryBytes(mesh)
+  }
+  if (min > MAX_ADD_BYTES) {
+    return deny('size', `at least ${min.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   }
   return null
 }
@@ -521,7 +650,22 @@ export function duplicateRuleProblem(node, { credit = true } = {}) {
  */
 export function remapBehaviorTargets(behavior, fromId, toId) {
   if (behavior == null || typeof behavior !== 'object' || !fromId || !toId) return behavior
-  const swap = (id) => (id === fromId ? toId : id)
+  return remapBehaviorIds(behavior, new Map([[fromId, toId]]))
+}
+
+/**
+ * subtree-add T5/T6 — `remapBehaviorTargets` for a tree: every id in `map`
+ * (a member's old id → its copy's) is swapped wherever it appears, so a
+ * reference to a member becomes a reference to its copy; every other id is
+ * kept (a grant, F-L10). Pure; the input is never mutated.
+ *
+ * @param {object} behavior
+ * @param {Map<string, string>} map
+ * @returns {object}
+ */
+export function remapBehaviorIds(behavior, map) {
+  if (behavior == null || typeof behavior !== 'object' || !(map instanceof Map) || map.size === 0) return behavior
+  const swap = (id) => (map.has(id) ? map.get(id) : id)
   const copy = structuredClone(behavior)
   if (Array.isArray(copy.nodeMap)) copy.nodeMap = copy.nodeMap.map(swap)
   if (Array.isArray(copy.targets)) copy.targets = copy.targets.map(swap)
@@ -542,33 +686,66 @@ function addSpecProblem(descriptor) {
   return problem ? deny('add', `${problem.code}: ${problem.message}`) : null
 }
 
-/** The descriptor, with the copy's behaviour remapped, if it carries one. */
-function withRemappedBehavior(descriptor, fromId, toId) {
-  const atrium = descriptor.extras?.atrium
-  if (!atrium || typeof atrium !== 'object' || !Object.hasOwn(atrium, 'behavior')) return descriptor
-  const behavior = remapBehaviorTargets(atrium.behavior, fromId, toId)
-  if (behavior === atrium.behavior) return descriptor
-  return { ...descriptor, extras: { ...descriptor.extras, atrium: { ...atrium, behavior } } }
+/** Every descriptor of a built tree, the root first, in message order. */
+function descriptorMembers(root) {
+  const out = []
+  const stack = [root]
+  while (stack.length > 0) {
+    const d = stack.pop()
+    out.push(d)
+    const children = Array.isArray(d.children) ? d.children : []
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+  }
+  return out
 }
 
 /**
  * Can this node be duplicated, and if so, what does the copy look like?
  * Rules 1–9 of N3, in order; the first that fails is reported.
  *
+ * subtree-add T5 (with `trees`): a tree is copied whole. The root is named
+ * `name`; every member whose name isn't free in the world (`isFree`), or is
+ * already chosen for the copy, gets `copyName`; EVERY member gets a fresh
+ * object id (E7, as the root does), and one map from each member's old id to
+ * its new one remaps every behaviour in the tree (a reference to a member
+ * becomes one to its copy; any other id is kept, a grant). Materials shared
+ * within the tree travel as refs (T12): the copies share among themselves.
+ *
  * @param {object} node  the glTF-Transform Node (read now, at click time)
  * @param {object} opts
  * @param {string} opts.name  the copy's name (J5); it counts toward rule 9
+ * @param {(name: string) => boolean} [opts.isFree]  is a name free in the world (subtree-add)
+ * @param {boolean} [opts.trees=false]  the server keeps add level 3 (subtree-add T7)
  * @returns {{ok: true, descriptor: object, bytes: number} | {ok: false, rule: string, reason: string}}
  */
-export function prepareDuplicate(node, { name }) {
-  const problem = duplicateRuleProblem(node)
+export function prepareDuplicate(node, { name, isFree = () => true, trees = false }) {
+  const problem = duplicateRuleProblem(node, { trees })
   if (problem) return problem
-  // E7 — the copy never carries the original's id. prepareRestore does not do
+  const built = buildDescriptor(node, name, DUPLICATE_OFFSET_X, { refs: trees })
+  const members = descriptorMembers(built)
+  // T5 — the members' names: kept when free, else the next copy name.
+  const chosen = new Set([name])
+  for (const d of members.slice(1)) {
+    const free = (x) => isFree(x) && !chosen.has(x)
+    const next = free(d.name) ? d.name : copyName(d.name, free)
+    if (next == null) return deny('names', 'no free name for one of its parts')
+    d.name = next
+    chosen.add(next)
+  }
+  // E7 — the copy never carries the original's ids. prepareRestore does not do
   // this: a restore brings back the same object.
-  const originalId = node.getExtras()?.atrium?.objectId
-  const copyId = newObjectId()
-  const built = buildDescriptor(node, name, DUPLICATE_OFFSET_X)
-  const descriptor = withRemappedBehavior(withNewObjectId(built, () => copyId), originalId, copyId)
+  const ids = new Map()
+  for (const d of members) {
+    const oldId = d.extras?.atrium?.objectId
+    const fresh = newObjectId()
+    if (typeof oldId === 'string') ids.set(oldId, fresh)
+    d.extras = withNewObjectId(d, () => fresh).extras
+  }
+  for (const d of members) {
+    const atrium = d.extras?.atrium
+    if (atrium && Object.hasOwn(atrium, 'behavior')) atrium.behavior = remapBehaviorIds(atrium.behavior, ids)
+  }
+  const descriptor = built
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   const refused = addSpecProblem(descriptor)
@@ -585,18 +762,22 @@ export function prepareDuplicate(node, { name }) {
  * values, not key order). richer-add R8: `sharedMaterial: true` when the
  * restore won't share what the node shares (`hasSharedMaterial`).
  *
+ * subtree-add T5 (with `trees`): a tree comes back whole, every member under
+ * its own name and id, its internal sharing as refs (T12).
+ *
  * @param {object} node  the glTF-Transform Node (read now, from current values)
  * @param {object} [opts]
  * @param {string} [opts.name]  defaults to the node's own name
+ * @param {boolean} [opts.trees=false]  the server keeps add level 3 (subtree-add T7)
  * @returns {{ok: true, descriptor: object, bytes: number, sharedMaterial?: true} | {ok: false, rule: string, reason: string}}
  */
-export function prepareRestore(node, { name = node.getName?.() } = {}) {
-  const problem = duplicateRuleProblem(node)
+export function prepareRestore(node, { name = node.getName?.(), trees = false } = {}) {
+  const problem = duplicateRuleProblem(node, { trees })
   if (problem) return problem
-  const descriptor = buildDescriptor(node, name, 0)
+  const descriptor = buildDescriptor(node, name, 0, { refs: trees })
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) return deny('size', `${bytes.toLocaleString('en-US')} bytes; the limit is ${MAX_ADD_BYTES.toLocaleString('en-US')}`)
   const refused = addSpecProblem(descriptor)
   if (refused) return refused
-  return hasSharedMaterial(node) ? { ok: true, descriptor, bytes, sharedMaterial: true } : { ok: true, descriptor, bytes }
+  return hasSharedMaterial(node, { trees }) ? { ok: true, descriptor, bytes, sharedMaterial: true } : { ok: true, descriptor, bytes }
 }

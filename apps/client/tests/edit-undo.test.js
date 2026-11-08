@@ -707,7 +707,9 @@ describe('edit-undo: what is recorded and what is not (Y1, W5)', () => {
     assert.equal(app.undo.undoCount, 1)
     assert.equal(app.undo.redoCount, 1)
 
-    // a group: it has children, so it can never come back (U6)
+    // a group: it has children, so it can never come back (U6). subtree-add:
+    // that is the engine below add level 3 (no `trees`), as before the round;
+    // the tree cases are subtree-add-undo.test.js.
     const grp = app.put(somNode('grp-test', { children: [somNode('leg')] }))
     const { restorable } = app.clickDelete(grp)
     assert.equal(restorable, false, 'the dialog path (W6)')

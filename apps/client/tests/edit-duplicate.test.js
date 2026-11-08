@@ -112,7 +112,9 @@ function expectRule(n, rule) {
 
 // ── One test per rule (§N3 1–9) ─────────────────────────────────────────────
 
-test('rule 1: a node with children is refused', () => {
+// subtree-add: rule 1 holds below add level 3 (no `trees`); the tree cases are
+// subtree-add-duplicate.test.js.
+test('rule 1: a node with children is refused (below add level 3)', () => {
   expectRule(node({ mesh: cubeMesh(), children: [{}] }), 'children')
 })
 
@@ -193,7 +195,7 @@ test('rule 9 (outside review S2): far over the cap is refused by a lower bound, 
 
 test('duplicateRuleProblem: null for an eligible node; never builds the copy', () => {
   assert.equal(duplicateRuleProblem(node({ mesh: cubeMesh() })), null)
-  assert.equal(duplicateRuleProblem(node({ children: [{}] })).rule, 'children')
+  assert.equal(duplicateRuleProblem(node({ children: [{}] })).rule, 'children', 'below add level 3')
 })
 
 test('rule 6: primitive mode other than triangles', () => {

@@ -47,6 +47,13 @@ export const OUT_OF_STEP_MESSAGE =
 export const DELETE_CHANGED_MESSAGE =
   'This delete can’t be undone: the object changed while it was being deleted.'
 export const UNDOING_MESSAGE = 'Undoing…'
+/**
+ * subtree-add T5 (the fresh-agent check's S6) — why a group can't be captured:
+ * a part holds its name without being addressable by it (a shadowed duplicate,
+ * or a name an animation or a `.camera`/`.light` alias took first), so its
+ * restore would be refused. The capture failing makes Delete ask first.
+ */
+export const PART_NOT_ADDRESSABLE = 'One of its parts can’t be restored under its own name'
 
 /** How the panel names a transform field in a message. */
 const FIELD_NAME = { translation: 'position', rotation: 'rotation', scale: 'scale', visible: 'visibility' }
@@ -93,8 +100,12 @@ function sameDescriptor(a, b) {
  * @param {object} deps
  * @param {(name: string) => object|null} deps.getNodeByName  SOM lookup by name
  * @param {(name: string, node?: object) => {ok: boolean, message?: string}} deps.checkNewName
- * @param {(gltfNode: object) => {ok: true, descriptor: object}|{ok: false, reason: string}} deps.prepareRestore
+ * @param {(gltfNode: object, opts?: {trees: boolean}) => {ok: true, descriptor: object}|{ok: false, reason: string}} deps.prepareRestore
  *   edit-duplicate's `prepareRestore` (Y2)
+ * @param {(name: string) => object|null} [deps.getObjectByName]  subtree-add T5: the SOM's
+ *   name-space lookup (nodes, animations, camera and light aliases); defaults to getNodeByName
+ * @param {() => boolean} [deps.trees]  subtree-add T7: the server keeps add level 3
+ *   (`client.serverAddFields >= 3`), so a group is captured and restored as a tree
  * @param {(node: object, field: string, value: number[]) => (number|null)} deps.sendTransform
  *   editTracker.commit(node, field, value, { record: false })
  * @param {(node: object, from: string, to: string, direction: string) => (number|null)} deps.rename
@@ -124,7 +135,10 @@ export function createEditUndo({
   isRenamePending = () => false,
   hasPendingSend = () => false,
   hasPendingStructural = () => false,
+  getObjectByName = null,
+  trees = () => false,
 }) {
+  const objectByName = getObjectByName ?? getNodeByName
   /** @type {WeakMap<object, {node: object}>} */
   const handles = new WeakMap()
   /** @type {object[]} oldest first; the newest is undone first */
@@ -285,13 +299,35 @@ export function createEditUndo({
 
   // ── Recording: adds, duplicates and deletes (Y1, Y2) ───────────────────
 
-  /** Y2 — capture what would bring this node back, from its current values. */
+  /**
+   * Y2 — capture what would bring this node back, from its current values.
+   * subtree-add T5: with `trees()`, a node with children is captured whole,
+   * every part addressable by its own name (else the capture fails, so Delete
+   * asks), and the result names each part's handle (`members`), so a re-add can
+   * point older entries for the parts at the parts that come back (S3).
+   */
   function capture(node) {
     const gltfNode = node?._node
     if (!gltfNode) return { ok: false, reason: 'not addressable' }
-    const r = prepareRestore(gltfNode)
+    const t = trees() === true
+    const parts = t ? collectSubtree(node).slice(1) : []
+    for (const part of parts) {
+      if (objectByName(part.name) !== part) return { ok: false, reason: PART_NOT_ADDRESSABLE }
+    }
+    const r = prepareRestore(gltfNode, { trees: t })
     if (!r.ok) return { ok: false, reason: r.reason }
-    return { ok: true, descriptor: r.descriptor, sharedMaterial: r.sharedMaterial === true }
+    return {
+      ok: true,
+      descriptor: r.descriptor,
+      sharedMaterial: r.sharedMaterial === true,
+      members: parts.map((part) => ({ name: part.name, handle: handleFor(part) })),
+    }
+  }
+
+  /** subtree-add T5 — a removed node's parts, as `{ name, handle }` (for a click delete). */
+  function partHandles(node) {
+    if (!node || trees() !== true) return []
+    return collectSubtree(node).slice(1).map((part) => ({ name: part.name, handle: handleFor(part) }))
   }
 
   function registerAdd(seq, { name, duplicate = false }) {
@@ -308,8 +344,8 @@ export function createEditUndo({
     if (seq == null) return
     // richer-add R8 — read here from the node (cheap), since the caller passes
     // only the click-time descriptor
-    const sharedMaterial = !!descriptor && hasSharedMaterial(node?._node)
-    const req = { kind: 'delete', seq, node, name, descriptor: descriptor ?? null, sharedMaterial, failed: false }
+    const sharedMaterial = !!descriptor && hasSharedMaterial(node?._node, { trees: trees() === true })
+    const req = { kind: 'delete', seq, node, name, descriptor: descriptor ?? null, sharedMaterial, members: partHandles(node), failed: false }
     requests.set(seq, req)
     deleteWindow = req
     return req
@@ -337,7 +373,10 @@ export function createEditUndo({
     // richer-add R8 — the entry's note follows the object as it is NOW: after a
     // Delete and an Undo the restored object shares nothing, so its next
     // Undo-of-delete has no note (the entry's descriptor follows R4's re-capture)
-    if (cap.ok) entry.sharedMaterial = cap.sharedMaterial
+    if (cap.ok) {
+      entry.sharedMaterial = cap.sharedMaterial
+      entry.members = cap.members
+    }
   }
 
   /** A `som:set`, `som:rename` or `som:add` while a delete is pending (Y2). */
@@ -350,10 +389,12 @@ export function createEditUndo({
     if (!cap.ok) { req.failed = true; return }
     req.descriptor = cap.descriptor
     req.sharedMaterial = cap.sharedMaterial
+    req.members = cap.members
     // R4 — a removal's entry keeps the descriptor its later re-add will use
     if (req.entry) {
       req.entry.descriptor = cap.descriptor
       req.entry.sharedMaterial = cap.sharedMaterial
+      req.entry.members = cap.members
     }
   }
 
@@ -368,6 +409,7 @@ export function createEditUndo({
       name: req.name,
       handle: handleFor(node),
       descriptor: cap.descriptor,
+      members: cap.members,
     })
   }
 
@@ -386,6 +428,7 @@ export function createEditUndo({
       handle: handleFor(req.node),
       descriptor: req.descriptor,
       sharedMaterial: req.sharedMaterial === true,
+      members: req.members ?? [],
     })
   }
 
@@ -561,10 +604,10 @@ export function createEditUndo({
       return { ok: true }
     }
 
-    // a remove: undo of an add, or redo of a delete
-    if (node.children && node.children.length > 0) {
-      return { ok: false, message: `${verb}: “${name}” was changed elsewhere.` }
-    }
+    // a remove: undo of an add, or redo of a delete. subtree-add T5: the whole
+    // tree's capture is compared (a part added, removed or changed elsewhere
+    // makes it differ); without trees, a node that has grown children can't be
+    // captured, so it is "changed elsewhere" as before.
     const cap = capture(node)
     if (!cap.ok || !sameDescriptor(cap.descriptor, entry.descriptor)) {
       return { ok: false, message: `${verb}: “${name}” was changed elsewhere.` }
@@ -609,6 +652,16 @@ export function createEditUndo({
       // edit:accepted), so older entries for the node follow it too (W2)
       const fresh = getNodeByName(entry.descriptor.name)
       if (fresh) repoint(entry.handle, fresh)
+      // subtree-add T5 (S3) — and every part's handle follows the part that
+      // came back, by name (unique within a tree, T1), so an older entry for a
+      // part (an Alt-clicked move) still undoes.
+      if (fresh) {
+        const inTree = new Set(collectSubtree(fresh))
+        for (const { name: partName, handle } of entry.members ?? []) {
+          const part = getNodeByName(partName)
+          if (part && inTree.has(part)) repoint(handle, part)
+        }
+      }
     }
     const removedNode = removed ? entry.handle.node : null
     moveEntry(entry, direction)

@@ -1655,16 +1655,35 @@ export class AtriumClient extends EventEmitter {
     // R1 — the whole remote apply runs inside applyLocally: addChild dispatches
     // a childList mutation on the parent, and that must stay local (it is not
     // an edit anybody made and has no field to send).
-    const node = this.applyLocally(() => {
-      const somNode = this._som.ingestNode(msg.node)
-      if (parentNode) parentNode.addChild(somNode)
-      else this._som.scene.addChild(somNode)
-      return somNode
-    })
-    this._attachNodeListeners(node)
+    // subtree-add T3 — ingestNode builds the whole tree (atomic: a message it
+    // can't resolve throws before anything is made).
+    let node
+    try {
+      node = this.applyLocally(() => {
+        const somNode = this._som.ingestNode(msg.node)
+        if (parentNode) parentNode.addChild(somNode)
+        else this._som.scene.addChild(somNode)
+        return somNode
+      })
+    } catch (err) {
+      if (this._debug) this._log(`som:desync — add "${msg.node?.name}" could not be ingested: ${err.message}`)
+      this.emit('som:desync', { reason: 'add-not-ingested', node: msg.node?.name ?? null })
+      return
+    }
+    // subtree-add T4 — listeners on EVERY member, as the som-dump path attaches
+    // them (L1893): an edit to a part sends.
+    const members = []
+    const walk = [node]
+    while (walk.length > 0) {
+      const m = walk.pop()
+      members.push(m)
+      const children = m.children
+      for (let i = children.length - 1; i >= 0; i--) walk.push(children[i])
+    }
+    for (const m of members) this._attachNodeListeners(m)
 
     const nodeName = msg.node.name
-    if (this._debug) this._log(`som:add "${nodeName}"`)
+    if (this._debug) this._log(`som:add "${nodeName}"${members.length > 1 ? ` (${members.length} members)` : ''}`)
 
     // Check if this add corresponds to a pending peer join
     let peerSessionId = null
@@ -1673,7 +1692,11 @@ export class AtriumClient extends EventEmitter {
       if (meta.nodeName === nodeName) { peerSessionId = sid; peerDisplayName = meta.displayName; break }
     }
 
-    this.emit('som:add', { nodeName })
+    // subtree-add T4 — one `som:add` per member, the root first, then in message
+    // order, each naming the root: every listener (pads, the model handover,
+    // the runner, the model bridge) sees every member unchanged, and a listener
+    // that wants one call per message checks `nodeName === root`.
+    for (const m of members) this.emit('som:add', { nodeName: m.name, root: nodeName })
 
     // A3/C5 — our own add broadcast resolves the pending add.
     this._resolveAccepted(msg, record)
@@ -1696,15 +1719,28 @@ export class AtriumClient extends EventEmitter {
 
     const nodeName = isPeerRemove ? peerMeta.nodeName : msg.node
 
+    // subtree-add T4 (the ChatGPT review's N1) — the names of every member of
+    // the removed subtree, collected before the dispose, ride on the one event.
+    let removed = nodeName ? [nodeName] : []
     if (nodeName && this._som) {
       // A6 — the SOM dispose path removes the whole subtree, so clients drop
       // the same nodes the server did. `som:remove` fires for the root only.
       const node = this._som.getNodeByName(nodeName)
-      if (node) node.dispose()
+      if (node) {
+        removed = []
+        const walk = [node]
+        while (walk.length > 0) {
+          const m = walk.pop()
+          removed.push(m.name)
+          const children = m.children
+          for (let i = children.length - 1; i >= 0; i--) walk.push(children[i])
+        }
+        node.dispose()
+      }
     }
 
     if (this._debug) this._log(`som:remove "${nodeName}"`)
-    this.emit('som:remove', { nodeName })
+    this.emit('som:remove', { nodeName, removed })
 
     // A3/C5 — our own remove broadcast resolves the pending remove.
     this._resolveAccepted(msg, record)

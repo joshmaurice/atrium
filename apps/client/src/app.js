@@ -1080,7 +1080,7 @@ client.on('som:set', ({ nodeName, path, origin }) => {
 })
 
 // Teleporter pad tracking (T4): rebuild pads on add/remove/set of teleporter nodes
-client.on('som:add', ({ nodeName }) => {
+client.on('som:add', ({ nodeName, root }) => {
   if (!client.som) return
   if (nodeName) {
     const node = client.som.getNodeByName(nodeName)
@@ -1088,7 +1088,9 @@ client.on('som:add', ({ nodeName }) => {
       rebuildPads()
     }
   }
-  undo.reCapture()                     // Y2 — a remote add re-captures a pending delete
+  // Y2 — a remote add re-captures a pending delete. subtree-add T4: once per
+  // message (a tree fires one som:add per member, each naming its root).
+  if (root === undefined || root === nodeName) undo.reCapture()
 })
 
 client.on('som:remove', ({ nodeName }) => {
@@ -1861,8 +1863,21 @@ function editDispatchBlocked() {
   return editBlocked({ undoing: undo.inFlight(), pending: !!structure.pending })
 }
 
+/**
+ * subtree-add T7 — the server keeps `add` level 3 (children, material refs).
+ * Below it (an older server, after a rollback) a group is handled as before
+ * the round: Duplicate refuses it, its Delete asks, Paste refuses it, and no
+ * material ref is built.
+ */
+function treesAllowed() {
+  return Number.isInteger(client.serverAddFields) && client.serverAddFields >= 3
+}
+
 const undo = createEditUndo({
   getNodeByName: (name) => client.som?.getNodeByName(name) ?? null,
+  // subtree-add T5 — every part of a captured group addressable by its name
+  getObjectByName: (name) => client.som?.getObjectByName(name) ?? null,
+  trees: treesAllowed,
   checkNewName: (name, node) => client.som?.checkNewName(name, node) ?? { ok: true },
   prepareRestore,                      // Y2's capture, straight from edit-duplicate
   // Y3 — an undo's or a redo's send is never recorded as a new edit
@@ -2681,8 +2696,13 @@ client.on('som:rename', () => {
 
 // A removed node (or one under a removed ancestor): cancel its gestures, never
 // write to it again, and drop it from the selection (B2, B4).
-client.on('som:remove', ({ nodeName: goneName } = {}) => {
+client.on('som:remove', ({ nodeName: goneName, removed } = {}) => {
   if (!client.som) return
+  // subtree-add T5 (the fresh-agent check's M3) — a removal re-captures a
+  // pending delete too: another tab removing a PART of the group we are
+  // deleting changes what our Undo must bring back. (A removal of the pending
+  // node itself ends the window, edit-undo.js reCapture.)
+  undo.reCapture()
   const alive = (n) => client.som.getNodeByName(n.name) === n
   editTracker.pruneRemoved(alive)
   if (pendingRename && !alive(pendingRename.node)) pendingRename = null
@@ -2704,8 +2724,11 @@ client.on('som:remove', ({ nodeName: goneName } = {}) => {
   resetStaleWorldCamera()
   // Z5 — the scene follows the SOM: a removed model node loses its instance.
   modelBridge.reconcile()
-  // Z6 — and its wanted animation value goes with it.
-  if (goneName) modelAnimations?.set(goneName, null)
+  // Z6 — and its wanted animation value goes with it. subtree-add T4 (the
+  // ChatGPT review's N1): every member of a removed group, not only its root.
+  for (const name of Array.isArray(removed) && removed.length > 0 ? removed : (goneName ? [goneName] : [])) {
+    modelAnimations?.set(name, null)
+  }
   refreshModelRow()
 })
 
@@ -2738,7 +2761,7 @@ function checkDuplicate(node) {
   if (!gltfNode) return { ok: false, reason: 'Select an object first' }
   const name = copyName(node.name, isNameFree)
   if (!name) return { ok: false, reason: 'No free name for a copy' }
-  return prepareDuplicate(gltfNode, { name })
+  return prepareDuplicate(gltfNode, { name, isFree: isNameFree, trees: treesAllowed() })
 }
 
 function structuralBlock() {
@@ -2760,7 +2783,7 @@ let dupSize = { node: null, result: null }
 function duplicateHint(node) {
   const gltfNode = node?._node
   if (!gltfNode) return 'Select an object first'
-  const problem = duplicateRuleProblem(gltfNode)
+  const problem = duplicateRuleProblem(gltfNode, { trees: treesAllowed() })
   if (problem) return problem.reason
   if (dupSize.node !== node) dupSize = { node, result: checkDuplicate(node) }
   return dupSize.result.ok ? null : dupSize.result.reason
