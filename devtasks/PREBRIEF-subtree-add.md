@@ -1,9 +1,11 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
 Status: **DRAFT, Revision 1.4 (2026-11-07). Decided (operator, 2026-11-07):
-SA-L2 (a) and SA-L3 (a) (17:37: "no preference", so the recommendations);
-SA-L6 (d), a selection round of its own next (19:13: "separate round").**
-Open: SA-L1, SA-L4, SA-L5, and SA-L7 (added in Rev 1.3; the operator leans to
+SA-L2 (a) (17:37: "no preference", so the recommendation);
+SA-L6 (d), a selection round of its own next (19:13: "separate round");
+SA-L4 (a), as recommended (19:26); SA-L3 (b), sharing kept within a message
+(19:29: "(b) now plz", after Claude's revised lean).** Open: SA-L1, SA-L5, and
+SA-L7 (added in Rev 1.3; the operator leans to
 (a), include). The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
 children**, so a group can be duplicated, deleted and undone, and copied
@@ -53,6 +55,10 @@ the remaining decisions and one ChatGPT review.
   stays a reference to its copy (K7 widened);
 - deleting a group is undoable, so the "This can't be undone" question goes
   away for a restorable group (SA-L4);
+- **(SA-L3 (b)) a group's own shared materials stay shared:** duplicate the
+  columns and the eight copies share one new marble, so recolouring one
+  recolours the eight; delete the furniture and Undo it, and its benches'
+  wood is still one material (T12);
 - **(SA-L7) a part works too:** an Alt-clicked part (a lamp shade) or a
   sub-group (`Furniture`'s `Bench-NE`) can be duplicated beside itself in its
   group, deleted and undone back into its group, and copied out to another
@@ -64,7 +70,8 @@ the remaining decisions and one ChatGPT review.
 **Not in this round:** selecting a nested group as a whole (SA-L6 (a): a
 click on `Furniture` selects its sub-group); grouping or ungrouping objects in
 the Edit panel; reparenting (`parent` on the message is
-unchanged); carrying material or mesh sharing inside a group (SA-L3); lights,
+unchanged); sharing a material with objects **outside** the message (that
+needs material identity, RA-L3 (c)) and sharing a mesh (SA-L3); lights,
 cameras, skins, morph targets and animation on `add` (per-node rules refuse
 them as today); textures; a per-world resource budget (the audit item).
 
@@ -294,10 +301,22 @@ node, nested).
   `Furniture`, whose meshless sub-groups take the click. No member has
   an `objectId`, a behaviour, a model, a hidden marker, an empty name or a
   name another node holds; one member is a pad (the harness).
-- **Sharing inside a group:** `atrium.gltf`'s nine columns share "Marble"
-  (`p5`, richer-add §2.3), and `p2` counted 40 primitives with a shared
-  material across the seven files, in groups and not. RA-L3 (a) gives each
-  primitive its own material on a copy or a restore (SA-L3).
+- **Sharing, and where it crosses group lines** (`atrium.gltf`, every mesh
+  node's material and its top-level object; no fixture shares a mesh):
+  
+  | Material | Users | Inside one top-level object? |
+  |---|---|---|
+  | `DarkWood` | the table top and 4 bench seats | yes, `Furniture` |
+  | `LightWood` | 4 credenza bodies | yes, `Furniture` |
+  | `Marble` | `Column-1`–`Column-8` and `Fountain-Pillar` | no: `Columns` and `Fountain` |
+  | `BrushedMetal` | 10 table and bench parts and `Fountain-Sphere` | no: `Furniture` and `Fountain` |
+  | `StoneWall` | `Ceiling` and 4 wall segments | no: `Ceiling` and `Walls` |
+  | `DarkStone` | `FloorAccent`, 4 credenza tops, `Fountain-Basin` | no: three objects |
+  
+  So the fixtures have both kinds: sharing a message can carry (T12: within
+  `Furniture`; within `Columns` among the eight columns) and sharing it
+  can't (the eight columns with the fountain's pillar). `p2` counted 40
+  primitives with a shared material across the seven files.
 - **PROD (`p6`, run by the operator 2026-11-07 at `530c636`, its
   subtree-add section new):** 24 worlds, none unreadable, **460** top-level
   objects (455 at `42aa56ff`): 450 copy today, **9 have children**, 1 has a
@@ -492,24 +511,43 @@ Binding from earlier rounds: RA-L1–RA-L8, C1–C4, CP-L1–CP-L8, PC.
   and the names check, the ids check, the broadcasts and the Undo stack carry
   it.
 
-**SA-L3. Sharing inside a group.** The columns share one material (§2.5); a
-copy or a restore gives each primitive its own (RA-L3 (a)).
-- **(a) Recommended: RA-L3 (a) holds across the tree; the Undo note says so.**
-  `hasSharedMaterial` walks the members (T5): a mesh or material used by two
-  members, or by a member and an outsider, gives the entry "(it comes back
-  with its own material)". PROD has no shared material or mesh (`p6` at
-  `3fcc296`), and RA-L3's revisit trigger (step 7's import, material identity,
-  or `p6` finding sharing) stands. The real argument isn't PROD's content
-  (seed only, §2.5) but that **nothing in Atrium can make sharing**: it can
-  arrive only by import, where the trigger already reopens it.
-- (b) Carry sharing **within one message**: a primitive's `material` may be
-  `{ "ref": i }`, the i-th material defined earlier in the same tree, and
-  `ingestNode` reuses it. It keeps a group's own sharing (recolour one column,
-  all nine change, `p5`) at the cost of a second material form in the schema,
-  both `checkAddNode` copies, `buildDescriptor` and the fixed point, for
-  content PROD doesn't have.
+**SA-L3. Sharing inside a group.** **Decided (operator, 2026-11-07, 19:29):
+(b), sharing kept within one message** (T12), after the operator asked
+whether there's a good reason for sharing to be lost.
+- **Why it was lost at all** (RA-L3, single objects): an `add` describes an
+  object by value, each primitive's material inline, and Atrium has no way to
+  name an existing material (material names aren't registered, can repeat,
+  and nothing looks one up; `send` reaches a material only through a node).
+  So a restore can't point back at a material other objects still use: that
+  needs material identity and its authority question (4d-1 passdown §5.1:
+  a pasted object pointing at your material could recolour your objects),
+  RA-L3 (c), not now. **It was a limit of the message, not a better
+  outcome.**
+- **(b) Decided: number the materials within the message.** A primitive's
+  `material` may be `{ "ref": i }`, the i-th material defined earlier in the
+  same message, and `ingestNode` reuses it. No identity is needed: the
+  numbers mean nothing outside the message. It keeps every sharing **among
+  the members of what travels**: a Duplicate of `Columns` makes eight copies
+  sharing one new marble; a delete and Undo of `Furniture` brings back its
+  `DarkWood` and `LightWood` shared; a Paste carries a group's sharing to
+  the other world; and a single object whose own primitives share a
+  material keeps that too. **Sharing with anything outside the message is
+  still lost** (the columns with `Fountain-Pillar`, `FloorAccent` with the
+  credenzas), and the Undo note keeps saying so for exactly those. Mesh
+  sharing isn't carried (no mesh refs; no fixture or PROD object shares a
+  mesh): stated.
+- (a) RA-L3 (a) across the tree: every primitive its own material, the Undo
+  note for any sharing. Claude's first recommendation, resting partly on
+  "PROD has none", which the operator rightly discounted (§2.5's caveat).
+- **What it means for editing:** a recolour of one shared copy recolours its
+  sharers, live, for everyone, exactly as the original columns behave today
+  (`p5`); nothing in the Edit panel shows that a material is shared (a
+  follow-up, §8). And **Atrium can now make a new shared material**: by
+  copying a group that already shares one. RA-L3's revisit trigger is
+  unchanged (it's about sharing *across* messages).
 
-**SA-L4. What Delete asks for a group that can come back.**
+**SA-L4. What Delete asks for a group that can come back.** **Decided
+(operator, 2026-11-07, 19:26): (a), as recommended.**
 - **(a) Recommended: nothing**, as for any restorable object (W6 supersedes
   design §4.1 for restorable nodes). The question stays, with "N objects
   inside it", for a group that can't come back.
@@ -713,9 +751,12 @@ distance below the root.
     reference to its copy; every other id stays, a grant, F-L10). The whole
     message is measured and run through `add-spec.js` (A7);
   - **Undo and Redo** (`prepareRestore`): the tree exactly as it is, names
-    and ids kept; `hasSharedMaterial` walks the members (SA-L3 (a)) **at both
-    call sites** (`prepareRestore`'s, and `registerDelete`'s own call,
-    `edit-undo.js` L311), and the note's text is unchanged. **The fixed point
+    and ids kept; `hasSharedMaterial` walks the members **at both call
+    sites** (`prepareRestore`'s, and `registerDelete`'s own call,
+    `edit-undo.js` L311) and, with T12, is true only for sharing the restore
+    **loses**: a member's material also used by a primitive outside the tree
+    (counting only meshes some node still uses, as today), or a member's
+    mesh used by any other node. The note's text is unchanged. **The fixed point
     holds for trees:** `prepareRestore(ingest(d))` is `sameDescriptor`-equal
     to `d`, children in order, live and after a save and a reload (the
     fresh-agent check prototyped it for the 7 passing fixture groups, both
@@ -815,7 +856,9 @@ distance below the root.
   schema itself (`$ref` to `#/definitions/node`, so the two files stay
   identical in their `node`; the fresh-agent check ran it under the repo's
   Ajv, `strict: false`, draft-07: the protocol suite passed); the bounds, the
-  name rules and the id rules stay in T1. **A new protocol test deep-compares
+  name rules and the id rules stay in T1. A primitive's `material` becomes
+  `oneOf` today's object and `{ "ref": integer ≥ 0 }` (`additionalProperties:
+  false`; T12), the ordering rule staying in T1. **A new protocol test deep-compares
   the two files' node definitions** (none does today). The schema's
   `minItems: 1` and `name`'s `minLength: 1` refuse `children: []` and an
   empty member name before the handler runs: those server tests see
@@ -881,6 +924,46 @@ distance below the root.
     any group;
   - **Inspect:** a click still lifts to the nearest container (§2.4), and
     Alt-click picks a part; Copy is offered for either.
+- **T12, shared materials within a message (SA-L3 (b)).**
+  - **The form:** a primitive's `material` is either today's object or
+    exactly `{ "ref": i }`, `i` an integer. Materials are numbered in **message
+    order**: members depth-first, the root first, children in order; within a
+    member, its primitives in order; each inline material takes the next
+    number from 0. A ref must name a number **already given** (backwards
+    only), so the check is one pass with a counter and the ingest one pass
+    with an array;
+  - **the rule** (T1, both copies): a ref that isn't exactly `{ ref }`, isn't
+    an integer, or names a number not yet given is refused, new code
+    **`material-ref`** ("a material reference must be { ref: n }, naming a
+    material given earlier in the same message"); an avatar may not carry
+    one (`avatar-fields`, R2); a referenced material's values were checked
+    where it was given, so a ref has none to check. The vectors gain the
+    cases (§5). The schema's material item becomes `oneOf` the object and
+    `{ ref }` (T8);
+  - **`ingestNode`** keeps the array of the materials it made in this call,
+    and a ref sets the primitive's material (and its `SOMMaterial` wrapper)
+    to the referenced one. Removing one sharer keeps the material for the
+    others; removing the last prunes it (`removeSubtree`, L454);
+  - **`buildDescriptor`** walks the members in message order with a map from
+    each glTF `Material` to its number: the first use is emitted inline in
+    today's canonical form, every later use as `{ ref }`. A material shared
+    with an object outside the tree is emitted inline at its first use in
+    the tree (the tree gets its own, shared among its members). **The fixed
+    point holds:** numbering is a function of the tree, so
+    `prepareRestore(ingest(d))` gives the same refs;
+  - **Duplicate and Paste** carry the refs as built: copies share among
+    themselves, never with the original (a copy is a new object). Paste's
+    per-member steps don't touch materials;
+  - **the server level** (T7): refs are emitted only when
+    `client.serverAddFields` is 3 or more; against an older server every
+    material is inline, as today (the old server's schema would refuse a
+    ref);
+  - **version skew:** a `42aa56ff` tab that sees a broadcast with a ref
+    ingests that primitive with a default material (its `ingestNode` reads no
+    `ref`): a white part in that tab's view until it reloads. It can't save
+    or restore the poorer copy (R6, T7 refuse its world adds and removes),
+    and the server and every current tab hold the real material. Stated, as
+    a visual-only skew.
 - **T10, what doesn't change:** `remove` and its rules; `send`; `parent` on
   the message and `isBlockedParent`; A5's numbers beyond `avatar-children`;
   the palette, pad, model and avatar builders (no children; they pass); the
@@ -903,7 +986,11 @@ distance below the root.
   has a malformed mesh is refused `children-count`); a member carrying
   `__atrium_visible: false` (accepted: PROD may have one, §2.5); member names
   `__document__` and 257 characters (both refused, the T1 name form, pinned
-  to `checkNewName` by a server unit test).
+  to `checkNewName` by a server unit test); **T12's refs:** a ref to
+  material 0 from a later primitive (accepted), from a later member
+  (accepted), to the material being defined or a later one (refused
+  `material-ref`), a non-integer, a negative, an extra key beside `ref`
+  (each `material-ref`), an avatar with a ref (`avatar-fields`).
 - **A new server test file, port 0, through the real `attachSessionHandlers`,
   run on both world kinds** (a file world through `createWorld`, as the
   commons is, and a document world through `createWorldFromDocument`;
@@ -984,8 +1071,19 @@ distance below the root.
     undoes after the group is deleted and restored** (S3); a group with a
     member whose name an animation holds can't be captured, and its Delete
     asks (S6); `serverAddFields` `null` → the group's Delete asks and its
-    Duplicate is refused (T7); the sharedMaterial note for `Columns`, through
-    both call sites;
+    Duplicate is refused (T7); the sharedMaterial note for `Columns` (its
+    marble is also the fountain pillar's), through both call sites, and **no
+    note for a group whose sharing is all inside it** (a test group sharing
+    one material among its own parts only);
+  - **T12** (pure, `apps/client` and `packages/som`): `buildDescriptor` of
+    `Furniture` emits `DarkWood` inline once and `{ ref }` for the other four
+    seats, `LightWood` likewise; `ingestNode` of it gives the five seats one
+    `Material`; recolouring one seat's material through the SOM changes all
+    five; the fixed point holds with refs, live and after a save and reload;
+    Duplicate of `Columns` gives eight copies one new material, not the
+    original's; removing one sharer keeps the material, removing all prunes
+    it; with `serverAddFields: null`, `buildDescriptor` emits every material
+    inline;
   - **the existing tests that encode today's group rules are rewritten, not
     kept green** (fresh-agent check, S12): `edit-undo.test.js` L710–865
     ("a group … can never come back", "grew a child …" → `DELETE_CHANGED`),
@@ -1054,6 +1152,8 @@ distance below the root.
   - (p7) T1's depth bound removed: the depth-9 vectors fail in both suites;
   - (p8) the `som:remove` re-capture removed: the member-removed-meanwhile
     tests fail;
+  - (p10) T12's ref ingested as a new default material: the shared-seat
+    tests fail (five materials, and the recolour reaches one seat);
   - (p9) T11's Copy keeps the part's local transform: the world-placement
     Copy test (a part of a moved and rotated group pasted where it appeared)
     fails; (p9b) T11's re-add without `parent`: the part-Undo test fails (the
@@ -1105,15 +1205,16 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
   cd ~ && rm -rf /root/tmp-survey
   ```
 - **Five commits, each runnable:**
-  1. T1 and T8: the vectors, both copies of the tree rule, the schemas and
-     their unit and protocol tests;
-  2. T2 and T3: the handler, `world.addNode`, `ingestNode`, the SOM tests and
-     the new server test file;
+  1. T1 and T8 (with T12's form): the vectors, both copies of the tree rule,
+     the schemas and their unit and protocol tests;
+  2. T2 and T3 (with T12's ingest): the handler, `world.addNode`,
+     `ingestNode`, the SOM tests and the new server test file;
   3. T7: `AtriumClient.js`, `isStaleEditor`, the server hello's level and
      `client.serverAddFields`, both hello schemas, the moved tests and
      `c1.py`;
-  4. T4 and T5: `_onAdd`, `edit-duplicate.js`, `edit-undo.js`, the delete
-     question in `app.js`, the renderer test, their tests;
+  4. T4 and T5 (with T12's builder): `_onAdd`, `edit-duplicate.js`,
+     `edit-undo.js`, the delete question in `app.js`, the renderer test,
+     their tests;
   5. T6: `copy-paste.js`, the Inspect summary and paste notes in `app.js`,
      the end-to-end tests;
   6. T11 (SA-L7): `addNode`'s `parent`, the `ancestors` rule, Duplicate in
@@ -1148,6 +1249,15 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.5** (2026-11-07, evening): **SA-L3 decided: (b)** (operator, 19:29),
+  after the operator asked for the rationale of losing sharing and Claude
+  answered that it's a limit of the message (no material identity), not a
+  better outcome. New T12 (refs within a message, message order, backwards
+  only, `material-ref`, emitted only at server level 3), §2.5's sharing table
+  for `atrium.gltf` (which sharing stays inside one object and which crosses),
+  T5's note narrowed to sharing a restore loses, tests, proof (p10), §8's
+  sharing items. **SA-L4 decided: (a)** (operator, 19:26). Not yet checked by
+  a fresh agent: T11 and T12 are new since Rev 1.2's check.
 - **Rev 1.4** (2026-11-07, evening): **SA-L6 decided: (d), a selection round
   of its own next** (operator, 19:13, after Claude's recommendation): the
   top-down scheme (click the top group, multi-click to drill, Alt to the
@@ -1252,13 +1362,15 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
   (`app.js`, `packages/interaction`'s policy, `index.html`), with the drag
   gesture's tests. Its own short pre-brief.
 - **When groups can be created or imported** (grouping in the Edit panel;
-  step 7): revisit SA-L2's bounds and SA-L3's sharing against real content
-  (§2.5's caveat).
+  step 7): revisit SA-L2's bounds against real content (§2.5's caveat).
 - **Parts, if SA-L7 is (b):** T11 as written, as a small round after this
   one.
 - Grouping and ungrouping in the Edit panel (a `parent` change on a live
   node: a new message or a `send` leaf), after that.
-- SA-L3 (b), sharing within a message, if `p6` ever finds shared materials
-  on PROD or step 7's import brings them (RA-L3's trigger).
+- **Showing sharing in the Edit panel** ("shared with 7 other parts"), now
+  that a copy can make a shared material (SA-L3 (b)): a recolour silently
+  reaching other objects is today's behaviour for file content too (`p5`).
+- Sharing **across** messages (a restore re-linking to a material others
+  still use) needs material identity: RA-L3 (c), with its trigger.
 - `p6`'s heading "by richer property" is current; its subtree-add section
   prints counts only, as the rest does.
