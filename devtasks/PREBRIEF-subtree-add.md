@@ -1,6 +1,7 @@
 # Pre-brief: the subtree `add` (`subtree-add`)
 
-Status: **DRAFT, Revision 1.8 (2026-11-07): every decision taken. Decided (operator, 2026-11-07):
+Status: **DRAFT, Revision 1.9 (2026-11-07): every decision taken; the ChatGPT
+review of Rev 1.8 folded in (§7). Decided (operator, 2026-11-07):
 SA-L2 (a) (17:37: "no preference", so the recommendation); SA-L6 (d), a
 selection round of its own next (19:13: "separate round"); SA-L4 (a), as
 recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
@@ -8,8 +9,7 @@ recommended (19:26); SA-L3 (b), sharing kept within a message (19:29); SA-L7
 and SA-L5 (a), as recommended (20:00: "go with the recs").** The next placement round after `copy-objects` (RA-L6 (a),
 `PREBRIEF-richer-add.md` §3): **an `add` that carries a node and its
 children**, so a top-level group can be duplicated, deleted and undone, and
-copied between worlds. **Still to come:** one ChatGPT review
-(`OUTSIDE-REVIEW-PROMPT-subtree-add.md`), then FINAL. (A second fresh-agent check, of T11 and T12, is folded in:
+copied between worlds. **Still to come:** the operator's approval for FINAL. (A second fresh-agent check, of T11 and T12, is folded in:
 §7, Rev 1.7.)
 - **What it builds on.** `PREBRIEF-add-check.md` FINAL Rev 1.1 (A1–A10),
   `PREBRIEF-richer-add.md` FINAL Rev 2 (R1–R10) and `PREBRIEF-copy-objects.md`
@@ -362,8 +362,11 @@ node, nested).
   `add-check`'s ranges.
 
 ### 2.6 What an `add` with children costs
-- **Bytes:** the socket's 1 MiB (`MAX_PAYLOAD_BYTES`, everywhere since K0)
-  and the client's 1,000,000 bound the whole message, children included: a
+- **Bytes:** the socket's 1 MiB (`MAX_PAYLOAD_BYTES`, 1,048,576, everywhere
+  since K0) is **the server's** bound on the whole message, children
+  included; the client's 1,000,000 (`MAX_ADD_BYTES`) is a first-party margin
+  under it, as it has been since `add-check` (the server enforces no
+  1,000,000 of its own: ChatGPT review S2). Together they bound it: a
   group over it can't be duplicated, restored or pasted as one message
   (SA-L1 (a)). Fixtures: 113 KB at most; PROD: 16,656 bytes at most (§2.5).
 - **Ingest:** `ingestNode` is 0.38 s for 20,000 primitives (richer-add R4's
@@ -373,6 +376,27 @@ node, nested).
   fresh-agent check prototyped it: one buffer for a 4-member tree; removing
   one part alone keeps the buffer and the rest's accessors live; removing the
   rest prunes back to the baseline.
+- **Primitives, not nodes or bytes, are what ingest costs** (ChatGPT review,
+  M2; measured for Rev 1.9 with the first check's prototype `ingestNode`,
+  `devtasks/spike-subtree-add/p11-ajv-ingest-cost.mjs`): a root and 255
+  members of 64 minimal primitives each is 16,320 primitives in 793,508
+  bytes, inside the node, depth, byte and per-mesh limits, and its ingest
+  took **202–292 ms** per run, on the server and again in every client.
+  Today's ceiling is 64 primitives per message. At 1,024 primitives the
+  ingest took 6–13 ms; at 4,096, 33–52 ms. The largest fixture group has 23
+  primitives (`Furniture`; `Walls` 4, `Columns` 8, `Fountain` 5, the lamp
+  2). Hence SA-L2's per-message budget of **1,024 primitives** (`children-
+  primitives`, T1): 16 times today's ceiling and 44 times the largest fixture
+  group, at about a tenth of a frame's work. Measured in the cloud sandbox,
+  not on the host: the server test's bound has headroom (§5).
+- **Schema validation of a large tree is cheap, but bounded anyway** (ChatGPT
+  review, M1, measured): the inbound order is `JSON.parse`, the depth guard,
+  Ajv, then the handler (`session.js` L727–744), so T2's shape pass runs
+  after Ajv has walked the whole tree, and before the gate, for any sender.
+  With the recursive schema, Ajv took **5.1 ms** for a 60,000-member tree of
+  780,058 bytes (`JSON.parse` 5.6 ms) and 1.0 ms for the dense one; today's
+  worst flat message (one primitive, 196,605 numbers) takes 3.4 ms. Not a
+  stall; T2's step 0 bounds it before Ajv anyway, because it costs nothing.
 - **Checks: names are a map lookup, ids are not** (§2.1: `objectIdInUse`
   scans every node). **About 57,000 near-empty members fit in 1,000,000
   bytes** (about 14,000 if each carries an id), and any signed-in user owns a
@@ -498,7 +522,9 @@ Binding from earlier rounds: RA-L1–RA-L8, C1–C4, CP-L1–CP-L8, PC.
 **SA-L2. The bounds on one message** (with SA-L1 (a)). **Decided (operator,
 2026-11-07, 17:37: "no preference"): (a), as recommended.**
 - **(a) Recommended: at most 256 nodes, root included; at most 8 generations
-  below the root; the 1,000,000-byte cap on the whole message.** 8 is two
+  below the root; at most 1,024 primitives across the whole message (added
+  in Rev 1.9, ChatGPT review M2); the socket's 1,048,576-byte cap on the
+  whole message, and the first-party client's 1,000,000 under it.** 8 is two
   under what §2.1's measurement allows (10 at the 32 ceiling); 256 is eight
   times the largest fixture group (33) and 85 times PROD's (3), and keeps the
   per-member checks' cost named; the byte cap is the one that binds in
@@ -657,7 +683,10 @@ distance below the root.
     checked **before** any member's mesh (add-check round 2's R4);
   - **the tree bounds** (SA-L2): at most `SUBTREE_NODES_MAX = 256` members
     including the root (**`children-count`**), and no member deeper than
-    `SUBTREE_DEPTH_MAX = 8` generations (**`children-depth`**);
+    `SUBTREE_DEPTH_MAX = 8` generations (**`children-depth`**), and at most
+    `SUBTREE_PRIMITIVES_MAX = 1,024` primitives across every member's mesh
+    (**`children-primitives`**: the sum of the `primitives` arrays' lengths,
+    counted in the same walk, without reading any primitive);
   - **names:** every member's `name` is a string that passes the D3 form
     (non-empty, at most 256 characters, not `__document__`, no `.camera` or
     `.light` suffix, no `/`), and **no two members share a name**
@@ -676,11 +705,27 @@ distance below the root.
     names.
 - **T2, the server.** In the `add` handler, for a world `add` whose node has
   `children`, **in this order:**
+  0. **before Ajv** (ChatGPT review, M1): in the message handler, after the
+     depth guard (`session.js` L727–737) and before `validate` (L739), an
+     `add` whose `node` has a `children` key gets **`subtreeCountProblem`**:
+     an iterative walk that stops at the 257th member, the 9th generation or
+     the 1,025th primitive, and reads nothing but the `children` and
+     `mesh.primitives` arrays' lengths. Over a bound, the reply is
+     `INVALID_VALUE` with T1's code and text, and nothing else runs (no Ajv,
+     no handler). It runs for any sender, before the gate, like the depth
+     guard; on a non-array `children` it does nothing and leaves the refusal
+     to Ajv. Both `checkAddNode` copies keep the same bounds (T1), so the
+     vectors pin them;
   1. **after the gate and R6, before `isBlockedParent`:** `subtreeShapeProblem`
      (T1), in a `try` of its own that fails closed (V9). Nothing that scans
      the world runs on a tree that hasn't passed it (§2.6, fresh-agent M1);
   2. **every per-node check runs for every member, before the first world
-     change:** S2's `source` (`addSetsAtriumSource`) walks the tree. **K4 is
+     change:** S2's `source`, **split** (ChatGPT review, S1): the existing
+     early call (`addSetsAtriumSource(msg.node)`, L1316, before the gate)
+     stays as it is, **the root only**, so it can't walk an unbounded tree;
+     the members' check, a walk of the tree after step 1's shape pass,
+     refuses a member carrying `extras.atrium.source` (any value, `null`
+     included) with S2's text, before any world change. **K4 is
      unchanged** (`msg.id && …`, avatar-only; an avatar tree is already
      refused `avatar-children`, and applying K4 to world members would refuse
      every pad and behaviour member). `checkNewName` for every member's name
@@ -730,8 +775,13 @@ distance below the root.
   `acceptAdd` captures the whole tree, which is in the SOM before
   `edit:accepted`. **`app.js`'s `undo.reCapture()` on `som:add` runs only for
   the root's event** (`nodeName === root`): one tree capture per message, not
-  one per member (§2.6). The `som:remove` path is unchanged (one event, the
-  root).
+  one per member (§2.6). **`som:remove` stays one event, for the root, and
+  gains `removed`:** the names of every member of the removed subtree,
+  collected before the dispose (`_onRemove`, L1685–1690). `app.js`'s
+  remove listener clears the Z6 wanted animation value for each
+  (`modelAnimations?.set(name, null)`, today for `goneName` only, L2708), so a
+  model inside a removed group leaves no stale state (ChatGPT review, N1).
+  Other listeners ignore the new key.
 - **T5, Duplicate, Undo and Redo** (`edit-duplicate.js`, `edit-undo.js`,
   `app.js`):
   - **`duplicateRuleProblem` drops its `children` rule** and asks every rule
@@ -742,7 +792,7 @@ distance below the root.
     restored on its own (§1). Two new rules: **`names`** ("Its parts don't all
     have distinct names": a member's name empty, failing the D3 form, or held
     by another member) and **`tree`** ("This object has too many parts, or
-    parts too deep": SA-L2's bounds). A member whose name another node **in
+    parts too deep": SA-L2's bounds, the primitive budget included). A member whose name another node **in
     the world** holds passes here for Duplicate (the copy is renamed, below);
   - **a restore needs every member addressable by its own name** (fresh-agent
     check, S6): the Undo engine's `capture` refuses a tree any member of which
@@ -772,7 +822,10 @@ distance below the root.
     **loses**: a member's material also used by a primitive outside the tree
     (counting only meshes some node still uses, as today), or a member's
     mesh used by any other node. The note's text is unchanged. **The fixed point
-    holds for trees:** `prepareRestore(ingest(d))` is `sameDescriptor`-equal
+    holds for trees,** for every **canonical** descriptor, that is one
+    `buildDescriptor` emits (not any schema-valid one: a node with only a
+    name ingests with default TRS, which the builder then writes out;
+    ChatGPT review, N2): `prepareRestore(ingest(d))` is `sameDescriptor`-equal
     to `d`, children in order, live and after a save and a reload (the
     fresh-agent check prototyped it for the 7 passing fixture groups, both
     ways);
@@ -1005,11 +1058,33 @@ distance below the root.
     name in use in the world; a member's id in use; a member with `source`;
     a member whose behaviour would take the world past 64; a member with a
     non-unit rotation (K6's text); a member's model with a mesh;
-  - **T2's order** (fresh-agent check, M1): a tree of 257 near-empty members,
-    each with an id, in a world of 500 nodes, is refused `children-count`
-    with the reply under 100 ms, and **`objectIdInUse` is never called**
-    (counted through a wrapped `som`); a valid 256-member tree with ids is
-    accepted with the reply under 500 ms;
+  - **T2's order** (fresh-agent check, M1; ChatGPT review, S3): a tree of 257
+    near-empty members, each with an id, in a world of 500 nodes, is refused
+    `children-count`, and **none of the world-id set's construction,
+    `checkNewName`, `checkTransformValues` or `ingestNode` has run** (spied
+    through a wrapped `som` and the handler's injected checks); a valid
+    256-member tree with ids is accepted with the reply under 500 ms;
+  - **step 0, before Ajv** (ChatGPT review, M1): a 60,000-member tree whose
+    **last** member also carries a key the schema refuses is answered with
+    `children-count` (step 0 ran first), not Ajv's "must NOT have additional
+    properties" (Ajv ran first), and nothing reaches the handler; the same
+    from a session that isn't the owner; a non-array `children` gets Ajv's
+    refusal;
+  - **the primitive budget** (ChatGPT review, M2): the dense tree (255
+    members × 64 one-triangle primitives, 16,320) is refused
+    `children-primitives` before `ingestNode` (spied: not called), in both
+    world kinds; 1,024 primitives (16 members × 64) is accepted with the
+    reply under 250 ms; 1,025 refused; the vectors carry 1,024 and 1,025;
+  - **the byte bounds** (ChatGPT review, S2): a legal two-node tree of
+    1,000,240 bytes is accepted by the server (its bound is the socket's)
+    and refused by the client's `prepareDuplicate` (`size`); one over
+    1,048,576 closes the socket with 1009 (K0's test, now with a tree);
+  - **S2 split** (ChatGPT review, S1): a member three generations down
+    carrying `extras.atrium.source: null` is refused with S2's text and
+    nothing changes; the root's own `source` is still refused before the gate
+    (the existing test);
+  - **N1:** deleting a group with a model member clears that member's wanted
+    animation value (`som:remove`'s `removed` lists it), on a present client;
   - **an 8-generation tree with a template leaf on its deepest member**
     (message depth 27): accepted, and `message-depth-measure.test.js` then
     records it (its 32 ceiling holds; check that file's run time stays inside
@@ -1120,8 +1195,14 @@ distance below the root.
     **and the world holds two nodes of one name** (with only the handler's
     check removed, the guard still refuses with "node name already exists",
     so the test asserts `checkNewName`'s exact text: fresh-agent check, S7);
-  - (p1b) T2's shape pass moved after the per-member checks: the
-    257-member timing test fails (`objectIdInUse` is called);
+  - (p1b) T2's shape pass moved after the per-member checks: the T2-order
+    test fails **because a spied per-member check runs** before the refusal
+    (the world-id set's construction, `checkNewName` or
+    `checkTransformValues`), not on timing (ChatGPT review, S3: with the id
+    set, `objectIdInUse` isn't called either way); (p1c) T2's step 0
+    removed: the pre-Ajv test fails (the reply is Ajv's text); (p1d) the
+    primitive budget removed from T1: the 1,025-primitive tests fail in both
+    suites and on the server;
   - (p2) T3 back to one buffer per member: the one-buffer tests fail;
   - (p3) T4 emits `som:add` for the root only: the `packages/client` test
     "`som:add` once per member" fails, and so does an `apps/client` wiring
@@ -1236,6 +1317,39 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.9** (2026-11-07, 20:30): ChatGPT's review of Rev 1.8 at
+  `2fbba08f7c7cc7562ca2f7d0c8760b25f06608c3` (the pinned commit, named in its
+  first lines): `REVIEW-subtree-add-rev1.8-chatgpt.md`, **CHANGES REQUESTED**,
+  source-only (its clone failed on DNS again; it built the two payloads in
+  Node 22). Claude measured both must-fixes instead of inferring them
+  (`devtasks/spike-subtree-add/p11-ajv-ingest-cost.mjs`, with the first
+  check's prototype `ingestNode`). Taken:
+  - **M2, must-fix, confirmed and the larger of the two:** 16,320 primitives
+    fit in one message inside every other limit, and their ingest took
+    202–292 ms per run, on the server and every client (today's ceiling: 64).
+    SA-L2 gains a **1,024-primitive** per-message budget (6–13 ms measured; 44×
+    the largest fixture group), `children-primitives`, checked before any
+    ingest (§2.6, T1, T2, §5, proof (p1d));
+  - **M1, must-fix, taken as defence in depth:** the shape pass ran after
+    Ajv, before the gate. Measured: Ajv takes 5.1 ms on a 60,000-member tree
+    (about `JSON.parse`'s time), so not a stall; but a count before Ajv costs
+    nothing, so T2 gains **step 0** before `validate`, with a deterministic
+    test (a schema-invalid last member tells which ran first) and proof (p1c);
+  - **S1:** S2's `source` check split: the early root check stays, the
+    members' walk runs after the shape pass;
+  - **S2:** the server's bound is the socket's 1,048,576 bytes; 1,000,000 is
+    the first-party client's margin, as since `add-check`: stated, and the
+    boundary tested (§2.6, SA-L2, §5);
+  - **S3:** proof (p1b) spies on the per-member checks, not on
+    `objectIdInUse`;
+  - **N1:** `som:remove` gains `removed`, and the app clears each member's
+    wanted animation value (T4, §5);
+  - **N2:** the fixed point is for canonical descriptors (T5).
+  
+  Not taken: nothing. The review found T1–T8 and T12 sound otherwise, agreed
+  with SA-L1, T7's two-way skew and T12's message-local sharing, and said it
+  would be comfortable advancing the design to implementation once M1 and M2
+  are specified and tested.
 - **Rev 1.8** (2026-11-07, 20:00): **SA-L1 (a) and SA-L5 (a) decided**, as
   recommended (operator: "go with the recs for those plz"); SA-L2's decision
   stated at its heading. Every decision is now taken. Next: one ChatGPT
