@@ -1,8 +1,9 @@
 # Handoff: `subtree-add`, implemented on `claude/subtree-add`
 
 **Contract:** `devtasks/PREBRIEF-subtree-add.md` FINAL Rev 2 (operator, 2026-11-06).
-**Base:** `main` at `99ed7a8` (the pre-brief's FINAL commit; code identical to
-`70a30bd2`, the SHA §2's facts were verified at). **Implemented by Claude in the
+**Base:** `99ed7a8`, the pre-brief's FINAL commit on this branch. Its code is
+`main`'s (`70a30bd2`, the SHA §2's facts were verified at), which is PROD's and
+DEV's (`42aa56ff`, `release_status`, 2026-11-07); only `devtasks/` differs. **Implemented by Claude in the
 fast lane** (SA-L5 (a)), no OpenRouter. **Checked by a fresh Claude agent**
 (§7: no must-fix; its two should-fix and three of its nits taken in commit 6).
 Not yet reviewed outside; not published or deployed.
