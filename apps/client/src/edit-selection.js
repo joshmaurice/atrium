@@ -44,7 +44,7 @@ export function isSelectClick(down, up, { gestureEnded = false } = {}) {
  * @param {boolean} [opts.descend=false]  Alt held
  * @returns {object|null}
  */
-export function resolveEditSelection(hit, { isExcluded, resolveRoot, descend = false }) {
+export function resolveEditSelection(hit, { isExcluded, resolveRoot, descend = false, current = null, drill = false }) {
   if (!hit) return null
 
   let external = null
@@ -52,9 +52,55 @@ export function resolveEditSelection(hit, { isExcluded, resolveRoot, descend = f
     if (isExcluded(n)) return null
     if (n.extras?.atrium?.source != null) external = n   // keeps the outermost
   }
-  if (external) return external
 
-  return resolveRoot(hit, { descend })
+  // selection-parts T13 — external content is handed to the policy AS THE
+  // LEAF: the container stays atomic whatever the gesture (Alt and drilling
+  // stop at it), and an ordinary group around it is still what a click selects.
+  return resolveRoot(external ?? hit, { descend, current, drill })
+}
+
+// ── The breadcrumb (selection-parts T14) ────────────────────────────────
+
+/** Over this many levels the breadcrumb shows the top, `…`, and the last ones. */
+export const BREADCRUMB_MAX_LEVELS = 7
+/** A crumb's shown name is cut to this many characters (its title is whole). */
+export const BREADCRUMB_NAME_MAX = 32
+
+/**
+ * The selection's path: its ancestors from the top-level one down, then the
+ * node itself. Walks `parent` only.
+ * @param {{ parent?: object|null }|null} node
+ * @returns {object[]}
+ */
+export function selectionPath(node) {
+  const out = []
+  for (let n = node; n; n = n.parent ?? null) out.push(n)
+  return out.reverse()
+}
+
+/**
+ * What the breadcrumb row shows for a path (`selectionPath`): nothing for a
+ * top-level selection; otherwise each ancestor a `crumb`, the selection the
+ * `current` item, and over BREADCRUMB_MAX_LEVELS the top-level crumb, an
+ * `ellipsis`, and the last BREADCRUMB_MAX_LEVELS − 1. Names are other users'
+ * text: `show` (copy-paste.js's `shownText`) escapes control and direction
+ * characters; `text` is cut to BREADCRUMB_NAME_MAX, `title` is whole.
+ *
+ * @param {object[]} path
+ * @param {{ show: (value: string, max?: number) => string }} opts
+ * @returns {Array<{ kind: 'crumb'|'current'|'ellipsis', node: object|null, text: string, title: string }>}
+ */
+export function breadcrumbItems(path, { show }) {
+  if (!Array.isArray(path) || path.length < 2) return []
+  const item = (node, kind) => ({ kind, node, text: show(node.name, BREADCRUMB_NAME_MAX), title: show(node.name) })
+  const last = path.length - 1
+  const shown = path.length > BREADCRUMB_MAX_LEVELS
+    ? [path[0], null, ...path.slice(path.length - (BREADCRUMB_MAX_LEVELS - 1))]
+    : path
+  return shown.map((node, i) => {
+    if (node === null) return { kind: 'ellipsis', node: null, text: '…', title: '' }
+    return item(node, i === shown.length - 1 && path[last] === node ? 'current' : 'crumb')
+  })
 }
 
 /** Shown when a click lands on a node whose name another node also has. */
