@@ -1,7 +1,8 @@
 # Pre-brief: selection and parts (`selection-parts`)
 
-Status: **FINAL, Revision 2 (2026-11-08): Rev 1.3 approved by the operator
-("approve", 18:30 PT).** Implementation on `claude/selection-parts` in §6's
+Status: **FINAL, Revision 2.1 (2026-11-08):** Rev 2 plus one DEV step's
+wording (§5 step 2, the outside code review's N-2). **Revision 2: Rev 1.3
+approved by the operator ("approve", 18:30 PT).** Implementation on `claude/selection-parts` in §6's
 commits. Rev 1.3 (2026-11-08): Rev 1.2 plus Fable's outside
 review of it (§7, `REVIEW-selection-parts-rev1.2-fable.md`, CHANGES
 REQUESTED) and the four decisions it raised, **SP-L9 (a), SP-L10 (a), SP-L11
@@ -909,7 +910,8 @@ null` on a SOM node).
      `lamp-01`. Double-click the shade: the Name is `lamp-shade`, and above
      it the breadcrumb reads `lamp-01 › lamp-shade`. The lamp hasn't moved,
      and the Undo button's tooltip (hover it) is unchanged.
-  2. With the shade selected, drag its up arrow a little: the shade moves,
+  2. With the shade selected, drag its up arrow a few centimetres on screen
+     (a press that moves less than that is a click and moves nothing, SP-L8): the shade moves,
      and Undo's tooltip reads "Undo Move “lamp-shade”"; Undo. Click the stand
      once: `lamp-stand` (the same level; the press may land on the shade's
      arrow and selects anyway, SP-L8). Click `lamp-01` in the breadcrumb:
@@ -988,6 +990,10 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2.1, wording** (2026-11-08, after the outside code review,
+  `REVIEW-selection-parts-code-claude.md` N-2): DEV step 2's drag is "a few
+  centimetres on screen", since a press under 4 px is now a click (SP-L8) and
+  "a little" could read as a failure. Nothing else changed.
 - **Rev 2, FINAL** (2026-11-08, 18:30): Rev 1.3 approved by the operator; no
   text changed. Implementation in Claude's fast lane on `claude/selection-parts`,
   in §6's commits, then a fresh-agent code check and one Fable code review

@@ -2326,6 +2326,10 @@ function onHandleDragging(isDragging) {
       // A drag that changed nothing sends nothing, so no idle comes for it: the
       // drag's own end clears the hold (undo-hold, H3).
       hold.clear()
+      // A drag is no selection. On touch the tap's `click` can still follow a
+      // short drag, with a `pressDown` made after the release (outside code
+      // review, S-1): the verdict says so.
+      if (released.handle) handleClick = { drag: true }
     } else {
       // T17 — no gesture began: whatever the handles drew is put back.
       putBackHandle()
@@ -2575,6 +2579,7 @@ viewportEl.addEventListener('click', (e) => {
   // whatever it travelled (SP-L11).
   const fromHandle = handleClick
   handleClick = null
+  if (fromHandle?.drag) return
   const forced = fromHandle?.forced === true && !down?.onHandle
   if (!forced && !isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
   const { node, refused } = pickEditTarget(e, { current: selected }) ?? { node: null, refused: null }

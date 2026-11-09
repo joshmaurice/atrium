@@ -135,6 +135,7 @@ describe('T17, run: a press on a handle', () => {
     assert.equal(env.gestures[0].ended, true)
     assert.equal(env.activeGesture, null)
     assert.equal(env.pressDown.onHandle, true, 'a drag is never a click')
+    assert.deepEqual(env.handleClick, { drag: true }, 'and the click that may follow on touch knows it (outside code review, S-1)')
   })
   test('a fast drag that arrives as one 30 px move begins at once (the pointer read from pointermove)', () => {
     const env = page()
@@ -167,6 +168,43 @@ describe('T17, run: a press on a handle', () => {
     env.selected.translation = [1, 0.25, -2]
     move(env, { x: 102, y: 100, to: [3, 0.05, 0] })
     assert.deepEqual(env.selectedObj.position.toArray(), [1, 0.25, -2])
+  })
+})
+
+describe('T17, run: rotate and scale modes (the outside code review, N-1)', () => {
+  /** A rotate or scale handle change: the control writes the quaternion or the scale, then reports it. */
+  function turn(env, { x, y, quaternion, scale }) {
+    env.handlePress.move({ x, y })
+    if (quaternion) env.selectedObj.quaternion.fromArray(quaternion)
+    if (scale) env.selectedObj.scale.fromArray(scale)
+    env.onHandleChange()
+  }
+  test('a short press in rotate mode puts the rotation back, and records nothing', () => {
+    const env = page()
+    env.gizmo.mode = 'rotate'
+    press(env)
+    turn(env, { x: 102, y: 100, quaternion: [0, 0.05, 0, 0.9987] })
+    assert.deepEqual(env.selectedObj.quaternion.toArray(), [0, 0, 0, 1])
+    release(env)
+    assert.equal(env.gestures.length, 0)
+    assert.deepEqual(env.selectedObj.quaternion.toArray(), [0, 0, 0, 1])
+  })
+  test('a short press in scale mode puts the scale back, and records nothing', () => {
+    const env = page()
+    env.gizmo.mode = 'scale'
+    press(env)
+    turn(env, { x: 101, y: 102, scale: [1.05, 1, 1] })
+    assert.deepEqual(env.selectedObj.scale.toArray(), [1, 1, 1])
+    release(env)
+    assert.equal(env.gestures.length, 0)
+  })
+  test('a real rotate drag begins past 4 px and records the rotation only', () => {
+    const env = page()
+    env.gizmo.mode = 'rotate'
+    press(env)
+    turn(env, { x: 120, y: 100, quaternion: [0, 0.3827, 0, 0.9239] })
+    assert.equal(env.gestures.length, 1)
+    assert.deepEqual(env.gestures[0].updates.at(-1), { rotation: [0, 0.3827, 0, 0.9239] })
   })
 })
 
@@ -215,7 +253,7 @@ describe('T13 and SP-L10: the click', () => {
     assert.match(functionText('pickEditTarget'), /resolveRoot: resolveScopedSelection,\s*descend: e\.altKey,\s*current,\s*drill: e\.detail >= 2,/)
   })
   test('a double-click’s second press on a handle counts as a click whatever it travelled', () => {
-    assert.match(click, /const fromHandle = handleClick\s*handleClick = null\s*const forced = fromHandle\?\.forced === true && !down\?\.onHandle\s*if \(!forced && !isSelectClick\(down, \{ x: e\.clientX, y: e\.clientY \}, \{ gestureEnded: !!down\?\.onHandle \}\)\) return/)
+    assert.match(click, /const fromHandle = handleClick\s*handleClick = null\s*if \(fromHandle\?\.drag\) return\s*const forced = fromHandle\?\.forced === true && !down\?\.onHandle\s*if \(!forced && !isSelectClick\(down, \{ x: e\.clientX, y: e\.clientY \}, \{ gestureEnded: !!down\?\.onHandle \}\)\) return/)
   })
   test('SP-L10: a click from a handle changes the selection only within the selected object’s top-level object', () => {
     assert.match(click, /if \(fromHandle && selected && !\(node && topLevelAncestor\(node\) === topLevelAncestor\(selected\)\)\) return\s*selectForEdit\(node\)/)

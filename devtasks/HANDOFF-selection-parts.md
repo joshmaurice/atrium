@@ -7,8 +7,9 @@
 and DEV's (`45e6cd00`, `release_status`, 2026-11-08); only `devtasks/`
 differs. **Implemented by Claude in the fast lane** (SP-L7 (a)), no
 OpenRouter. **Checked by a fresh Claude agent** (§7: one must-fix, three
-should-fix, two nits; all taken in commit 6, `a1037f0`). **Not yet reviewed
-outside** (Fable, next).
+should-fix, two nits; all taken in commit 6, `a1037f0`). **Reviewed outside**
+at `5fe582c9` (§8: APPROVE WITH NITS; the reviewer was Claude, Opus 5.5, given
+the Fable prompt; its should-fix and two nits taken in commit 8).
 
 The decisions it implements: SP-L1 (a) a double-click drills; SP-L2 (b) a
 click stays at the working level; SP-L3 (b) Escape goes up first; SP-L4 (b) a
@@ -28,6 +29,8 @@ bug fixed here.
 | 4 `f0fa9d8` | T11: `addNode(d, { parent })`; `part-transform.js`; the `ancestors`, `group` and `shear` reasons and the offset vector (`edit-duplicate.js`); parent handles, the parent checks and messages, `sameCanonical` (`edit-undo.js`); Copy's world placement and `partCopyProblem` (`copy-paste.js`); their `app.js` glue; the server test with `parent`; three more wiring tests that pinned today's calls |
 | 5 `c3a83f0` | the harness checks (`devtasks/harness/checks/selection-parts/`); the guard's identical-files rule (for proof (p14c)); three more T11 tests §5 listed |
 | 6 `a1037f0` | the fresh-agent code check's findings (§7): an unnamed group not addressable; the handle release's verdict kept apart from the mouse press (touch); the part glue run in tests; N-4 tested; the crumb's order; `escapeTarget` pure; harness c3–c5 |
+| 7 `5fe582c`, `2c69b04` | `devtasks/` only: this file's §7, c3's start; the outside code-review prompt |
+| 8 (this commit) | the outside code review's fixes (§8): a touch drag's verdict kept for the tap's click (S-1); rotate and scale put-back tested (N-1); harness c5's touch drags and c6; the pre-brief's Rev 2.1 wording (N-2) |
 
 Code files touched are exactly §6's list (34 files, +2,684 −208), plus the
 comment in `test/helpers/depth-recorder.mjs`, a test file under
@@ -186,9 +189,10 @@ An earlier smoke on commit 3 showed the same for the gestures.
     well as being the node of its name: `parent: ''` is dropped by `addNode`
     and read as "no parent" by the server, though the SOM registers an
     unnamed node under `''`. §9.5 S6's "as the server resolves it".
-11. **(commit 6) Touch.** The handle release's verdict (`handleClick`) is kept
-    apart from `pressDown`, because on touch the compatibility `mousedown`
-    comes after the release; T17 and SP-L10 hold on touch (c5), and Chromium
+11. **(commit 6, 8) Touch.** The handle release's verdict (`handleClick`: a
+    click, or since commit 8 a drag) is kept apart from `pressDown`, because on
+    touch the compatibility `mousedown` comes after the release; T17 and SP-L10
+    hold on touch for a tap and for a short drag (c5), and Chromium
     counts taps, so a double-tap drills. **SP-L11 on touch is not delivered:**
     the click count arrives only after the release, so a second tap that
     travels 4 px or more could drag. Stated; not in the contract.
@@ -208,7 +212,8 @@ An earlier smoke on commit 3 showed the same for the gestures.
   part with no children uses only `parent`, which every server since
   edit-plumbing honours; the pure tests run with `trees: false` too.
 - **Pen input** (touch and mouse were run); SP-L11 on touch (§4 item 11).
-- **The Fable code review** (SP-L7 (a)): next.
+- **A Fable code review:** the outside review was by Claude (Opus 5.5), which
+  executed everything (§8); the passdown's preference was Fable.
 
 ## 6. Release
 - A client round with server **test** files: **DEV restarts** at the deploy
@@ -266,3 +271,40 @@ handle through a rename, the group's and a grandparent's Delete and Undo.
 **Not checked by it:** pen, Firefox, Safari, a physical mouse, a double-tap
 on touch, c4 against a broken worktree, the server's hostile suites, the
 untouched packages' suites, the host's timings.
+
+## 8. The outside code review (of `5fe582c9`)
+`devtasks/REVIEW-selection-parts-code-claude.md`: **APPROVE WITH NITS**, the
+reviewed SHA in its first line. **The reviewer was Claude (Opus 5.5)**, given
+the prompt written for Fable; it says so. It cloned, ran every listed test
+file (1,759 in `apps/client`, the server's files alone, the four shards: 48,
+54, 32, 61 s, deepest 27), built the harness for `5fe582c9` and ran c1–c5
+(113/113), and wrote its own probes: `touchdrag.py` (CDP touch events),
+`modes.py` (rotate and scale, snaps), an Undo probe on a real SOM. It
+re-ran proofs (p13) and (p9d). Claude reproduced S-1 with a probe of its own
+(`/tmp/sel/probes2/touchdrag.py`) before taking it. **Taken, in commit 8:**
+- **S-1, should-fix (on PROD today, narrowed but not closed by commit 6):** on
+  touch a 6–14 px drag on a handle moved the object (correct) and then the
+  tap's `click` selected the floor or nothing, because a drag left no verdict
+  and the touch `pressDown` comes after the release. Reproduced: 6 and 10 px
+  → `ground-plane`, 14 px → nothing, each with a Move. Fixed by the
+  reviewer's two lines (a drag's verdict, `{ drag: true }`, and the click
+  returning on it); after it every travel keeps `lamp-01` with one Move. A
+  lifted test and proof (p22); c5's 6 and 10 px touch drags, which fail
+  without the fix (rerun on the harness worktree, then restored).
+- **N-1, nit:** the put-back of rotation and scale had no test (removing it
+  left every test green). Three lifted tests in rotate and scale modes; proof
+  (p21); harness c6 (rotate and scale, snaps off and on: a 2 px press draws
+  and records nothing, a 40 px drag records one Rotate or Scale, drawn as the
+  SOM, snapped to 15° with the snap on).
+- **N-2, nit:** DEV step 2's "drag its up arrow a little" could be a click
+  now; the pre-brief's Rev 2.1 says "a few centimetres on screen".
+
+Not taken: nothing. **Confirmed sound by the review:** T17 against r163's
+TransformControls (the put-back idempotent, the capture listeners first); T18's
+re-entrancy and the click after it; no undo during a press; the hold released
+on a removal; Undo of parts through repeated part and group deletes, a
+sub-group under a renamed `Furniture`, `trees: false`; `NODE_NOT_FOUND`'s text;
+the policy, E7 at every level, the breadcrumb's text handling; the
+decomposition and the offset; P0's guard (a stray `-5` or `-01` file fails
+it). **Not run by it:** a physical mouse or touchscreen, Firefox, Safari, pen,
+DEV, PROD, the full server suite, the host's timings.

@@ -25,5 +25,11 @@ harness README). Every press gives Playwright a `click_count`: without it
   server's copy; the copy 1.5 m along world x; Copy of the stand and Paste at
   the top level at its world height.
 
+- `c5.py`: touch. A tap on a handle over the floor keeps the selection
+  (SP-L10 on touch); a 6 and a 10 px touch drag on the handle keep it too,
+  with one Move each (the outside code review's S-1); a double-tap.
+- `c6.py`: rotate and scale modes, snaps off and on: a 2 px press draws and
+  records nothing; a 40 px drag records one Rotate or Scale, snapped.
+
 Run: `HARNESS_ROOT=/tmp/atrium-harness python3 -u c1.py` (and c2–c4). Each
 prints PASS/FAIL lines and exits non-zero on any FAIL.
