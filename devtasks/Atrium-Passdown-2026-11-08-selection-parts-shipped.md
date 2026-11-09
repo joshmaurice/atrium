@@ -154,7 +154,8 @@ host, connector and convention notes of `Atrium-Passdown-2026-11-06-richer-add-s
 
 ## 6. Cleanup (operator, on the host)
 ```bash
-git -C /root/.hermes/sandboxes/docker/default/workspace/atrium push origin --delete claude/selection-parts
+git -C /root/.hermes/sandboxes/docker/default/workspace/atrium push origin --delete claude/selection-parts claude/selection-parts-passdown
 ```
-The only branch on GitHub but `main` (checked 2026-11-08, 21:10 PT). It goes
-only after this passdown is on `main`.
+The only branches on GitHub but `main` (checked 2026-11-08, 21:10 PT): the
+round's, and the one this passdown was pushed on. They go only after this
+passdown is on `main`.
