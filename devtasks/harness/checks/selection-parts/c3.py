@@ -39,11 +39,15 @@ with sync_playwright() as pw:
     targets = [n for n in ['Table-Center-Top', 'Credenza-North-Top', 'Bench-SE-Seat', 'Bench-SW-Seat', 'Credenza-East-Body',
                            'Bench-NW-Seat', 'Credenza-West-Top', 'Table-Center-Base', 'Credenza-South-Body', 'Bench-NE-LegLeft'] if p.ev(VISIBLE, n)]
     check(len(targets) >= 6, 'at least six of the ten parts are on screen', targets)
-    # a real run of gestures (the fresh-agent code check's nit): a click to
-    # select Furniture, then for each part a double-click and an Escape back up
+    # a real run of gestures (the fresh-agent code check's nit): from the bench
+    # the breadcrumb selected, Escape up to Furniture (a click on another
+    # bench's part would rightly select at the bench level, SP-L2), then for
+    # each part a double-click and an Escape back up
+    p.page.keyboard.press('Escape'); time.sleep(0.3)
+    check(p.ev(SEL) == 'Furniture', 'Escape from the bench goes up to Furniture', p.ev(SEL))
     first = p.ev(SCREEN, targets[0])
     click(m, first['x'], first['y']); time.sleep(0.5)
-    check(p.ev(SEL) == 'Furniture', 'a click on a part selects Furniture', p.ev(SEL))
+    check(p.ev(SEL) == 'Furniture', '  a click on a part keeps Furniture', p.ev(SEL))
     for name in targets:
         pt = p.ev(SCREEN, name)
         dbl(m, pt['x'], pt['y'], travel=1)

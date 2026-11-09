@@ -6,7 +6,9 @@
 `main`'s (`dd2071f9`, the SHA §2's facts were verified at), which is PROD's
 and DEV's (`45e6cd00`, `release_status`, 2026-11-08); only `devtasks/`
 differs. **Implemented by Claude in the fast lane** (SP-L7 (a)), no
-OpenRouter. **Not yet checked** by a fresh agent or reviewed outside (§7).
+OpenRouter. **Checked by a fresh Claude agent** (§7: one must-fix, three
+should-fix, two nits; all taken in commit 6, `a1037f0`). **Not yet reviewed
+outside** (Fable, next).
 
 The decisions it implements: SP-L1 (a) a double-click drills; SP-L2 (b) a
 click stays at the working level; SP-L3 (b) Escape goes up first; SP-L4 (b) a
@@ -25,6 +27,7 @@ bug fixed here.
 | 3 `3d6d54e` | T17's `edit-press.js`; T13's, T14's, T15's, T17's and T18's `app.js` and `index.html` glue (the click handler, the breadcrumb rows and their writer, Escape, `endHandleDrag` in `selectForEdit` and `syncGizmoEnabled`, the hint lines, Inspect's identity-based removal and its rename re-render); the two wiring tests §5 named |
 | 4 `f0fa9d8` | T11: `addNode(d, { parent })`; `part-transform.js`; the `ancestors`, `group` and `shear` reasons and the offset vector (`edit-duplicate.js`); parent handles, the parent checks and messages, `sameCanonical` (`edit-undo.js`); Copy's world placement and `partCopyProblem` (`copy-paste.js`); their `app.js` glue; the server test with `parent`; three more wiring tests that pinned today's calls |
 | 5 `c3a83f0` | the harness checks (`devtasks/harness/checks/selection-parts/`); the guard's identical-files rule (for proof (p14c)); three more T11 tests §5 listed |
+| 6 `a1037f0` | the fresh-agent code check's findings (§7): an unnamed group not addressable; the handle release's verdict kept apart from the mouse press (touch); the part glue run in tests; N-4 tested; the crumb's order; `escapeTarget` pure; harness c3–c5 |
 
 Code files touched are exactly §6's list (34 files, +2,684 −208), plus the
 comment in `test/helpers/depth-recorder.mjs`, a test file under
@@ -35,8 +38,9 @@ comment in `test/helpers/depth-recorder.mjs`, a test file under
   `/tmp/sel/full-suites.sh` in the cloud session): **70 suites, 4,591
   passing, 0 failing, 1 named skip** (`apps/client`'s richer-add R7 stated-limit
   test, unchanged). Commit 5 added five tests (the guard's sixth, four T11);
-  each touched suite was rerun: **4,596** passing. Baseline at `45e6cd00`: 65
-  suites, 4,463.
+  each touched suite was rerun: **4,596** passing; commit 6 added ten more to
+  `apps/client` (1,759, its whole suite rerun): **4,606**. Baseline at
+  `45e6cd00`: 65 suites, 4,463.
 - **The depth measurement (P0), cloud times, each file alone under `timeout
   180`:** at commit 1, 44.7, 50.1, 39.9 and 61.4 s (deepest 11, 8, **27**, 3:
   the overall deepest is 27, `subtree-add.test.js`'s add, as before); at
@@ -83,8 +87,14 @@ comment in `test/helpers/depth-recorder.mjs`, a test file under
 | (p16) | `endHandleDrag` returns at once | the T18 wiring tests fail (2); **harness `c2.py`: the removal and disconnect checks fail** (the handles stranded); see §4 item 1 | all |
 | (p16b) | (p16) and a begun press allowed to begin again | **harness `c2.py`: Fable's M-1 exactly**: Escape mid-drag moves `lamp-01` to `[0, 1.6107, 0]`, on the server too, and records "Move “lamp-01”" | all |
 | (p17) | SP-L10's line removed | its wiring test fails; **harness `c1.py`**: a short press on the handle over the floor selects `ground-plane` | all |
+| (p18a) | `partRules` handing glTF nodes straight through, every parent addressable (commit 6) | the lifted `partRules` and `checkDuplicate` tests fail | all |
+| (p18b) | `checkDuplicate` without the parent-frame offset | the turned-group Duplicate test fails | all |
+| (p18c) | `parentWorldOf` returns null | its lifted test fails | all |
+| (p19) | `capture` accepting an unnamed parent | the unnamed-group test fails | all |
+| (p20a) | `acceptAdd`'s N-4 note removed | the Duplicate-into-a-replaced-group test fails | all |
+| (p20b) | the re-add not re-pointed to where it landed | the Undo-and-Redo-into-the-newer-group test fails | all |
 
-### 2.2 The harness checks (`devtasks/harness/checks/selection-parts/`, on `f0fa9d8`)
+### 2.2 The harness checks (`devtasks/harness/checks/selection-parts/`, on `f0fa9d8`; rerun on `a1037f0`: c1 29, c2 16, c3 30, c4 32, c5 6, **113 PASS, 0 FAIL**)
 Real mouse events through Playwright (Chromium, SwiftShader), `click_count`
 on every press. **c1: 29 PASS** (the lamp's gestures, jitter 0/1/2 px, 6 px,
 Escape ×3, SP-L10 over the floor and empty space, a 25 px and a one-move 30
@@ -172,6 +182,21 @@ An earlier smoke on commit 3 showed the same for the gestures.
 9. **N-4's note** is shown for a Duplicate in place only when `expectParent`
    was given (the app gives it for every Duplicate: the original's parent or
    null), and for a re-add when the entry has a parent.
+10. **(commit 6) A parent must have a non-empty name** to be addressable, as
+    well as being the node of its name: `parent: ''` is dropped by `addNode`
+    and read as "no parent" by the server, though the SOM registers an
+    unnamed node under `''`. §9.5 S6's "as the server resolves it".
+11. **(commit 6) Touch.** The handle release's verdict (`handleClick`) is kept
+    apart from `pressDown`, because on touch the compatibility `mousedown`
+    comes after the release; T17 and SP-L10 hold on touch (c5), and Chromium
+    counts taps, so a double-tap drills. **SP-L11 on touch is not delivered:**
+    the click count arrives only after the release, so a second tap that
+    travels 4 px or more could drag. Stated; not in the contract.
+12. **`source: null`:** the selection rule treats content as external when
+    `source != null` (unchanged, released); the new `ancestors` rule when
+    `source` is an own key (the server's S2 refuses any own `source`). A
+    container with `source: null` can be drilled into but its parts are
+    refused Duplicate as external. Stated, unchanged.
 
 ## 5. Not done, or not checked
 - **A physical double-click** (the browser's own click counting on a real
@@ -182,7 +207,8 @@ An earlier smoke on commit 3 showed the same for the gestures.
 - **An old server** (T7) with a part's Duplicate and Undo: by reading, a
   part with no children uses only `parent`, which every server since
   edit-plumbing honours; the pure tests run with `trees: false` too.
-- **The fresh-agent code check and the Fable code review** (SP-L7 (a)): next.
+- **Pen input** (touch and mouse were run); SP-L11 on touch (§4 item 11).
+- **The Fable code review** (SP-L7 (a)): next.
 
 ## 6. Release
 - A client round with server **test** files: **DEV restarts** at the deploy
@@ -196,3 +222,47 @@ An earlier smoke on commit 3 showed the same for the gestures.
   node under its parent.
 - The deploy's server suite takes about 80 s longer (the four measure files).
 - DEV acceptance: §5 of the pre-brief, steps 1–7, and step 8 on PROD.
+
+## 7. The fresh-agent code check (of `8ec887ce..a983b613`)
+A fresh Claude agent that hadn't written the code read the whole diff against
+§4–§6 and r163's `TransformControls.js`, ran the suites in a scratch copy
+(`apps/client` 1,749, `packages/client` 753, `interaction`, the server's new
+and measure files alone; the shards 48, 55, 33, 61 s, deepest 27), ran
+harness c1–c4 (all pass), wrote browser probes (`modes.py`, `touch.py`,
+`turned.py`) and node probes (`unnamed-group.mjs`), and made 17 breaks in its
+copy, each rerun and restored. Claude reproduced each finding before taking
+it. **All taken, in commit 6:**
+- **must-fix 1:** a part of an unnamed group passed every check, but `''`
+  can't travel as `parent`: Undo restored it at the top level, Duplicate put
+  the copy there. Reproduced with the real engine, client and server
+  (`unnamed-group.mjs`). The parent must have a non-empty name (`partRules`,
+  `capture`, `checkEntry`); proof (p19); the test harness's server now
+  follows `if (parentName)` as `world.addNode` does.
+- **should-fix 2:** on touch the compatibility `mousedown` comes after the
+  release, so SP-L10's flags on `pressDown` were lost: a tap on a handle over
+  the floor selected `ground-plane`. Reproduced (`touch.py`); fixed by
+  `handleClick` (§4 item 11); harness c5.
+- **should-fix 3:** `partRules`, `parentWorldOf` and the offset in
+  `checkDuplicate` could be broken with every test green (the fixtures'
+  groups have no rotation or scale). Now lifted and run on a turned, scaled
+  group; proofs (p18a)–(p18c); c4 gains the turned lamp (the copy 1.5 m along
+  world x, the stand pasted at world height 1.5 with the lamp's rotation and
+  scale).
+- **should-fix 4:** neither half of N-4 was tested; two tests, proofs (p20a),
+  (p20b).
+- **nits:** a crumb checks E7 before identity and, when stale, re-renders the
+  current selection's path; `escapeTarget` moved to `edit-selection.js`,
+  pure and tested; c3 is a real gesture run (Escape back up between
+  double-clicks) and its hidden-part check expects the ground exactly; the
+  `source: null` inconsistency stated (§4 item 12).
+
+**Confirmed sound by the check:** T17 in rotate and scale modes; Escape
+mid-press within the slop; c1–c4; ten more breaks the tests catch (the
+canonical traversal order, the partition, `forced`, (p15), the travel on x
+only, Inspect's `current`, Inspect's removal by name, the crumb's identity,
+`renderPath` rebuilding every call, SP-L10 comparing nodes); P0's guard and
+55 suites measured; the handoff's §4 items against the code; the parent
+handle through a rename, the group's and a grandparent's Delete and Undo.
+**Not checked by it:** pen, Firefox, Safari, a physical mouse, a double-tap
+on touch, c4 against a broken worktree, the server's hostile suites, the
+untouched packages' suites, the host's timings.
