@@ -10,7 +10,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   resolveEditSelection, pickEditSelection, DUPLICATE_NAME_MESSAGE,
-  selectionPath, breadcrumbItems, BREADCRUMB_MAX_LEVELS, BREADCRUMB_NAME_MAX,
+  selectionPath, breadcrumbItems, escapeTarget, BREADCRUMB_MAX_LEVELS, BREADCRUMB_NAME_MAX,
 } from '../src/edit-selection.js'
 import { resolveScopedSelection } from '../../../packages/interaction/src/selectionModel.js'
 import { shownText } from '../src/copy-paste.js'
@@ -114,5 +114,17 @@ describe('T14: the breadcrumb', () => {
     const [, b] = breadcrumbItems([furniture, bidi], { show: shownText })
     assert.equal(b.text.includes('‮'), false)
     assert.equal(b.title.includes('‮'), false)
+  })
+})
+
+describe('T15: where Escape goes (pure)', () => {
+  test('a part goes to its parent, step by step; a top-level object to nothing', () => {
+    assert.deepEqual(escapeTarget(seat), { node: bench, refused: null })
+    assert.deepEqual(escapeTarget(bench), { node: furniture, refused: null })
+    assert.deepEqual(escapeTarget(furniture), { node: null, refused: null })
+    assert.deepEqual(escapeTarget(null), { node: null, refused: null })
+  })
+  test('a parent whose name another node holds: nothing, with E7\u2019s reason', () => {
+    assert.deepEqual(escapeTarget(seat, { isDuplicatedName: (n) => n === 'Bench-NE' }), { node: null, refused: DUPLICATE_NAME_MESSAGE })
   })
 })

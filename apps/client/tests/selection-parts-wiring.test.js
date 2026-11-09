@@ -56,6 +56,7 @@ function page({ blocked = false } = {}) {
     selectedObj: { position: vec([3, 0, 0]), quaternion: vec([0, 0, 0, 1]), scale: vec([1, 1, 1]) },
     activeGesture: null,
     pressDown: null,
+    handleClick: null,
     pendingRename: null,
     modes: { edit: true },
     handlePress: createHandlePress(),
@@ -120,7 +121,7 @@ describe('T17, run: a press on a handle', () => {
     assert.equal(env.gestures.length, 0, 'no gesture began: no Move is sent or recorded')
     assert.deepEqual(env.holds, [], 'the drag rule was not held')
     assert.equal(env.pressDown.onHandle, false, 'the click that follows is a select click')
-    assert.equal(env.pressDown.fromHandle, true)
+    assert.deepEqual(env.handleClick, { forced: false }, 'from a handle (SP-L10), read by the click whatever the event order')
   })
   test('a real drag: the gesture begins at the first change past 4 px and ends at the release', () => {
     const env = page()
@@ -150,7 +151,7 @@ describe('T17, run: a press on a handle', () => {
     assert.equal(env.gestures.length, 0)
     assert.deepEqual(env.selectedObj.position.toArray(), [3, 0, 0])
     release(env)
-    assert.equal(env.pressDown.forced, true)
+    assert.deepEqual(env.handleClick, { forced: true })
     assert.equal(env.pressDown.onHandle, false)
   })
   test('a block: no gesture begins past 4 px, and the change is put back (N-3)', () => {
@@ -214,13 +215,14 @@ describe('T13 and SP-L10: the click', () => {
     assert.match(functionText('pickEditTarget'), /resolveRoot: resolveScopedSelection,\s*descend: e\.altKey,\s*current,\s*drill: e\.detail >= 2,/)
   })
   test('a double-click’s second press on a handle counts as a click whatever it travelled', () => {
-    assert.match(click, /const forced = down\?\.forced === true && !down\.onHandle\s*if \(!forced && !isSelectClick\(down, \{ x: e\.clientX, y: e\.clientY \}, \{ gestureEnded: !!down\?\.onHandle \}\)\) return/)
+    assert.match(click, /const fromHandle = handleClick\s*handleClick = null\s*const forced = fromHandle\?\.forced === true && !down\?\.onHandle\s*if \(!forced && !isSelectClick\(down, \{ x: e\.clientX, y: e\.clientY \}, \{ gestureEnded: !!down\?\.onHandle \}\)\) return/)
   })
   test('SP-L10: a click from a handle changes the selection only within the selected object’s top-level object', () => {
-    assert.match(click, /if \(down\?\.fromHandle && selected && !\(node && topLevelAncestor\(node\) === topLevelAncestor\(selected\)\)\) return\s*selectForEdit\(node\)/)
+    assert.match(click, /if \(fromHandle && selected && !\(node && topLevelAncestor\(node\) === topLevelAncestor\(selected\)\)\) return\s*selectForEdit\(node\)/)
+    // the verdict is cleared at every new press (capture-phase pointerdown, before the handles)
+    assert.match(code, /viewportEl\.addEventListener\('pointerdown', \(e\) => \{\s*handleClick = null\s*handlePress\.down\(\{ x: e\.clientX, y: e\.clientY \}\)\s*\}, true\)/)
   })
   test('the press, its moves and its click count are recorded in the capture phase', () => {
-    assert.match(code, /viewportEl\.addEventListener\('pointerdown', \(e\) => handlePress\.down\(\{ x: e\.clientX, y: e\.clientY \}\), true\)/)
     assert.match(code, /viewportEl\.addEventListener\('pointermove', \(e\) => handlePress\.move\(\{ x: e\.clientX, y: e\.clientY \}\), true\)/)
     assert.match(blockFrom("viewportEl.addEventListener('mousedown'"), /handlePress\.count\(e\.detail\)/)
   })
@@ -243,17 +245,16 @@ describe('T14 and T15: the breadcrumb, Escape, Inspect', () => {
   test('a crumb re-checks identity and the duplicate-name rule, and gives focus back to the canvas', () => {
     const body = functionText('wireCrumbs')
     assert.match(body, /if \(!node \|\| client\.som\?\.getNodeByName\(node\.name\) !== node\)/)
-    assert.match(body, /if \(isDuplicatedName\(node\.name\)\) \{ refuse\(DUPLICATE_NAME_MESSAGE\); return \}/)
+    assert.match(body, /if \(node && isDuplicatedName\(node\.name\)\) \{ refuse\(DUPLICATE_NAME_MESSAGE\); return \}/)
+    assert.ok(body.indexOf('isDuplicatedName(node.name)') < body.indexOf('getNodeByName(node.name) !== node'), 'E7 before identity (finding 5)')
+    assert.match(body, /renderPath\(row, current\(\)\)/, 'a stale crumb re-renders the current selection\u2019s path')
     assert.match(body, /canvas\.focus\?\.\(\)/)
   })
   test('Escape goes up a level in Edit and in Inspect; a duplicated parent deselects with the message', () => {
-    const esc = functionText('escapeTarget')
-    assert.match(esc, /if \(!parent\) return \{ node: null, refused: null \}/)
-    assert.match(esc, /if \(isDuplicatedName\(parent\.name\)\) return \{ node: null, refused: DUPLICATE_NAME_MESSAGE \}/)
     const listener = code.slice(code.indexOf("if (e.key === 'Escape') {"), code.indexOf('// ── The Teleporter button'))
-    assert.match(listener, /if \(selected\) \{\s*const up = escapeTarget\(selected\)\s*selectForEdit\(up\.node\)/)
+    assert.match(listener, /if \(selected\) \{\s*const up = escapeTarget\(selected, \{ isDuplicatedName \}\)\s*selectForEdit\(up\.node\)/)
     assert.match(listener, /else \{\s*setEditMode\(false\)\s*\}/)
-    assert.match(listener, /if \(modes\.inspect && inspected && !e\.target\.closest\?\.\('input, textarea, select'\)\) \{\s*const up = escapeTarget\(inspected\)\s*inspectSelect\(up\.node\)/)
+    assert.match(listener, /if \(modes\.inspect && inspected && !e\.target\.closest\?\.\('input, textarea, select'\)\) \{\s*const up = escapeTarget\(inspected, \{ isDuplicatedName \}\)\s*inspectSelect\(up\.node\)/)
   })
   test('Inspect follows a removed part by identity, and re-renders on a rename', () => {
     assert.match(code, /client\.on\('som:remove', \(\) => \{\s*if \(inspected && client\.som\?\.getNodeByName\(inspected\.name\) !== inspected\) inspectSelect\(null\)/)
@@ -261,5 +262,74 @@ describe('T14 and T15: the breadcrumb, Escape, Inspect', () => {
   })
   test('the hint line names the double-click and Escape going up', () => {
     assert.match(code, /Edit mode · Click to select · Double-click goes into a group · Alt-click selects a part · Esc goes up/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T11, run (the fresh-agent code check's finding 3): the app's part glue,
+// lifted and run on a real SOM with a TURNED and SCALED group, so a regression
+// in the glTF-to-SOM mapping, the parent's world matrix or the offset fails.
+// ---------------------------------------------------------------------------
+
+describe('T11, run: partRules, parentWorldOf and checkDuplicate', async () => {
+  const { SOMDocument, worldMatrix } = await import('@atrium/som')
+  const { prepareDuplicate, DUPLICATE_OFFSET_X } = await import('../src/edit-duplicate.js')
+  const { parentFrameOffset } = await import('../src/part-transform.js')
+  const { copyName } = await import('../src/edit-palette.js')
+  const { Document } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
+
+  function world() {
+    const doc = new Document()
+    const h = Math.SQRT1_2
+    const lamp = doc.createNode('lamp-01').setTranslation([3, 0, 0]).setRotation([0, h, 0, h]).setScale([2, 2, 2])
+    lamp.addChild(doc.createNode('lamp-shade').setTranslation([0, 1.6, 0]))
+    const anon = doc.createNode('')
+    anon.addChild(doc.createNode('leaf'))
+    const avatar = doc.createNode('User-aaaa')
+    avatar.addChild(doc.createNode('hat'))
+    doc.createScene().addChild(lamp).addChild(anon).addChild(avatar)
+    return new SOMDocument(doc)
+  }
+  function lift(som) {
+    const env = {
+      client: { som },
+      isEditExcluded: (n) => n?.name === 'User-aaaa',
+      worldMatrix, parentFrameOffset, prepareDuplicate, DUPLICATE_OFFSET_X, copyName,
+      isNameFree: (n) => som.checkNewName(n).ok,
+      treesAllowed: () => true,
+    }
+    return new Function('env', `with (env) { ${['partRules', 'parentWorldOf', 'checkDuplicate'].map(functionText).join('\n')}\n return { partRules, parentWorldOf, checkDuplicate } }`)(env)
+  }
+
+  test('partRules hands glTF nodes and maps them to the SOM: the group is addressable, an unnamed one isn’t, an avatar ancestor is excluded', () => {
+    const som = world()
+    const app = lift(som)
+    const rules = app.partRules()
+    assert.equal(rules.parentAddressable(som.getNodeByName('lamp-01')._node), true)
+    assert.equal(rules.parentAddressable(som.getNodeByName('leaf').parent._node), false, 'an unnamed group (finding 1)')
+    assert.equal(rules.isExcluded(som.getNodeByName('User-aaaa')._node), true)
+    assert.equal(rules.isExcluded(som.getNodeByName('lamp-01')._node), false)
+  })
+  test('parentWorldOf is the SOM parent’s world matrix, and null at the top level', () => {
+    const som = world()
+    const app = lift(som)
+    assert.deepEqual(app.parentWorldOf(som.getNodeByName('lamp-shade')), worldMatrix(som.getNodeByName('lamp-01')))
+    assert.equal(app.parentWorldOf(som.getNodeByName('lamp-01')), null)
+  })
+  test('checkDuplicate of a part under a turned, scaled group puts the copy 1.5 m along WORLD x', () => {
+    const som = world()
+    const app = lift(som)
+    const shade = som.getNodeByName('lamp-shade')
+    const r = app.checkDuplicate(shade)
+    assert.equal(r.ok, true, r.reason)
+    const copy = { translation: r.descriptor.translation, parent: shade.parent }
+    const a = worldMatrix(shade); const b = worldMatrix(copy)
+    for (const [i, want] of [[12, 1.5], [13, 0], [14, 0]]) assert.ok(Math.abs(b[i] - a[i] - want) < 1e-9, `world delta ${i}: ${b[i] - a[i]}`)
+  })
+  test('checkDuplicate refuses a part of an unnamed group (group) and a part of an avatar (ancestors)', () => {
+    const som = world()
+    const app = lift(som)
+    assert.equal(app.checkDuplicate(som.getNodeByName('leaf')).rule, 'group')
+    assert.equal(app.checkDuplicate(som.getNodeByName('hat')).rule, 'ancestors')
   })
 })

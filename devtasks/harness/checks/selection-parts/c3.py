@@ -39,12 +39,18 @@ with sync_playwright() as pw:
     targets = [n for n in ['Table-Center-Top', 'Credenza-North-Top', 'Bench-SE-Seat', 'Bench-SW-Seat', 'Credenza-East-Body',
                            'Bench-NW-Seat', 'Credenza-West-Top', 'Table-Center-Base', 'Credenza-South-Body', 'Bench-NE-LegLeft'] if p.ev(VISIBLE, n)]
     check(len(targets) >= 6, 'at least six of the ten parts are on screen', targets)
+    # a real run of gestures (the fresh-agent code check's nit): a click to
+    # select Furniture, then for each part a double-click and an Escape back up
+    first = p.ev(SCREEN, targets[0])
+    click(m, first['x'], first['y']); time.sleep(0.5)
+    check(p.ev(SEL) == 'Furniture', 'a click on a part selects Furniture', p.ev(SEL))
     for name in targets:
-        p.ev("() => __ep().selectForEdit(atriumClient.som.getNodeByName('Furniture'))"); time.sleep(0.25)
         pt = p.ev(SCREEN, name)
         dbl(m, pt['x'], pt['y'], travel=1)
         group = p.ev(f"() => atriumClient.som.getNodeByName('{name}').parent.name")
         check(p.ev(SEL) == group, f'double-click on {name} with Furniture selected: {group}', p.ev(SEL))
+        p.page.keyboard.press('Escape'); time.sleep(0.3)
+        check(p.ev(SEL) == 'Furniture', '  Escape goes back up to Furniture', p.ev(SEL))
     check(p.ev(ALL) == before, f'the {len(targets)} double-clicks moved nothing', None)
     check(p.ev(UNDO) == [], '  and recorded nothing', p.ev(UNDO))
     check(p.errors == [], 'no page errors', p.errors[:2])
@@ -65,7 +71,7 @@ with sync_playwright() as pw:
     v.page.keyboard.press('Escape'); time.sleep(0.3)
     check((v.ev(IPNAME) or '').startswith('lamp-01 (2 parts'), 'Inspect: Escape goes up to lamp-01', v.ev(IPNAME))
     dbl(vm, st['x'], st['y'])
-    check(v.ev(IPNAME) != 'lamp-stand', 'Inspect: the hidden stand can’t be reached', v.ev(IPNAME))
+    check(v.ev(IPNAME) == 'ground-plane', 'Inspect: the hidden stand can’t be reached: the click goes through it to the ground', v.ev(IPNAME))
     check(v.errors == [] and o.errors == [], 'no page errors', v.errors[:2] + o.errors[:2])
     br.close()
 done()

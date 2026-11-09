@@ -16,7 +16,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { resolveScopedSelection, topLevelAncestor } from '@atrium/interaction'   // selection-parts T13
 import { createEditModes } from './edit-modes.js'
 import { createEditTracker, createBehaviorHold, handleUpdate, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
-import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject, selectionPath, breadcrumbItems, DUPLICATE_NAME_MESSAGE } from './edit-selection.js'
+import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject, selectionPath, breadcrumbItems, escapeTarget, DUPLICATE_NAME_MESSAGE } from './edit-selection.js'
 import { createHandlePress } from './edit-press.js'   // selection-parts T17
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
@@ -1652,7 +1652,7 @@ document.addEventListener('keydown', (e) => {
     // can't be selected (E7): Escape deselects and says so.
     if (modes.edit && !e.target.closest?.('input, textarea, select')) {
       if (selected) {
-        const up = escapeTarget(selected)
+        const up = escapeTarget(selected, { isDuplicatedName })
         selectForEdit(up.node)
         if (up.refused) showEditError(up.refused)
       } else {
@@ -1662,7 +1662,7 @@ document.addEventListener('keydown', (e) => {
     }
     // Inspect: the same first two steps (selection-parts T15).
     if (modes.inspect && inspected && !e.target.closest?.('input, textarea, select')) {
-      const up = escapeTarget(inspected)
+      const up = escapeTarget(inspected, { isDuplicatedName })
       inspectSelect(up.node)
       ipStatus.textContent = up.refused ?? ''
     }
@@ -1995,7 +1995,12 @@ function partRules() {
       const n = client.som?.getNodeByName(g.getName?.())
       return !!n && n._node === g && isEditExcluded(n)
     },
-    parentAddressable: (g) => client.som?.getNodeByName(g.getName?.())?._node === g,
+    // an empty name can't travel as `parent` (the client drops it, the server
+    // reads it as none), so an unnamed group is not addressable
+    parentAddressable: (g) => {
+      const name = g.getName?.()
+      return typeof name === 'string' && name !== '' && client.som?.getNodeByName(name)?._node === g
+    },
   }
 }
 
@@ -2275,9 +2280,20 @@ function endHandleDrag() {
 // until the pointer travels CLICK_SLOP_PX, and a double-click's second press
 // never drags. The rule is edit-press.js's; this is the DOM half.
 const handlePress = createHandlePress()
+/**
+ * The verdict of the last handle press that released as a click, for the
+ * `click` that follows (SP-L10, SP-L11). Kept apart from `pressDown`: on touch
+ * the compatibility `mousedown` (which makes `pressDown`) comes AFTER the
+ * release, so a flag on `pressDown` would be lost (the fresh-agent code
+ * check's finding 2). Cleared at every new press and used once.
+ */
+let handleClick = null
 // Capture phase on the viewport: before the handles' own listeners on the
 // canvas, so the press and every move are known before the object moves.
-viewportEl.addEventListener('pointerdown', (e) => handlePress.down({ x: e.clientX, y: e.clientY }), true)
+viewportEl.addEventListener('pointerdown', (e) => {
+  handleClick = null
+  handlePress.down({ x: e.clientX, y: e.clientY })
+}, true)
 viewportEl.addEventListener('pointermove', (e) => handlePress.move({ x: e.clientX, y: e.clientY }), true)
 
 /** Put the selected object back where the SOM has it (T17: the live node is the record). */
@@ -2313,13 +2329,12 @@ function onHandleDragging(isDragging) {
     } else {
       // T17 — no gesture began: whatever the handles drew is put back.
       putBackHandle()
-      if (released.click && pressDown) {
+      if (released.click) {
         // the click that follows is a select click (SP-L8), from a handle
         // (SP-L10), and a double-click's second press counts whatever it
         // travelled (SP-L11)
-        pressDown.onHandle = false
-        pressDown.fromHandle = true
-        pressDown.forced = released.forced === true
+        handleClick = { forced: released.forced === true }
+        if (pressDown) pressDown.onHandle = false
       }
     }
   }
@@ -2558,13 +2573,15 @@ viewportEl.addEventListener('click', (e) => {
   // selection. selection-parts T17: a short press on a handle is (its mark is
   // cleared at the release), and a double-click's second press on a handle is
   // whatever it travelled (SP-L11).
-  const forced = down?.forced === true && !down.onHandle
+  const fromHandle = handleClick
+  handleClick = null
+  const forced = fromHandle?.forced === true && !down?.onHandle
   if (!forced && !isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
   const { node, refused } = pickEditTarget(e, { current: selected }) ?? { node: null, refused: null }
   // SP-L10 — a click that began on a handle changes the selection only within
   // the selected object's top-level object (drilling and siblings); a press
   // over the floor or the sky behind a handle changes nothing.
-  if (down?.fromHandle && selected && !(node && topLevelAncestor(node) === topLevelAncestor(selected))) return
+  if (fromHandle && selected && !(node && topLevelAncestor(node) === topLevelAncestor(selected))) return
   selectForEdit(node)
   if (refused) showEditError(refused)
 })
@@ -2667,36 +2684,27 @@ function renderPath(row, node) {
  * its name isn't another node's too (E7); else re-render. Focus goes back to
  * the canvas, so the movement keys work.
  */
-function wireCrumbs(row, select, refuse) {
+function wireCrumbs(row, current, select, refuse) {
   row?.addEventListener('click', (e) => {
     const button = e.target.closest?.('button.ep-crumb')
     if (!button) return
     const node = pathRendered.get(row)?.path[Number(button.dataset.level)] ?? null
     button.blur()
     canvas.focus?.()
+    // E7 first: with a duplicated name the lookup may return the other node
+    if (node && isDuplicatedName(node.name)) { refuse(DUPLICATE_NAME_MESSAGE); return }
     if (!node || client.som?.getNodeByName(node.name) !== node) {
+      // the path changed under the click: show the current selection's again
       pathRendered.delete(row)
-      renderPath(row, null)
+      renderPath(row, current())
       return
     }
-    if (isDuplicatedName(node.name)) { refuse(DUPLICATE_NAME_MESSAGE); return }
     select(node)
   })
 }
-wireCrumbs(epPath, (node) => { if (modes.edit) selectForEdit(node) }, (text) => showEditError(text))
-wireCrumbs(ipPath, (node) => { if (modes.inspect) { inspectSelect(node); ipStatus.textContent = '' } }, (text) => { ipStatus.textContent = text })
+wireCrumbs(epPath, () => selected, (node) => { if (modes.edit) selectForEdit(node) }, (text) => showEditError(text))
+wireCrumbs(ipPath, () => inspected, (node) => { if (modes.inspect) { inspectSelect(node); ipStatus.textContent = '' } }, (text) => { ipStatus.textContent = text })
 
-/**
- * selection-parts T15 — where Escape goes from `node`: its parent, unless the
- * parent's name is duplicated (E7: then nothing, with the reason); a
- * top-level node → nothing.
- */
-function escapeTarget(node) {
-  const parent = node?.parent ?? null
-  if (!parent) return { node: null, refused: null }
-  if (isDuplicatedName(parent.name)) return { node: null, refused: DUPLICATE_NAME_MESSAGE }
-  return { node: parent, refused: null }
-}
 
 // ── Property panel (B5) ─────────────────────────────────────────────────
 

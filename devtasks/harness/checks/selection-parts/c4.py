@@ -73,6 +73,31 @@ with sync_playwright() as pw:
     btn(p, 'ep-undo')
     check(p.errors == [], 'no page errors', p.errors[:2])
 
+    # a TURNED and SCALED lamp (the fresh-agent code check's finding 3: the
+    # fixtures' groups have no rotation or scale, so the offset and the world
+    # height can't be told from local ones there)
+    k3 = 'c4t' + key()
+    t = Page(br); t.connect(f'wss://127.0.0.1:8443/w/{k3}'); t.edit_on(); time.sleep(1)
+    t.ev("() => { const l = atriumClient.som.getNodeByName('lamp-01'); l.rotation = [0, Math.SQRT1_2, 0, Math.SQRT1_2]; l.scale = [2, 2, 2] }"); time.sleep(0.8)
+    WORLD = "(n) => { const o = stage.scene.getObjectByName(n); o.updateWorldMatrix(true, false); const v = o.position.clone(); o.getWorldPosition(v); return v.toArray() }"
+    shadeW = t.ev(WORLD, 'lamp-shade')
+    select(t, 'lamp-shade'); btn(t, 'ep-duplicate')
+    copyW = t.ev(WORLD, 'lamp-shade copy')
+    check(abs(copyW[0] - shadeW[0] - 1.5) < 1e-6 and abs(copyW[1] - shadeW[1]) < 1e-6 and abs(copyW[2] - shadeW[2]) < 1e-6,
+          'under a lamp turned 90° and scaled 2, the copy lands 1.5 m along world x', (shadeW, copyW))
+    check(parent_on_server(k3, 'lamp-shade copy') == 'lamp-01', '  under lamp-01 on the server', parent_on_server(k3, 'lamp-shade copy'))
+    btn(t, 'ep-undo')
+    select(t, 'lamp-stand')
+    standW = t.ev(WORLD, 'lamp-stand')
+    btn(t, 'ep-copy'); btn(t, 'ep-paste')
+    pasted = t.ev(SEL)
+    check(parent_on_server(k3, pasted) is None, 'the stand\u2019s Paste is at the top level', parent_on_server(k3, pasted))
+    check(abs(t.ev(TR, pasted)[1] - standW[1]) < 1e-4, '  at its world height (1.5 m, not its local 0.75)', (t.ev(TR, pasted), standW))
+    rs = t.ev(f"() => {{ const n = atriumClient.som.getNodeByName('{pasted}'); return [[...n.rotation], [...n.scale]] }}")
+    check(all(abs(a - b) < 1e-6 for a, b in zip(rs[0], [0, 2 ** -0.5, 0, 2 ** -0.5])) and all(abs(x - 2) < 1e-6 for x in rs[1]), '  with the lamp\u2019s rotation and scale baked in', rs)
+    btn(t, 'ep-undo')
+    check(t.errors == [], 'no page errors', t.errors[:2])
+
     # Bench-NE in atrium.gltf: a sub-group (a tree) as the part
     k2 = 'atr' + key()
     a = Page(br); a.connect(f'wss://127.0.0.1:8443/w/{k2}'); a.edit_on(); time.sleep(1.2)

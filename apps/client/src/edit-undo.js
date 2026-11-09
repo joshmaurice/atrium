@@ -421,8 +421,9 @@ export function createEditUndo({
     const gltfNode = node?._node
     if (!gltfNode) return { ok: false, reason: 'not addressable' }
     // selection-parts T11 — a part comes back under its parent BY NAME, so the
-    // parent must be the node of its name (§9.5 S6): else Delete asks.
-    if (node.parent && getNodeByName(node.parent.name) !== node.parent) return { ok: false, reason: GROUP_NOT_ADDRESSABLE }
+    // parent must be the node of its name (§9.5 S6), and the name not empty
+    // (the client and the server treat `parent: ''` as no parent): else Delete asks.
+    if (node.parent && (!node.parent.name || getNodeByName(node.parent.name) !== node.parent)) return { ok: false, reason: GROUP_NOT_ADDRESSABLE }
     const t = trees() === true
     const parts = t ? collectSubtree(node).slice(1) : []
     for (const part of parts) {
@@ -711,8 +712,8 @@ export function createEditUndo({
       // be the same node (the handle follows a rename and our own re-add)
       const p = entry.parent?.node ?? null
       if (entry.parent) {
-        const holder = p ? getNodeByName(p.name) : null
-        if (holder !== p || !p) {
+        const holder = p?.name ? getNodeByName(p.name) : null
+        if (!p || !p.name || holder !== p) {
           return { ok: false, message: holder ? groupReplaced(verb, name) : groupRemoved(verb, name) }
         }
       }

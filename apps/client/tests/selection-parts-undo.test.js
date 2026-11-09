@@ -44,7 +44,8 @@ function harness(som, { trees = true } = {}) {
     message: (t) => messages.push(t),
   })
   function add(descriptor, parentName) {
-    if (parentName != null) {
+    // as world.addNode: an empty name is no parent (`if (parentName)`)
+    if (parentName) {
       const parent = som.getNodeByName(parentName)
       if (!parent) return { ok: false, text: `NODE_NOT_FOUND: ${parentName}` }
       parent.addChild(som.ingestNode(descriptor))
@@ -245,6 +246,35 @@ describe('T11: a part’s Delete, Undo and Redo', () => {
     assert.equal(h.messages.at(-1), '“lamp-shade” went into a newer “lamp-01”: its group was replaced elsewhere.')
   })
 
+  test('N-4: a Duplicate in place whose group another tab replaced before the answer says so', async () => {
+    const som = await world()
+    const h = harness(som)
+    const dup = h.duplicateInPlace(som.getNodeByName('lamp-shade'), 'lamp-shade copy')
+    som.getNodeByName('lamp-01').dispose()                 // another tab replaces the group
+    som.scene.addChild(som.ingestNode({ name: 'lamp-01' }))
+    h.answer(dup.seq)
+    assert.equal(h.messages.at(-1), '“lamp-shade copy” went into a newer “lamp-01”: its group was replaced elsewhere.')
+  })
+
+  test('N-4: a re-add that landed in a newer group is recorded there: Undo and Redo go into the newer group', async () => {
+    const som = await world()
+    const h = harness(som)
+    const del = h.clickDelete(som.getNodeByName('lamp-shade'))
+    h.answer(del.seq)
+    h.undo.run('undo')
+    som.getNodeByName('lamp-01').dispose()
+    som.scene.addChild(som.ingestNode({ name: 'lamp-01' }))
+    const newer = som.getNodeByName('lamp-01')
+    h.answer(h.last().seq)
+    assert.equal(som.getNodeByName('lamp-shade').parent, newer)
+    assert.equal(h.undo.run('redo'), true, h.messages.join(' | '))     // the Delete again
+    h.answer(h.last().seq)
+    assert.equal(h.undo.run('undo'), true, `not “its group was removed”: ${h.messages.join(' | ')}`)
+    assert.equal(h.last().req.parent, 'lamp-01')
+    h.answer(h.last().seq)
+    assert.equal(som.getNodeByName('lamp-shade').parent, newer)
+  })
+
   test('a part whose parent isn’t the node of its name can’t be captured, so its Delete asks', async () => {
     const som = await world()
     const h = harness(som)
@@ -252,6 +282,19 @@ describe('T11: a part’s Delete, Undo and Redo', () => {
     const realGet = som.getNodeByName.bind(som)
     som.getNodeByName = (n) => (n === 'lamp-01' ? null : realGet(n))   // a shadowed parent
     const cap = h.undo.capture(shade)
+    assert.equal(cap.ok, false)
+    assert.equal(cap.reason, GROUP_NOT_ADDRESSABLE)
+  })
+
+  test('a part of an UNNAMED group can\u2019t be captured (an empty name can\u2019t travel as parent), so its Delete asks', () => {
+    const doc = new Document()
+    const g = doc.createNode('').setTranslation([5, 0, 0])
+    g.addChild(doc.createNode('leaf').setTranslation([0, 1, 0]))
+    doc.createScene().addChild(g)
+    const som = new SOMDocument(doc)
+    const h = harness(som)
+    assert.equal(som.getNodeByName(''), som.getNodeByName('leaf').parent, 'the SOM does register the unnamed node under ""')
+    const cap = h.undo.capture(som.getNodeByName('leaf'))
     assert.equal(cap.ok, false)
     assert.equal(cap.reason, GROUP_NOT_ADDRESSABLE)
   })

@@ -59,6 +59,22 @@ export function resolveEditSelection(hit, { isExcluded, resolveRoot, descend = f
   return resolveRoot(external ?? hit, { descend, current, drill })
 }
 
+/**
+ * selection-parts T15 — where Escape goes from the selection: its parent;
+ * nothing when it is top-level; nothing, with E7's reason, when the parent's
+ * name another node also has (the by-name lookups couldn't tell them apart).
+ *
+ * @param {{ parent?: object|null }|null} node
+ * @param {{ isDuplicatedName?: (name: string) => boolean }} [opts]
+ * @returns {{ node: object|null, refused: string|null }}
+ */
+export function escapeTarget(node, { isDuplicatedName = () => false } = {}) {
+  const parent = node?.parent ?? null
+  if (!parent) return { node: null, refused: null }
+  if (isDuplicatedName(parent.name)) return { node: null, refused: DUPLICATE_NAME_MESSAGE }
+  return { node: parent, refused: null }
+}
+
 // ── The breadcrumb (selection-parts T14) ────────────────────────────────
 
 /** Over this many levels the breadcrumb shows the top, `…`, and the last ones. */
