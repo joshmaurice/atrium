@@ -309,3 +309,16 @@ the policy, E7 at every level, the breadcrumb's text handling; the
 decomposition and the offset; P0's guard (a stray `-5` or `-01` file fails
 it). **Not run by it:** a physical mouse or touchscreen, Firefox, Safari, pen,
 DEV, PROD, the full server suite, the host's timings.
+
+## 9. Release (2026-11-08)
+- **DEV:** `atrium-deploy-gate "dev 331e4aed…"` (the operator, about 20:43
+  PT); `release_status`: DEV actual and recorded `331e4aed`, healthy, serving
+  `app.js` `d8a71eb2d8d6`; the release merge merged nothing (`main` was
+  already in the branch). Every deploy test passed, each server file under
+  its 180 s, the four depth-measure files included.
+- **DEV acceptance:** §5 steps 1–7 (the operator, 20:58: "All looks good").
+- **MAIN and PROD:** `atrium-main-approve … && atrium-deploy-gate "main …"`,
+  then `atrium-prod-approve … && atrium-deploy-gate "prod …"`. MAIN
+  fast-forwarded `dd2071f..331e4ae`. **Step 8 on PROD passed** (21:09).
+- **`release_status` at 21:10:** `COMPLETE`; DEV, MAIN and PROD at
+  `331e4aed287fba4543cf4a203d73cbaecb71aa9c`; PROD serves `d8a71eb2d8d6`, as DEV.
