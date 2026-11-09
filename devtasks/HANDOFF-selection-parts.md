@@ -30,7 +30,7 @@ bug fixed here.
 | 5 `c3a83f0` | the harness checks (`devtasks/harness/checks/selection-parts/`); the guard's identical-files rule (for proof (p14c)); three more T11 tests §5 listed |
 | 6 `a1037f0` | the fresh-agent code check's findings (§7): an unnamed group not addressable; the handle release's verdict kept apart from the mouse press (touch); the part glue run in tests; N-4 tested; the crumb's order; `escapeTarget` pure; harness c3–c5 |
 | 7 `5fe582c`, `2c69b04` | `devtasks/` only: this file's §7, c3's start; the outside code-review prompt |
-| 8 (this commit) | the outside code review's fixes (§8): a touch drag's verdict kept for the tap's click (S-1); rotate and scale put-back tested (N-1); harness c5's touch drags and c6; the pre-brief's Rev 2.1 wording (N-2) |
+| 8 `dbf9338` | the outside code review's fixes (§8): a touch drag's verdict kept for the tap's click (S-1); rotate and scale put-back tested (N-1); harness c5's touch drags and c6; the pre-brief's Rev 2.1 wording (N-2) |
 
 Code files touched are exactly §6's list (34 files, +2,684 −208), plus the
 comment in `test/helpers/depth-recorder.mjs`, a test file under
@@ -42,7 +42,8 @@ comment in `test/helpers/depth-recorder.mjs`, a test file under
   passing, 0 failing, 1 named skip** (`apps/client`'s richer-add R7 stated-limit
   test, unchanged). Commit 5 added five tests (the guard's sixth, four T11);
   each touched suite was rerun: **4,596** passing; commit 6 added ten more to
-  `apps/client` (1,759, its whole suite rerun): **4,606**. Baseline at
+  `apps/client` (1,759, its whole suite rerun): **4,606**; commit 8 three more
+  (1,762): **4,609**. Baseline at
   `45e6cd00`: 65 suites, 4,463.
 - **The depth measurement (P0), cloud times, each file alone under `timeout
   180`:** at commit 1, 44.7, 50.1, 39.9 and 61.4 s (deepest 11, 8, **27**, 3:
@@ -97,7 +98,7 @@ comment in `test/helpers/depth-recorder.mjs`, a test file under
 | (p20a) | `acceptAdd`'s N-4 note removed | the Duplicate-into-a-replaced-group test fails | all |
 | (p20b) | the re-add not re-pointed to where it landed | the Undo-and-Redo-into-the-newer-group test fails | all |
 
-### 2.2 The harness checks (`devtasks/harness/checks/selection-parts/`, on `f0fa9d8`; rerun on `a1037f0`: c1 29, c2 16, c3 30, c4 32, c5 6, **113 PASS, 0 FAIL**)
+### 2.2 The harness checks (`devtasks/harness/checks/selection-parts/`, on `f0fa9d8`; rerun on `a1037f0`: c1 29, c2 16, c3 30, c4 32, c5 6, 113 PASS; on `dbf9338`: c1 29, c2 16, c3 30, c4 32, c5 10, c6 18, **135 PASS, 0 FAIL**)
 Real mouse events through Playwright (Chromium, SwiftShader), `click_count`
 on every press. **c1: 29 PASS** (the lamp's gestures, jitter 0/1/2 px, 6 px,
 Escape ×3, SP-L10 over the floor and empty space, a 25 px and a one-move 30
