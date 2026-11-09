@@ -1,7 +1,11 @@
 # Pre-brief: selection and parts (`selection-parts`)
 
-Status: **DRAFT, Revision 1.2 (2026-11-08).** Rev 1.1 plus the fresh-agent
-check (§7) and **SP-L8 (a)**, which it made necessary (operator, about 17:40 PT).
+Status: **DRAFT, Revision 1.3 (2026-11-08).** Rev 1.2 plus Fable's outside
+review of it (§7, `REVIEW-selection-parts-rev1.2-fable.md`, CHANGES
+REQUESTED) and the four decisions it raised, **SP-L9 (a), SP-L10 (a), SP-L11
+(a) and SP-L12 (a)**, as recommended (operator, about 18:25 PT). Rev 1.2 was the
+fresh-agent check (§7) and **SP-L8 (a)**, which it made necessary (operator,
+about 17:40 PT).
 Every decision taken (operator, 2026-11-08, 17:04 PT): SP-L2 (b), SP-L3 (b),
 SP-L4 (b) as recommended, and SP-L1 (a), SP-L5 (a), SP-L6 (b), SP-L7 (a):
 "go with the recs". The
@@ -28,8 +32,11 @@ place, Undo back into the group, Copy out with the world placement: T11).
   2 imprecise; T13, T11's Undo, the TRS decomposition and the offset
   prototyped on the real modules; five real-browser checks through
   `devtasks/harness`). Claude reproduced both must-fixes before taking them,
-  must-fix 1 in the browser. Not yet done: the outside review; the suites not
-  rerun.
+  must-fix 1 in the browser. **Fable reviewed Rev 1.2** at `3ccc1ad4`
+  (cloned, ran the listed commands, drove the real page with a prototype of
+  T13, T15 and T17 behind `?proto`); Claude reran its released-code and
+  prototype probes on the scratch harness and reproduced every finding it
+  took (§7, Rev 1.3). Not yet done: the suites not rerun.
 - **Sources:** `PREBRIEF-subtree-add.md` SA-L6, SA-L7, §2.4, §2.8, §8, §9;
   `Atrium-Passdown-2026-11-08-subtree-add-shipped.md` §1.1 (Edit mode selects
   hidden objects on purpose, F-L8), §3 (lessons), §5 item 1;
@@ -48,7 +55,12 @@ place, Undo back into the group, Copy out with the world placement: T11).
     the same level (SP-L2);
   - **Alt-click** goes straight to the part under the pointer, as today;
   - **a short press on a move handle is a click** (SP-L8): it selects and
-    moves nothing; a handle drag starts once the pointer travels 4 px;
+    moves nothing, and changes the selection only within the selected
+    object's group (SP-L10); a handle drag starts once the pointer travels 4
+    px, and never from the second press of a double-click (SP-L11);
+  - **a selection change during a handle drag ends the drag first**, keeping
+    the move (SP-L9); today such a change can leave the handles stuck until a
+    reload (SP-L12, a PROD bug fixed here);
   - a **breadcrumb** in the Edit and Inspect panels (`Furniture › Bench-NE ›
     seat`) shows where the selection is, and each name in it selects that
     level;
@@ -165,6 +177,29 @@ Edit panel showing that a material is shared (subtree-add §8).
   **without SP-L8 a double-click can't drill into a stacked group, and a
   shaky one moves it.** The gesture has a `cancel()` (L447–453: no final
   send) that the app uses only for removed nodes.
+- **The handles keep their drag across a selection change** (Fable review,
+  M-1; reproduced by Claude on the released code). `attach(object)`
+  (`TransformControls.js` L573–580) swaps the object and leaves `dragging`,
+  `axis` and `_positionStart` as they were, and every later pointer move sets
+  `object.position = offset + _positionStart` (L328): the old object's start
+  on the new object. Today only Escape changes the selection mid-drag, and it
+  selects nothing (L1646), which detaches. Calling `selectForEdit(parent)`
+  mid-drag of the shade, on today's code, leaves `lamp-01` at `[3, 0, 0]` in
+  the SOM and **drawn at `[0.6353, 1.4963, -0.3741]`**.
+- **A selection cleared mid-drag leaves the handles stuck: a PROD bug today**
+  (Fable review, S-1; reproduced by Claude on the released code, all three
+  triggers). `syncGizmoEnabled` turns the control off with nothing selected
+  (L2205), and its `onPointerUp` returns at once when it is off
+  (`TransformControls.js` L730–732), so `dragging` stays `true`; no later
+  press starts (L244), every press is marked `onHandle` (L2373), every click
+  is refused (L2439), the look-drag doesn't start, and Undo says "Finish
+  moving the object first". It lasts until a reload, Edit off and on
+  included. Triggers: Escape mid-drag (L1646), another tab removing the
+  dragged object (L2745–2748), a disconnect mid-drag (`endEditSession`,
+  L2173). Nothing is lost: the drag's last send stands. Calling the
+  control's own `pointerUp({ button: 0 })` (L540–553: clears `dragging` and
+  `axis`, which fires `dragging-changed`) before the selection changes ends
+  it cleanly (Fable's `p5.py`, rerun by Claude).
 - **Escape** (`app.js` L1617–1650): in Edit mode, outside a text field, the
   first Escape deselects and the second leaves Edit mode (L1642–1647, B2).
   Inspect has no Escape handling.
@@ -353,6 +388,41 @@ recommended.**
   following a click. No change to drags, but timing-based: a slow
   double-click still lands on them.
 
+**SP-L9. Escape (or any selection change) during a handle drag** (new in Rev
+1.3; Fable review, M-1). **Decided (operator, 2026-11-08): (a), as
+recommended.**
+- **(a) Decided: keep the move, then change the selection.** The drag ends
+  where it is, with its final send, and is undoable, as today's Escape-deselect
+  keeps it; then Escape selects the parent (T15).
+- (b) Cancel the drag: the object goes back to where the drag started, with a
+  revert sent if a move already went out (the 100 ms throttle), then up. New
+  behaviour, and more code.
+
+**SP-L10. What a short press on a handle may select** (new in Rev 1.3; Fable
+review, S-3: as Rev 1.2 read, a hesitant grab of the X arrow over the floor
+selected the ground plane, and one over empty sky deselected). **Decided
+(operator, 2026-11-08): (a), as recommended.**
+- **(a) Decided: only within the group.** A click that began on a handle
+  changes the selection only when T13 picks something inside the current
+  selection's top-level object; otherwise nothing changes (no message).
+  Drilling and siblings through a handle still work.
+- (b) Any click selects: a short press on a handle is an ordinary click, the
+  floor and the sky included.
+
+**SP-L11. The second press of a double-click** (new in Rev 1.3; Fable
+review, N-1: a second press that travelled 6 px moved the lamp 1 cm and
+recorded a Move). **Decided (operator, 2026-11-08): (a), as recommended.**
+- **(a) Decided: it never starts a handle drag.** A press whose `mousedown`
+  has `detail` 2 or more is a click whatever it travels. A deliberate drag
+  starts with a fresh press.
+- (b) Leave it: 4 px of travel on any press starts a drag.
+
+**SP-L12. The stuck-handle bug on PROD** (§2.2; Fable review, S-1).
+**Decided (operator, 2026-11-08): (a), as recommended.**
+- **(a) Decided: fixed in this round,** by T18, which is the same line as
+  SP-L9's fix and is tested with it.
+- (b) A one-line round of its own, shipped first.
+
 **SP-L7. How the round runs.** **Decided (operator, 2026-11-08): (a), as
 recommended.**
 - **(a) Recommended: the cheap round, with Fable as the outside reviewer
@@ -380,10 +450,13 @@ null` on a SOM node).
     `SOLO = ['world-visibility.test.js']`, and `shard(k, n)`: the files of
     `serverTestFiles()` not in `SOLO`, sorted, numbered from 0 **without**
     `SOLO`, those whose number is `k` mod `n`.
-  - `message-depth-measure-1.test.js`, `-2`, `-3` each run `shard(k − 1, 3)`;
-    `message-depth-measure-4.test.js` runs `SOLO`. Each asserts its list isn't
-    empty and its recording isn't empty, and prints its own deepest
-    message. `message-depth-measure.test.js` is removed, its header comment
+  - `message-depth-measure-1.test.js`, `-2`, `-3` and `-4` are the same three
+    lines: each takes **its list from its own file name**,
+    `listFor(basename(fileURLToPath(import.meta.url)))` (`-1` to `-3` the
+    three shards, `-4` `SOLO`; no literal index in any file: Fable review,
+    S-6, so a file can't run another's list). Each asserts its list isn't
+    empty and its recording isn't empty, and prints its own deepest message
+    and its elapsed time. `message-depth-measure.test.js` is removed, its header comment
     (why the ceiling exists, the recorder, the exclusions and their reasons)
     moved to the helper.
   - **A guard** (`message-depth-shards.test.js`, new, no spawn, under a
@@ -392,12 +465,16 @@ null` on a SOM node).
     `test/*.test.js` itself with `readdirSync`, removes the two hostile files
     and the five measure files **named literally**, and asserts the result
     equals the union of the three shards and `SOLO`, each file once; that
-    `HOSTILE`'s files exist; and that no measure file is in any list.
+    `HOSTILE`'s files exist; that **the five measure files exist** (a renamed
+    or deleted shard file fails, Fable review S-6); that `listFor` of each of
+    the four names is its shard; and that no measure file is in any list.
   - `message-depth.js` L22's comment names the helper instead of the old file
     (a comment; nothing else in `packages/server/src` changes).
   - **What it proves is unchanged:** every legitimate message every server
-    suite sends is depth 32 or less. Now it includes the three suites left
-    out for time, and runs in the deploy.
+    suite sends **to its in-process server** is depth 32 or less (messages to
+    a spawned child server, as `world-total.test.js` L547's, aren't recorded,
+    as today; they are shallow: Fable review, N-7). Now it includes the three
+    suites left out for time, and runs in the deploy.
 - **T13, the selection policy (SA-L6 (d), SP-L1 (a), SP-L2 (b)).**
   `packages/interaction/src/selectionModel.js` gains, beside today's
   exports (whose behaviour is unchanged):
@@ -429,7 +506,14 @@ null` on a SOM node).
   `DUPLICATE_NAME_MESSAGE` still applies to the hit and to the result.
   **Stated changes:** a click on a part of a group whose root has a mesh now
   selects the root (no fixture or PROD group has one, subtree-add §2.5); a
-  click on a piece of `Furniture` selects `Furniture`.
+  click on a piece of `Furniture` selects `Furniture`, so **a click and
+  Delete now remove the whole top-level group**, with no question when it can
+  come back (W6, SA-L4): in `atrium.gltf` that is `Furniture`, 33 nodes, where
+  a click used to take one bench; Undo brings it back (Fable review, N-8).
+  - **The hint line** (`app.js` L652) becomes `Edit mode · Click to select ·
+    Double-click goes into a group · Alt-click selects a part · Esc goes up ·
+    Drag to look · WASD to move` (Fable review, N-6), and Inspect's hint
+    likewise names the double-click.
   - **Inspect follows a removed part** (should-fix 4): the `som:remove`
     listener (`app.js` L3276–3278) clears `inspected` when
     `getNodeByName(inspected.name) !== inspected`, as Edit's does, not only
@@ -444,9 +528,12 @@ null` on a SOM node).
   through `shownText(name)` (no truncation, so direction characters can't
   reorder it), is the button's `title`. The row is a `nav` with
   `aria-label="Selection path"`, the separators `aria-hidden`, the last item
-  `aria-current="true"`. **Over 7 levels** (a world file can be deeper than
-  T1's 9, which binds only messages) it shows the top-level name, `…`, and
-  the last 6. One writer per panel, called from `refreshEditPanel` and
+  `aria-current="location"`. **Over 7 levels** (a world file can be deeper
+  than T1's 9, which binds only messages) it shows the top-level name, `…`,
+  and the last 6. The items come from a pure `breadcrumbItems(path)` in
+  `edit-selection.js` (its cap, truncation and titles unit-tested: Fable
+  review, N-5). Inspect's name and path rows are re-rendered on `som:rename`
+  of any node in the path (Fable review, N-9; today `#ip-name` isn't). One writer per panel, called from `refreshEditPanel` and
   `renderInspectPanel`, **which rebuilds the row only when the path changes**
   (the list of node objects and their names; should-fix 5: `refreshEditPanel`
   runs on every `som:set` of the selection, L1065, and in Chromium a row
@@ -459,32 +546,70 @@ null` on a SOM node).
   the click, focus returns to the viewport, so the movement keys work.
 - **T15, Escape (SP-L3 (b)).** In the existing document listener (`app.js`
   L1642–1647), Edit mode: a selection with a parent → `selectForEdit(parent)`,
-  unless the parent's name is duplicated (`DUPLICATE_NAME_MESSAGE`, nothing
-  selected: should-fix 6); a top-level selection → `selectForEdit(null)`;
-  none → `setEditMode(false)`. Inspect mode: the same first two steps on
+  unless the parent's name is duplicated (then `selectForEdit(null)` and
+  `DUPLICATE_NAME_MESSAGE`: should-fix 6, Fable review N-2); a top-level
+  selection → `selectForEdit(null)`; none → `setEditMode(false)`. **During a
+  handle drag** T18 ends the drag first (the move kept, SP-L9 (a)), then the
+  same step runs. Inspect mode: the same first two steps on
   `inspected`. The forms that take
   Escape first (the failure panel, the Library grid, the Model and
   destination forms) still do, in today's order.
-- **T17, a short press on a handle (SP-L8 (a)).** In `app.js`:
-  - the capture-phase `mousedown` (L2372–2374) keeps recording `pressDown`;
-    `onHandleDragging(true)` (L2217–2226) **no longer begins the gesture**: it
-    marks the press as a handle press and records the selected node's
-    translation, rotation and scale;
-  - `onHandleChange` (L2237–2246), while the pointer is within 4 px of the
-    press, **puts the three.js object back** to those values and does
-    nothing else (no `update`, no local SOM write, no hold); the first change
-    past 4 px begins the gesture (`editTracker.begin`, `hold.hold`) and
-    applies the current handle values, so a real drag behaves as today;
+- **T18, the drag ends before the handles change (SP-L9 (a), SP-L12 (a)).**
+  `selectForEdit` (`app.js` L2283) begins with: `if (gizmo?.dragging)
+  gizmo.pointerUp({ button: 0 })`. That clears the control's drag and
+  fires `dragging-changed(false)`, so `onHandleDragging(false)` ends the
+  gesture with its final send (the move is kept and recorded) before the
+  selection, the handles or their enabled state change. `syncGizmoEnabled`
+  (L2202–2206) does the same before it sets `enabled` false, so no path
+  that turns the control off mid-drag (Edit off, an undo in flight, a
+  pending structural request) can strand it. Every selection change mid-drag
+  goes through these: Escape (T15), a crumb (T14), another tab's removal
+  (L2745–2748), Edit off and the session end (L2155, L2173), a click.
+- **T17, a short press on a handle (SP-L8 (a), SP-L10 (a), SP-L11 (a)).** The
+  rule lives in a pure module, **`apps/client/src/edit-press.js`** (new;
+  Fable review, S-7: it is the riskiest item and should be unit-tested, not
+  only lifted as text). `createHandlePress({ slop = CLICK_SLOP_PX })` keeps
+  one press:
+  - `press({ x, y, detail, onHandle })` at the capture-phase `mousedown`
+    (`app.js` L2372–2374, which also records `detail`);
+  - `pointer({ x, y })` from a **capture-phase `pointermove` on `#viewport`**
+    (Fable review, S-4: `TransformControls` moves the object from its own
+    `pointermove`, and a `mousemove` arrives after it, one event late, so a
+    drag that arrives as one 30 px move would be put back and lost);
+  - `change()` → `'put-back'` while the pointer is within `slop` of the
+    press, or always when the press's `detail` is 2 or more (SP-L11);
+    `'begin'` at the first change past `slop`; `'drag'` once begun;
+  - `release()` → `{ click: true }` when no gesture began, else `{ click:
+    false }`; `reset()` for T18 and the session end.
+  
+  The app's glue (`onHandleDragging`, L2217–2235; `onHandleChange`,
+  L2237–2246):
+  - `onHandleDragging(true)` no longer begins the gesture; it tells the
+    press a handle is held;
+  - `onHandleChange`: on `'put-back'`, the three.js object is set back to the
+    **live SOM node's** `translation`, `rotation` and `scale` (Fable review,
+    S-2: the SOM node is never written before the gesture begins, so it is
+    the record; a press-time copy would undo another tab's move on screen
+    only), and nothing else happens (no `update`, no hold); on `'begin'`, the
+    gesture begins **only when `selected && !editDispatchBlocked()`**, as
+    today's L2221 (Fable review, N-3; blocked, the change is put back), then
+    `hold.hold(selected)` and the current handle values are applied, so a
+    real drag behaves as today;
   - `onHandleDragging(false)` with no gesture begun puts the object back once
-    more and clears the mark; `pressDown.onHandle` is then false for that
-    press, so the `click` that follows is a select click (`isSelectClick`'s
-    `gestureEnded` false), with `e.detail` as the browser counted it;
+    more; `pressDown.onHandle` is then false for that press, so the `click`
+    that follows is a select click, with `e.detail` as the browser counted
+    it;
+  - **SP-L10:** that click, having begun on a handle, changes the selection
+    only when T13's pick is the current selection's top-level object or
+    below it; otherwise the selection is left as it is, with no message;
   - a gesture that did begin ends as today (`activeGesture.end()`). Nothing
     else in the gizmo changes (snaps, modes, space).
   
   **Stated:** a handle drag smaller than 4 px no longer moves the object; the
-  fields and the snaps make small moves. The behaviour runner's drag rule
-  (F-L5) holds from the gesture's start, so it now starts 4 px later.
+  fields and the snaps make small moves. The second press of a double-click
+  never drags. The behaviour runner's drag rule (F-L5) holds from the
+  gesture's start, so it now starts 4 px later; until then a behaviour may
+  move the node and the put-back follows it (the live node).
 - **T11, parts** (subtree-add §9.1, with §9.5 taken; SP-L4 (b), SP-L5 (a)).
   A **part** is a node whose parent is a node: a single mesh part, or a
   sub-group with members of its own (then also a tree, T1–T6).
@@ -544,6 +669,12 @@ null` on a SOM node).
     was renamed or removed." A
     part's descriptor holds its local TRS, so the fixed point is unchanged.
     A part whose capture succeeds is deleted without the question (W6).
+    **A group replaced while a re-add or a Duplicate in place is in flight**
+    (Fable review, N-4: `parent` is a name on the wire): on the accepted
+    answer, if the new node's parent isn't the entry's parent handle's node
+    (or, for a Duplicate, the original's parent), the panel says "“X” went
+    into a newer “G”: its group was replaced elsewhere", and the entry is
+    recorded against where it landed. Narrow; stated.
   - **The comparison** (SP-L5 (a)): `checkEntry`'s remove check uses
     `sameCanonical(a, b)` (new, `edit-undo.js`): both descriptors with each
     `{ ref }` replaced by a copy of the material it names, each `children`
@@ -637,6 +768,21 @@ null` on a SOM node).
   selection, in both the Inspect and the Edit branches; the Escape listener's
   three steps; the breadcrumb writers use `textContent` and `shownText`; the
   crumb listener re-checks identity.
+- **T17** (`apps/client/tests/edit-press.test.js`, pure; Fable review, S-7):
+  a press with no travel, with 2 px, with one 30 px move (`'begin'` on the
+  first change), with `detail` 2 and 6 px (`'put-back'` throughout, a
+  click); `reset()` mid-press (T18's Escape and a removal); a block starting
+  mid-press (the app's glue: put back, no gesture); the pointer read from
+  `pointer()`, never from the press.
+- **T18 and SP-L10** (`apps/client` wiring, as text, plus a harness check
+  each): `selectForEdit` and `syncGizmoEnabled` end the control's drag first;
+  a click that began on a handle picking outside the selection's top-level
+  object changes nothing.
+- **T14 and T15** (pure, `edit-selection.js`): `breadcrumbItems` for 1, 7 and
+  12 levels (the cap: the top, `…`, the last 6), a name with direction
+  characters (title escaped), a 300-character name (truncated to 32); Escape's
+  steps in Edit and in Inspect, a duplicated-name parent (deselects, the
+  message).
 - **T11** (`apps/client`, pure, and `packages/client`):
   - `addNode(d, { parent: 'lamp-01' })` puts `parent` on the wire; without
     it nothing changes (the existing `addNode` tests pass); an empty string
@@ -656,7 +802,11 @@ null` on a SOM node).
     name as `parent`. Undo after the lamp was deleted refuses with "its group
     was removed"; after it was deleted and restored by our own Undo, the shade
     goes into the restored lamp; after another tab made a new `lamp-01`, it
-    refuses with "replaced elsewhere";
+    refuses with "replaced elsewhere"; a re-add answered `NODE_NOT_FOUND:
+    lamp-01` shows "its group was renamed or removed"; a re-add accepted
+    under a newer `lamp-01` shows the N-4 note; Inspect follows a removed
+    part (the panel empties when the lamp is deleted while its shade is
+    inspected);
   - `sameCanonical`: §2.6's group (`b` and `c` sharing) equal before and
     after `a`'s delete and Undo; `a` and `c` sharing, unequal after it (the
     sharing was lost); the same tree with its refs numbered differently,
@@ -697,10 +847,16 @@ null` on a SOM node).
   - (p14) P0's guard with a file dropped from the shard rule, and again with
     `serverTestFiles()`'s filter widened to drop a suite: the guard fails both
     times;
-  - (p15) T17 back to beginning the gesture at the press: the jitter
-    double-click unit test (an `app.js` wiring test feeding the handlers a
-    press, a 2 px change and a release) records a Move, and the harness's
-    jitter check fails;
+  - (p14) also with one shard file pointed at another's list: the guard
+    fails (S-6);
+  - (p15) `edit-press.js` returning `'begin'` at the first change: the 2 px
+    and `detail` 2 unit tests fail, and the harness's jitter checks record a
+    Move;
+  - (p16) T18 removed: the harness's Escape-mid-drag check moves the lamp,
+    and its stuck-handle checks (a click after Escape, after a remote removal,
+    after a reconnect) select nothing;
+  - (p17) SP-L10's rule removed: the floor-behind-the-handle check selects the
+    ground plane;
   - (p9d) a Delete's parent read in `acceptDelete`: the shade's
     Delete-and-Undo test fails (it comes back at the top level).
 - **Wiring tests that change** (they pin today's text; rewritten with the
@@ -727,7 +883,18 @@ null` on a SOM node).
     record nothing (the drag-safety check SA-L6 (d) asked for);
   - a double-click whose second press lands on a handle (SP-L8): it drills,
     nothing moves, nothing is recorded; a drag on the same handle past 4 px
-    moves the object and records one Move, as today;
+    moves the object and records one Move, as today; a drag that arrives as
+    one 30 px move records one Move (S-4); a double-click whose second press
+    travels 6 px drills and moves nothing (SP-L11);
+  - a short press on `lamp-01`'s X handle over the ground, and on its Y
+    handle over the sky: the selection stays `lamp-01` (SP-L10);
+  - **T18:** Alt-click the shade, drag its handle, press Escape mid-drag,
+    keep moving, release: `lamp-01` selected and unmoved (SOM, drawn and on
+    the server's `/__doc`), one "Move “lamp-shade”" recorded, and the next
+    click selects; the same with another tab removing the dragged crate, and
+    with a disconnect and reconnect mid-drag;
+  - another tab moving the crate during a short press on its handle: the
+    crate is drawn where the SOM has it (S-2);
   - Inspect (`?visitor`): the same click, double-click and breadcrumb; a
     hidden part can't be reached;
   - Duplicate, Delete, Undo and Redo of the shade, and of `Bench-NE`, with
@@ -740,13 +907,19 @@ null` on a SOM node).
      `lamp-01`. Double-click the shade: the Name is `lamp-shade`, and above
      it the breadcrumb reads `lamp-01 › lamp-shade`. The lamp hasn't moved,
      and the Undo button's tooltip (hover it) is unchanged.
-  2. Click the stand once: `lamp-stand` (the same level; the press lands on
-     the shade's move arrow and selects anyway, SP-L8). Drag that arrow up a
-     little: the shade moves, and Undo's tooltip reads "Undo Move
-     “lamp-shade”"; Undo. Click `lamp-01` in the breadcrumb: `lamp-01`.
-     Click `crate-01`: `crate-01`, no breadcrumb.
+  2. With the shade selected, drag its up arrow a little: the shade moves,
+     and Undo's tooltip reads "Undo Move “lamp-shade”"; Undo. Click the stand
+     once: `lamp-stand` (the same level; the press may land on the shade's
+     arrow and selects anyway, SP-L8). Click `lamp-01` in the breadcrumb:
+     `lamp-01`. Click `crate-01`: `crate-01`, no breadcrumb.
   3. Alt-click the shade: `lamp-shade`. Press Escape: `lamp-01`. Escape:
      nothing selected. Escape: Edit mode is off. Turn it back on.
+     **Escape mid-drag** (SP-L9, SP-L12): Alt-click the shade, start dragging
+     its arrow, press Escape while still holding the button, move a little
+     more and release. The Name is `lamp-01`; the shade stayed where the drag
+     left it and the rest of the lamp hasn't moved; Undo's tooltip reads
+     "Undo Move “lamp-shade”". Click `crate-01`: it is selected (on today's
+     PROD it isn't, until a reload). Undo the move.
   4. Double-click the shade. Duplicate is enabled (tooltip "Duplicate the
      selected object"). Click it: `lamp-shade copy` appears 1.5 m beside the
      shade, selected, with the breadcrumb `lamp-01 › lamp-shade copy`.
@@ -777,19 +950,21 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
   1. P0: the helper, the four shard files, the guard, the comment; each
      shard timed (the handoff's table);
   2. T13: the policy and its tests, `edit-selection.js` and its tests;
-  3. T13's and T14's and T15's `app.js` and `index.html` glue and the wiring
+  3. T17's `edit-press.js` and its tests; T13's, T14's, T15's, T17's and T18's
+     `app.js` and `index.html` glue (the hint line included) and the wiring
      tests;
   4. T11: `AtriumClient.addNode`, `part-transform.js`, `edit-duplicate.js`,
      `edit-undo.js`, `copy-paste.js`, their `app.js` glue, the tests, the
      server test;
-  5. the full suites, proofs (p9)–(p14), the harness checks and the handoff.
+  5. the full suites, proofs (p9)–(p17), the harness checks and the handoff.
 - **Files:** `packages/server/test/message-depth-measure.test.js` (removed),
   `message-depth-measure-{1,2,3,4}.test.js`, `message-depth-shards.test.js`,
   `helpers/depth-measure.mjs` (new), `packages/server/src/message-depth.js`
   (the comment); `packages/interaction/src/selectionModel.js`, `index.js`;
   `packages/client/src/AtriumClient.js` (`addNode`);
   `apps/client/src/edit-selection.js`, `edit-duplicate.js`, `edit-undo.js`,
-  `copy-paste.js`, `part-transform.js` (new), `app.js`; `apps/client/index.html`
+  `copy-paste.js`, `part-transform.js` (new), `edit-press.js` (new),
+  `app.js`; `apps/client/index.html`
   (the two breadcrumb rows); `devtasks/harness/checks/selection-parts/` (new)
   and, if its hooks need it, `devtasks/harness/server.mjs`; test files under
   `packages/*/test/`, `packages/*/tests/` and `apps/client/tests/`. **No
@@ -798,9 +973,11 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
   test files one at a time,** each under `timeout 180`, new tests on port 0.
 - **Release:** a client round with server test files. **DEV restarts** at
   the deploy (the files are under `packages/server/`), so acceptance needs a
-  hard reload in every tab. **The deploy's server suite takes about 200 s
-  longer** (the four measure files run everything once more; each file well
-  inside its 180 s). No `package.json` or lockfile change. **A
+  hard reload in every tab. **The deploy's server suite takes about 80 s
+  longer** (the four measure files take about 215 s on the host, and the old
+  file's 135 s goes; each file well inside its 180 s: Fable review, N-7).
+  **The release notes name SP-L12's fix** (the stuck handles after Escape,
+  a remote removal or a disconnect mid-drag). No `package.json` or lockfile change. **A
   rollback** stores nothing to undo: a part added in place is an ordinary
   node under its parent, as any server since `parent` existed stores it.
   **Check DEV's actual SHA with `release_status` before reading an
@@ -809,6 +986,51 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.3** (2026-11-08, 18:30 PT): **Fable's outside review of Rev 1.2**
+  (`devtasks/REVIEW-selection-parts-rev1.2-fable.md`, at `3ccc1ad4`, named in
+  its first line): **CHANGES REQUESTED**, one must-fix, seven should-fixes,
+  nine nits. Its clone worked; it ran every listed command, built the harness
+  for `dd2071f9`, and drove the real page with real mouse events, the
+  gesture items through a prototype of T13, T15 and T17 behind `?proto` (its
+  probes: `p1`–`p5.py`, `apply_proto.py`, `trs.mjs`, attached as an archive).
+  **Claude reran them** on the scratch harness (`dd2071f9`, the prototype
+  applied to the harness worktree only) and reproduced: M-1 on the prototype
+  and on the released code; S-1's three triggers on the released code; S-2,
+  S-3, S-4, S-5 and N-1 on the prototype; the candidate fix (`p5.py`). Taken:
+  - **M-1, must-fix:** a selection change mid-drag re-attaches the dragging
+    handles, so Escape mid-drag of the shade moved and saved `lamp-01`
+    (§2.2). New **T18** (the control's drag ended first), **SP-L9 (a)** (the
+    move is kept), proof (p16), a harness check, DEV step 3;
+  - **S-1:** the same root cause strands the handles on PROD today (§2.2).
+    **SP-L12 (a)**: fixed here by T18; release notes;
+  - **S-2:** put back from the live SOM node; **S-3:** **SP-L10 (a)**, a
+    handle click changes the selection only within the group, proof (p17);
+    **S-4:** the pointer from a capture-phase `pointermove`; **S-5:** DEV step
+    2 drags before clicking the stand; **S-6:** each shard file takes its list
+    from its own name, the guard checks the files exist, (p14)'s third break;
+    **S-7:** T17 in a pure module (`edit-press.js`) with unit tests, and in
+    §6's commits and files;
+  - **N-1:** **SP-L11 (a)**, the second press of a double-click never drags;
+    **N-2** to **N-9**, every one: the duplicated-name Escape deselects with
+    the message; T17 keeps today's block guard; the N-4 note; §5 lines for
+    the `NODE_NOT_FOUND` text, Inspect's Escape and removed part, the
+    breadcrumb cap (a pure `breadcrumbItems`); the hint line; P0's wording
+    and the deploy's time (about 80 s longer, not 200); the click-and-Delete
+    consequence stated; `aria-current="location"`; Inspect re-rendered on a
+    rename.
+  
+  Not taken: nothing. **Confirmed sound by the review:** T13's policy (every
+  §5 case, external content inside a group, avatars, hidden parts in
+  Inspect, duplicated names at a middle level); T11's Undo and Redo by
+  tracing (the parent handle re-pointed through the group's delete and Undo,
+  a grandparent's, a rename; no retry re-sends without `parent`);
+  `sameCanonical` by reading (no false equal found); the Copy decomposition
+  over 200,000 random unsheared chains (worst relative miss 1.75e-15) and
+  the shear refusal from 1e-6 to 1e3; SP-L4 (b)'s offset over 20,000 parents
+  (worst 3.8e-10 m); P0's timings (shards 45.3, 50.0, 39.1 s, `SOLO` 61.3 s).
+  **Not run by it:** DEV, PROD, Firefox, Safari, a physical double-click (its
+  presses were Playwright's with `click_count`), the full suites. The harness
+  checks (§5) cover the gestures again on the round's code.
 - **Rev 1.2** (2026-11-08): **a fresh Claude agent checked Rev 1.1** at
   `74bdc113` (it hadn't written it). It read every cited line, timed all 54
   server files under the recorder, prototyped T13 through the real
@@ -891,6 +1113,8 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Grouping and ungrouping** in the Edit panel (a `parent` change on a live
   node: a new message or a `send` leaf), and with it moving a part to
   another group. Then SA-L2's bounds against created content (subtree-add §8).
+- Escape during a handle drag could cancel the drag instead (SP-L9 (b)), if
+  the kept move proves surprising at DEV.
 - A keyboard route down a level (Alt-click and double-click need a pointer):
   for example Enter selects the child toward the last pointer hit.
 - Several objects selected at once (Shift-click), with the breadcrumb showing
