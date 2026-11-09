@@ -19,7 +19,7 @@
  * The deepest inbound message the server accepts. The top-level parsed message
  * object counts as depth 1, objects and arrays each add one level. A wide
  * margin over the deepest legitimate client message (measured in
- * message-depth-measure.test.js, which asserts it is 32 or less) and far below
+ * test/helpers/depth-measure.mjs, which asserts it is 32 or less) and far below
  * the depth at which `JSON.stringify` or a recursive walk breaks.
  */
 export const MAX_MESSAGE_DEPTH = 64

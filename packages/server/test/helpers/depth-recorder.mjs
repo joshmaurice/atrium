@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 //
 // depth-recorder — §6.2 measurement. TEST CODE ONLY, loaded with
-// `node --import` (see message-depth-measure.test.js), never imported by
+// `node --import` (see depth-measure.mjs), never imported by
 // packages/server/src.
 //
 // packages/server/src carries ONLY G1 (the walk + the guard) and G2 (the
