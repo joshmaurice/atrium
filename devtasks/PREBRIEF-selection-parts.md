@@ -1,9 +1,10 @@
 # Pre-brief: selection and parts (`selection-parts`)
 
-Status: **DRAFT, Revision 1.1 (2026-11-08).** Every decision taken
-(operator, 2026-11-08, 17:04 PT): SP-L2 (b), SP-L3 (b), SP-L4 (b) as
-recommended, and SP-L1 (a), SP-L5 (a), SP-L6 (b), SP-L7 (a): "go with the
-recs". The
+Status: **DRAFT, Revision 1.2 (2026-11-08).** Rev 1.1 plus the fresh-agent
+check (§7) and **SP-L8 (a)**, which it made necessary (operator, about 17:40 PT).
+Every decision taken (operator, 2026-11-08, 17:04 PT): SP-L2 (b), SP-L3 (b),
+SP-L4 (b) as recommended, and SP-L1 (a), SP-L5 (a), SP-L6 (b), SP-L7 (a):
+"go with the recs". The
 round after `subtree-add`, as decided there: **SA-L6 (d)**, a selection round
 of its own (a click selects the top-level group, more clicks drill down, Alt
 goes to the leaf, a breadcrumb), **with SA-L7 (c)**, parts (Duplicate in
@@ -22,8 +23,13 @@ place, Undo back into the group, Copy out with the world placement: T11).
   timed every server test file under the depth recorder in the cloud session
   (§2.1; `devtasks/spike-selection-parts/depth-times.mjs`). Claude also
   reproduced §9.5's M2 with the real `buildDescriptor` (§2.6;
-  `devtasks/spike-selection-parts/m2-refs.mjs`). Not yet done: no fresh-agent check, no
-  outside review, the app not opened in a browser, the suites not rerun.
+  `devtasks/spike-selection-parts/m2-refs.mjs`). **A fresh Claude agent
+  checked Rev 1.1** against the code (§7, Rev 1.2: 50 of 52 facts confirmed,
+  2 imprecise; T13, T11's Undo, the TRS decomposition and the offset
+  prototyped on the real modules; five real-browser checks through
+  `devtasks/harness`). Claude reproduced both must-fixes before taking them,
+  must-fix 1 in the browser. Not yet done: the outside review; the suites not
+  rerun.
 - **Sources:** `PREBRIEF-subtree-add.md` SA-L6, SA-L7, §2.4, §2.8, §8, §9;
   `Atrium-Passdown-2026-11-08-subtree-add-shipped.md` §1.1 (Edit mode selects
   hidden objects on purpose, F-L8), §3 (lessons), §5 item 1;
@@ -41,6 +47,8 @@ place, Undo back into the group, Copy out with the world placement: T11).
   - while you work inside a group, a click on another part of it selects at
     the same level (SP-L2);
   - **Alt-click** goes straight to the part under the pointer, as today;
+  - **a short press on a move handle is a click** (SP-L8): it selects and
+    moves nothing; a handle drag starts once the pointer travels 4 px;
   - a **breadcrumb** in the Edit and Inspect panels (`Furniture › Bench-NE ›
     seat`) shows where the selection is, and each name in it selects that
     level;
@@ -103,9 +111,13 @@ Edit panel showing that a material is shared (subtree-add §8).
   behaviour click outside Edit (L2400–2434), then Edit's selection
   (L2435–2442). Each checks `isSelectClick(down, up, { gestureEnded })`
   (`edit-selection.js` L22–26: less than 4 px of travel, no handle press)
-  before it selects. **Nothing reads `e.detail`, and nothing listens for
+  before it selects. **Nothing reads a click count, and nothing listens for
   `dblclick`** (grep of `apps/client/src`, `packages/client/src` and
-  `packages/renderer-three/src`).
+  `packages/renderer-three/src`; `model-listeners.js` L36, L38 read the SOM
+  pointer events' own `detail`, which is not a click count). In Chromium the
+  second press of a double-click carries `detail` 2. **Playwright's
+  `mouse.down()` sends `detail` 1 unless given `clickCount`**: the harness
+  must pass it (seen in the fresh-agent check's probe).
 - **`pickEditTarget(e, { includeHidden })`** (L2326–2357) raycasts, maps each
   hit to the SOM node of the nearest node object (`nodeForHitObject`,
   `edit-selection.js` L104–114), and calls `pickEditSelection(hits, {
@@ -132,12 +144,27 @@ Edit panel showing that a material is shared (subtree-add §8).
 - **Selecting:** Edit calls `selectForEdit(node)` (L2283–2292: ends a drag
   in progress, attaches the handles and the outline, refreshes the panel);
   Inspect calls `inspectSelect(node)` (L2024–2040). **The handles are
-  attached to the selection at once**, so the second press of a double-click
-  lands where `TransformControls` may be hovering a handle. A press on a
-  handle starts a drag (`dragging-changed`, L2217–2235), sets
-  `pressDown.onHandle`, and `isSelectClick` refuses that click: no selection
-  change. A drag that moves nothing sends nothing and records nothing (R7,
-  undo-hold H3).
+  attached to the selection at once, and they cover its parts on screen**
+  (fresh-agent check, measured with a real mouse on `dd2071f9`; Claude
+  reproduced it): a group's origin is at its base and its parts stack above
+  it, so the Y arrow and the centre XYZ handle lie over them. With `lamp-01`
+  selected the stand is under its Y handle (at 4.4, 5.4 and 7.1 m); with the
+  shade selected, the stand is under the shade's Y handle; `Table-Center`'s
+  parts are under its Y and XYZ handles, `Fountain`'s under XYZ; any selected
+  object's own centre is under XYZ.
+- **A press on a handle is a drag at once.** It starts a gesture
+  (`dragging-changed`, L2217–2235), sets `pressDown.onHandle`, and
+  `isSelectClick` refuses that click: no selection change. The gesture writes
+  every pointer move locally at once and **sends its first change after 100
+  ms** (`edit-gesture.js` L198 `throttleMs = 100`, L435), then one final send
+  at the end. A drag that moves nothing sends nothing and records nothing (R7,
+  undo-hold H3); **a drag that moves 2 px does both:** a double-click on the
+  stand with `lamp-01` selected, with 2 px of travel on the second press,
+  moved the lamp 0.0995 m up and recorded "Undo Move “lamp-01”"
+  (`/tmp/sp-check-probes/h-dblclick-jitter.py`, reproduced by Claude). So
+  **without SP-L8 a double-click can't drill into a stacked group, and a
+  shaky one moves it.** The gesture has a `cancel()` (L447–453: no final
+  send) that the app uses only for removed nodes.
 - **Escape** (`app.js` L1617–1650): in Edit mode, outside a text field, the
   first Escape deselects and the second leaves Edit mode (L1642–1647, B2).
   Inspect has no Escape handling.
@@ -222,14 +249,17 @@ Edit panel showing that a material is shared (subtree-add §8).
 ### 2.6 Shared materials and a part's re-add (§9.5 M2, reproduced)
 `buildDescriptor` numbers material refs in message order, children in
 `listChildren()` order (L453–468). A group `G` of `a` (red), `b` (blue) and `c`
-(red): its capture has `a` inline, `b` inline, `c` → `{ ref: 0 }`. Remove `a`
-and add it back under `G` (what T11's Undo does): the order is `b, c, a`, `c`
-is inline and `a` → `{ ref: 1 }`. **The two captures differ though the group
-didn't change** (`devtasks/spike-selection-parts/m2-refs.mjs`, the real `buildDescriptor`).
-A comparison that only ignores order fails too: the refs' numbers differ. And
-when `a` shared with `c`, the restored `a` comes back with its own red (a part
-is one message; sharing with its siblings is outside it, T12), so the group
-**has** changed: its older entries are rightly "changed elsewhere".
+(blue): its capture has `a` inline, `b` inline, `c` → `{ ref: 1 }`. Delete `a`
+and Undo it (T11): `a` comes back last, so the order is `b, c, a`, and `c` →
+`{ ref: 0 }`. **The two captures differ though the group didn't change.** A
+comparison that only ignores order fails too: the refs' numbers differ.
+(`devtasks/spike-selection-parts/m2-refs.mjs` shows the renumbering with the
+real `buildDescriptor`; corrected by the fresh-agent check: the probe
+re-attaches the same `a`, still sharing with `c`, which a real restore
+doesn't.) When `a` itself shared with a sibling, the restored `a` comes back
+with its own material (a part is one message; sharing with its siblings is
+outside it, T12), so the group **has** changed: its older entries are
+rightly "changed elsewhere".
 
 ## 3. Decisions (for the operator)
 Binding from earlier rounds: everything in `PREBRIEF-subtree-add.md` §3,
@@ -243,9 +273,8 @@ SA-L6 (d) and SA-L7 (c) included.
   levels. A single click inside the current selection changes nothing. A
   double-click on the selected object a while later works the same way: its
   first click changes nothing, its second goes deeper. The browser decides
-  what counts as a double-click (the system's interval and distance). Moving
-  the object is unaffected: moves are made with the handles, never by
-  pressing on the object.
+  what counts as a double-click (the system's interval and distance). The
+  handles cover the parts (§2.2), so this needs SP-L8.
 - (b) Any click on the current selection goes one level deeper. Fewer
   gestures, but a stray click on the selected object changes the selection,
   and the "click to make sure it's selected" habit drills down.
@@ -309,6 +338,21 @@ recommended.**
   45, 49 and 39 s here). The only exclusions left are the two hostile suites
   and the measure files themselves.
 
+**SP-L8. A press on a move handle** (new in Rev 1.2; the fresh-agent
+check's must-fix 1, §2.2). **Decided (operator, 2026-11-08): (a), as
+recommended.**
+- **(a) Decided: a short press is a click, even on a handle.** A
+  press-and-release that travels less than 4 px (`CLICK_SLOP_PX`) puts back
+  what the handle changed on screen, sends and records nothing, and is handled
+  as a click (it selects, and drills with SP-L1). A handle drag begins once
+  the pointer has travelled 4 px from the press. A nudge smaller than that
+  is typed in the panel's fields, or made with a snap.
+- (b) Keep the handles as they are, and go down a level with Alt-click, the
+  breadcrumb or a key only. Drops SA-L6 (d)'s double-click.
+- (c) Show the handles only after the double-click interval (about 0.5 s)
+  following a click. No change to drags, but timing-based: a slow
+  double-click still lands on them.
+
 **SP-L7. How the round runs.** **Decided (operator, 2026-11-08): (a), as
 recommended.**
 - **(a) Recommended: the cheap round, with Fable as the outside reviewer
@@ -331,9 +375,11 @@ null` on a SOM node).
     per-file assertions (no signal, status 0), the same per-file printout and
     the same ceiling assertion; plus `serverTestFiles()` (every
     `*.test.js` in `test/`, sorted, less `HOSTILE` = `message-depth.test.js`
-    and `behavior-walk.test.js`, and less every `message-depth-measure*`
-    file), `SOLO = ['world-visibility.test.js']`, and `shard(k, n)` (the files
-    not in `SOLO` whose index in that sorted list is `k` mod `n`).
+    and `behavior-walk.test.js`, and less the **measure files**:
+    `message-depth-measure-*.test.js` and `message-depth-shards.test.js`),
+    `SOLO = ['world-visibility.test.js']`, and `shard(k, n)`: the files of
+    `serverTestFiles()` not in `SOLO`, sorted, numbered from 0 **without**
+    `SOLO`, those whose number is `k` mod `n`.
   - `message-depth-measure-1.test.js`, `-2`, `-3` each run `shard(k − 1, 3)`;
     `message-depth-measure-4.test.js` runs `SOLO`. Each asserts its list isn't
     empty and its recording isn't empty, and prints its own deepest
@@ -341,9 +387,12 @@ null` on a SOM node).
     (why the ceiling exists, the recorder, the exclusions and their reasons)
     moved to the helper.
   - **A guard** (`message-depth-shards.test.js`, new, no spawn, under a
-    second): the shards and `SOLO` together hold every file
-    `serverTestFiles()` lists, each once; `HOSTILE` names files that exist; and
-    no measure file is in any list.
+    second) that **doesn't use `serverTestFiles()`** (should-fix 8: built from
+    the same filter, it would pass a filter that drops a suite): it lists
+    `test/*.test.js` itself with `readdirSync`, removes the two hostile files
+    and the five measure files **named literally**, and asserts the result
+    equals the union of the three shards and `SOLO`, each file once; that
+    `HOSTILE`'s files exist; and that no measure file is in any list.
   - `message-depth.js` L22's comment names the helper instead of the old file
     (a comment; nothing else in `packages/server/src` changes).
   - **What it proves is unchanged:** every legitimate message every server
@@ -366,9 +415,13 @@ null` on a SOM node).
     4. otherwise `topLevelAncestor(leaf)`.
   
   All of it is pure and walks `parent` only (no recursion over children).
-  `resolveEditSelection` (`edit-selection.js` L47–58) keeps its avatar and
-  external rules **first**. External content stays its outermost container
-  whatever the gesture. Then it calls `resolveRoot(hit, { descend, current,
+  `resolveEditSelection` (`edit-selection.js` L47–58) keeps its avatar rule
+  **first**. External content is now handed to the policy **as the leaf**:
+  the outermost ancestor carrying `extras.atrium.source` replaces the hit, so
+  the container stays atomic whatever the gesture (Alt and drilling stop at
+  it) and an ordinary group around it is still selected by a single click
+  (fresh-agent check, should-fix 7: as Rev 1.1 read, a click returned the
+  inner container). Then it calls `resolveRoot(leaf, { descend, current,
   drill })`. `pickEditSelection` passes them through.
   `pickEditTarget(e, { includeHidden, current })` passes `resolveRoot:
   resolveScopedSelection`, `descend: e.altKey`, `drill: e.detail >= 2` and
@@ -377,33 +430,72 @@ null` on a SOM node).
   **Stated changes:** a click on a part of a group whose root has a mesh now
   selects the root (no fixture or PROD group has one, subtree-add §2.5); a
   click on a piece of `Furniture` selects `Furniture`.
+  - **Inspect follows a removed part** (should-fix 4): the `som:remove`
+    listener (`app.js` L3276–3278) clears `inspected` when
+    `getNodeByName(inspected.name) !== inspected`, as Edit's does, not only
+    when the removed root is the inspected node. Today a visitor's
+    Alt-clicked part stays in the panel after its group is removed.
 - **T14, the breadcrumb.** `index.html` gains `#ep-path` as the first row of
   `#ep-fields` and `#ip-path` as the first of `#ip-fields`, hidden when the
   selection is top-level. It lists the selection's ancestors from the
   top-level one down, then the selection: each ancestor a `<button
   class="ep-crumb">`, the selection plain text, separated by ` › `, each name
-  through `shownText(name, 32)` and set with `textContent`. The full name is
-  the button's `title`. One writer per panel (`refreshEditPanel`,
-  `renderInspectPanel`), on every refresh; one delegated click listener per
-  row. A crumb's click selects that node through `selectForEdit` (Edit) or
-  `inspectSelect` (Inspect) if it is still `getNodeByName(name)` by identity,
-  else re-renders. It ends a drag in progress as any selection change does.
-  The rows wrap rather than scroll; depth is at most 9 levels in any
-  message-built group (T1) and 3 in every fixture.
+  through `shownText(name, 32)` and set with `textContent`. The full name,
+  through `shownText(name)` (no truncation, so direction characters can't
+  reorder it), is the button's `title`. The row is a `nav` with
+  `aria-label="Selection path"`, the separators `aria-hidden`, the last item
+  `aria-current="true"`. **Over 7 levels** (a world file can be deeper than
+  T1's 9, which binds only messages) it shows the top-level name, `…`, and
+  the last 6. One writer per panel, called from `refreshEditPanel` and
+  `renderInspectPanel`, **which rebuilds the row only when the path changes**
+  (the list of node objects and their names; should-fix 5: `refreshEditPanel`
+  runs on every `som:set` of the selection, L1065, and in Chromium a row
+  rebuilt between press and release delivers no click). One delegated click
+  listener per row. A crumb's click selects that node through `selectForEdit`
+  (Edit) or `inspectSelect` (Inspect) if it is still `getNodeByName(name)`
+  by identity and **its name isn't duplicated** (`isDuplicatedName`, else
+  `DUPLICATE_NAME_MESSAGE` and nothing selected: should-fix 6); else it
+  re-renders. It ends a drag in progress as any selection change does. After
+  the click, focus returns to the viewport, so the movement keys work.
 - **T15, Escape (SP-L3 (b)).** In the existing document listener (`app.js`
-  L1642–1647), Edit mode: a selection with a parent → `selectForEdit(parent)`;
-  a top-level selection → `selectForEdit(null)`; none → `setEditMode(false)`.
-  Inspect mode: the same first two steps on `inspected`. The forms that take
+  L1642–1647), Edit mode: a selection with a parent → `selectForEdit(parent)`,
+  unless the parent's name is duplicated (`DUPLICATE_NAME_MESSAGE`, nothing
+  selected: should-fix 6); a top-level selection → `selectForEdit(null)`;
+  none → `setEditMode(false)`. Inspect mode: the same first two steps on
+  `inspected`. The forms that take
   Escape first (the failure panel, the Library grid, the Model and
   destination forms) still do, in today's order.
+- **T17, a short press on a handle (SP-L8 (a)).** In `app.js`:
+  - the capture-phase `mousedown` (L2372–2374) keeps recording `pressDown`;
+    `onHandleDragging(true)` (L2217–2226) **no longer begins the gesture**: it
+    marks the press as a handle press and records the selected node's
+    translation, rotation and scale;
+  - `onHandleChange` (L2237–2246), while the pointer is within 4 px of the
+    press, **puts the three.js object back** to those values and does
+    nothing else (no `update`, no local SOM write, no hold); the first change
+    past 4 px begins the gesture (`editTracker.begin`, `hold.hold`) and
+    applies the current handle values, so a real drag behaves as today;
+  - `onHandleDragging(false)` with no gesture begun puts the object back once
+    more and clears the mark; `pressDown.onHandle` is then false for that
+    press, so the `click` that follows is a select click (`isSelectClick`'s
+    `gestureEnded` false), with `e.detail` as the browser counted it;
+  - a gesture that did begin ends as today (`activeGesture.end()`). Nothing
+    else in the gizmo changes (snaps, modes, space).
+  
+  **Stated:** a handle drag smaller than 4 px no longer moves the object; the
+  fields and the snaps make small moves. The behaviour runner's drag rule
+  (F-L5) holds from the gesture's start, so it now starts 4 px later.
 - **T11, parts** (subtree-add §9.1, with §9.5 taken; SP-L4 (b), SP-L5 (a)).
   A **part** is a node whose parent is a node: a single mesh part, or a
   sub-group with members of its own (then also a tree, T1–T6).
   - **The rule.** `duplicateRuleProblem`'s `parent` rule (L606–607) becomes
     an **`ancestors`** rule: no ancestor carries `extras.atrium.source`
-    (`external`'s reason) or is excluded by the caller's predicate
-    (`isExcluded`, the app's `isEditExcluded`, `app.js` L1960–1962: an
-    avatar). Every other per-node rule holds for the part, and T5's tree rules
+    (`external`'s reason) or is excluded by the caller's predicate. The
+    predicate receives **glTF-Transform nodes**, as `duplicateRuleProblem`
+    walks them: the app passes `(g) => isEditExcluded(client.som.getNodeByName(g.getName()))`
+    (`isEditExcluded`, `app.js` L1960–1962, compares SOM nodes, so passed
+    straight through it would never match: should-fix 10). An avatar is
+    never a parent (the server refuses it), so this is defence in depth. Every other per-node rule holds for the part, and T5's tree rules
     for a sub-group. The client's rule is stricter than the server's
     `isBlockedParent`, which is unchanged. `DUPLICATE_REASONS.parent` is
     removed; its tests (`edit-duplicate.test.js` L122, L497;
@@ -426,10 +518,19 @@ null` on a SOM node).
     (b)): `inverse3(linear(worldMatrix(parent))) × [1.5, 0, 0]`, from
     `part-transform.js` (below), with `prepareDuplicate` taking the offset
     vector instead of `DUPLICATE_OFFSET_X` (a top-level node's is `[1.5, 0,
-    0]`, unchanged). The `DUPLICATE_OFFSET_X` comment says so.
-  - **Undo and Redo** (§9.5 M1): **every** structural entry (`acceptAdd`,
-    `acceptDelete`) records `parent: handleFor(node.parent)` when the node
-    has one, else `parent: null`. Every re-add (Undo of a delete, Redo of an
+    0]`, unchanged). The `DUPLICATE_OFFSET_X` comment says so. Under a
+    parent scaled near K6's minimum the local offset is large (about 1.5e6
+    at scale 1e-6); K6 bounds no translation, so it is accepted and lands
+    1.5 m away in the world, as specified: stated.
+  - **Undo and Redo** (§9.5 M1): **every** structural entry records `parent:
+    handleFor(node.parent)` when the node has one, else `parent: null`,
+    **read while the node is alive:** a Delete's parent is read at the click,
+    in `registerDelete`, carried on the request, and recorded by
+    `acceptDelete` (fresh-agent check, must-fix 2: `_onRemove` disposes the
+    node, `AtriumClient.js` L1737, before the engine hears the answer, so
+    reading it in `acceptDelete` gives `null` and Undo restores the part at
+    the top level); `acceptAdd` reads it from the live node. A removal (Undo
+    of an Add, Redo of a Delete) keeps the entry's own `parent`. Every re-add (Undo of a delete, Redo of an
     add) sends `parent: entry.parent.node.name`. `checkEntry`'s re-add check
     (L574–580) also requires, when `entry.parent` is set, that the parent is
     alive by identity (`getNodeByName(p.name) === p`). If it isn't: "Can’t
@@ -438,7 +539,9 @@ null` on a SOM node).
     elsewhere." The entry is dropped, as any refused entry is. The handle
     follows the group through a rename, and through the group's own delete
     and Undo (T5's re-pointing by name). A server refusal of a vanished parent
-    (`NODE_NOT_FOUND: <name>`) is shown as "its group was removed" too. A
+    (`NODE_NOT_FOUND: <name>`, when another tab renamed or removed the
+    group after the re-add was sent) is shown as "Can’t undo: “X” its group
+    was renamed or removed." A
     part's descriptor holds its local TRS, so the fixed point is unchanged.
     A part whose capture succeeds is deleted without the question (W6).
   - **The comparison** (SP-L5 (a)): `checkEntry`'s remove check uses
@@ -456,8 +559,12 @@ null` on a SOM node).
   - **Copy** (§9.5 S1, S2, S3). `copyObject(node, source, { …, parentWorld =
     null })`: with `parentWorld` null (a top-level node) the root keeps its
     TRS **verbatim**, no decomposition. For a part, the app passes
-    `worldMatrix(selected.parent)` (the SOM node's), and the root's TRS
-    becomes `decomposeTRS(multiply(parentWorld, localMatrix(part)))`:
+    `worldMatrix(node.parent)` of the **SOM** node (`selected` in Edit,
+    `inspected` in Inspect), and the root's TRS becomes
+    `decomposeTRS(multiply(parentWorld, localMatrix(rootTRS)))`, where
+    `rootTRS` is the built descriptor's root `{ translation, rotation, scale }`
+    (should-fix 2: `localMatrix` of the glTF-Transform node, which
+    `copyObject` holds, reads no fields and gives the identity):
     - the translation is the last column;
     - the scale is the three columns' lengths, and when the determinant is
       negative, the x scale is negated (a mirrored ancestor, legal under K6,
@@ -467,8 +574,10 @@ null` on a SOM node).
     
     The copy is refused with "Its group’s rotation and scale can’t be
     carried with it" (new reason `shear`) when recomposing that TRS misses an
-    element of the matrix by more than `1e-5 × max(1, that column's
-    length)`. That is a shear: a non-uniform scale on an ancestor with a
+    element of the matrix by more than `1e-5 × max(1e-9, that column's
+    length)` (relative, so a shear at small scale is caught: nit). The
+    check runs in `copyHint` too, so Copy shows the reason before the
+    click. That is a shear: a non-uniform scale on an ancestor with a
     rotation below it. It is also refused when the TRS fails K6
     (`transform`, as today). The members below the root keep their local
     TRS. Paste treats the snapshot as a top-level object: x and z from the
@@ -548,13 +657,15 @@ null` on a SOM node).
     was removed"; after it was deleted and restored by our own Undo, the shade
     goes into the restored lamp; after another tab made a new `lamp-01`, it
     refuses with "replaced elsewhere";
-  - `sameCanonical`: §2.6's `a, b, c` group equal before and after `a`'s
-    re-add with no sharing between `a` and `c`, unequal with it; the same
-    tree with its refs numbered differently, equal; a child added or removed,
-    unequal;
+  - `sameCanonical`: §2.6's group (`b` and `c` sharing) equal before and
+    after `a`'s delete and Undo; `a` and `c` sharing, unequal after it (the
+    sharing was lost); the same tree with its refs numbered differently,
+    equal; a child added or removed, unequal;
   - Copy of a part of a group moved, rotated 90° about y and scaled 2: the
-    pasted root's world matrix equals the part's (within 1e-5); a mirrored
-    group (scale `[-1, 1, 1]`): accepted, the same equality; a part with a
+    **snapshot**'s root TRS composes to the part's world matrix (within
+    1e-5), and after Paste the root's rotation, scale and y are the part's
+    (x and z are the palette's, should-fix 1); a mirrored group (scale `[-1,
+    1, 1]`): accepted, the same; a 1% shear at scale 1e-3: refused; a part with a
     rotation **below** a non-uniformly scaled group: refused with `shear`; a
     top-level node's snapshot TRS is bit-for-bit its own (no decomposition);
     a behaviour on the shade targeting the stand keeps it on a same-world
@@ -583,22 +694,40 @@ null` on a SOM node).
     tests fail;
   - (p13) SP-L5 (a)'s comparison back to `sameDescriptor`: the lamp's
     older-entry test fails;
-  - (p14) P0's guard with a file dropped from the shard rule: the guard
-    fails.
+  - (p14) P0's guard with a file dropped from the shard rule, and again with
+    `serverTestFiles()`'s filter widened to drop a suite: the guard fails both
+    times;
+  - (p15) T17 back to beginning the gesture at the press: the jitter
+    double-click unit test (an `app.js` wiring test feeding the handlers a
+    press, a 2 px change and a release) records a Move, and the harness's
+    jitter check fails;
+  - (p9d) a Delete's parent read in `acceptDelete`: the shade's
+    Delete-and-Undo test fails (it comes back at the top level).
+- **Wiring tests that change** (they pin today's text; rewritten with the
+  code, not counted as regressions): `copy-objects-wiring.test.js` L189
+  (`pickEditTarget(e, { includeHidden: false })`) and L191 (`{ includeHidden
+  = true } = {}`); `app-wiring.test.js` L451 (`pickEditTarget\(e\)`); any
+  test of `onHandleDragging`'s text.
 - **Claude's harness checks before DEV acceptance** (`devtasks/harness`, on
-  the published SHA; new `checks/selection-parts/`; real mouse events through
-  Playwright, `page.mouse.dblclick`):
+  the published SHA; new `checks/selection-parts/`; real mouse events
+  through Playwright with `clickCount` given on every press (§2.2). **Every
+  check asserts the selection it expects and that no transform changed and
+  no entry was recorded,** and each double-click check has a **jitter**
+  variant (1 and 2 px of travel on the second press), on the handles' own
+  positions (the stand under `lamp-01`'s Y handle, `Table-Center`'s parts,
+  `Fountain`'s):
   - in a `space.gltf` world: a click on the shade selects `lamp-01`; a
     double-click selects `lamp-shade`, and **the lamp hasn't moved and no
     Undo entry was recorded**; the breadcrumb reads `lamp-01 › lamp-shade`;
     a click on the stand selects `lamp-stand`; Escape, Escape, Escape:
     `lamp-01`, nothing, Edit off;
-  - in an `atr…` world (`atrium.gltf`): a click on a bench seat selects
+  - in an `atr…` world (`atrium.gltf`): a click on `Bench-NE-Seat` selects
     `Furniture`, a triple-click the seat, the breadcrumb's `Bench-NE` the
     bench; ten double-clicks in a row on different groups move nothing and
     record nothing (the drag-safety check SA-L6 (d) asked for);
-  - a double-click whose second press lands on a handle: no selection change,
-    nothing recorded;
+  - a double-click whose second press lands on a handle (SP-L8): it drills,
+    nothing moves, nothing is recorded; a drag on the same handle past 4 px
+    moves the object and records one Move, as today;
   - Inspect (`?visitor`): the same click, double-click and breadcrumb; a
     hidden part can't be reached;
   - Duplicate, Delete, Undo and Redo of the shade, and of `Bench-NE`, with
@@ -611,23 +740,27 @@ null` on a SOM node).
      `lamp-01`. Double-click the shade: the Name is `lamp-shade`, and above
      it the breadcrumb reads `lamp-01 › lamp-shade`. The lamp hasn't moved,
      and the Undo button's tooltip (hover it) is unchanged.
-  2. Click the stand once: `lamp-stand` (the same level). Click `lamp-01` in
-     the breadcrumb: `lamp-01`. Click `crate-01`: `crate-01`, no breadcrumb.
+  2. Click the stand once: `lamp-stand` (the same level; the press lands on
+     the shade's move arrow and selects anyway, SP-L8). Drag that arrow up a
+     little: the shade moves, and Undo's tooltip reads "Undo Move
+     “lamp-shade”"; Undo. Click `lamp-01` in the breadcrumb: `lamp-01`.
+     Click `crate-01`: `crate-01`, no breadcrumb.
   3. Alt-click the shade: `lamp-shade`. Press Escape: `lamp-01`. Escape:
      nothing selected. Escape: Edit mode is off. Turn it back on.
   4. Double-click the shade. Duplicate is enabled (tooltip "Duplicate the
      selected object"). Click it: `lamp-shade copy` appears 1.5 m beside the
      shade, selected, with the breadcrumb `lamp-01 › lamp-shade copy`.
-     Click `crate-01`, then click the copy: `lamp-01` (it's part of the lamp).
      Undo (tooltip "Undo Duplicate “lamp-shade copy”"): the copy is gone.
-     Redo: it is back **on the lamp** (a click on it selects `lamp-01`). Undo.
+     Redo: it is back, selected, and the breadcrumb reads `lamp-01 ›
+     lamp-shade copy` (it is **on the lamp**). Click `crate-01`, then click
+     the copy: `lamp-01`. Undo.
   5. Double-click the shade and Delete: **no question**. Undo: the shade is
-     back; double-click it: the breadcrumb reads `lamp-01 › lamp-shade`.
-     Redo: gone; Undo: back.
+     back, selected, and the breadcrumb reads `lamp-01 › lamp-shade`. Redo:
+     gone; Undo: back.
   6. Double-click the stand and Copy. Teleport home and Paste: a stand
      appears ahead at the height it had in the lamp (0.75 m up), on its own: a
      click selects it, with no breadcrumb. Undo.
-  7. Signed out, Inspect: click the lamp: `lamp-01 · 2 parts`; double-click
+  7. Signed out, Inspect: click the lamp: `lamp-01 (2 parts)`; double-click
      the shade: `lamp-shade`, with the breadcrumb in the Inspect panel; Copy
      is enabled.
   8. **On PROD after the deploy:** double-click one lamp's shade, Duplicate,
@@ -665,7 +798,9 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
   test files one at a time,** each under `timeout 180`, new tests on port 0.
 - **Release:** a client round with server test files. **DEV restarts** at
   the deploy (the files are under `packages/server/`), so acceptance needs a
-  hard reload in every tab. No `package.json` or lockfile change. **A
+  hard reload in every tab. **The deploy's server suite takes about 200 s
+  longer** (the four measure files run everything once more; each file well
+  inside its 180 s). No `package.json` or lockfile change. **A
   rollback** stores nothing to undo: a part added in place is an ordinary
   node under its parent, as any server since `parent` existed stores it.
   **Check DEV's actual SHA with `release_status` before reading an
@@ -674,6 +809,45 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.2** (2026-11-08): **a fresh Claude agent checked Rev 1.1** at
+  `74bdc113` (it hadn't written it). It read every cited line, timed all 54
+  server files under the recorder, prototyped T13 through the real
+  `pickEditSelection`, T11's Undo and Redo on the real `edit-undo.js` and a
+  real `SOMDocument`, the TRS decomposition and the offset on the real
+  `world-matrix.js`, and a `sameCanonical`, and ran five real-browser checks
+  on `devtasks/harness` (probes in `/tmp/sp-check-probes/`, this session
+  only). **50 of 52 facts confirmed**, 2 imprecise (corrected: §2.2's
+  `e.detail`, §2.6's example). Claude reproduced must-fix 1 in the browser
+  (`h-dblclick-jitter.py`: the lamp moved 0.0995 m, "Undo Move “lamp-01”")
+  and must-fix 2 by the code and the probe. Taken:
+  - **must-fix 1:** the handles cover the parts, so the second press of a
+    double-click grabs a handle, and with jitter moves the group (§2.2). New
+    **SP-L8**, decided (a) by the operator: a short press is a click (T17),
+    proof (p15), jitter harness checks that assert the selection, DEV step 2;
+  - **must-fix 2:** a Delete's parent read after the dispose is `null` (T11:
+    read at the click), proof (p9d);
+  - **should-fix:** the Copy test asserts the snapshot, not the paste (1);
+    `localMatrix` of the descriptor's TRS, not the glTF node (2); DEV steps
+    4, 5 and 7 (3); Inspect follows a removed part (4, T13); the breadcrumb
+    rebuilt only when its path changes (5); the duplicate-name refusal for
+    Escape and crumbs (6); external content handed to the policy as the leaf
+    (7); a guard that lists the files itself (8); harness checks assert the
+    selection (9); the predicate takes glTF nodes (10); the wiring tests that
+    change (11);
+  - **nits:** a relative shear tolerance, the shear in Copy's hint, the tiny-
+    parent offset stated, the crumb title through `shownText`, ARIA, a row
+    cap, focus back to the viewport, "renamed or removed", the fixture's real
+    names in the harness, Inspect's `inspected.parent`, the shard numbering,
+    the deploy's longer server suite.
+  - **Recorded, not taken:** a keyboard route down a level (§8).
+  
+  **Confirmed sound by running it:** P0's shards (45–54 s, `SOLO` 61 s, every
+  file green under the recorder, deepest 27); T13 exactly as written, every
+  §5 case; an `add` with `parent` from a real page, in two tabs and on the
+  server; T11's Undo and Redo with the click-time parent (rename, removed,
+  replaced, restored by our own Undo); SP-L5 (a)'s comparison; the
+  decomposition (exact for rotated, scaled and mirrored parents, a shear
+  refused) and SP-L4 (b)'s offset (exactly 1.5 m along world x).
 - **Rev 1.1** (2026-11-08): every decision taken, as recommended (operator:
   SP-L2, SP-L3 and SP-L4 by choice, the other four "go with the recs"). No
   contract text changed: §4 was written for the recommendations. Next: a
@@ -717,6 +891,8 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Grouping and ungrouping** in the Edit panel (a `parent` change on a live
   node: a new message or a `send` leaf), and with it moving a part to
   another group. Then SA-L2's bounds against created content (subtree-add §8).
+- A keyboard route down a level (Alt-click and double-click need a pointer):
+  for example Enter selects the child toward the last pointer hit.
 - Several objects selected at once (Shift-click), with the breadcrumb showing
   their common ancestor.
 - The SOM Inspector tool's tree rebuilds once per member on a tree's
