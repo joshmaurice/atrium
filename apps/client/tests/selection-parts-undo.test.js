@@ -11,7 +11,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { createEditUndo, sameCanonical, GROUP_NOT_ADDRESSABLE } from '../src/edit-undo.js'
+import { createEditUndo, sameCanonical, GROUP_NOT_ADDRESSABLE, SHARED_MATERIAL_NOTE } from '../src/edit-undo.js'
 import { prepareRestore, prepareDuplicate, buildDescriptor } from '../src/edit-duplicate.js'
 
 const { NodeIO, Document } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
@@ -154,6 +154,24 @@ describe('T11: a part’s Delete, Undo and Redo', () => {
     assert.equal(r, true, `the lamp’s Duplicate still undoes: ${h.messages.join(' | ')}`)
     h.answer(h.last().seq)
     assert.equal(som.getNodeByName('lamp-01 copy'), null)
+  })
+
+  test('a part sharing a material with a sibling: its Delete has the note, and after its restore the group\u2019s older entry is \u201cchanged elsewhere\u201d (the sharing was lost)', async () => {
+    const som = await world()
+    // the lamp's shade and stand share one material (as T12 keeps it within a copy)
+    const shadeMat = som.getNodeByName('lamp-shade')._node.getMesh().listPrimitives()[0].getMaterial()
+    som.getNodeByName('lamp-stand')._node.getMesh().listPrimitives()[0].setMaterial(shadeMat)
+    const h = harness(som)
+    const dup = h.duplicateInPlace(som.getNodeByName('lamp-01'), 'lamp-01 copy')
+    h.answer(dup.seq)
+    const shadeCopy = som.getNodeByName('lamp-shade copy')
+    const del = h.clickDelete(shadeCopy)
+    h.answer(del.seq)
+    assert.ok(h.undo.label('undo').endsWith(SHARED_MATERIAL_NOTE), h.undo.label('undo'))
+    h.undo.run('undo'); h.answer(h.last().seq)
+    assert.equal(parentName(som, 'lamp-shade copy'), 'lamp-01 copy')
+    assert.equal(h.undo.run('undo'), false)
+    assert.equal(h.messages.at(-1), 'Can\u2019t undo: \u201clamp-01 copy\u201d was changed elsewhere.')
   })
 
   test('Undo after the lamp was renamed sends the new name as parent', async () => {

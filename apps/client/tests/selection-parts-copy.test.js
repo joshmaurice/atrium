@@ -12,11 +12,12 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { localMatrix, worldMatrix, SOMDocument } from '@atrium/som'
 import { copyObject, preparePaste, partCopyProblem } from '../src/copy-paste.js'
-import { prepareDuplicate, DUPLICATE_REASONS } from '../src/edit-duplicate.js'
+import { prepareDuplicate, duplicateRuleProblem, DUPLICATE_REASONS } from '../src/edit-duplicate.js'
 import { parentFrameOffset } from '../src/part-transform.js'
 import { templateGraph } from '../../../packages/behaviors/src/templates.js'
 
-const { Document } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
+const { Document, NodeIO } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
+const { fileURLToPath } = await import('node:url')
 
 const SRC_WS = 'wss://a.example/worlds/alice/garden'
 const WORLD_A = { id: 'world-a', owner: { id: 'user-alice', name: 'alice' } }
@@ -113,5 +114,37 @@ describe('T11: references outside the copied tree', () => {
     const atrium = p.descriptor.extras.atrium
     assert.notEqual(atrium.behavior.template.params.target, w.ids.stand)
     assert.deepEqual(atrium.copiedFrom.refs, [{ id: atrium.behavior.template.params.target, was: w.ids.stand, name: 'the stand' }])
+  })
+})
+
+describe('T11: a sub-group and the ancestors rule', () => {
+  test('Duplicate of Bench-NE in atrium.gltf: a tree under Furniture, every member renamed', async () => {
+    const doc = await new NodeIO().read(fileURLToPath(new URL('../../../tests/fixtures/atrium.gltf', import.meta.url)))
+    const som = new SOMDocument(doc)
+    const bench = som.getNodeByName('Bench-NE')
+    const r = prepareDuplicate(bench._node, { name: 'Bench-NE copy', isFree: (n) => som.checkNewName(n).ok, trees: true, offset: parentFrameOffset(worldMatrix(bench.parent)) })
+    assert.equal(r.ok, true, r.reason)
+    assert.deepEqual(r.descriptor.children.map((c) => c.name), ['Bench-NE-Seat copy', 'Bench-NE-LegLeft copy', 'Bench-NE-LegRight copy'])
+    assert.equal(bench.parent.name, 'Furniture')
+  })
+  test('a part of externally loaded content is refused, with external\u2019s reason', () => {
+    const doc = new Document()
+    const ext = doc.createNode('statue').setExtras({ atrium: { source: 'statue.gltf' } })
+    const head = doc.createNode('statue/Head')
+    ext.addChild(head)
+    doc.createScene().addChild(ext)
+    const r = duplicateRuleProblem(head, { trees: true })
+    assert.equal(r?.rule, 'ancestors')
+    assert.equal(r.reason, DUPLICATE_REASONS.external)
+  })
+  test('a part under an excluded ancestor is refused ancestors (the app passes glTF nodes)', () => {
+    const doc = new Document()
+    const av = doc.createNode('User-aaaa')
+    const child = doc.createNode('hat')
+    av.addChild(child)
+    doc.createScene().addChild(av)
+    const r = duplicateRuleProblem(child, { trees: true, isExcluded: (g) => g.getName() === 'User-aaaa' })
+    assert.equal(r?.rule, 'ancestors')
+    assert.equal(r.reason, DUPLICATE_REASONS.ancestors)
   })
 })

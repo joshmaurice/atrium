@@ -12,7 +12,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { HOSTILE, SOLO, SHARDS, shard, listFor, serverTestFiles } from './helpers/depth-measure.mjs'
@@ -60,6 +60,13 @@ test('P0: each measure file\'s own name maps to its own list', () => {
   assert.deepEqual(listFor('message-depth-measure-3.test.js'), shard(2, SHARDS))
   assert.deepEqual(listFor('message-depth-measure-4.test.js'), [...SOLO])
   assert.throws(() => listFor('message-depth-measure-5.test.js'))
+})
+
+test('P0: the four measure files are the same text, so none can name another\u2019s list (Fable review, S-6)', () => {
+  const texts = MEASURE_FILES.slice(0, 4).map((f) => readFileSync(join(__dirname, f), 'utf8'))
+  for (const t of texts.slice(1)) assert.equal(t, texts[0])
+  assert.match(texts[0], /measureFiles\(listFor\(NAME\), \{ label: NAME \}\)/)
+  assert.match(texts[0], /const NAME = basename\(fileURLToPath\(import\.meta\.url\)\)/)
 })
 
 test('P0: no measure file is in any list', () => {
