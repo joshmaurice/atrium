@@ -1,6 +1,8 @@
 # Pre-brief: selection and parts (`selection-parts`)
 
-Status: **DRAFT, Revision 1.3 (2026-11-08).** Rev 1.2 plus Fable's outside
+Status: **FINAL, Revision 2 (2026-11-08): Rev 1.3 approved by the operator
+("approve", 18:30 PT).** Implementation on `claude/selection-parts` in §6's
+commits. Rev 1.3 (2026-11-08): Rev 1.2 plus Fable's outside
 review of it (§7, `REVIEW-selection-parts-rev1.2-fable.md`, CHANGES
 REQUESTED) and the four decisions it raised, **SP-L9 (a), SP-L10 (a), SP-L11
 (a) and SP-L12 (a)**, as recommended (operator, about 18:25 PT). Rev 1.2 was the
@@ -986,6 +988,10 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2, FINAL** (2026-11-08, 18:30): Rev 1.3 approved by the operator; no
+  text changed. Implementation in Claude's fast lane on `claude/selection-parts`,
+  in §6's commits, then a fresh-agent code check and one Fable code review
+  (SP-L7 (a)).
 - **Rev 1.3** (2026-11-08, 18:30 PT): **Fable's outside review of Rev 1.2**
   (`devtasks/REVIEW-selection-parts-rev1.2-fable.md`, at `3ccc1ad4`, named in
   its first line): **CHANGES REQUESTED**, one must-fix, seven should-fixes,
