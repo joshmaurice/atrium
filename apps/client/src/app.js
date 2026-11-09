@@ -13,10 +13,11 @@ import { teleporterLabel } from './teleporter-label.js'
 import { syncPadLabels } from './pad-labels.js'
 import { teleportFailureMessage, evictionMessage, codeToReason, formatDestination } from './teleport-failure.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
-import { resolveSelectionRoot } from '@atrium/interaction'
+import { resolveScopedSelection, topLevelAncestor } from '@atrium/interaction'   // selection-parts T13
 import { createEditModes } from './edit-modes.js'
 import { createEditTracker, createBehaviorHold, handleUpdate, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
-import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject } from './edit-selection.js'
+import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject, selectionPath, breadcrumbItems, DUPLICATE_NAME_MESSAGE } from './edit-selection.js'
+import { createHandlePress } from './edit-press.js'   // selection-parts T17
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
 import { createGraphImportPanel } from './graph-import-panel.js'
@@ -649,13 +650,13 @@ function updateHintText() {
   }
 
   if (modes.edit) {
-    hudHintEl.textContent = `Edit mode · Click to select · Alt-click selects a part · Esc to deselect · Drag to look · WASD to move${camSuffix}`
+    hudHintEl.textContent = `Edit mode · Click to select · Double-click goes into a group · Alt-click selects a part · Esc goes up · Drag to look · WASD to move${camSuffix}`
     return
   }
 
   // copy-objects K4 — Inspect changes clicks only: pads still teleport.
   if (modes.inspect) {
-    hudHintEl.textContent = `Inspect mode · Click an object to see it and copy it · Drag to look · WASD to move${camSuffix}`
+    hudHintEl.textContent = `Inspect mode · Click an object to see it and copy it · Double-click goes into a group · Esc goes up · Drag to look · WASD to move${camSuffix}`
     return
   }
 
@@ -1642,9 +1643,27 @@ document.addEventListener('keydown', (e) => {
     // Edit mode (B2): first Escape deselects, a second leaves Edit mode.
     // An Escape inside a panel field never gets here (B5).
     // Escape typed in another text field (sign-in, world browser) is theirs.
+    //
+    // selection-parts T15 (SP-L3 (b)) — and first it goes UP a level: a part
+    // selects its parent, a top-level object deselects, nothing leaves Edit
+    // mode. During a handle drag T18 (in selectForEdit) ends the drag first,
+    // keeping the move (SP-L9 (a)). A parent whose name another node holds
+    // can't be selected (E7): Escape deselects and says so.
     if (modes.edit && !e.target.closest?.('input, textarea, select')) {
-      if (selected) selectForEdit(null)
-      else setEditMode(false)
+      if (selected) {
+        const up = escapeTarget(selected)
+        selectForEdit(up.node)
+        if (up.refused) showEditError(up.refused)
+      } else {
+        setEditMode(false)
+      }
+      return
+    }
+    // Inspect: the same first two steps (selection-parts T15).
+    if (modes.inspect && inspected && !e.target.closest?.('input, textarea, select')) {
+      const up = escapeTarget(inspected)
+      inspectSelect(up.node)
+      ipStatus.textContent = up.refused ?? ''
     }
   }
 })
@@ -1698,6 +1717,7 @@ const ipCredit         = document.getElementById('ip-credit')
 const ipBehaviorRow    = document.getElementById('ip-behavior-row')
 const ipBehavior       = document.getElementById('ip-behavior')
 const ipCopy           = document.getElementById('ip-copy')
+const ipPath           = document.getElementById('ip-path')         // selection-parts T14
 const ipReason         = document.getElementById('ip-reason')
 const ipStatus         = document.getElementById('ip-status')
 const epHostStatus   = document.getElementById('ep-host-status')
@@ -1804,6 +1824,7 @@ const epPasteNotes   = document.getElementById('ep-paste-notes')    // copy-obje
 const epCreditRow    = document.getElementById('ep-credit-row')     // copy-objects, post-review
 const epCredit       = document.getElementById('ep-credit')
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
+const epPath         = document.getElementById('ep-path')           // selection-parts T14
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
 const epRedo         = document.getElementById('ep-redo')           // step 2, Y5
 // R1 — Undo and Redo live in their own row (#ep-history) outside #ep-fields,
@@ -2045,6 +2066,7 @@ function inspectSelect(node) {
  */
 function renderInspectPanel() {
   const node = inspected
+  renderPath(ipPath, node)
   ipEmpty.style.display = node ? 'none' : ''
   ipFields.style.display = node ? '' : 'none'
   if (!node) return
@@ -2202,7 +2224,44 @@ editToggleBtn.addEventListener('click', () => setEditMode(!modes.edit))
 function syncGizmoEnabled() {
   if (!gizmo) return
   const renaming = !!pendingRename && pendingRename.node === selected
-  gizmo.enabled = modes.edit && !!selectedObj && !renaming && !editDispatchBlocked()
+  const on = modes.edit && !!selectedObj && !renaming && !editDispatchBlocked()
+  // selection-parts T18 — a control turned off mid-drag never hears the
+  // release (its onPointerUp returns when disabled), so its drag would stay
+  // on and every later press would be refused until a reload (SP-L12). End
+  // the drag first.
+  if (!on) endHandleDrag()
+  gizmo.enabled = on
+}
+
+/**
+ * selection-parts T18 (SP-L9 (a), SP-L12 (a)) — end the control's own drag, if
+ * one is under way, BEFORE the selection, the handles or their enabled state
+ * change. `pointerUp` clears `dragging` and `axis`, which fires
+ * `dragging-changed(false)`: `onHandleDragging(false)` then ends the gesture
+ * with its final send (the move is kept and recorded). The press is spent:
+ * the click that follows the real release selects nothing.
+ */
+function endHandleDrag() {
+  if (!gizmo?.dragging) return
+  handlePress.reset()
+  gizmo.pointerUp({ button: 0 })
+}
+
+// selection-parts T17 (SP-L8 (a), SP-L11 (a)) — a press on a handle is a click
+// until the pointer travels CLICK_SLOP_PX, and a double-click's second press
+// never drags. The rule is edit-press.js's; this is the DOM half.
+const handlePress = createHandlePress()
+// Capture phase on the viewport: before the handles' own listeners on the
+// canvas, so the press and every move are known before the object moves.
+viewportEl.addEventListener('pointerdown', (e) => handlePress.down({ x: e.clientX, y: e.clientY }), true)
+viewportEl.addEventListener('pointermove', (e) => handlePress.move({ x: e.clientX, y: e.clientY }), true)
+
+/** Put the selected object back where the SOM has it (T17: the live node is the record). */
+function putBackHandle() {
+  if (!selected || !selectedObj) return
+  selectedObj.position.fromArray(selected.translation ?? [0, 0, 0])
+  selectedObj.quaternion.fromArray(selected.rotation ?? [0, 0, 0, 1])
+  selectedObj.scale.fromArray(selected.scale ?? [1, 1, 1])
 }
 
 function ensureGizmo() {
@@ -2216,26 +2275,52 @@ function ensureGizmo() {
 
 function onHandleDragging(isDragging) {
   if (isDragging) {
-    // Y4 — no gesture begins while an undo or a redo is in flight or a
-    // structural request is pending: the dispatch path, not just the button
-    if (selected && !editDispatchBlocked()) {
-      activeGesture = editTracker.begin(selected)
-      // F-L5 — the drag rule: behaviour sends to the edited node, its
-      // descendants and its ancestors are dropped while the gesture lasts.
-      hold.hold(selected)
+    // selection-parts T17 — the press grabbed a handle; the gesture begins
+    // only once the pointer has travelled (onHandleChange).
+    handlePress.grab()
+  } else {
+    const released = handlePress.release()
+    if (activeGesture) {
+      activeGesture.end()
+      activeGesture = null
+      // A drag that changed nothing sends nothing, so no idle comes for it: the
+      // drag's own end clears the hold (undo-hold, H3).
+      hold.clear()
+    } else {
+      // T17 — no gesture began: whatever the handles drew is put back.
+      putBackHandle()
+      if (released.click && pressDown) {
+        // the click that follows is a select click (SP-L8), from a handle
+        // (SP-L10), and a double-click's second press counts whatever it
+        // travelled (SP-L11)
+        pressDown.onHandle = false
+        pressDown.fromHandle = true
+        pressDown.forced = released.forced === true
+      }
     }
-  } else if (activeGesture) {
-    activeGesture.end()
-    activeGesture = null
-    // A drag that changed nothing sends nothing, so no idle comes for it: the
-    // drag's own end clears the hold (undo-hold, H3).
-    hold.clear()
   }
   refreshEditActions()
 }
 
 function onHandleChange() {
-  if (!activeGesture || !selectedObj) return
+  if (!selectedObj) return
+  if (!activeGesture) {
+    // selection-parts T17 — within the slop (or a double-click's second
+    // press) the change is put back and nothing else happens; past it the
+    // gesture begins, unless a block holds it (Y4: no gesture begins while an
+    // undo or a redo is in flight or a structural request is pending).
+    const step = handlePress.change()
+    if (step !== 'begin' || !selected || editDispatchBlocked()) {
+      putBackHandle()
+      return
+    }
+    activeGesture = editTracker.begin(selected)
+    handlePress.begin()
+    // F-L5 — the drag rule: behaviour sends to the edited node, its
+    // descendants and its ancestors are dropped while the gesture lasts.
+    hold.hold(selected)
+    refreshEditActions()
+  }
   // R1 (round 2) — the gesture records only the field the handle's own mode
   // changes: a Move drag cannot pick up a rotation an echo wrote mid-drag.
   activeGesture.update(handleUpdate(gizmo.mode, selectedObj))
@@ -2282,6 +2367,9 @@ function tickEditMode() {
 
 function selectForEdit(node) {
   if (node === selected) return
+  // selection-parts T18 — a handle drag ends first (the move kept), so the
+  // handles never carry a drag to another object (SP-L9 (a)).
+  endHandleDrag()
   if (activeGesture) { activeGesture.end(); activeGesture = null }
   selected = node
   attachSelected()
@@ -2323,7 +2411,7 @@ function attachSelected() {
 }
 
 // The SOM node an Edit-mode click lands on, resolved per B2.
-function pickEditTarget(e, { includeHidden = true } = {}) {
+function pickEditTarget(e, { includeHidden = true, current = null } = {}) {
   if (!sceneGroup || !client.som) return null
   const rect = viewportEl.getBoundingClientRect()
   const ndc = new THREE.Vector2(
@@ -2351,8 +2439,13 @@ function pickEditTarget(e, { includeHidden = true } = {}) {
     isSeeThrough: (node) => node === avatar.localNode,   // third person: it sits mid-view
     isExcluded: isEditExcluded,
     isDuplicatedName,
-    resolveRoot: resolveSelectionRoot,
+    // selection-parts T13 — the scoped policy: a click selects the top-level
+    // object, a double-click goes one level deeper from `current`, a click
+    // stays at the current level, Alt goes to the leaf.
+    resolveRoot: resolveScopedSelection,
     descend: e.altKey,
+    current,
+    drill: e.detail >= 2,
   })
 }
 
@@ -2371,6 +2464,8 @@ function isDuplicatedName(name) {
 // Capture phase, so the press is recorded before anything else handles it.
 viewportEl.addEventListener('mousedown', (e) => {
   pressDown = { x: e.clientX, y: e.clientY, onHandle: !!gizmo?.dragging }
+  // selection-parts T17 — the click count (`pointerdown` carries none)
+  handlePress.count(e.detail)
 }, true)
 
 viewportEl.addEventListener('click', (e) => {
@@ -2382,8 +2477,8 @@ viewportEl.addEventListener('click', (e) => {
     const down = pressDown
     pressDown = null
     if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: false })) return
-    const { node } = pickEditTarget(e, { includeHidden: false }) ?? { node: null }
-    inspectSelect(node)
+    const { node } = pickEditTarget(e, { includeHidden: false, current: inspected }) ?? { node: null }
+    if (node !== inspected) inspectSelect(node)
     ipStatus.textContent = ''
     return
   }
@@ -2435,9 +2530,17 @@ viewportEl.addEventListener('click', (e) => {
   if (e.target !== canvas) return
   const down = pressDown
   pressDown = null
-  // A look-drag, or a press on a handle, is not a selection.
-  if (!isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
-  const { node, refused } = pickEditTarget(e) ?? { node: null, refused: null }
+  // A look-drag, or a press on a handle that became a drag, is not a
+  // selection. selection-parts T17: a short press on a handle is (its mark is
+  // cleared at the release), and a double-click's second press on a handle is
+  // whatever it travelled (SP-L11).
+  const forced = down?.forced === true && !down.onHandle
+  if (!forced && !isSelectClick(down, { x: e.clientX, y: e.clientY }, { gestureEnded: !!down?.onHandle })) return
+  const { node, refused } = pickEditTarget(e, { current: selected }) ?? { node: null, refused: null }
+  // SP-L10 — a click that began on a handle changes the selection only within
+  // the selected object's top-level object (drilling and siblings); a press
+  // over the floor or the sky behind a handle changes nothing.
+  if (down?.fromHandle && selected && !(node && topLevelAncestor(node) === topLevelAncestor(selected))) return
   selectForEdit(node)
   if (refused) showEditError(refused)
 })
@@ -2490,6 +2593,87 @@ function isUnder(node, root) {
   return false
 }
 
+// ── The breadcrumb (selection-parts T14) ────────────────────────────────
+//
+// One row per panel (#ep-path, #ip-path), rebuilt ONLY when the path changes
+// (the node objects and their names): refreshEditPanel runs on every som:set
+// of the selection, and a row rebuilt between press and release delivers no
+// click. Every name is another user's text: textContent, through shownText.
+
+/** row → { path, names } as last rendered */
+const pathRendered = new Map()
+
+function renderPath(row, node) {
+  if (!row) return
+  const path = selectionPath(node)
+  const names = path.map((n) => n.name)
+  const last = pathRendered.get(row)
+  if (last && last.path.length === path.length &&
+      last.path.every((n, i) => n === path[i]) && last.names.every((x, i) => x === names[i])) return
+  pathRendered.set(row, { path, names })
+  const items = breadcrumbItems(path, { show: shownText })
+  row.replaceChildren()
+  row.style.display = items.length > 0 ? '' : 'none'
+  items.forEach((item, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span')
+      sep.className = 'ep-crumb-sep'
+      sep.setAttribute('aria-hidden', 'true')
+      sep.textContent = '›'
+      row.append(sep)
+    }
+    let el
+    if (item.kind === 'crumb') {
+      el = document.createElement('button')
+      el.type = 'button'
+      el.className = 'ep-crumb'
+      el.dataset.level = String(path.indexOf(item.node))
+    } else {
+      el = document.createElement('span')
+      if (item.kind === 'current') el.setAttribute('aria-current', 'location')
+    }
+    el.textContent = item.text
+    if (item.title) el.title = item.title
+    row.append(el)
+  })
+}
+
+/**
+ * A crumb's click: select that level if it is still the node of that name and
+ * its name isn't another node's too (E7); else re-render. Focus goes back to
+ * the canvas, so the movement keys work.
+ */
+function wireCrumbs(row, select, refuse) {
+  row?.addEventListener('click', (e) => {
+    const button = e.target.closest?.('button.ep-crumb')
+    if (!button) return
+    const node = pathRendered.get(row)?.path[Number(button.dataset.level)] ?? null
+    button.blur()
+    canvas.focus?.()
+    if (!node || client.som?.getNodeByName(node.name) !== node) {
+      pathRendered.delete(row)
+      renderPath(row, null)
+      return
+    }
+    if (isDuplicatedName(node.name)) { refuse(DUPLICATE_NAME_MESSAGE); return }
+    select(node)
+  })
+}
+wireCrumbs(epPath, (node) => { if (modes.edit) selectForEdit(node) }, (text) => showEditError(text))
+wireCrumbs(ipPath, (node) => { if (modes.inspect) { inspectSelect(node); ipStatus.textContent = '' } }, (text) => { ipStatus.textContent = text })
+
+/**
+ * selection-parts T15 — where Escape goes from `node`: its parent, unless the
+ * parent's name is duplicated (E7: then nothing, with the reason); a
+ * top-level node → nothing.
+ */
+function escapeTarget(node) {
+  const parent = node?.parent ?? null
+  if (!parent) return { node: null, refused: null }
+  if (isDuplicatedName(parent.name)) return { node: null, refused: DUPLICATE_NAME_MESSAGE }
+  return { node: parent, refused: null }
+}
+
 // ── Property panel (B5) ─────────────────────────────────────────────────
 
 function fmt(v) {
@@ -2497,6 +2681,7 @@ function fmt(v) {
 }
 
 function refreshEditPanel() {
+  renderPath(epPath, selected)
   if (!selected) {
     epEmpty.style.display = ''
     epFields.style.display = 'none'
@@ -3273,8 +3458,14 @@ function selectAddedNode(node) {
 client.on('som:add', ({ nodeName }) => structure.addSeen(nodeName))
 
 // copy-objects K4 — the inspected object went away: the panel says so.
-client.on('som:remove', ({ nodeName } = {}) => {
-  if (inspected && inspected.name === nodeName && client.som?.getNodeByName(nodeName) !== inspected) inspectSelect(null)
+// selection-parts T13 — by identity: a part whose group was removed goes too.
+client.on('som:remove', () => {
+  if (inspected && client.som?.getNodeByName(inspected.name) !== inspected) inspectSelect(null)
+})
+// selection-parts T14 — a rename of the inspected node or one of its ancestors
+// re-renders the name and the path.
+client.on('som:rename', () => {
+  if (inspected) renderInspectPanel()
 })
 
 // Z4 — the document's own sky write. The picker owns the select's wait and the

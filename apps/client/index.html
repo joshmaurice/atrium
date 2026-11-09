@@ -444,6 +444,11 @@
   #inspect-panel .ep-row { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 4px; }
   #inspect-panel .ep-row > span { width: 58px; color: #94a3b8; flex-shrink: 0; }
   #inspect-panel .ip-value { overflow-wrap: anywhere; white-space: pre-line; }
+  /* selection-parts T14 — the breadcrumb, in both panels */
+  .ep-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin-bottom: 6px; font-size: 11px; color: #94a3b8; }
+  .ep-path .ep-crumb { padding: 1px 5px; font-size: 11px; background: transparent; border: 1px solid #444; border-radius: 3px; color: #c4b5fd; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .ep-path .ep-crumb:hover { border-color: #7c3aed; }
+  .ep-path [aria-current] { color: #e2e8f0; overflow-wrap: anywhere; }
   #inspect-panel .ep-status { color: #94a3b8; font-size: 11px; margin-top: 4px; white-space: pre-line; }
   #inspect-panel .ep-status:empty { display: none; }
   #inspect-panel .ep-buttons { display: flex; gap: 4px; margin: 6px 0; }
@@ -790,6 +795,7 @@
     <div class="ep-status" id="ep-paste-notes"></div>
     <div class="ep-empty" id="ep-empty">Click an object to select it.</div>
     <div id="ep-fields" style="display:none">
+      <nav class="ep-path" id="ep-path" aria-label="Selection path" style="display:none"></nav>
       <div class="ep-row"><span>Name</span><input type="text" id="ep-name" spellcheck="false" autocomplete="off" /></div>
       <!-- copy-objects (post-review, DEV acceptance) — the credit, read-only and
            worded as claimed, for an object that carries one. Inspect isn't
@@ -928,6 +934,7 @@
     <div class="ep-title">Inspect</div>
     <div class="ep-empty" id="ip-empty">Click an object to see what it is.</div>
     <div id="ip-fields" style="display:none">
+      <nav class="ep-path" id="ip-path" aria-label="Selection path" style="display:none"></nav>
       <div class="ep-row"><span>Name</span><div class="ip-value" id="ip-name"></div></div>
       <div class="ep-row" id="ip-credit-row" style="display:none"><span>Credit</span><div class="ip-value" id="ip-credit"></div></div>
       <div class="ep-row" id="ip-behavior-row" style="display:none"><span>Behaviour</span><div class="ip-value" id="ip-behavior"></div></div>

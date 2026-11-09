@@ -448,7 +448,8 @@ describe('AC6 — the click branch, and the ONE connect path', () => {
 
   test('the EDIT-mode half is unchanged: a click selects, and never activates', () => {
     const branch = editBranch()
-    assert.match(branch, /pickEditTarget\(e\)/)
+    // selection-parts T13 — the scoped policy reads the current selection
+    assert.match(branch, /pickEditTarget\(e, \{ current: selected \}\)/)
     assert.match(branch, /selectForEdit\(node\)/)
     assert.match(branch, /if \(refused\) showEditError\(refused\)/)
     assert.doesNotMatch(branch, /activate/,

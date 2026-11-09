@@ -186,9 +186,10 @@ describe('K4 — the Inspect click and panel', () => {
 
   test('an Inspect click picks with includeHidden: false, so a hidden object isn\'t picked', () => {
     assert.ok(inspectBranch.length > 0, 'the Inspect branch comes first')
-    assert.match(inspectBranch, /pickEditTarget\(e, \{ includeHidden: false \}\)/)
+    // selection-parts T13 — Inspect passes its own current selection too
+    assert.match(inspectBranch, /pickEditTarget\(e, \{ includeHidden: false, current: inspected \}\)/)
     assert.match(flatten(functionText('pickEditTarget')), /visibleHits\(raycaster\.intersectObjects\(sceneGroup\.children, true\), \{ includeHidden \}\)/)
-    assert.match(flatten(functionText('pickEditTarget')), /\{ includeHidden = true \} = \{\}/, 'Edit mode keeps picking hidden objects (F-L8)')
+    assert.match(flatten(functionText('pickEditTarget')), /\{ includeHidden = true, current = null \} = \{\}/, 'Edit mode keeps picking hidden objects (F-L8)')
   })
 
   test('an Inspect click never sends activate: its branch returns before the activate path', () => {
