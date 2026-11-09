@@ -1,6 +1,9 @@
 # Pre-brief: selection and parts (`selection-parts`)
 
-Status: **DRAFT, Revision 1 (2026-11-08).** Every decision (§3) is open. The
+Status: **DRAFT, Revision 1.1 (2026-11-08).** Every decision taken
+(operator, 2026-11-08, 17:04 PT): SP-L2 (b), SP-L3 (b), SP-L4 (b) as
+recommended, and SP-L1 (a), SP-L5 (a), SP-L6 (b), SP-L7 (a): "go with the
+recs". The
 round after `subtree-add`, as decided there: **SA-L6 (d)**, a selection round
 of its own (a click selects the top-level group, more clicks drill down, Alt
 goes to the leaf, a breadcrumb), **with SA-L7 (c)**, parts (Duplicate in
@@ -232,7 +235,8 @@ is one message; sharing with its siblings is outside it, T12), so the group
 Binding from earlier rounds: everything in `PREBRIEF-subtree-add.md` §3,
 SA-L6 (d) and SA-L7 (c) included.
 
-**SP-L1. What makes a click go deeper.**
+**SP-L1. What makes a click go deeper.** **Decided (operator, 2026-11-08):
+(a), as recommended.**
 - **(a) Recommended: a double-click.** A click whose click count
   (`event.detail`) is 2 or more, landing inside the current selection, selects
   one level deeper toward what's under the pointer, so a triple-click goes two
@@ -247,6 +251,7 @@ SA-L6 (d) and SA-L7 (c) included.
   and the "click to make sure it's selected" habit drills down.
 
 **SP-L2. What a single click selects while you work inside a group.**
+**Decided (operator, 2026-11-08): (b), as recommended.**
 - **(a)** Always the top-level object (a click inside the current selection
   changes nothing). Simple: one rule. But after drilling to the lamp's shade,
   a click on its stand selects the whole lamp, and getting to the stand takes
@@ -260,7 +265,8 @@ SA-L6 (d) and SA-L7 (c) included.
   nothing selected, or a top-level object selected, this is (a). The common
   rule in scene and drawing editors.
 
-**SP-L3. Going back up a level.**
+**SP-L3. Going back up a level.** **Decided (operator, 2026-11-08): (b), as
+recommended.**
 - (a) The breadcrumb only.
 - **(b) Recommended: Escape goes up one level first.** In Edit mode, Escape
   with a part selected selects its parent; with a top-level object selected it
@@ -269,7 +275,8 @@ SA-L6 (d) and SA-L7 (c) included.
   Escape today). The breadcrumb jumps to any level either way.
 - (c) A new key (Shift+Enter, as some editors use), Escape unchanged.
 
-**SP-L4. Where a part's Duplicate puts the copy** (§9.5 nit).
+**SP-L4. Where a part's Duplicate puts the copy** (§9.5 nit). **Decided
+(operator, 2026-11-08): (b), as recommended.**
 - (a) +1.5 on the part's **local** x, as `buildDescriptor` does today: in a
   rotated or scaled group the offset turns and scales with the group (a
   group scaled by 1,000 puts the copy 1.5 km away).
@@ -280,7 +287,7 @@ SA-L6 (d) and SA-L7 (c) included.
   same.
 
 **SP-L5. How Undo compares a group after one of its parts was re-added**
-(§9.5 M2, §2.6).
+(§9.5 M2, §2.6). **Decided (operator, 2026-11-08): (a), as recommended.**
 - **(a) Recommended: a canonical comparison.** `checkEntry`'s remove check
   compares the two captures with each ref replaced by the material it names,
   `children` matched by member name (unique within a tree, T1) rather than by
@@ -291,7 +298,8 @@ SA-L6 (d) and SA-L7 (c) included.
   children (shown by the SOM Inspector), and a Duplicate built by the same
   builder would too, unless it is told not to.
 
-**SP-L6. The depth measurement's split (P0).**
+**SP-L6. The depth measurement's split (P0).** **Decided (operator,
+2026-11-08): (b), as recommended.**
 - (a) Three shards of today's 51 files (about 50, 46 and 27 s here); the
   three suites left out for time stay out, and the handoff keeps reporting
   them by hand.
@@ -301,7 +309,8 @@ SA-L6 (d) and SA-L7 (c) included.
   45, 49 and 39 s here). The only exclusions left are the two hostile suites
   and the measure files themselves.
 
-**SP-L7. How the round runs.**
+**SP-L7. How the round runs.** **Decided (operator, 2026-11-08): (a), as
+recommended.**
 - **(a) Recommended: the cheap round, with Fable as the outside reviewer
   both times** (the passdown's lesson 2: the reviewer that can execute finds
   the bugs; ChatGPT's clone fails): a fresh-agent check of this file, one
@@ -665,6 +674,11 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.1** (2026-11-08): every decision taken, as recommended (operator:
+  SP-L2, SP-L3 and SP-L4 by choice, the other four "go with the recs"). No
+  contract text changed: §4 was written for the recommendations. Next: a
+  fresh-agent check of this file, then one Fable review pinned to its commit
+  (SP-L7 (a)).
 - **Rev 1, DRAFT** (2026-11-08, against `dd2071f9`): written from the
   passdown's §5 item 1 and `PREBRIEF-subtree-add.md` §9, every line
   rechecked. **§9.5's findings, item by item:**
@@ -697,8 +711,7 @@ As `subtree-add` (`PREBRIEF-subtree-add.md` §6), with these specifics:
   measurement take 71.7 s, so the full set (194 s) can't be one file
   (§2.1); new server test files join the deploy with no host change.
   
-  Next: the operator's decisions, then a fresh-agent check of this file and
-  one outside review pinned to its commit (SP-L7).
+  Next: the operator's decisions (taken in Rev 1.1).
 
 ## 8. Follow-ups this file records
 - **Grouping and ungrouping** in the Edit panel (a `parent` change on a live
