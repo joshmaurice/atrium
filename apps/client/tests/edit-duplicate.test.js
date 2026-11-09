@@ -102,8 +102,8 @@ const NAME = 'Cube copy'
 // scripting-4b-1 E7 — the copy always carries a fresh v4 id.
 const ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-function expectRule(n, rule) {
-  const r = prepareDuplicate(n, { name: NAME })
+function expectRule(n, rule, opts = {}) {
+  const r = prepareDuplicate(n, { name: NAME, ...opts })
   assert.equal(r.ok, false, `expected refusal by ${rule}`)
   assert.equal(r.rule, rule)
   assert.ok(r.reason.startsWith(DUPLICATE_REASONS[rule]), r.reason)
@@ -118,8 +118,12 @@ test('rule 1: a node with children is refused (below add level 3)', () => {
   expectRule(node({ mesh: cubeMesh(), children: [{}] }), 'children')
 })
 
-test('rule 2: a nested node is refused (J3)', () => {
-  expectRule(node({ mesh: cubeMesh(), parents: ['Root', 'Node'] }), 'parent')
+// selection-parts T11 — rule 2 (J3, "a nested node is refused") is gone: a part
+// passes, subject to `ancestors` and `group`.
+test('rule 2 (T11): a part passes; an excluded ancestor is refused ancestors; an unaddressable parent, group', () => {
+  assert.equal(duplicateRuleProblem(node({ mesh: cubeMesh(), parents: ['Root', 'Node'] })), null)
+  expectRule(node({ mesh: cubeMesh(), parents: ['Root', 'Node'] }), 'ancestors', { isExcluded: () => true })
+  expectRule(node({ mesh: cubeMesh(), parents: ['Root', 'Node'] }), 'group', { parentAddressable: () => false })
 })
 
 test('rule 3: camera, light or skin hosts are refused', () => {
@@ -447,8 +451,8 @@ test('(review #1) a node that became ineligible after the first check is refused
 
 // ── Y2: prepareRestore ──────────────────────────────────────────────────────
 
-function expectRestoreRule(n, rule) {
-  const r = prepareRestore(n)
+function expectRestoreRule(n, rule, opts = {}) {
+  const r = prepareRestore(n, opts)
   assert.equal(r.ok, false, `expected refusal by ${rule}`)
   assert.equal(r.rule, rule)
   assert.ok(r.reason.startsWith(DUPLICATE_REASONS[rule]), r.reason)
@@ -494,7 +498,7 @@ test('Y2 (U5): an X the offset round-trip cannot reproduce is kept bit for bit',
 test('Y2: every one of N3’s rules 1–9 refuses a restore too', () => {
   const m = cubeMesh()
   expectRestoreRule(node({ mesh: m, children: [{}] }), 'children')
-  expectRestoreRule(node({ mesh: m, parents: ['Root', 'Node'] }), 'parent')
+  expectRestoreRule(node({ mesh: m, parents: ['Root', 'Node'] }), 'group', { parentAddressable: () => false })
   expectRestoreRule(node({ camera: {} }), 'attached')
   expectRestoreRule(node({ mesh: m, parents: ['Root', 'Scene', 'AnimationChannel'] }), 'referenced')
   expectRestoreRule(node({ extras: { atrium: { source: null } } }), 'external')

@@ -1329,10 +1329,14 @@ export class AtriumClient extends EventEmitter {
   /**
    * Send a non-avatar add. Requires the current world fully loaded (T3).
    * @param {object} descriptor — glTF node descriptor
+   * @param {object} [opts]
+   * @param {string} [opts.parent] — selection-parts T11: the name of the node
+   *   to add it under (a Duplicate in place, a part's re-add). Sent only when
+   *   it is a non-empty string; without it the node goes to the scene.
    * @returns {number} the seq of the request
    * @throws {Error} 'World not loaded' when _worldReady is false
    */
-  addNode(descriptor) {
+  addNode(descriptor, { parent } = {}) {
     if (!this._worldReady) throw new Error('World not loaded')
     const seq = ++this._sendSeq
     this._trackEdit(seq, { type: 'add', node: descriptor?.name ?? null })
@@ -1340,6 +1344,7 @@ export class AtriumClient extends EventEmitter {
       type: 'add',
       seq,
       node: descriptor,
+      ...(typeof parent === 'string' && parent !== '' ? { parent } : {}),
     })
     return seq
   }

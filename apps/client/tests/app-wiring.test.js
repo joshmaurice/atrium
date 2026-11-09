@@ -354,7 +354,8 @@ describe('E7 — the add paths pass through withNewObjectId', () => {
   })
 
   test('the structural re-add (Undo and redo) does not stamp', () => {
-    const at = code().indexOf('client.addNode(request.descriptor)')
+    // selection-parts T11 — the re-add names the part's parent
+    const at = code().indexOf('client.addNode(request.descriptor, { parent: request.parent ?? undefined })')
     assert.ok(at >= 0, 'the undo engine’s own re-add calls client.addNode directly')
     const before = code().slice(Math.max(0, at - 120), at)
     assert.doesNotMatch(before, /withNewObjectId/, 'the re-add is not wrapped')
@@ -363,7 +364,8 @@ describe('E7 — the add paths pass through withNewObjectId', () => {
   test('Duplicate is not stamped in app.js: edit-duplicate.js owns that', () => {
     const body = flatten(listenerBody('epDuplicate', 'click'))
     assert.doesNotMatch(body, /withNewObjectId/)
-    assert.match(body, /client\.addNode\(check\.descriptor\)/)
+    // selection-parts T11 — a part's copy goes under the same parent
+    assert.match(body, /client\.addNode\(check\.descriptor, \{ parent: parent\?\.name \}\)/)
   })
 
   test('the palette retry predicate is exactly /already in use/ (S-B)', () => {

@@ -46,8 +46,9 @@ import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
 import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animation-panel.js'
-import { prepareDuplicate, duplicateRuleProblem, prepareRestore } from './edit-duplicate.js'
-import { copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsText, descriptorPartsSummary, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, shownText, VISIBILITY_NOTE } from './copy-paste.js'   // copy-objects K4–K9; subtree-add T6
+import { prepareDuplicate, duplicateRuleProblem, prepareRestore, DUPLICATE_OFFSET_X } from './edit-duplicate.js'
+import { parentFrameOffset } from './part-transform.js'   // selection-parts T11
+import { copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsText, descriptorPartsSummary, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, shownText, VISIBILITY_NOTE, partCopyProblem } from './copy-paste.js'   // copy-objects K4–K9; subtree-add T6; selection-parts T11
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
 import { createEditUndo } from './edit-undo.js'    // Phase 3 step 2 (Y1, Y4)
 import { editKeyAction } from './edit-keys.js'   // edit-tweaks (K3, Z4)
@@ -1918,7 +1919,8 @@ const undo = createEditUndo({
   getObjectByName: (name) => client.som?.getObjectByName(name) ?? null,
   trees: treesAllowed,
   checkNewName: (name, node) => client.som?.checkNewName(name, node) ?? { ok: true },
-  prepareRestore,                      // Y2's capture, straight from edit-duplicate
+  // Y2's capture, from edit-duplicate, with selection-parts T11's part rules
+  prepareRestore: (gltfNode, opts) => prepareRestore(gltfNode, { ...opts, ...partRules() }),
   // Y3 — an undo's or a redo's send is never recorded as a new edit
   sendTransform: (node, field, value) => editTracker.commit(node, field, value, { record: false }),
   // Y4 — a rename goes through the same pendingRename path as the name field.
@@ -1941,7 +1943,7 @@ const undo = createEditUndo({
     try {
       seq = request.kind === 'delete'
         ? client.removeNode(request.name)
-        : client.addNode(request.descriptor)
+        : client.addNode(request.descriptor, { parent: request.parent ?? undefined })   // selection-parts T11
     } catch (err) {
       showEditError(`Couldn’t ${direction}: ${err.message}`)
       return null
@@ -1980,6 +1982,26 @@ const undo = createEditUndo({
 // refuses edits to live avatars anyway; this is for the UI.
 function isEditExcluded(node) {
   return node === avatar.localNode || !!avatar.getPeerNode(node.name)
+}
+
+/**
+ * selection-parts T11 — the part rules edit-duplicate.js asks of a part's
+ * ancestors, given glTF-Transform nodes (as it walks them): an ancestor that
+ * is an avatar, and a parent that isn't the SOM's node of its name.
+ */
+function partRules() {
+  return {
+    isExcluded: (g) => {
+      const n = client.som?.getNodeByName(g.getName?.())
+      return !!n && n._node === g && isEditExcluded(n)
+    },
+    parentAddressable: (g) => client.som?.getNodeByName(g.getName?.())?._node === g,
+  }
+}
+
+/** selection-parts T11 — a part's parent's world matrix (from the SOM node), or null at the top level. */
+function parentWorldOf(node) {
+  return node?.parent ? worldMatrix(node.parent) : null
 }
 
 function updateEditControls() {
@@ -2101,7 +2123,8 @@ function renderInspectPanel() {
 function copyHint(node) {
   const gltfNode = node?._node
   if (!gltfNode) return 'Select an object first'
-  return duplicateRuleProblem(gltfNode, { credit: false, trees: treesAllowed() })?.reason ?? null
+  return duplicateRuleProblem(gltfNode, { credit: false, trees: treesAllowed(), ...partRules() })?.reason ??
+    partCopyProblem(gltfNode, parentWorldOf(node))       // selection-parts T11: a shear can't be carried
 }
 
 /**
@@ -2112,7 +2135,8 @@ function copyHint(node) {
 function copyNode(node) {
   const gltfNode = node?._node
   if (!gltfNode) return { ok: false, reason: 'Select an object first' }
-  const result = copyObject(gltfNode, { wsUrl: client.wsUrl, world: client.world }, { nameOf: objectNameHere, trees: treesAllowed() })
+  // selection-parts T11 — a part's Copy carries its world placement
+  const result = copyObject(gltfNode, { wsUrl: client.wsUrl, world: client.world }, { nameOf: objectNameHere, trees: treesAllowed(), parentWorld: parentWorldOf(node), ...partRules() })
   if (result.ok) clipboard = result.snapshot
   return result
 }
@@ -2977,7 +3001,10 @@ function checkDuplicate(node) {
   if (!gltfNode) return { ok: false, reason: 'Select an object first' }
   const name = copyName(node.name, isNameFree)
   if (!name) return { ok: false, reason: 'No free name for a copy' }
-  return prepareDuplicate(gltfNode, { name, isFree: isNameFree, trees: treesAllowed() })
+  // selection-parts T11 — a part's copy goes into the same group, 1.5 m along
+  // world x (SP-L4 (b)): the offset in the parent's frame
+  const offset = node.parent ? parentFrameOffset(worldMatrix(node.parent)) : DUPLICATE_OFFSET_X
+  return prepareDuplicate(gltfNode, { name, isFree: isNameFree, trees: treesAllowed(), offset, ...partRules() })
 }
 
 function structuralBlock() {
@@ -2999,7 +3026,7 @@ let dupSize = { node: null, result: null }
 function duplicateHint(node) {
   const gltfNode = node?._node
   if (!gltfNode) return 'Select an object first'
-  const problem = duplicateRuleProblem(gltfNode, { trees: treesAllowed() })
+  const problem = duplicateRuleProblem(gltfNode, { trees: treesAllowed(), ...partRules() })
   if (problem) return problem.reason
   if (dupSize.node !== node) dupSize = { node, result: checkDuplicate(node) }
   return dupSize.result.ok ? null : dupSize.result.reason
@@ -3161,15 +3188,19 @@ epDuplicate.addEventListener('click', () => {
     refreshEditActions()
     return
   }
+  // selection-parts T11 — a part's copy goes under the same parent (by name,
+  // as `parent` travels); the Undo engine is told where, to notice a group
+  // replaced meanwhile (N-4)
+  const parent = node.parent ?? null
   let seq
   try {
-    seq = client.addNode(check.descriptor)
+    seq = client.addNode(check.descriptor, { parent: parent?.name })
   } catch (err) {
     showEditError(`Couldn’t duplicate: ${err.message}`)
     return
   }
   structure.begin('duplicate', seq, { name: check.descriptor.name, node })
-  undo.registerAdd(seq, { name: check.descriptor.name, duplicate: true })
+  undo.registerAdd(seq, { name: check.descriptor.name, duplicate: true, expectParent: parent })
   clearEditError()
   refreshEditActions()
 })

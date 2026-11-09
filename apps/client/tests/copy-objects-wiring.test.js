@@ -200,7 +200,8 @@ describe('K4 — the Inspect click and panel', () => {
 
   test('Copy\'s refusal reason is Duplicate\'s, the credit skipped', () => {
     // subtree-add T6/T7 — at the server's level, so a group's reason is its own
-    assert.match(flatten(body('copyHint')), /duplicateRuleProblem\(gltfNode, \{ credit: false, trees: treesAllowed\(\) \}\)\?\.reason \?\? null/)
+    // selection-parts T11 — with the part rules, then a part's placement (a shear can't be carried)
+    assert.match(flatten(body('copyHint')), /duplicateRuleProblem\(gltfNode, \{ credit: false, trees: treesAllowed\(\), \.\.\.partRules\(\) \}\)\?\.reason \?\? partCopyProblem\(gltfNode, parentWorldOf\(node\)\)/)
     assert.match(flatten(body('renderInspectPanel')), /const reason = copyHint\(node\) ipCopy\.disabled = !!reason/)
   })
 
@@ -215,7 +216,8 @@ describe('K4 — the Inspect click and panel', () => {
 
   test('Copy reads the live connection, never the File box base', () => {
     const copy = flatten(body('copyNode'))
-    assert.match(copy, /copyObject\(gltfNode, \{ wsUrl: client\.wsUrl, world: client\.world \}, \{ nameOf: objectNameHere, trees: treesAllowed\(\) \}\)/)
+    // selection-parts T11 — a part's Copy carries its world placement
+    assert.match(copy, /copyObject\(gltfNode, \{ wsUrl: client\.wsUrl, world: client\.world \}, \{ nameOf: objectNameHere, trees: treesAllowed\(\), parentWorld: parentWorldOf\(node\), \.\.\.partRules\(\) \}\)/)
     assert.ok(!/worldBaseUrl/.test(copy))
   })
 

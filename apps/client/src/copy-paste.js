@@ -41,6 +41,24 @@ import { withNewObjectId } from './object-identity.js'
 import { copyName } from './edit-palette.js'
 import { resolveWorldAddress } from './wsUrl.js'
 import { matchesTemplate } from './behavior-form.js'
+import { partWorldTRS } from './part-transform.js'
+
+/**
+ * selection-parts T11 — Copy's placement problem for a part, for the hint (the
+ * click checks again in `copyObject`): the shear sentence, the transform
+ * reason, or null. Null for a top-level node (`parentWorld` null).
+ *
+ * @param {object} node  the glTF-Transform Node
+ * @param {number[]|null} parentWorld  its parent's world matrix, or null
+ * @returns {string|null}
+ */
+export function partCopyProblem(node, parentWorld) {
+  if (!parentWorld) return null
+  const placed = partWorldTRS(parentWorld, {
+    translation: [...node.getTranslation()], rotation: [...node.getRotation()], scale: [...node.getScale()],
+  })
+  return placed.ok ? null : DUPLICATE_REASONS[placed.rule]
+}
 
 /** K6 step 4 — the `extras.atrium` keys Atrium defines; any other is dropped at Paste. */
 export const ATRIUM_KEYS = Object.freeze(['objectId', 'teleporter', 'model', 'animation', 'behavior', 'origin', 'copiedFrom'])
@@ -203,10 +221,16 @@ export function isTemplateBehavior(behavior, ownId) {
  * @param {Date|string} [opts.date]  the Copy's day (K2's `at`)
  * @param {(id: string) => string|null} [opts.nameOf]  an object's name in the source world, or null
  * @param {boolean} [opts.trees=false]  the source server keeps add level 3 (subtree-add T7)
+ * @param {number[]|null} [opts.parentWorld=null]  selection-parts T11: for a PART, the
+ *   world matrix of its parent (`worldMatrix` of the SOM node's parent); its root
+ *   then carries the part's world placement. Null for a top-level node, whose
+ *   TRS is kept as it is
+ * @param {(gltfNode: object) => boolean} [opts.isExcluded]  T11's `ancestors` rule
+ * @param {(gltfParent: object) => boolean} [opts.parentAddressable]  T11's `group` rule
  * @returns {{ok: true, snapshot: object} | {ok: false, rule: string, reason: string}}
  */
-export function copyObject(node, source, { date = new Date(), nameOf = null, trees = false } = {}) {
-  const problem = duplicateRuleProblem(node, { credit: false, trees })
+export function copyObject(node, source, { date = new Date(), nameOf = null, trees = false, parentWorld = null, isExcluded, parentAddressable } = {}) {
+  const problem = duplicateRuleProblem(node, { credit: false, trees, isExcluded, parentAddressable })
   if (problem) return problem
   const wsUrl = source?.wsUrl
   const baseUrl = AtriumClient.wsOriginToHttpOrigin(wsUrl ?? null)
@@ -219,6 +243,15 @@ export function copyObject(node, source, { date = new Date(), nameOf = null, tre
   }
   if (!creditAddressOk(address)) return { ok: false, rule: 'source', reason: PASTE_TEXT.addressTooLong }
   const descriptor = buildDescriptor(node, node.getName(), 0, { refs: trees })
+  // selection-parts T11 — a part's root takes its WORLD placement (the members
+  // below keep their local TRS); Paste then treats it as a top-level object.
+  if (parentWorld) {
+    const placed = partWorldTRS(parentWorld, descriptor)
+    if (!placed.ok) return { ok: false, rule: placed.rule, reason: DUPLICATE_REASONS[placed.rule] }
+    descriptor.translation = placed.trs.translation
+    descriptor.rotation = placed.trs.rotation
+    descriptor.scale = placed.trs.scale
+  }
   const bytes = addMessageBytes(descriptor)
   if (bytes > MAX_ADD_BYTES) {
     return {

@@ -80,9 +80,12 @@ describe('T5: the rules on fixture groups', () => {
     assert.equal(animated.rule, 'referenced')
     assert.doesNotMatch(animated.reason, /\(in /, 'the root’s own refusal names no part')
   })
-  test('a part is still refused parent (parts are the selection round’s, SA-L7 (c))', async () => {
+  test('selection-parts T11: a part passes now (its parent rule is gone), and a sub-group passes as a tree', async () => {
     const { doc } = await load('space.gltf')
-    assert.equal(duplicateRuleProblem(nodeIn(doc, 'lamp-shade'), { trees: true })?.rule, 'parent')
+    assert.equal(duplicateRuleProblem(nodeIn(doc, 'lamp-shade'), { trees: true }), null)
+    const atrium = await load('atrium.gltf')
+    assert.equal(duplicateRuleProblem(nodeIn(atrium.doc, 'Bench-NE'), { trees: true }), null)
+    assert.equal(duplicateRuleProblem(nodeIn(atrium.doc, 'Bench-NE'), { trees: false })?.rule, 'children', 'a sub-group is a tree: level 3')
   })
   test('the tree bounds: 257 members, a chain of 9, 1,025 primitives are refused tree; 256 and a chain of 8 pass', () => {
     const doc = new Document()

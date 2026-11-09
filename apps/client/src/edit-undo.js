@@ -54,6 +54,18 @@ export const UNDOING_MESSAGE = 'Undoing…'
  * restore would be refused. The capture failing makes Delete ask first.
  */
 export const PART_NOT_ADDRESSABLE = 'One of its parts can’t be restored under its own name'
+/**
+ * selection-parts T11 (§9.5 S6) — why a part can't be captured: its parent
+ * isn't the node of its name (as the server and `_onAdd` resolve `parent`),
+ * so its re-add would land elsewhere. The capture failing makes Delete ask.
+ */
+export const GROUP_NOT_ADDRESSABLE = 'Its group can’t be found by its name'
+
+/** The re-add of a part whose group is gone, or isn't the same node any more (T11). */
+const groupRemoved = (verb, name) => `${verb}: “${name}” its group was removed.`
+const groupReplaced = (verb, name) => `${verb}: “${name}” its group was replaced elsewhere.`
+const groupRenamedOrRemoved = (verb, name) => `${verb}: “${name}” its group was renamed or removed.`
+const landedElsewhere = (name, parent) => `“${name}” went into a newer “${parent}”: its group was replaced elsewhere.`
 
 /** How the panel names a transform field in a message. */
 const FIELD_NAME = { translation: 'position', rotation: 'rotation', scale: 'scale', visible: 'visibility' }
@@ -92,6 +104,105 @@ function sameDescriptor(a, b) {
   for (const k of ka) {
     if (!Object.hasOwn(b, k)) return false
     if (!sameDescriptor(a[k], b[k])) return false
+  }
+  return true
+}
+
+/**
+ * selection-parts T11 (SP-L5 (a)) — are two captures of a tree the same
+ * group? As `sameDescriptor`, except that each `{ ref }` is replaced by the
+ * material it names, `children` are matched by member name (unique within a
+ * tree, T1) rather than by position, and which primitives share a material
+ * (the partition) must be the same. A part re-added under its group comes back
+ * last among its siblings (`addChild` appends), which renumbers the refs:
+ * this comparison doesn't see that, and does see sharing really lost.
+ *
+ * @param {object} a  a descriptor (`buildDescriptor`'s canonical form)
+ * @param {object} b
+ * @returns {boolean}
+ */
+export function sameCanonical(a, b) {
+  const ca = canonicalTree(a)
+  const cb = canonicalTree(b)
+  if (!ca || !cb) return sameDescriptor(a, b)
+  if (!sameByName(ca.tree, cb.tree)) return false
+  return samePartition(ca.partition, cb.partition)
+}
+
+/** The tree with refs resolved, and its partition: material number → the primitives using it. */
+function canonicalTree(root) {
+  if (root === null || typeof root !== 'object') return null
+  const tree = structuredClone(root)
+  const materials = []
+  const groups = new Map()
+  const stack = [tree]
+  while (stack.length > 0) {
+    const d = stack.pop()
+    const prims = Array.isArray(d?.mesh?.primitives) ? d.mesh.primitives : []
+    prims.forEach((prim, i) => {
+      const m = prim?.material
+      if (m === undefined || m === null) return
+      let n
+      if (typeof m === 'object' && !Array.isArray(m) && Object.keys(m).length === 1 && Number.isInteger(m.ref)) {
+        n = m.ref
+        if (!(n >= 0 && n < materials.length)) return
+        prim.material = structuredClone(materials[n])
+      } else {
+        n = materials.length
+        materials.push(m)
+      }
+      const key = `${d.name}#${i}`
+      if (!groups.has(n)) groups.set(n, [])
+      groups.get(n).push(key)
+    })
+    const children = Array.isArray(d?.children) ? d.children : []
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+  }
+  const partition = new Set([...groups.values()].map((keys) => keys.sort().join('\u0000')))
+  return { tree, partition }
+}
+
+function samePartition(a, b) {
+  if (a.size !== b.size) return false
+  for (const g of a) if (!b.has(g)) return false
+  return true
+}
+
+/** `sameDescriptor`, with every `children` array matched by member name. */
+function sameByName(a, b) {
+  if (a === b) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameByName(a[i], b[i])) return false
+    return true
+  }
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if (!Object.hasOwn(b, k)) return false
+    if (k === 'children') {
+      if (!sameChildren(a.children, b.children)) return false
+    } else if (!sameByName(a[k], b[k])) {
+      return false
+    }
+  }
+  return true
+}
+
+function sameChildren(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+  const byName = new Map()
+  for (const c of b) {
+    if (!c || typeof c.name !== 'string' || byName.has(c.name)) return false
+    byName.set(c.name, c)
+  }
+  const seen = new Set()
+  for (const c of a) {
+    if (!c || typeof c.name !== 'string' || seen.has(c.name) || !byName.has(c.name)) return false
+    seen.add(c.name)
+    if (!sameByName(c, byName.get(c.name))) return false
   }
   return true
 }
@@ -309,6 +420,9 @@ export function createEditUndo({
   function capture(node) {
     const gltfNode = node?._node
     if (!gltfNode) return { ok: false, reason: 'not addressable' }
+    // selection-parts T11 — a part comes back under its parent BY NAME, so the
+    // parent must be the node of its name (§9.5 S6): else Delete asks.
+    if (node.parent && getNodeByName(node.parent.name) !== node.parent) return { ok: false, reason: GROUP_NOT_ADDRESSABLE }
     const t = trees() === true
     const parts = t ? collectSubtree(node).slice(1) : []
     for (const part of parts) {
@@ -330,10 +444,20 @@ export function createEditUndo({
     return collectSubtree(node).slice(1).map((part) => ({ name: part.name, handle: handleFor(part) }))
   }
 
-  function registerAdd(seq, { name, duplicate = false }) {
+  /**
+   * @param {number} seq
+   * @param {{ name: string, duplicate?: boolean, expectParent?: object|null }} opts
+   *   `expectParent` (selection-parts T11, N-4): the parent a Duplicate in place
+   *   was sent under (null: the scene); when the copy lands elsewhere, the
+   *   panel says so. Left out, nothing is checked.
+   */
+  function registerAdd(seq, { name, duplicate = false, expectParent = undefined }) {
     if (seq == null) return
-    requests.set(seq, { kind: 'add', seq, name, duplicate })
+    requests.set(seq, { kind: 'add', seq, name, duplicate, expectParent })
   }
+
+  /** selection-parts T11 — the handle of a node's parent, or null at the top level. */
+  const parentHandle = (node) => (node?.parent ? handleFor(node.parent) : null)
 
   /**
    * Y2 — a delete's capture begins at the click and is redone on every remote
@@ -345,7 +469,9 @@ export function createEditUndo({
     // richer-add R8 — read here from the node (cheap), since the caller passes
     // only the click-time descriptor
     const sharedMaterial = !!descriptor && hasSharedMaterial(node?._node, { trees: trees() === true })
-    const req = { kind: 'delete', seq, node, name, descriptor: descriptor ?? null, sharedMaterial, members: partHandles(node), failed: false }
+    // selection-parts T11 (must-fix 2) — the parent is read NOW, while the node
+    // is alive: `_onRemove` disposes it before this engine hears the answer.
+    const req = { kind: 'delete', seq, node, name, descriptor: descriptor ?? null, sharedMaterial, members: partHandles(node), parent: parentHandle(node), failed: false }
     requests.set(seq, req)
     deleteWindow = req
     return req
@@ -401,6 +527,11 @@ export function createEditUndo({
   function acceptAdd(req) {
     const node = getNodeByName(req.name)
     if (!node) { clearRedo(); return }      // nothing to point an entry at
+    // selection-parts T11 (N-4) — a Duplicate in place sent under a group that
+    // another tab replaced meanwhile lands in the newer node of that name
+    if (req.expectParent !== undefined && (node.parent ?? null) !== req.expectParent) {
+      message(landedElsewhere(node.name, node.parent?.name ?? ''))
+    }
     const cap = capture(node)
     if (!cap.ok) { clearRedo(); return }    // not restorable: not recorded (Y1)
     pushEntry({
@@ -410,6 +541,7 @@ export function createEditUndo({
       handle: handleFor(node),
       descriptor: cap.descriptor,
       members: cap.members,
+      parent: parentHandle(node),            // selection-parts T11 (§9.5 M1)
     })
   }
 
@@ -429,6 +561,7 @@ export function createEditUndo({
       descriptor: req.descriptor,
       sharedMaterial: req.sharedMaterial === true,
       members: req.members ?? [],
+      parent: req.parent ?? null,            // selection-parts T11: read at the click
     })
   }
 
@@ -574,6 +707,15 @@ export function createEditUndo({
     const readd = (entry.kind === 'delete' && direction === 'undo') ||
       (entry.kind === 'add' && direction === 'redo')
     if (readd) {
+      // selection-parts T11 — a part goes back into its group, which must still
+      // be the same node (the handle follows a rename and our own re-add)
+      const p = entry.parent?.node ?? null
+      if (entry.parent) {
+        const holder = p ? getNodeByName(p.name) : null
+        if (holder !== p || !p) {
+          return { ok: false, message: holder ? groupReplaced(verb, name) : groupRemoved(verb, name) }
+        }
+      }
       const check = checkNewName(entry.descriptor.name)
       if (check && !check.ok) return { ok: false, message: `${verb}: “${name}” the name is in use.` }
       return { ok: true }
@@ -608,8 +750,10 @@ export function createEditUndo({
     // tree's capture is compared (a part added, removed or changed elsewhere
     // makes it differ); without trees, a node that has grown children can't be
     // captured, so it is "changed elsewhere" as before.
+    // selection-parts T11 (SP-L5 (a)) — compared canonically: a part re-added
+    // last among its siblings doesn't make its group "changed elsewhere"
     const cap = capture(node)
-    if (!cap.ok || !sameDescriptor(cap.descriptor, entry.descriptor)) {
+    if (!cap.ok || !sameCanonical(cap.descriptor, entry.descriptor)) {
       return { ok: false, message: `${verb}: “${name}” was changed elsewhere.` }
     }
     return { ok: true }
@@ -652,6 +796,13 @@ export function createEditUndo({
       // edit:accepted), so older entries for the node follow it too (W2)
       const fresh = getNodeByName(entry.descriptor.name)
       if (fresh) repoint(entry.handle, fresh)
+      // selection-parts T11 (N-4) — a group replaced while the re-add was in
+      // flight: it landed in the newer node of that name. Say so, and record
+      // the entry against where it landed (the old handle stays the group's).
+      if (fresh && entry.parent && (fresh.parent ?? null) !== entry.parent.node) {
+        message(landedElsewhere(fresh.name, fresh.parent?.name ?? ''))
+        entry.parent = parentHandle(fresh)
+      }
       // subtree-add T5 (S3) — and every part's handle follows the part that
       // came back, by name (unique within a tree, T1), so an older entry for a
       // part (an Alt-clicked move) still undoes.
@@ -676,9 +827,15 @@ export function createEditUndo({
 
   /** A refusal: the entry is dropped. Nothing of this tab's was confirmed. */
   function failEntry(text) {
-    const { direction } = inFlight
+    const { direction, entry } = inFlight
     dropEntry()
     inFlight = null
+    // selection-parts T11 — the server refuses a re-add whose parent is gone
+    // (renamed or removed by another tab after the send) as NODE_NOT_FOUND
+    if (entry?.parent && /^NODE_NOT_FOUND\b/.test(text ?? '')) {
+      message(groupRenamedOrRemoved(direction === 'undo' ? 'Can’t undo' : 'Can’t redo', entry.name))
+      return
+    }
     message(`Couldn’t ${direction}: ${text || 'refused'}`)
   }
 
@@ -748,13 +905,13 @@ export function createEditUndo({
     }
     if (entry.kind === 'add') {
       // redo of an add: re-add the descriptor
-      const seq = structural({ kind: 'add', name: entry.descriptor.name, descriptor: entry.descriptor }, direction)
+      const seq = structural({ kind: 'add', name: entry.descriptor.name, descriptor: entry.descriptor, parent: entry.parent?.node?.name ?? null }, direction)
       if (seq == null) return
       inFlight = { direction, entry, kind: 'add', bySeq: new Map([[seq, { field: null }]]) }
       return
     }
     if (entry.kind === 'delete' && direction === 'undo') {
-      const seq = structural({ kind: 'add', name: entry.descriptor.name, descriptor: entry.descriptor }, direction)
+      const seq = structural({ kind: 'add', name: entry.descriptor.name, descriptor: entry.descriptor, parent: entry.parent?.node?.name ?? null }, direction)
       if (seq == null) return
       inFlight = { direction, entry, kind: 'delete', bySeq: new Map([[seq, { field: null }]]) }
       return

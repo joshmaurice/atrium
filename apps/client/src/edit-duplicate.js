@@ -51,7 +51,12 @@ import { copyName } from './edit-palette.js'
 /** Rule 9: the whole `add` message, in UTF-8 bytes. The server's cap is 1 MiB. */
 export const MAX_ADD_BYTES = 1_000_000
 
-/** Where the copy goes: this far along world X from the original (J3: root only). */
+/**
+ * Where the copy goes: this far along WORLD x from the original. For a
+ * top-level object that is its own x; for a part (selection-parts T11, SP-L4
+ * (b)) the app converts it into the parent's frame (`parentFrameOffset`,
+ * part-transform.js) and passes the vector as `offset`.
+ */
 export const DUPLICATE_OFFSET_X = 1.5
 
 /** The server's K6 limits on `add` (session.js / send-policy.js). */
@@ -71,7 +76,11 @@ const SCENE_GRAPH_PARENTS = new Set(['Root', 'Scene', 'Node'])
 
 export const DUPLICATE_REASONS = Object.freeze({
   children:   'Objects with children can’t be duplicated yet',
-  parent:     'Only top-level objects can be duplicated yet',
+  // selection-parts T11 — a part is duplicated, restored and copied like any
+  // object; these are the rules about its place in its group
+  ancestors:  'Parts of an avatar can’t be duplicated',
+  group:      'Its group can’t be found by its name',
+  shear:      'Its group’s rotation and scale can’t be carried with it',
   attached:   'Objects with a camera, light or skin can’t be duplicated',
   referenced: 'This object is animated or part of a skin; a copy would lose that',
   external:   'Externally loaded content can’t be duplicated',
@@ -450,14 +459,14 @@ export function hasSharedMaterial(node, { trees = false } = {}) {
  * is inline at its first use here. A node without children builds today's
  * descriptor exactly, and so does one whose materials are all distinct.
  */
-export function buildDescriptor(node, name, offsetX, { refs = false } = {}) {
+export function buildDescriptor(node, name, offset, { refs = false } = {}) {
   const numbering = refs ? new Map() : null
   let root = null
   const stack = [{ node, parent: null, index: 0 }]
   while (stack.length > 0) {
     const { node: n, parent, index } = stack.pop()
     const children = n.listChildren()
-    const own = parent ? buildOneDescriptor(n, n.getName(), 0, numbering) : buildOneDescriptor(n, name, offsetX, numbering)
+    const own = parent ? buildOneDescriptor(n, n.getName(), 0, numbering) : buildOneDescriptor(n, name, offset, numbering)
     // the child slots are made with the object, filled as the walk reaches them
     const d = children.length > 0 ? { ...own, children: new Array(children.length) } : own
     if (parent) parent.children[index] = d
@@ -468,11 +477,15 @@ export function buildDescriptor(node, name, offsetX, { refs = false } = {}) {
 }
 
 /** One node's own descriptor (no `children`): today's builder. */
-function buildOneDescriptor(node, name, offsetX, numbering) {
+function buildOneDescriptor(node, name, offset, numbering) {
   const t = node.getTranslation()
+  // `offset`: 0 (a restore, bit for bit: U5), a number along x (today's
+  // Duplicate), or a vector (selection-parts T11: a part's parent-frame offset)
+  const o = Array.isArray(offset) ? offset : [offset || 0, 0, 0]
+  const moved = o[0] !== 0 || o[1] !== 0 || o[2] !== 0
   const descriptor = {
     name,
-    translation: offsetX ? [t[0] + offsetX, t[1], t[2]] : [t[0], t[1], t[2]],
+    translation: moved ? [t[0] + o[0], t[1] + o[1], t[2] + o[2]] : [t[0], t[1], t[2]],
     rotation: [...node.getRotation()],
     scale: [...node.getScale()],
   }
@@ -562,6 +575,11 @@ export function subtreeMembers(node) {
   return out
 }
 
+/** The glTF-Transform node a node is a child of, or null (the scene). */
+function parentNodeOf(node) {
+  return (node.listParents?.() ?? []).find((p) => p.propertyType === 'Node') ?? null
+}
+
 /** Rules 3–8 of N3: everything about the node itself (not its place in the tree). */
 function nodeRuleProblem(node, { credit }) {
   const parents = node.listParents().map((p) => p.propertyType)
@@ -593,18 +611,36 @@ function nodeRuleProblem(node, { credit }) {
  * subtree-add T5: with `trees`, a node with children passes when every member
  * passes rules 3–8 (a member's refusal names it), the tree is within SA-L2's
  * bounds (`tree`), and its members' names are in the D3 form and distinct
- * (`names`). `parent` stays: a part isn't copied or restored on its own.
+ * (`names`).
+ *
+ * selection-parts T11: a part is duplicated, restored and copied as any
+ * object (the `parent` rule is gone), subject to `ancestors` (no ancestor
+ * externally loaded or excluded) and `group` (its parent addressable by name).
  *
  * @param {object} node  the glTF-Transform Node
  * @param {object} [opts]
  * @param {boolean} [opts.credit=true]  false skips the credit check (copy-objects K5: Copy)
  * @param {boolean} [opts.trees=false]  the server keeps add level 3 (subtree-add T7)
+ * @param {(gltfNode: object) => boolean} [opts.isExcluded]  selection-parts T11: an
+ *   ancestor that rules the part out (the app's avatar check), given glTF-Transform nodes
+ * @param {(gltfParent: object) => boolean} [opts.parentAddressable]  selection-parts T11:
+ *   the part's parent is the node of its name in the SOM
  * @returns {null | {ok: false, rule: string, reason: string}}  null when no rule refuses it
  */
-export function duplicateRuleProblem(node, { credit = true, trees = false } = {}) {
+export function duplicateRuleProblem(node, { credit = true, trees = false, isExcluded = () => false, parentAddressable = () => true } = {}) {
   if (!trees && node.listChildren().length > 0) return deny('children')
-  const parents = node.listParents().map((p) => p.propertyType)
-  if (parents.includes('Node')) return deny('parent')
+  // selection-parts T11 — a part (a node whose parent is a node) passes when no
+  // ancestor is externally loaded content or excluded (an avatar), and its
+  // parent is the node of its name (as the server and `_onAdd` resolve it).
+  const parent = parentNodeOf(node)
+  for (let a = parent; a; a = parentNodeOf(a)) {
+    const atrium = a.getExtras?.()?.atrium
+    if (atrium !== null && typeof atrium === 'object' && Object.hasOwn(atrium, 'source')) {
+      return { ok: false, rule: 'ancestors', reason: DUPLICATE_REASONS.external }
+    }
+    if (isExcluded(a)) return deny('ancestors')
+  }
+  if (parent && !parentAddressable(parent)) return deny('group')
   const members = trees ? subtreeMembers(node) : [{ node, generation: 0 }]
   if (members.length > 1) {
     if (members.length > SUBTREE_NODES_MAX) return deny('tree')
@@ -718,10 +754,10 @@ function descriptorMembers(root) {
  * @param {boolean} [opts.trees=false]  the server keeps add level 3 (subtree-add T7)
  * @returns {{ok: true, descriptor: object, bytes: number} | {ok: false, rule: string, reason: string}}
  */
-export function prepareDuplicate(node, { name, isFree = () => true, trees = false }) {
-  const problem = duplicateRuleProblem(node, { trees })
+export function prepareDuplicate(node, { name, isFree = () => true, trees = false, offset = DUPLICATE_OFFSET_X, isExcluded, parentAddressable }) {
+  const problem = duplicateRuleProblem(node, { trees, isExcluded, parentAddressable })
   if (problem) return problem
-  const built = buildDescriptor(node, name, DUPLICATE_OFFSET_X, { refs: trees })
+  const built = buildDescriptor(node, name, offset, { refs: trees })
   const members = descriptorMembers(built)
   // T5 — the members' names: kept when free, else the next copy name.
   const chosen = new Set([name])
@@ -771,8 +807,8 @@ export function prepareDuplicate(node, { name, isFree = () => true, trees = fals
  * @param {boolean} [opts.trees=false]  the server keeps add level 3 (subtree-add T7)
  * @returns {{ok: true, descriptor: object, bytes: number, sharedMaterial?: true} | {ok: false, rule: string, reason: string}}
  */
-export function prepareRestore(node, { name = node.getName?.(), trees = false } = {}) {
-  const problem = duplicateRuleProblem(node, { trees })
+export function prepareRestore(node, { name = node.getName?.(), trees = false, isExcluded, parentAddressable } = {}) {
+  const problem = duplicateRuleProblem(node, { trees, isExcluded, parentAddressable })
   if (problem) return problem
   const descriptor = buildDescriptor(node, name, 0, { refs: trees })
   const bytes = addMessageBytes(descriptor)

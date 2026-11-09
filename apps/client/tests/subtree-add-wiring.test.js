@@ -43,8 +43,9 @@ test('T5: the Undo engine gets the name-space lookup and the level', () => {
 })
 
 test('T5: Duplicate names the parts against the world, at the server’s level; the hint checks the same rule', () => {
-  assert.match(code, /prepareDuplicate\(gltfNode, \{ name, isFree: isNameFree, trees: treesAllowed\(\) \}\)/)
-  assert.match(code, /duplicateRuleProblem\(gltfNode, \{ trees: treesAllowed\(\) \}\)/)
+  // selection-parts T11 — with a part's offset and the part rules
+  assert.match(code, /prepareDuplicate\(gltfNode, \{ name, isFree: isNameFree, trees: treesAllowed\(\), offset, \.\.\.partRules\(\) \}\)/)
+  assert.match(code, /duplicateRuleProblem\(gltfNode, \{ trees: treesAllowed\(\), \.\.\.partRules\(\) \}\)/)
 })
 
 test('T4: a remote add re-captures a pending delete once per message (the root’s event)', () => {
