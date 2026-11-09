@@ -1246,8 +1246,8 @@ distance below the root.
      Delete “lamp-01 copy”"; Undo: the lamp is back, shade and stand; Redo:
      gone;
   3. Alt-click the original's shade: the panel shows `lamp-shade` alone and
-     Duplicate is disabled with "Only top-level objects can be duplicated
-     yet" (parts are the selection round's, SA-L7 (c)); Delete asks
+     Duplicate is disabled, its tooltip (hover the button) reading "Only
+     top-level objects can be duplicated yet" (parts are the selection round's, SA-L7 (c)); Delete asks
      `Delete "lamp-shade"? This can’t be undone.` Cancel;
   4. Sign out, Inspect the lamp: the panel offers Copy (not the children
      reason) and says "2 parts"; Copy; sign in, teleport home (a document
@@ -1264,8 +1264,9 @@ distance below the root.
      already open). Tabs A and B, both opened after the deploy, both in the
      commons in Edit mode. In A, Alt-click `lamp-01`'s stand and untick
      Visible: the stand disappears in both tabs. In A, click the lamp and
-     Duplicate. In B: the copy's stand is **not drawn**, and clicking where it
-     would be doesn't select it. In A: Delete the copy, Undo; in B, the
+     Duplicate. In B: the copy's stand is **not drawn**. (A click there still
+     selects it, with its outline: Edit mode keeps hidden objects selectable on
+     purpose, F-L8, so the owner can un-hide one.) In A: Delete the copy, Undo; in B, the
      copy's stand is still not drawn; Redo, Undo again, and check B once
      more. Then, in A, delete the copy and tick the original stand's Visible
      again;
@@ -1329,6 +1330,10 @@ As `copy-objects` (`PREBRIEF-copy-objects.md` §6), with these specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2.1, wording** (2026-11-08, after the DEV run): step 3's reason is
+  the disabled button's tooltip; step 6's check is that B doesn't draw the
+  part, not that a click misses it (F-L8). Both read as failures at DEV and
+  were the steps' words, not the code.
 - **Rev 2.1** (2026-11-07, 23:45): §5's DEV acceptance gains step 6 (a
   hidden part across two tabs), after the outside code review
   (`REVIEW-subtree-add-code-fable.md`, S-1, fixed in the implementation's

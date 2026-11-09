@@ -7,7 +7,7 @@ DEV's (`42aa56ff`, `release_status`, 2026-11-07); only `devtasks/` differs. **Im
 fast lane** (SA-L5 (a)), no OpenRouter. **Checked by a fresh Claude agent**
 (§7: no must-fix; its two should-fix and three of its nits taken in commit 6).
 **Reviewed outside** (Fable, at `02b5554b`: APPROVE WITH NITS; §8: its
-should-fix and N-2 taken in commit 8). Not published or deployed.
+should-fix and N-2 taken in commit 8). **Shipped:** PROD, MAIN and DEV at `45e6cd00` (2026-11-08, §9).
 
 The decisions it implements: SA-L1 (a) one `add` carries the tree; SA-L2 (a)
 256 nodes, 8 generations, 1,024 primitives, the socket's 1,048,576 bytes as the
@@ -25,9 +25,10 @@ SA-L7 (c): selection and parts (T11) are the next round's, §9.
 | 5 `fd0bb88` | T6: Copy and Paste of trees (`copy-paste.js`), the Inspect panel's parts line and the paste's level, notes and retry (`app.js`); the two-world end-to-end group test; the full suites; the proofs; this file |
 | 6 `02b5554` | the fresh check's fixes: the Copy and Paste notes' parts summary, T6's lowercase "includes", the paste retry keeping a free root name, `ingestNode`'s first pass numbering exactly what the build numbers, the client half of the byte-bound test |
 | 7 `d2aadc2` | `devtasks/` only: the outside code-review prompt, this file's base line |
-| 8 (see §8) | the outside review's fixes: a part that arrives hidden in a live add is hidden in the view (`app.js`); the e2e's Undo wiring takes `app.js`'s re-captures, and a part removed elsewhere during a group's Delete |
+| 8 `68a7027` | the outside review's fixes: a part that arrives hidden in a live add is hidden in the view (`app.js`); the e2e's Undo wiring takes `app.js`'s re-captures, and a part removed elsewhere during a group's Delete |
+| 9 `45e6cd0` | docs only (operator, "approve all"): Rev 2.1's DEV step, AGENTS.md's two gotchas, the prompt's install line. **Released** (§9) |
 
-Code files touched are §6's list. Outside it: only `devtasks/` (this file).
+Code files touched are §6's list. Outside it: `devtasks/` and, in commit 9, `AGENTS.md`'s gotchas.
 
 ## 2. Tests
 - **All suites, each server file alone under `timeout 180`:** 65 suites,
@@ -281,3 +282,48 @@ what was done (commit 8):
   since names are chosen first. Kept: it is the name the part has here, the
   one the person can find. Recorded.
 - **The skip** is `apps/client`'s, as it said: §2 corrected.
+
+## 9. Release (2026-11-08)
+`45e6cd00` (commit 8's code; commit 9 docs only) went to DEV, MAIN and PROD;
+the DEV gate merged nothing (`main` was already in it). `release_status`:
+COMPLETE, PROD serving DEV's `app.js` (`d7151c35be74`).
+
+**Claude's checks before DEV acceptance (pre-brief §5),** on `45e6cd00`, DEV's
+SHA:
+- `p10`, `p1`, `p2`, `add-check`'s `p3`/`p4`/`p7`, `review-q/q1`, `q2`: run at
+  the base (`99ed7a8`) and at `45e6cd00`; every output identical but timings
+  and `p4`'s random session ids. Single objects are unchanged, and what
+  `add-check` refused is still refused.
+- T12's acceptance on `atrium.gltf`. The fresh pre-brief check's probes were
+  written against a stand-in builder and a sketch; they are ported to the
+  real code (`devtasks/spike-subtree-add/t12-fixedpoint.mjs`, `t12-shared.mjs`,
+  `t12-prune.mjs`; run from the repo root):
+  - Furniture: 4 inline materials, 19 refs, 73,946 bytes as one message
+    (76,133 without refs); the live fixed point holds, 4 distinct materials as
+    in the source; after a save and reload, 4 again; a send to
+    `Bench-NE-Seat` recolours `Table-Center-Top` (one DarkWood);
+  - the real `hasSharedMaterial(…, { trees: true })` agrees with the sketch on
+    all 11 cases;
+  - prune: DarkWood stays until its last user goes, then is disposed; removing
+    Furniture returns to the starting counts (1 buffer, 4 materials, 12
+    accessors);
+  - the part-restore lines are T11's (§9 of the pre-brief), out of scope.
+- The browser checks, the harness at `45e6cd00` on `authserver.mjs` with
+  `HOOKS=1`: `h2`–`h6` pass (FAILS: none), `c2` 15 of 15. `h1`: check 3's bug
+  repro "fails" (fixed) and check 4 passes, **the same as `h1` on PROD's
+  `42aa56ff`** (a second harness): as before the round. (The undo-hold
+  passdown's "checks 3–4 now fail" is looser than what `h1` prints.)
+
+**DEV acceptance (the operator):** steps 1–6 passed. Two read as failures and
+were the steps' words: step 3's reason is the disabled button's tooltip, and
+step 6's click selects the hidden part because Edit mode keeps hidden objects
+selectable (F-L8); what the fix changes, B not drawing the part, held. The
+pre-brief's wording is corrected (Rev 2.1, wording).
+
+**PROD's `p6` at `45e6cd00`:** identical to §2.5 of the pre-brief (24 worlds,
+460 top-level objects, 9 groups of 3 nodes at depth 1, the largest 16,656
+bytes as one message, 149,039 all together, 1 member with the hidden marker,
+5 objects with a credit).
+
+**PROD acceptance (step 7, the operator):** passed. PROD's backup before the
+deploy: `/var/backups/atrium-prod/atrium-20261108T161727Z-42aa56ffac68.db`.
