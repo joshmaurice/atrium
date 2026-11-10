@@ -61,45 +61,75 @@ with sync_playwright() as pw:
     check('t5 two thumbs: the stick strafes while the other finger turns', abs(b['yaw'] - a['yaw'] + 0.3) < 0.05 and math.hypot(b['pos'][0] - a['pos'][0], b['pos'][2] - a['pos'][2]) > 0.3,
           f"Δyaw {b['yaw'] - a['yaw']:.3f}, moved {math.hypot(b['pos'][0] - a['pos'][0], b['pos'][2] - a['pos'][2]):.2f} m")
 
-    # t3 — taps: Edit selects on a tap; a short drag (6 px, inside Chrome's tap slop) looks and does NOT select
+    # t3 — taps in Edit. At 390 px the Edit panel covers the middle: turn until the cube is left of it.
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.6)
     p.ev("document.querySelector('#ep-palette button[data-kind=\"cube\"]').click()"); time.sleep(1.5)
     home(p)
     cube = p.ev("__ep().selected?.name")
-    p.ev("__ep().selectForEdit(null)"); time.sleep(0.3)
-    scr = p.ev(f"""(() => {{ const o = stage.scene.getObjectByName({json.dumps(cube)}); const v = new (o.position.constructor)();
+    SEL = "__ep().selected?.name ?? null"
+    PROJ = f"""(() => {{ const o = stage.scene.getObjectByName({json.dumps(cube)}); const v = new (o.position.constructor)();
         o.getWorldPosition(v); v.project(stage.camera); const r = document.querySelector('#viewport canvas').getBoundingClientRect();
-        return [r.x + (v.x + 1) / 2 * r.width, r.y + (1 - v.y) / 2 * r.height] }})()""") if cube else None
+        return [r.x + (v.x + 1) / 2 * r.width, r.y + (1 - v.y) / 2 * r.height] }})()"""
+    def deselect(): p.ev("__ep().selectForEdit(null)"); time.sleep(0.8)
     ui = p.ev(UI)
     check('t3a Edit mode: the stick still shows (TN-L8 (a)) and the hint is the touch one', ui['stick'] and 'Tap to select' in ui['hint'], json.dumps(ui))
-    if scr:
-        y0 = p.ev(NAV)['yaw']
-        t.down(5, scr[0], scr[1]); t.move(5, scr[0] + 3, scr[1]); t.move(5, scr[0] + 6, scr[1]); t.up(5); time.sleep(0.8)
-        check('t3b a 6 px drag on the cube looks a little and selects nothing (the click is swallowed)',
-              p.ev("__ep().selected?.name ?? null") is None and abs(p.ev(NAV)['yaw'] - y0) > 0.01, f"selected {p.ev('__ep().selected?.name ?? null')}, Δyaw {p.ev(NAV)['yaw'] - y0:.3f}")
-        scr = p.ev(f"""(() => {{ const o = stage.scene.getObjectByName({json.dumps(cube)}); const v = new (o.position.constructor)();
-            o.getWorldPosition(v); v.project(stage.camera); const r = document.querySelector('#viewport canvas').getBoundingClientRect();
-            return [r.x + (v.x + 1) / 2 * r.width, r.y + (1 - v.y) / 2 * r.height] }})()""")
-        p.page.touchscreen.tap(scr[0], scr[1]); time.sleep(0.8)
-        check('t3c a tap on the cube selects it', p.ev("__ep().selected?.name ?? null") == cube, f"selected {p.ev('__ep().selected?.name ?? null')} want {cube}")
-        # t6 — a drag that starts on the handle's centre moves the cube, not the view (B3).
-        # At 390 px the Edit panel covers the middle: turn until the cube is left of it.
-        for _ in range(40):
-            if scr[0] < 90: break
-            p.ev("stage.nav.yaw -= 0.03"); time.sleep(0.1)
-            scr = p.ev(f"""(() => {{ const o = stage.scene.getObjectByName({json.dumps(cube)}); const v = new (o.position.constructor)();
-                o.getWorldPosition(v); v.project(stage.camera); const r = document.querySelector('#viewport canvas').getBoundingClientRect();
-                return [r.x + (v.x + 1) / 2 * r.width, r.y + (1 - v.y) / 2 * r.height] }})()""")
-        time.sleep(0.3)
-        check('t6 setup: the handle is on the canvas, not under the Edit panel',
-              p.ev(f"document.elementFromPoint({scr[0]}, {scr[1]}) === document.querySelector('#viewport canvas')"), f'at {scr}')
-        y0 = p.ev(NAV)['yaw']; pos0 = p.ev(f"atriumClient.som.getNodeByName({json.dumps(cube)}).translation.slice()")
-        t.drag(6, (scr[0], scr[1]), (scr[0] + 40, scr[1] - 20), steps=12, hold=0.03); time.sleep(1.0)
-        pos1 = p.ev(f"atriumClient.som.getNodeByName({json.dumps(cube)}).translation.slice()")
-        moved = math.dist(pos0, pos1); dyaw = abs(p.ev(NAV)['yaw'] - y0)
-        check('t6 a touch drag on the handle moves the cube and does not turn the view', moved > 0.05 and dyaw < 1e-6, f'moved {moved:.3f}, Δyaw {dyaw:.4f}')
-    else:
-        check('t3 setup: a cube was added', False, 'no cube')
+    for _ in range(40):
+        scr = p.ev(PROJ)
+        if scr[0] < 90: break
+        p.ev("stage.nav.yaw -= 0.03"); time.sleep(0.1)
+    time.sleep(0.3); scr = p.ev(PROJ)
+    check('t3 setup: the cube is on the canvas, not under the Edit panel',
+          p.ev(f"document.elementFromPoint({scr[0]}, {scr[1]}) === document.querySelector('#viewport canvas')"), f'at {scr}')
+    # clicks Chrome sends (document, capture) against clicks the page's handlers see (viewport, bubble)
+    p.ev("window.__docClk = 0; window.__vpClk = 0; document.addEventListener('click', () => __docClk++, true); document.getElementById('viewport').addEventListener('click', () => __vpClk++)")
+    clk = lambda: p.ev("[__docClk, __vpClk]")
+    deselect(); y0 = p.ev(NAV)['yaw']; c0 = clk()
+    t.down(5, scr[0], scr[1])
+    for s in range(1, 7): t.move(5, scr[0] + 2 * s, scr[1])
+    t.up(5); time.sleep(0.8); c1 = clk()
+    check('t3b a 12 px drag on the cube looks, Chrome still sends its click, and the page swallows it: nothing selected',
+          p.ev(SEL) is None and abs(p.ev(NAV)['yaw'] - y0) > 0.03 and c1[0] - c0[0] == 1 and c1[1] - c0[1] == 0,
+          f"selected {p.ev(SEL)}, Δyaw {p.ev(NAV)['yaw'] - y0:.3f}, clicks sent/seen {c1[0] - c0[0]}/{c1[1] - c0[1]}")
+    p.ev(f"stage.nav.yaw = {y0}"); time.sleep(0.4); scr = p.ev(PROJ)
+    deselect(); p.page.touchscreen.tap(scr[0], scr[1]); time.sleep(0.8)
+    check('t3c a tap on the cube selects it', p.ev(SEL) == cube, f"selected {p.ev(SEL)} want {cube}")
+    deselect(); y0 = p.ev(NAV)['yaw']
+    t.down(5, scr[0], scr[1]); t.move(5, scr[0] + 2.5, scr[1] + 1); t.move(5, scr[0] + 5, scr[1] + 2); t.up(5); time.sleep(0.8)
+    check('t3d S-1: a tap that rolls 5 px selects and does not look', p.ev(SEL) == cube and abs(p.ev(NAV)['yaw'] - y0) < 1e-9,
+          f"selected {p.ev(SEL)}, Δyaw {p.ev(NAV)['yaw'] - y0:.4f}")
+    deselect(); sx, sy = stick_centre(p); c0 = clk()
+    t.down(11, sx, sy); t.move(11, sx, sy - 2)          # a thumb resting on the stick
+    t.down(5, scr[0], scr[1]); t.up(5); time.sleep(0.8)
+    c1 = clk()
+    check('t3e S-2: with a thumb on the stick, a tap on the cube selects it (Chrome sends no click; the page makes one)',
+          p.ev(SEL) == cube and c1[0] - c0[0] == 1, f"selected {p.ev(SEL)}, clicks {c1[0] - c0[0]}")
+    bfp = p.ev("(() => { const r = document.getElementById('touch-fp').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
+    cam0 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
+    t.down(12, bfp[0], bfp[1]); t.up(12); time.sleep(0.6)
+    cam1 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
+    check('t3f S-2: with a thumb on the stick, a tap on First person works, once', cam0 != cam1 and cam1 == 1.6, f'camera y {cam0} → {cam1}')
+    t.down(12, bfp[0], bfp[1]); t.up(12); time.sleep(0.6)
+    t.up(11); time.sleep(0.4)
+    check('t3g ... and a second tap goes back to third person', p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0)
+    # t6 — a drag that starts on the handle's centre moves the cube, not the view (B3)
+    p.ev(f"__ep().selectForEdit(atriumClient.som.getNodeByName({json.dumps(cube)}))"); time.sleep(0.8); scr = p.ev(PROJ)
+    y0 = p.ev(NAV)['yaw']; pos0 = p.ev(f"atriumClient.som.getNodeByName({json.dumps(cube)}).translation.slice()")
+    t.drag(6, (scr[0], scr[1]), (scr[0] + 40, scr[1] - 20), steps=12, hold=0.03); time.sleep(1.0)
+    pos1 = p.ev(f"atriumClient.som.getNodeByName({json.dumps(cube)}).translation.slice()")
+    moved = math.dist(pos0, pos1); dyaw = abs(p.ev(NAV)['yaw'] - y0)
+    check('t6 a touch drag on the handle moves the cube and does not turn the view', moved > 0.05 and dyaw < 1e-6, f'moved {moved:.3f}, Δyaw {dyaw:.4f}')
+    # t6b — S-3: a second finger during the handle drag doesn't steer it or end it
+    scr = p.ev(PROJ); obj = lambda: p.ev(f"stage.scene.getObjectByName({json.dumps(cube)}).position.toArray()")
+    t.down(6, scr[0], scr[1])
+    for s in range(1, 6): t.move(6, scr[0] + 4 * s, scr[1]); time.sleep(0.03)
+    o1 = obj()
+    t.down(13, cx + 100, cy + 200)
+    for s in range(1, 8): t.move(13, cx + 100 - 10 * s, cy + 200 - 10 * s); time.sleep(0.03)
+    o2 = obj(); t.up(13); time.sleep(0.3)
+    for s in range(6, 9): t.move(6, scr[0] + 4 * s, scr[1]); time.sleep(0.03)
+    o3 = obj(); t.up(6); time.sleep(1.0)
+    check('t6b S-3: a second finger moving during a handle drag leaves the cube still, and the first finger drags on after it lifts',
+          math.dist(o1, o2) < 1e-6 and math.dist(o2, o3) > 0.05, f'jump {math.dist(o1, o2):.4f}, after the lift {math.dist(o2, o3):.3f}')
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)
 
     # t4 — ORBIT: the stick hides; a drag orbits; a pinch out zooms in
@@ -117,10 +147,13 @@ with sync_playwright() as pw:
     p.ev("(() => { const s = document.getElementById('mode-switcher'); s.value = 'WALK'; s.dispatchEvent(new Event('change')) })()"); time.sleep(0.5)
     check('t4d back in WALK the stick shows again', p.ev(UI)['stick'])
 
-    # first-person button = V
-    p.ev("document.getElementById('touch-fp').click()"); time.sleep(0.3)
-    check('t8 the first-person button goes first person, and back', p.ev("stage.nav._avatar.cameraNode.translation[1]") == 1.6 and 'Third' in p.ev("document.getElementById('touch-fp').textContent"))
-    p.ev("document.getElementById('touch-fp').click()"); time.sleep(0.3)
+    # t8 — the First person button by a real touch tap (N-2), and back
+    bfp = p.ev("(() => { const r = document.getElementById('touch-fp').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
+    cam0 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
+    p.page.touchscreen.tap(bfp[0], bfp[1]); time.sleep(0.6)
+    fp_on = p.ev("stage.nav._avatar.cameraNode.translation[1]") == 1.6 and 'Third' in p.ev("document.getElementById('touch-fp').textContent")
+    p.page.touchscreen.tap(bfp[0], bfp[1]); time.sleep(0.6)
+    check('t8 a touch tap on the button goes first person, a second one back', fp_on and p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0)
 
     # t2-pad — a teleporter pad 3 m ahead fires when the stick walks onto it
     k2 = k + 'b'
@@ -147,6 +180,34 @@ with sync_playwright() as pw:
     else:
         check('t2d setup: a pad was made', False, 'no pad')
 
+    # t10 — S-4: the stick lets go on every route, each with the stick at full push first
+    def pushed():
+        sx, sy = stick_centre(p); t.down(20, sx, sy); t.move(20, sx, sy - 60); time.sleep(0.4)
+        return p.ev(NAV)['input'] == [0, -1]
+    def stopped(label):
+        time.sleep(0.4); a = p.ev(NAV); time.sleep(0.6); b = p.ev(NAV)
+        knob = p.ev("document.getElementById('touch-stick-knob').style.transform")
+        ok = a['input'] == [0, 0] and b['pos'] == a['pos'] and knob in ('translate(0px, 0px)', '')
+        check(f't10{label}', ok, f"input {a['input']}, still {b['pos'] == a['pos']}, knob {knob}")
+        t.pts.clear()
+    check('t10 after the teleport (t2d) the stick is let go and the avatar stands still', p.ev(NAV)['input'] == [0, 0])
+    home(p)
+    ok = pushed(); t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []}); stopped(f'a a cancelled touch (pushed {ok})')
+    ok = pushed(); p.ev("(() => { const s = document.getElementById('mode-switcher'); s.value = 'ORBIT'; s.dispatchEvent(new Event('change')) })()")
+    stopped(f'b the mode switched to ORBIT (pushed {ok})'); t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []})
+    p.ev("(() => { const s = document.getElementById('mode-switcher'); s.value = 'WALK'; s.dispatchEvent(new Event('change')) })()"); time.sleep(0.4)
+    ok = pushed(); p.ev("window.dispatchEvent(new Event('blur'))"); stopped(f'c the window blurred (pushed {ok})')
+    t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []})
+    ok = pushed(); p.ev("Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); delete document.hidden")
+    stopped(f'd the page hidden (pushed {ok})'); t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []})
+    ok = pushed(); p.ev("connectBtn.click()"); p.wait("!window.atriumClient.connected"); time.sleep(1.0)
+    inp = p.ev("stage.nav.moveInput")
+    check(f't10e a disconnect lets go (pushed {ok})', inp == [0, 0], f'input {inp}')
+    t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []}); t.pts.clear()
+    time.sleep(1.5)
+    ui = p.ev(UI)
+    check('t11 N-1: disconnected (a static world), the stick shows but First person does not', ui['stick'] and not ui['fp'], json.dumps(ui))
+
     p.page.screenshot(path=f'{SHOTS}/touch-nav-phone.png')
     errs = list(p.errors); p.ctx.close()
 
@@ -161,3 +222,4 @@ with sync_playwright() as pw:
     m.close(); br.close()
 
 print(f"\n{sum(1 for _, ok in RESULTS if ok)}/{len(RESULTS)} PASS")
+sys.exit(0 if all(ok for _, ok in RESULTS) else 1)     # N-2: a FAIL fails the run

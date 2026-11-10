@@ -2352,11 +2352,18 @@ const handlePress = createHandlePress()
 let handleClick = null
 // Capture phase on the viewport: before the handles' own listeners on the
 // canvas, so the press and every move are known before the object moves.
+// touch-nav (the outside review's S-3) — a second finger is not a new press: it
+// would replace a handle press still inside its slop, and the first finger's
+// next 1 px move would then begin a gesture.
 viewportEl.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'touch' && !e.isPrimary) return
   handleClick = null
   handlePress.down({ x: e.clientX, y: e.clientY })
 }, true)
-viewportEl.addEventListener('pointermove', (e) => handlePress.move({ x: e.clientX, y: e.clientY }), true)
+viewportEl.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch' && !e.isPrimary) return
+  handlePress.move({ x: e.clientX, y: e.clientY })
+}, true)
 
 /** Put the selected object back where the SOM has it (T17: the live node is the record). */
 function putBackHandle() {
@@ -4168,7 +4175,9 @@ function updateTouchUI() {
   // A hidden stick lets go; a look or a pinch in progress (ORBIT's) goes on.
   if (!show) applyTouch(touchNav.releaseStick())
   touchStickEl.hidden = !show
-  touchFpBtn.hidden   = !show
+  // N-1 — a static world walks by the stick too, but V's first person is a
+  // connected avatar's: the button shows only while connected.
+  touchFpBtn.hidden   = !show || !client.connected
   touchFpBtn.textContent = firstPerson ? '👤 Third person' : '👤 First person'
 }
 
@@ -4179,7 +4188,23 @@ function applyTouch(effects) {
     else if (fx.type === 'look') { if (!gizmo?.dragging) nav.onTouchLook(fx.dx, fx.dy) }
     else if (fx.type === 'pinch') nav.onPinch(fx.ratio)
     else if (fx.type === 'swallow-click') swallowClickUntil = performance.now() + SWALLOW_CLICK_MS
+    else if (fx.type === 'tap') touchTap(fx.x, fx.y)
   }
+}
+
+/**
+ * The outside review's S-2 — a tap on the view while another finger holds the
+ * stick: Chrome sends no click (probe 7), so the page makes the click it
+ * would have made (the compatibility mousedown, mouseup, then click) for the
+ * select, Inspect and activate paths, and drops a real one if it follows.
+ */
+function touchTap(x, y) {
+  const init = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, detail: 1, view: window }
+  canvas.dispatchEvent(new MouseEvent('mousedown', init))
+  canvas.dispatchEvent(new MouseEvent('mouseup', init))
+  swallowClickUntil = 0
+  canvas.dispatchEvent(new MouseEvent('click', init))
+  swallowClickUntil = performance.now() + SWALLOW_CLICK_MS
 }
 
 /**
@@ -4207,8 +4232,8 @@ function resetTouch() { applyTouch(touchNav.reset()) }
 
 // Seen anywhere on the page (capture), so a first tap on a panel counts too.
 document.addEventListener('pointerdown', (e) => {
+  swallowClickUntil = 0      // F1, N-5 — a new press (any kind): the last drag's click has come or never will
   if (e.pointerType !== 'touch') return
-  swallowClickUntil = 0      // F1 — a new press: the last drag's click has come or never will
   if (touchSeen) return
   touchSeen = true
   updateHintText()
@@ -4227,23 +4252,55 @@ viewportEl.addEventListener('pointerdown', (e) => {
     touchStickEl.setPointerCapture?.(e.pointerId)
   } else if (e.target === canvas) {
     on = gizmo?.dragging ? 'handle' : 'view'
+    if (on === 'handle' && handlePointerId === null) handlePointerId = e.pointerId
   }
   applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre, primary: e.isPrimary }))
 })
+// Capture phase on the document: before the viewport's handle-drag filter
+// (below), so a tracked finger's move and release always arrive.
 document.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'touch') return
   applyTouch(touchNav.move({ id: e.pointerId, x: e.clientX, y: e.clientY }))
-})
+}, true)
 for (const type of ['pointerup', 'pointercancel']) {
   document.addEventListener(type, (e) => {
     if (e.pointerType !== 'touch') return
+    if (e.pointerId === handlePointerId) handlePointerId = null
     applyTouch(touchNav.up({ id: e.pointerId }))
-  })
+  }, true)
 }
 window.addEventListener('blur', resetTouch)
 document.addEventListener('visibilitychange', () => { if (document.hidden) resetTouch() })
 
+/**
+ * The outside review's S-3 — TransformControls reads every pointer on the
+ * canvas and checks no `pointerId`, so a second finger during a handle drag
+ * steered the object (probe 7: it jumped 0.05). While a handle drags, the
+ * canvas hears only the finger that grabbed it.
+ */
+let handlePointerId = null
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+  viewportEl.addEventListener(type, (e) => {
+    if (e.pointerType !== 'touch' || e.target !== canvas) return
+    if (!gizmo?.dragging) { if (type === 'pointerdown') handlePointerId = null; return }
+    if (handlePointerId === null || e.pointerId === handlePointerId) return
+    e.stopPropagation()
+  }, true)
+}
+
+/**
+ * The First person button. The outside review's S-2: with a thumb on the
+ * stick Chrome sends no `click` for a tap (probe 7), so a touch acts on its
+ * `pointerup`, and the click that may follow is ignored.
+ */
+let fpTouchAt = -Infinity
+touchFpBtn.addEventListener('pointerup', (e) => {
+  if (e.pointerType !== 'touch') return
+  fpTouchAt = performance.now()
+  toggleFirstPerson()
+})
 touchFpBtn.addEventListener('click', () => {
+  if (performance.now() - fpTouchAt < SWALLOW_CLICK_MS) return
   toggleFirstPerson()
   canvas.focus?.({ preventScroll: true })   // a touch laptop's keys go back to the view
 })

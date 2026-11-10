@@ -10,6 +10,8 @@
  *   { type: 'knob',  dx, dy }   the stick knob's offset in CSS px, for the display
  *   { type: 'look',  dx, dy }   a look-drag delta for NavigationController.onTouchLook
  *   { type: 'pinch', ratio }    the fingers' distance over their last, for onPinch
+ *   { type: 'tap', x, y }       a view finger that never looked lifted while the stick
+ *                               was held: Chrome sends no click then (the page makes it)
  *   { type: 'swallow-click' }   a view finger that looked or pinched lifted: the
  *                               browser may still send a click for a short drag
  *                               (Chrome's tap slop is wider than ours), and that
@@ -23,16 +25,22 @@
  * `primary` is the event's `isPrimary`: a primary touch means no other finger
  * is down, so whatever is still tracked lost its release and is dropped.
  *
- * A 'view' press sends nothing until it has travelled `slop` px, so a tap stays
- * a tap and the browser's click (select, Inspect, activate) follows as today.
+ * A 'view' press sends nothing until it has travelled `slop` px (10), so a tap
+ * stays a tap and the browser's click (select, Inspect, activate) follows as
+ * today; with the stick held the page makes that click itself ('tap').
  */
 
-import { CLICK_SLOP_PX } from './edit-selection.js'
-
+/**
+ * The travel before a touch is a look (the outside review's S-1): the mouse's
+ * 4 px is under a thumb's roll, and Chrome on Android still sends a click up to
+ * its own tap slop (8 dp), so a 5 px tap looked and lost its click (probe 7).
+ * 10 px is above that slop: a drag that looks was never going to be a click.
+ */
+export const TOUCH_LOOK_SLOP_PX = 10
 export const STICK_RADIUS_PX = 48
 export const STICK_DEAD_ZONE = 0.12
 
-export function createTouchNav({ slop = CLICK_SLOP_PX, stickRadius = STICK_RADIUS_PX, deadZone = STICK_DEAD_ZONE } = {}) {
+export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_RADIUS_PX, deadZone = STICK_DEAD_ZONE } = {}) {
   /** @type {{ id: number, cx: number, cy: number } | null} */
   let stick = null
   /** The 'view' pointers, in press order (at most two). */
@@ -75,11 +83,12 @@ export function createTouchNav({ slop = CLICK_SLOP_PX, stickRadius = STICK_RADIU
       if (on === 'stick') {
         if (stick || !stickCentre) return []
         stick = { id, cx: stickCentre.x, cy: stickCentre.y }
+        for (const v of views) v.withStick = true
         return stickEffects(x, y)
       }
       if (on !== 'view') return []
       if (views.length >= 2) return []
-      views.push({ id, x0: x, y0: y, x, y, live: false, used: false })
+      views.push({ id, x0: x, y0: y, x, y, live: false, used: false, withStick: !!stick })
       if (views.length === 2) { pinchDist = dist(); for (const p of views) p.used = true }
       return []
     },
@@ -118,7 +127,9 @@ export function createTouchNav({ slop = CLICK_SLOP_PX, stickRadius = STICK_RADIU
         v.x0 = v.x; v.y0 = v.y
       }
       pinchDist = 0
-      return gone.used ? [{ type: 'swallow-click' }] : []
+      if (gone.used) return [{ type: 'swallow-click' }]
+      if (gone.withStick) return [{ type: 'tap', x: gone.x, y: gone.y }]
+      return []
     },
 
     /** The stick is hidden: let it go, leave the view's fingers alone. */

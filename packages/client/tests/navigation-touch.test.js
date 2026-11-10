@@ -165,6 +165,9 @@ test('touch-nav T1 — onPinch zooms ORBIT: spread (ratio > 1) comes closer; cla
   assert.equal(nav.orbitRadius, 100, 'clamped at 100')
   nav.onPinch(1000)
   assert.equal(nav.orbitRadius, 0.5, 'clamped at 0.5')
-  nav.onPinch(0); nav.onPinch(-1); nav.onPinch(NaN); nav.onPinch(Infinity)
-  assert.equal(nav.orbitRadius, 0.5, 'bad ratios do nothing')
+  nav.orbitRadius = 10                     // away from the clamps, so each bad ratio could show (N-2)
+  for (const bad of [0, -1, NaN, Infinity, -Infinity]) {
+    nav.onPinch(bad)
+    assert.equal(nav.orbitRadius, 10, `ratio ${bad} does nothing`)
+  }
 })
