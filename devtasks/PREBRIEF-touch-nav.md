@@ -1,6 +1,6 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **Revision 1.0 (2026-11-10), decisions taken; building.** The
+Status: **Revision 1.1 (2026-11-10), decisions taken; built at `50af5c2`+.** The
 operator, by voice (about 14:10 PT): "I'm using Android and Chrome browser.
 And uh, we can build this now, I'm thinking, and go with your
 recommendations otherwise"; then in text, 14:15 PT: "Okay go ahead with that
@@ -226,6 +226,18 @@ events of `pointerType` `touch` and returning effects:
   distance. When one lifts, the other goes on looking from where it is,
   without a jump. A third `'view'` pointer is ignored.
 - `'handle'` and `'other'` pointers are never tracked.
+- **Swallow the click after a look** (found while building, Rev 1.1): Chrome
+  still sends a `click` for a touch drag inside its own tap slop, which is
+  wider than ours, and on touch the compatibility `mousedown` arrives at the
+  release (selection-parts lesson 4), so `isSelectClick` can't see the
+  travel. A `'view'` finger that looked or was part of a pinch returns
+  `{ type: 'swallow-click' }` on release; the page then drops the next
+  `click` on the viewport within 500 ms (a capture listener,
+  `stopImmediatePropagation`). Otherwise a 6 px drag would turn the view
+  **and** select or activate.
+- `releaseStick()`: lets the stick go and leaves a look or pinch in progress
+  alone (the page calls it when the stick hides, e.g. on entering ORBIT
+  mid-pinch); `reset()` drops everything.
 
 **T3 `apps/client/index.html`:**
 - `#viewport canvas { touch-action: none }`, so the browser doesn't take a
@@ -261,18 +273,37 @@ events of `pointerType` `touch` and returning effects:
 pass these on (`AtriumClient` L2004, L2205); nothing animates from them, so
 no peer change and no schema change (`velocity` is already a number).
 
-## 5. Tests and checks (sketch)
-- Unit: T1, T2 as above; every gesture asserts the outcome (selection-parts
-  lesson 2): yaw, pitch, position, selection, Undo stack.
-- Harness (Chromium, mobile emulation, CDP touch): t1 a drag looks; t2 the
-  stick walks onto a teleporter pad in `atrium.gltf` and the teleport
-  happens; t3 a tap still activates and selects; t4 a pinch zooms ORBIT;
-  t5 a stick push plus a look-drag at once (two pointers); t6 a handle
-  drag in Edit on touch is unchanged; t7 a mouse session is unchanged (the existing harness checks still
-  pass).
-- **A gesture design needs a real-browser probe before it is approved**
-  (selection-parts lesson 1): before FINAL, a prototype on the harness, and
-  the operator tries it on his phone at DEV acceptance.
+## 5. Tests and checks (at `50af5c2` plus the check files)
+- **Unit:** `packages/client/tests/navigation-touch.test.js` (T1, 10 tests)
+  and `apps/client/tests/touch-nav.test.js` (T2, 18 tests): every effect
+  asserted, including touch's event order. The whole client app suite: 1,853
+  pass, 0 fail (`node --test apps/client/tests/*.test.js`, 2026-11-10),
+  the import guard included.
+- **Harness:** `devtasks/harness/checks/touch-nav/tn.py` (helpers in
+  `tn_lib.py`), Chromium at 390 × 844, mobile, real CDP touch events,
+  **23/23 PASS**:
+  t0 nothing before a touch, the stick after the first; t1 a 100 px drag
+  turns 0.5 rad, an 80 px one pitches 0.4, neither walks; t2 a full push
+  walks 4.4 m in 3.1 s (1.4 m/s), release stops, a peer sees the avatar
+  there, and **walking onto a teleporter pad teleports**; t3 in Edit the
+  stick shows, a 6 px drag on the cube looks and selects nothing (the
+  swallowed click), a tap selects; t4 ORBIT hides the stick, a spread from
+  80 to 200 px zooms in 2.5×, a drag orbits, WALK shows it again; t5 two
+  thumbs, stick and look at once; t6 a touch drag on the move handle moves
+  the cube (0.54) and doesn't turn the view; t7 a mouse page: 100 px turns
+  0.2 rad as before, no stick ever; t8 the first-person button; t9 no page
+  errors.
+- **No regression:** selection-parts `c1` (29), `c3` (30), `c5` (10) and
+  grouping's `smoke.py` all pass on this code.
+- **Harness gotcha:** at 390 px the top bar is 795 px wide, and focusing a
+  field there pans the visual viewport sideways (`visualViewport.pageLeft`
+  211), which puts every CDP touch about 210 px off. The checks set fields
+  from script and assert the page isn't panned (`home()`). At 390 px the
+  Edit panel covers the middle of the view; t6 turns until the cube is left
+  of it (probe 4: the same drag by mouse and by touch moves it 0.573).
+- **On the phone (DEV acceptance, Android Chrome):** the feel: stick size
+  and place, look speed (0.005 rad/px), the dead zone; a pad walked onto;
+  Edit taps and a handle drag; two thumbs at once.
 
 ## 6. Process
 As every round (selection-parts passdown §4): this pre-brief; a fresh-agent
@@ -281,6 +312,7 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 1.1 (2026-11-10): swallow the click after a look; `releaseStick`; §5's results.
 - Rev 1.0 (2026-11-10): the decisions (Status), the full contract (§4).
 - Rev 0.2 (2026-11-10): the operator's report of his phone (§2.2): only
   navigation is missing; TN-L5 now recommends (c), TN-L8 notes Edit on a
