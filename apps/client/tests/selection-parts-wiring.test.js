@@ -258,10 +258,11 @@ describe('T13 and SP-L10: the click', () => {
   test('SP-L10: a click from a handle changes the selection only within the selected object’s top-level object', () => {
     assert.match(click, /if \(fromHandle && selected && !\(node && topLevelAncestor\(node\) === topLevelAncestor\(selected\)\)\) return\s*selectForEdit\(node\)/)
     // the verdict is cleared at every new press (capture-phase pointerdown, before the handles)
-    assert.match(code, /viewportEl\.addEventListener\('pointerdown', \(e\) => \{\s*handleClick = null\s*handlePress\.down\(\{ x: e\.clientX, y: e\.clientY \}\)\s*\}, true\)/)
+    // touch-nav (the outside review's S-3): a second finger is not a new press
+    assert.match(code, /viewportEl\.addEventListener\('pointerdown', \(e\) => \{\s*if \(e\.pointerType === 'touch' && !e\.isPrimary\) return\s*handleClick = null\s*handlePress\.down\(\{ x: e\.clientX, y: e\.clientY \}\)\s*\}, true\)/)
   })
   test('the press, its moves and its click count are recorded in the capture phase', () => {
-    assert.match(code, /viewportEl\.addEventListener\('pointermove', \(e\) => handlePress\.move\(\{ x: e\.clientX, y: e\.clientY \}\), true\)/)
+    assert.match(code, /viewportEl\.addEventListener\('pointermove', \(e\) => \{\s*if \(e\.pointerType === 'touch' && !e\.isPrimary\) return\s*handlePress\.move\(\{ x: e\.clientX, y: e\.clientY \}\)\s*\}, true\)/)
     assert.match(blockFrom("viewportEl.addEventListener('mousedown'"), /handlePress\.count\(e\.detail\)/)
   })
 })
