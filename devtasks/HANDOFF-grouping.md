@@ -124,7 +124,9 @@ At commit 7: the same, except app 1,823 pass, 1 skip, and server 1,069. All
 0 fail. The harness checks smoke and c1–c5 all pass on commit 7's page.
 
 ## 6. Next
-1. The outside code review, its prompt pinned to the reviewed SHA.
+1. The outside code review: `devtasks/OUTSIDE-CODE-REVIEW-PROMPT-grouping.md`,
+   pinned to `e9886572` (commit 7). Its findings are reproduced before they
+   are taken.
 2. The operator's go, then the release path (§6 of the pre-brief): DEV
    acceptance steps 1–8; the release note says a stale tab is **refused at
    Connect** (§2's note).
