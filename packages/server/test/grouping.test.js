@@ -73,6 +73,7 @@ async function connect(port) {
   const messages = collect(ws)
   const closed = new Promise((res) => ws.once('close', res))
   await new Promise((res, rej) => { ws.once('open', res); ws.once('error', rej) })
+  closers.push(async () => ws.terminate())   // a red test never leaves a socket holding the server open
   return { ws, messages, closed }
 }
 
@@ -462,7 +463,7 @@ describe('GR5: unreloaded tabs', () => {
     assert.equal(err.code, 'PERMISSION_DENIED')
     assert.equal(err.message, STALE_HELLO_MESSAGE)
     assert.equal(STALE_HELLO_MESSAGE, 'this page is older than the server: reload it')
-    await c.closed
+    assert.ok(await Promise.race([c.closed.then(() => true), delay(2000).then(() => false)]), 'the server closes it')
     assert.equal(c.messages.some((m) => m.type === 'hello' || m.type === 'som-dump'), false, 'no hello reply and no som-dump')
     await delay(50)
     assert.equal(witness.messages.some((m) => m.type === 'join' && m.id === 'stale-hello'), false, 'no presence')
@@ -476,7 +477,7 @@ describe('GR5: unreloaded tabs', () => {
     c.ws.send(JSON.stringify({ type: 'hello', id: 'stale-later', capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
     const err = await waitFor(c.messages, (m) => m.type === 'error')
     assert.equal(err?.message, STALE_HELLO_MESSAGE)
-    await c.closed
+    assert.ok(await Promise.race([c.closed.then(() => true), delay(2000).then(() => false)]), 'the server closes it')
   })
 
   test('a level-4 hello, a later page and a hello with neither capability join', async () => {

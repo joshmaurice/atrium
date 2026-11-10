@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import * as group from '../src/edit-group.js'
 import { ownNodeProblem, isReferenced } from '../src/edit-duplicate.js'
 import { treeBoundsProblem } from '../../../packages/client/src/add-spec.js'
+import { createEditTracker } from '../src/edit-gesture.js'
 
 const { NodeIO } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
 const { SOMDocument } = await import('../../../packages/som/src/index.js')
@@ -79,6 +80,7 @@ function page(som, { block = null, serverAddFields = 4 } = {}) {
     structure: { reparentSeen: () => env.calls.push('reparentSeen') },
     undo: { inFlight: () => false, doing: () => false, moveTo: (...a) => { env.calls.push(['moveTo', ...a]); return true }, group: () => true, ungroup: () => true },
     hold: { clear: () => env.calls.push('hold.clear') },
+    editTracker: { remoteSet: () => {} },
     isEditExcluded: (n) => /^avatar-/.test(n.name),
     isTeleporter: (n) => n.extras?.atrium?.teleporter != null,
     structuralBlock: () => block,
@@ -185,6 +187,23 @@ describe('GR8: Move to', () => {
     assert.equal(env.epMoveTo.children.some((c) => c.marker), false, 'rebuilt after a structural change')
   })
 
+  test('harness c1: a Move to list that keeps the focus after a choice is rebuilt when the answer changes the structure; an unfocused one waits for its focus', async () => {
+    const som = await world()
+    const env = page(som)
+    env.selected = som.getNodeByName('crate-01')
+    env.syncMoveOptions()
+    assert.ok(optionLabels(env.epMoveTo).includes('lamp-01'))
+    assert.equal(optionLabels(env.epMoveTo).includes('Top level'), false, 'crate-01 is at the top level')
+    // the move lands: crate-01 is inside lamp-01 now
+    som.getNodeByName('lamp-01')._node.addChild(som.getNodeByName('crate-01')._node)
+    env.structureStamp += 1
+    env.refreshGroupActions()
+    assert.equal(optionLabels(env.epMoveTo).includes('Top level'), false, 'not focused: left for the focus to rebuild')
+    env.document.activeElement = env.epMoveTo
+    env.refreshGroupActions()
+    assert.ok(optionLabels(env.epMoveTo).includes('Top level'), JSON.stringify(optionLabels(env.epMoveTo)))
+  })
+
   test('a som:set never rebuilds the Move to list (text: its handler only refreshes the Empty groups)', () => {
     const handler = blockFrom("client.on('som:set', ({ path }) => {")
     assert.equal(/buildMoveOptions|syncMoveOptions/.test(handler), false)
@@ -241,6 +260,21 @@ describe('GR8: Empty groups', () => {
     assert.equal(env.epEmptyGroups.value, '', 'it picks; it holds no state')
   })
 
+  test('harness c5: another tab’s add, remove or rename refreshes the list at once (an undone Delete of an empty group, the last part deleted)', async () => {
+    const som = await world()
+    const env = page(som)
+    new Function('env', `with (env) { ${code.match(/for \(const ev of \['som:add', 'som:remove', 'som:rename'\]\)[^\n]*/)[0]} }`)(env)
+    env.refreshEmptyGroups()
+    assert.equal(env.epEmptyRow.style.display, 'none')
+    som.scene.addChild(som.ingestNode({ name: 'group-09' }))
+    env.listeners['som:add'][0]({ nodeName: 'group-09' })
+    assert.deepEqual(optionLabels(env.epEmptyGroups), ['Empty groups (1)', 'group-09'], 'a bare node another tab added')
+    const lamp = som.getNodeByName('lamp-01')
+    for (const part of [...lamp.children]) som.removeSubtree(part)
+    env.listeners['som:remove'][0]({ nodeName: 'lamp-stand' })
+    assert.deepEqual(optionLabels(env.epEmptyGroups), ['Empty groups (2)', 'group-09', 'lamp-01'], 'a group whose last part another tab deleted')
+  })
+
   test('the DOM is rebuilt only when the key changes; the row waits while this tab’s own request is in flight', async () => {
     const som = await world()
     const env = page(som)
@@ -279,6 +313,39 @@ describe('GR8: som:reparent', () => {
     const order = env.calls.filter((c) => typeof c === 'string')
     assert.ok(order.indexOf('hold.clear') < order.indexOf('endHandleDrag'), JSON.stringify(order))
     for (const c of ['reparentSeen', 'attachSelected', 'refreshEditPanel', 'refreshEditActions']) assert.ok(order.includes(c), c)
+  })
+
+  test('harness c3: a drag whose sends were all answered before another tab regrouped its node is not recorded (its records are marked as another session’s before the cancel)', async () => {
+    const som = await world()
+    const env = reparentPage(som)
+    const crate = som.getNodeByName('crate-01')
+    let t = 0
+    let seq = 0
+    const settled = []
+    const tracker = createEditTracker({
+      read: (n, f) => n[f],
+      writeLocal: (n, f, v) => { n[f] = v },
+      writeSend: (n, f, v) => { n[f] = v; return ++seq },
+      onTransformsSettled: (results, info) => settled.push({ results, info }),
+      now: () => t,
+    })
+    env.editTracker = tracker
+    const gesture = tracker.begin(crate)
+    t = 200
+    gesture.update({ translation: [0.5, 0.25, 0] })
+    assert.equal(seq, 1, 'the drag sent once')
+    tracker.accepted(1)                       // every send answered: nothing pending
+    // the reparent: the node's values are the new frame's
+    som.getNodeByName('lamp-01')._node.addChild(crate._node)
+    crate.translation = [-2.5, 0.25, 0]
+    env.selected = crate
+    env.activeGesture = gesture
+    env.gizmo.dragging = true
+    env.listeners['som:reparent'][0]({ nodeName: 'crate-01' })
+    assert.equal(settled.length, 1, `${settled.length} batches`)
+    assert.equal(settled[0].results.length, 0, `no entry for the cancelled drag (${settled[0].results.map((r) => r.changes.map((c) => c.field).join()).join('; ')})`)
+    assert.equal(settled[0].info.remote, true)
+    assert.deepEqual([...crate.translation], [-2.5, 0.25, 0], 'nothing written back')
   })
 
   test('a gesture on another node is left alone; the breadcrumb still refreshes', async () => {

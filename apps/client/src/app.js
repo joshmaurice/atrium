@@ -3615,6 +3615,10 @@ function refreshGroupActions() {
   epMoveTo.disabled = !!m
   epMoveTo.title = m ?? 'Move the selected object into a group'
   if (m) epMoveNote.style.display = 'none'
+  // A select that keeps the focus after a choice gets no new focus or
+  // mousedown before the keyboard's next choice: rebuild it here when its key
+  // has changed (harness c1, a stale list after a move).
+  else if (typeof document !== 'undefined' && document.activeElement === epMoveTo) syncMoveOptions()
   refreshEmptyGroups()
 }
 
@@ -3628,6 +3632,10 @@ client.on('som:reparent', ({ nodeName }) => {
   structure.reparentSeen()
   const node = client.som?.getNodeByName(nodeName) ?? null
   if (node && activeGesture && activeGesture.node === node) {
+    // harness c3: the drag's sends may all be answered already, so no later
+    // som:set finds an open record; mark them as another session's now, with
+    // the new frame's values, so the cancel records nothing and writes nothing.
+    for (const f of ['translation', 'rotation', 'scale']) editTracker.remoteSet(node, f, node[f] == null ? node[f] : [...node[f]])
     activeGesture.cancel()
     activeGesture = null
     hold.clear()
@@ -3641,7 +3649,9 @@ client.on('som:reparent', ({ nodeName }) => {
   emptyKey = null
   refreshEditActions()
 })
-for (const ev of ['som:add', 'som:remove', 'som:rename']) client.on(ev, () => { structureStamp += 1; emptyKey = null })
+// harness c5: another tab's add, remove or rename refreshes the Empty groups at
+// once (its own refreshEditActions only follows this tab's answers)
+for (const ev of ['som:add', 'som:remove', 'som:rename']) client.on(ev, () => { structureStamp += 1; emptyKey = null; refreshEmptyGroups() })
 // a set that can change bareness (a mesh, a model, a node's extras) refreshes the list
 client.on('som:set', ({ path }) => {
   if (typeof path === 'string' && (path === 'extras' || path.startsWith('extras.atrium.model') || path === 'mesh')) refreshEmptyGroups()

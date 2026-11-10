@@ -390,6 +390,22 @@ describe('GR7: the pending-delete fix (fresh check must-fix 1, f2)', () => {
     assert.equal(parentName(som, 'crate-02'), 'lamp-01')
     assert.ok(near(worldT(som, 'crate-02'), w0))
   })
+
+  test('C (the re-read when the window opens): Delete, Undo, another tab moves it into a group at the origin (its values unchanged), Redo, Undo: it comes back inside that group', async () => {
+    const som = await world()
+    const h = harness(som)
+    som.scene.addChild(som.ingestNode({ name: 'group-09' }))
+    const w0 = worldT(som, 'crate-01')
+    const s = h.clickDelete(som.getNodeByName('crate-01'))
+    h.answerPlain(s)
+    run(h, 'undo')                              // re-added at the top level
+    h.remoteMove('crate-01', 'group-09')        // before the Redo: no window is open; same local values
+    run(h, 'redo')                              // the delete again: the window opens now
+    assert.equal(som.getNodeByName('crate-01'), null)
+    run(h, 'undo')
+    assert.equal(parentName(som, 'crate-01'), 'group-09', 'back where it was when deleted')
+    assert.ok(near(worldT(som, 'crate-01'), w0), `world ${worldT(som, 'crate-01')} vs ${w0}`)
+  })
 })
 
 describe('GR7: out of step', () => {
