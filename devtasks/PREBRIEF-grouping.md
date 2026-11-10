@@ -1,18 +1,25 @@
 # Pre-brief: grouping and ungrouping (`grouping`)
 
-Status: **DRAFT, Revision 1.1 (2026-11-09).** Rev 1.0 plus the outside
-review of `34917de8` (§7). The review is by Claude Fable 5.2, per its own
-first lines; its verdict is CHANGES REQUESTED, with 2 must-fix, 9
-should-fix and 7 nits. Claude reproduced every finding before taking it.
-The operator's decisions (2026-11-09):
-- **GR-L1 (a)** and **GR-L3 (a)**;
-- GR-L2 and GR-L4 to GR-L9 as recommended ("no preference");
-- **GR-L10 (a)** (20:24 PT, "go with recs", after asking why (a)).
+Status: **DRAFT, Revision 1.2 (2026-11-09). Every decision is taken.** This
+is Rev 1.0 plus the outside review of `34917de8` (§7), by Claude Fable 5.2
+per its own first lines. Its verdict was CHANGES REQUESTED, with 2 must-fix,
+9 should-fix and 7 nits; Claude reproduced every finding before taking it.
 
-**GR-L12 (a)** is decided ("no preference"). **GR-L11 is open:** the
-operator asked whether someone might want to empty a group for a while and
-refill it later. That question bears on GR-L8 (a) too. §4 is written for
-the recommendations. Next: GR-L11 (and GR-L8 with it), then FINAL.
+The operator's decisions (2026-11-09):
+- **GR-L1 (a)**, **GR-L3 (a)** and **GR-L10 (a)** (20:24 PT, "go with recs",
+  after asking why (a));
+- GR-L2, GR-L4 to GR-L7, GR-L9 and **GR-L12** as recommended ("no
+  preference");
+- **GR-L8 and GR-L11: (c), keep empty groups** (22:31 PT). The operator asked
+  whether someone might want to empty a group for a while and refill it
+  later, which rules out deleting a group because it is empty. Empty groups
+  stay, are listed in Move to, and are reached by an **Empty groups**
+  dropdown. A real-browser probe of the released page
+  (`checks/grouping/g4.py`, 9 PASS) showed the panel already holds a bare
+  node as its selection.
+
+§4 is the contract for every decision. **Next: the operator's approval as
+FINAL.**
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -56,8 +63,13 @@ once, and nothing jumps.**
   - **Ungroup:** for a selected group with nothing of its own, moves its parts
     up one level, keeping each where it is in the world, then deletes the
     group;
-  - **Move to…:** a list of the groups the selected object can go into,
-    plus **Top level** for a part. The object keeps its place in the world.
+  - **Move to…:** a list of the groups the selected object can go into
+    (empty ones too), plus **Top level** for a part. The object keeps its
+    place in the world.
+- **An Empty groups dropdown** (GR-L8/GR-L11 (c)), among the panel's
+  world-level rows, shown only when the world has an empty group. Choosing
+  one selects it. A group emptied by Move to, Delete or anything else stays,
+  can be refilled with Move to, and is deleted only when its owner deletes it.
 - **One new edit on the wire** (GR-L2 (a)): a `send` whose `field` is
   `parent`. Its value names the new parent (or `null` for the top level) and
   carries the local placement that keeps the object where it is. The server
@@ -187,6 +199,12 @@ the page (world placement kept, through `applyLocally`), then back.
   local value under `lamp-01`, and every tab and the saved world end with
   the crate at world (4.5, 0.25, 0). Ending the drag (f3) can't cover a send
   made before the reparent.
+- **The panel holds a bare node as its selection** (g4, real mouse, 9 PASS).
+  A node with no mesh and no parts, made by a real `add`, selected through
+  `selectForEdit`, gets the handles at its origin and its name in the Name
+  field. A real-mouse drag of its X handle moves it, and the server saves
+  it. Delete removes it, and Undo brings it back. Nothing is outlined
+  (there is nothing to draw).
 - **An animation plays in local values** (review r6, in the browser).
   `space-anim.gltf`'s clip `CrateBob` writes `crate-01`'s translation around
   (1, 0.25, 0). After a Group as GR-L6 (a) makes it (the group at that
@@ -392,14 +410,20 @@ tab of the owner changed something after this tab's check). **Decided (operator,
 
 **GR-L8. A group emptied by Move to** (fresh check, missing decision 1).
 Moving the last part out of a group leaves a node with no mesh and no parts:
-nothing to click, not in Move to's list, so it can't be selected or deleted. **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
+nothing to click, not in Move to's list, so it can't be selected or deleted.
+**Decided (operator, 2026-11-09, 22:31 PT): (c) as amended below, replacing
+the earlier "no preference" (a).** The operator asked whether someone might
+want to empty a group for a while and refill it later, which (a) rules out.
 - **(a) Recommended: delete it in the same step**, when it would have
   qualified for Ungroup (GR-L6 (a)). The Undo entry ("Move to") brings it
   back, then the part. GR-L11 extends this to the other paths.
 - (b) Leave it, and list empty groups in Move to so they can be refilled.
   They still can't be selected or deleted.
-- (c) Leave it, and make empty nodes selectable (a list, or a marker in the
-  viewport). This is a selection change for the whole app.
+- **(c) as decided: leave it; list empty groups in Move to; and add an Empty
+  groups dropdown** among the panel's world-level rows (GR8). Choosing one
+  selects it, with the handles at its origin and no outline (g4). Then it
+  can be renamed, moved, moved into another group, refilled, or deleted.
+  Nothing deletes a group because it is empty.
 
 **GR-L9. Hidden groups** (fresh check, missing decision 2). three.js doesn't
 draw a hidden node's children, so moving into or out of a hidden group hides
@@ -452,8 +476,11 @@ parts in other ways:
 - **a composite that stops halfway:** for example a disconnect between
   Group's `add` and its move.
 
-Each leaves a node nothing can click, whose name stays taken.
-- **(a) Recommended: one rule.** Whenever an Edit-panel action leaves a
+Each leaves a node nothing can click, whose name stays taken. **Decided
+(operator, 2026-11-09, 22:31 PT): (c), with GR-L8 (c)'s dropdown.** Every
+path's empty group is reached the same way, including the disconnect
+mid-composite, so no path needs its own rule and Delete is unchanged.
+- (a) One rule. Whenever an Edit-panel action leaves a
   group with no parts that would qualify for Ungroup, the same step also
   deletes it, and then any ancestor it leaves empty in turn. One Undo brings
   them all back. **That includes Delete** (a change: deleting a group's last
@@ -463,12 +490,12 @@ Each leaves a node nothing can click, whose name stays taken.
   way to reach it in the viewport (§8).
 - (b) GR-L8 only (a Move to of the last part), and the other paths leave
   empty groups, as Delete does today.
-- (c) A way to reach empty groups: list them in Move to, plus a Delete for a
-  chosen one. This is new panel surface, but it covers the disconnect too.
+- **(c) as decided:** a way to reach empty groups (GR-L8 (c)). It is new
+  panel surface, but it covers the disconnect too.
 
 **GR-L12. Unreloaded tabs that lose objects** (review S1; new in Rev 1.1).
 An Ungroup elsewhere removes the parts from an unreloaded tab's view (§2.3,
-r2), and so does a Move to that empties a group (GR-L8). **Decided
+r2). **Decided
 (operator, 2026-11-09, 21:50 PT, "no preference"): (a), as recommended.**
 - **(a) Recommended: the server ends every judged stale session in a world
   when it first broadcasts a `parent` change there.** It knows each
@@ -596,12 +623,8 @@ first before any action whose Undo the rule would refuse (GR-L5 (a)).
       addressable; its parent is `to.parent`; its vectors equal `to`'s
       exactly; `from.parent`, if any, is alive and addressable. Otherwise
       "changed elsewhere". Redo is the mirror.
-    - **With GR-L8 or GR-L11 (a), the entry also holds the emptied
-      groups' captures.** Its Undo has its own checks (review M2), in place
-      of "`from.parent` is alive": each group's name is free; each group's
-      own parent (a handle) is alive and addressable. Then it re-adds them,
-      outermost first, points each group's handle at its new node, and moves
-      the node back once every `add` is accepted.
+    - Nothing is deleted with a move (GR-L8 (c)), so `from.parent` is
+      still there to check.
   - **`group`:** the object's move and the group's descriptor.
     - Undo checks that the group's children are exactly [the object], and
       that the group's own capture without children equals the add's. Then
@@ -614,14 +637,13 @@ first before any action whose Undo the rule would refuse (GR-L5 (a)).
     - Redo moves them out, then deletes the group once every move is
       accepted.
 - **Every re-add inside a composite points the group's handle at the new
-  node** (review M2, r5): Undo of `ungroup`, Redo of `group`, and Undo of a
-  `move` that deleted emptied groups. This is what `completeAccepted` does
+  node** (review M2, r5): Undo of `ungroup` and Redo of `group`. This is what `completeAccepted` does
   for `entry.handle` (L793–816), so older entries that point at the group
   keep working. Those are a Delete of a part, a Move to into or out of it,
   a transform or Rename of the group, and a Rename after Undo and Redo of
   its Group.
 - **The group's delete goes through the existing capture window**, in
-  Ungroup and in GR-L8/GR-L11 (`registerDelete`, with the parent re-read).
+  Ungroup (`registerDelete`, with the parent re-read).
   So a node another tab moves into the group, or a move of the group itself,
   between this tab's check and its `remove` is neither lost nor restored in
   the wrong place (review M2).
@@ -647,6 +669,21 @@ a new pure module `apps/client/src/edit-group.js`).
   select is width-capped as `#ep-anim-row select` is (index.html L554–559);
   its option values are indices, never names (a node may be called "Top
   level").
+- **The Empty groups dropdown** `#ep-empty-groups` (GR-L8/GR-L11 (c)) sits
+  in a row of its own beside `#ep-sky-row`, among the world-level rows and
+  not the selected object's fields. It is in Edit mode only, and **hidden
+  when the world has none**.
+  - Its label is "Empty groups (N)". Each option shows a group's breadcrumb
+    text, so a nested empty group reads `lamp-01 › group-02`.
+  - Choosing one calls `selectForEdit` on that node, as a click would
+    (g4), then puts the select back to its label: it picks, it holds no
+    state.
+  - **An empty group** is `isEmptyGroup(node)` (`edit-group.js`): no parts
+    and nothing of its own, by GR-L6 (a)'s own test for Ungroup (no mesh,
+    model, light, camera, behaviour or teleporter). A bare helper node in a
+    file world is listed too.
+  - Its list follows the same rebuild rule as Move to (below), and its
+    `change` handler checks the node again.
 - **When the list is built** (review S8): when the select opens, or when its
   key changes (the selected node, and the world's structure), as the sky
   select (R4) does. Never on every `som:set`: a running behaviour produces
@@ -682,8 +719,9 @@ a new pure module `apps/client/src/edit-group.js`).
     the values other tabs' entries expect;
   - `groupPlan(node, { isFree })`;
   - `ungroupPlan(group)`;
-  - `moveTargets(node, som, rules)`: the groups (nodes that have parts)
-    the object may go into, sorted, each with its breadcrumb text, then
+  - `isEmptyGroup(node)` and `emptyGroups(som)`, sorted by breadcrumb text;
+  - `moveTargets(node, som, rules)`: the groups (nodes that have parts,
+    and empty groups) the object may go into, sorted, each with its breadcrumb text, then
     "Top level" for a part. Targets that `moveValue` refuses, or that GR-L4
     (with GR3's `source` rule), GR4, GR-L9 or GR-L10 refuse, are **left
     out**. A line under the select says how many were left out for a shear
@@ -697,6 +735,7 @@ a new pure module `apps/client/src/edit-group.js`).
   (`tools/som-inspector/src/app.js`).
 - **Selection afterwards:** after Group, the new group. After Ungroup, the
   first part. After Move to, the moved object, with its new breadcrumb.
+  Moving the last part out of a group leaves the group in Empty groups.
 - **Nit taken:** a pending delete of a group that another tab grew no longer
   reports the newcomer as "removed elsewhere" (`removalSeen` checks
   membership at the answer, `edit-structure.js` L96–101).
@@ -767,6 +806,10 @@ can't, with the reason). Server test files run one at a time under
     scale under 0.01 or negative; r4);
   - a shear refused in both directions;
   - equal linear parts give bitwise rotation and scale (N2);
+  - `isEmptyGroup`: true for a bare node and a group emptied by a move;
+    false for a mesh, a model, a light, a camera, a behaviour host and a
+    teleporter with no parts; `emptyGroups` sorted, with nested breadcrumbs;
+  - `moveTargets` lists an empty group;
   - `moveTargets`' exclusions.
 - **`edit-undo.js`:**
   - `move`, `group` and `ungroup` undo and redo, with the exact values
@@ -778,10 +821,8 @@ can't, with the reason). Server test files run one at a time under
     while another tab moves the node): restored in the right place;
   - **r5's sequence and its relatives** (review M2): Delete a part, Ungroup,
     Undo, Undo; a Move into a group, Ungroup, Undo, Undo; a drag of the
-    group, Ungroup, Undo, Undo; Group, Move to the top level (GR-L8), Undo,
-    Undo. Each ends with every entry undone;
-  - GR-L11: a Delete of a group's last part removes the emptied group (and an
-    emptied ancestor), and one Undo brings back all of them;
+    group, Ungroup, Undo, Undo; Group, Move to the top level, Undo, Undo.
+    Each ends with every entry undone;
   - a Group whose `add` is refused "already in use" because another node holds
     that name: nothing is moved until the retry's `add` is accepted, and the
     object ends in the retry's group. **This is the test for "the wait for
@@ -792,14 +833,21 @@ can't, with the reason). Server test files run one at a time under
 - **Wiring:** the row's enable rules (an animated node, r6's `crate-01`,
   disabled); a pending move blocks the gizmo and the fields and holds the
   runner; `som:reparent` ends a drag and refreshes; the Move to list is not
-  rebuilt by a `som:set`, and a chosen option is checked again (lift the
+  rebuilt by a `som:set`, and a chosen option is checked again; the Empty
+  groups row is hidden with none, appears when a move empties a group, and
+  its choice selects the node and resets the select (lift the
   page's own handlers, subtree-add lesson 1).
 - **Harness** (`devtasks/harness/checks/grouping/`, real mouse):
   - Group, Move to, Ungroup, and Undo and Redo of each, in two tabs, on
     `group.gltf`'s rotated group;
   - **f3 as a check:** no jump when another tab regroups the dragged object;
   - **r6 as a check:** Group is disabled for `space-anim.gltf`'s
-    `crate-01`, and enabled for its plain cubes.
+    `crate-01`, and enabled for its plain cubes;
+  - **g4 extended:** Group a cube, Move it to the top level, then pick the
+    empty `group-01` in **Empty groups**. The handles attach, and a real
+    drag moves the group; Move the cube back into it with **Move to**; then
+    empty it again and **Delete** it from the dropdown's selection. Undo
+    brings it back.
 
   **Stated, not tested:** r3's in-flight race between two tabs of one owner
   (one round trip wide; §8).
@@ -829,6 +877,12 @@ can't, with the reason). Server test files run one at a time under
 5. **Redo** three times, then select `group-01` and press **Ungroup**: both
    cubes stay where they are, `group-01` is gone, Undo brings it back with
    both inside.
+5a. Select one cube and **Move to… → Top level**, then the other. Both stay
+   where they are, and **Empty groups (1)** appears. Pick `group-01` there:
+   the handles appear at its origin and the Name field reads `group-01`.
+   Select a cube and **Move to… → group-01**: the list in Empty groups
+   disappears. Move both out again, pick it, and press **Delete**: it is
+   gone, and Undo brings it back.
 6. In a second tab (a visitor), watch steps 1–5: nothing jumps.
 7. A tab opened before the deploy, not reloaded: at the first Group or Move
    to in another tab, it shows "disconnected" (GR-L12). Press **Connect** in
@@ -850,7 +904,7 @@ specifics:
     `edit-structure.js`, `app.js`;
   - `apps/client/index.html`;
   - `tools/som-inspector/src/app.js`;
-  - `devtasks/harness/checks/grouping/`, and
+  - `devtasks/harness/checks/grouping/` (g4 among them), and
     `devtasks/harness/checks/scripting-4d/c1.py` (its hello assertion only);
   - test files under `packages/*/test/`, `packages/*/tests/` and
     `apps/client/tests/`, including §5's existing hellos.
@@ -874,13 +928,20 @@ specifics:
   - **The release notes name:**
     - the stale-tab change: no edits, no host, and disconnected at the first
       regroup;
-    - the stated limits (GR-L3, GR-L10, GR-L11, r3's race);
-    - Delete of a group's last part now also removes the emptied group
-      (GR-L11);
+    - the stated limits (GR-L3, GR-L10, r3's race);
+    - the Empty groups dropdown (a group is never deleted because it is
+      empty);
     - the pending-delete fix (f2).
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.2** (2026-11-09, 22:31 PT): GR-L8 and GR-L11 decided as (c),
+  keeping empty groups, with the Empty groups dropdown (GR8). The operator
+  asked first what control it entails, and approved the answer. Before the
+  contract, `checks/grouping/g4.py` probed the released page with a real
+  mouse: a bare node can be selected, dragged, deleted and restored (9
+  PASS). GR7's emptied-group captures are gone, and so is GR-L11's Delete
+  change.
 - **Rev 1.1, same day:** GR-L12 (a) decided; GR-L11 questioned (status line).
 - **Rev 1.1** (2026-11-09): **the outside review of `34917de8`**, by Claude
   Fable 5.2, per its first lines. It ran on a clone with code: 121 + 30 + 30
@@ -958,8 +1019,8 @@ specifics:
 - r3's in-flight race between two tabs of one owner (review S2): a tab that
   sees its own transform accepted after a `som:reparent` of that node could
   re-send the reparent's value.
-- A way to reach an empty group that a disconnect mid-composite leaves
-  (GR-L11's stated limit).
+- An outline or marker for a selected empty group in the viewport (g4: the
+  handles show its origin, nothing is outlined).
 - A move into a scripted group that asks the Enable grant question
   ("the behaviour on X will be able to change Y"), instead of GR-L10 (a)'s
   refusal.
