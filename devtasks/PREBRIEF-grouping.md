@@ -1,10 +1,10 @@
 # Pre-brief: grouping and ungrouping (`grouping`)
 
-Status: **DRAFT, Revision 0.2 (2026-11-09).** Rev 0.1 plus the fresh-agent
-check (§7). That check found 4 must-fix and 9 should-fix, plus missing
-decisions; each finding Claude took was reproduced first. **Decisions GR-L1
-to GR-L10 are open** (§3), each with a recommendation; §4 is written for the
-recommendations.
+Status: **DRAFT, Revision 0.3 (2026-11-09).** Rev 0.2 (the fresh-agent check,
+§7) plus the operator's decisions: **GR-L1 (a) and GR-L3 (a)**, and GR-L2 and
+GR-L4 to GR-L9 as recommended ("no preference"). **GR-L10 is open**: the
+operator asked why (a) is recommended (answered in the session). §4 is written
+for the recommendations.
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -202,7 +202,7 @@ Binding from earlier rounds: everything in `PREBRIEF-selection-parts.md` §3
 and `PREBRIEF-subtree-add.md` §3.
 
 **GR-L1. The controls.** The Edit panel selects one object at a time; Shift
-multi-select is a separate candidate round.
+multi-select is a separate candidate round. **Decided (operator, 2026-11-09): (a), as recommended.**
 - **(a) Recommended: three controls for one selected object.** **Group**,
   **Ungroup** and **Move to…** (§1). Two objects end up together in two
   steps: Group the first, then Move the second into that group. A later
@@ -214,7 +214,7 @@ multi-select is a separate candidate round.
   It is a new gesture over the handles, which needs its own browser probe
   first (selection-parts lesson 1); the list in (a) needs none.
 
-**GR-L2. The edit on the wire.**
+**GR-L2. The edit on the wire.** **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended: a `send` with `field: 'parent'` and
   `value: { parent, translation, rotation, scale }`.** `parent` is a name, or
   `null` for the top level. The vectors are the new local placement, which
@@ -229,7 +229,7 @@ multi-select is a separate candidate round.
 - (c) A new message type: a schema, a validator key, a direction, and
   nothing gained over (a).
 
-**GR-L3. Unreloaded tabs** (§2.3).
+**GR-L3. Unreloaded tabs** (§2.3). **Decided (operator, 2026-11-09): (a), as recommended.**
 - **(a) Recommended: `addFields` 4. A tab below it may not edit (`send`
   included) and may not be the behaviour host.** The server refuses its
   `send` with the stale message, and gives it the host role in neither of
@@ -245,7 +245,7 @@ multi-select is a separate candidate round.
   connected. This narrows the cost of (a), but needs per-session history on
   the server, and doesn't cover the host.
 
-**GR-L4. What may move, and where.**
+**GR-L4. What may move, and where.** **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended:**
   - **The object moved:** any node a `send` may edit today: not a live
     avatar, and not external content or inside it.
@@ -260,7 +260,7 @@ multi-select is a separate candidate round.
   be *in* a group), and a model's node already holds its drawing.
 - (b) As (a), but models may be parents too. One rule fewer, and untried.
 
-**GR-L5. The bounds** (SA-L2 against created content).
+**GR-L5. The bounds** (SA-L2 against created content). **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended: the server refuses a move or a parented `add` when,
   afterwards, the destination's top-level tree is past one of SA-L2's counts
   and the change made that count larger than it was.**
@@ -273,7 +273,7 @@ multi-select is a separate candidate round.
   build an oversized group.
 - (c) No bounds. Such a group can't be copied, and its Delete asks first.
 
-**GR-L6. What Group and Ungroup make.**
+**GR-L6. What Group and Ungroup make.** **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended:**
   - **Group**, step by step:
     1. The new group goes into the object's parent, at the object's local
@@ -301,7 +301,7 @@ multi-select is a separate candidate round.
   object. This gives "Ungroup" two meanings.
 
 **GR-L7. Several messages, and the server stops halfway** (a race: another
-tab of the owner changed something after this tab's check).
+tab of the owner changed something after this tab's check). **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended: whatever was accepted is the outcome, recorded as one
   entry; the panel names what didn't follow.**
   - **An Ungroup:** if a part's move is refused, the group stays, and the
@@ -315,7 +315,7 @@ tab of the owner changed something after this tab's check).
 
 **GR-L8. A group emptied by Move to** (fresh check, missing decision 1).
 Moving the last part out of a group leaves a node with no mesh and no parts:
-nothing to click, not in Move to's list, so it can't be selected or deleted.
+nothing to click, not in Move to's list, so it can't be selected or deleted. **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended: delete it in the same step**, when it would have
   qualified for Ungroup (GR-L6 (a)). The Undo entry ("Move to") brings it
   back, then the part.
@@ -327,7 +327,7 @@ nothing to click, not in Move to's list, so it can't be selected or deleted.
 **GR-L9. Hidden groups** (fresh check, missing decision 2). three.js doesn't
 draw a hidden node's children, so moving into or out of a hidden group hides
 or shows the object, and Ungroup of a hidden group shows its parts, for
-everyone.
+everyone. **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended: refuse any change of drawn visibility.** Group, Move to
   and Ungroup are disabled ("show the group first") when the object's drawn
   visibility would change: a hidden node on one side of the move and not the
@@ -340,7 +340,8 @@ everyone.
 **GR-L10. Behaviours** (fresh check, missing decision 3). A behaviour may
 write its own node and its descendants (§2.5), so a move into a scripted
 node gives its behaviour the moved object without the grant question, and a
-move out takes it away.
+move out takes it away. **Open: the operator asked why (a) is recommended
+(2026-11-09); answered in the session.**
 - **(a) Recommended: refuse a move that changes which behaviours may write
   the object.** The set of behaviour-carrying ancestors of the moved object
   must be the same before and after. The server checks it (it holds the
@@ -641,6 +642,8 @@ specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 0.3** (2026-11-09): the operator's decisions (status line). GR-L10
+  open.
 - **Rev 0.2** (2026-11-09): **the fresh-agent check of Rev 0.1.** Claude
   reproduced before taking: f1, f2 (cases A and B, 3 m off), f3 (the 3.009 m
   jump, in the browser), and in the source the stale host (`session.js`
