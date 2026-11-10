@@ -265,12 +265,17 @@ test('policy A1/A2: a node allows only its four fields and the teleporter leaf',
   assert.equal(decide('visible', false).ok, true)
   assert.equal(decide('extras.atrium.teleporter.destination', '#').ok, true)
 
-  for (const field of ['extras', 'extras.atrium', 'parent', 'children', 'mesh',
+  for (const field of ['extras', 'extras.atrium', 'children', 'mesh',
                        'mesh.name', 'mesh.weights', 'mesh.extras', 'skin', 'extensions', 'intensity']) {
     const d = decide(field, field === 'extras' || field === 'extras.atrium' ? { a: 1 } : 'x')
     assert.equal(d.ok, false, `field "${field}" must be refused`)
     assert.equal(d.code, 'PERMISSION_DENIED', `field "${field}" must be PERMISSION_DENIED`)
   }
+
+  // grouping GR2: `parent` is a node field now, with one value shape; anything
+  // else is INVALID_VALUE (the world checks are session.js's, after this).
+  assert.equal(decide('parent', 'x').code, 'INVALID_VALUE', 'a bare name is not the parent value')
+  assert.equal(decide('parent', { parent: 'lamp-01', translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }).ok, true, 'the GR2 value')
 
   // A8/A9: `name` is now allowed on a node — but only with a string value.
   // The D3 rules themselves are enforced by the server's rename branch.

@@ -174,7 +174,7 @@ async function hello(ws, messages, id) {
   // scripting-4c S2 / scripting-4d G-L9 — a 4c page sends `scriptRunner: 2` and
   // is never the host now. This test only sends edits, so the value is
   // incidental; it is 2 to match a 4c page.
-  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
+  ws.send(JSON.stringify({ type: 'hello', id, capabilities: { tick: { interval: 5000 }, scriptRunner: 2, addFields: 4 } }))   // grouping GR5: a current page is level 4
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'the hello reply arrives')
   return reply

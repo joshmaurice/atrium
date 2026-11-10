@@ -18,7 +18,7 @@ import { dirname, resolve } from 'node:path'
 import { WebSocketServer } from 'ws'
 import { AtriumClient } from '../src/AtriumClient.js'
 import { createWorld } from '../../server/src/world.js'
-import { attachSessionHandlers, STALE_CLIENT_MESSAGE } from '../../server/src/session.js'
+import { attachSessionHandlers, STALE_CLIENT_MESSAGE, STALE_HELLO_MESSAGE } from '../../server/src/session.js'
 import { createPresence } from '../../server/src/presence.js'
 import { createEditUndo } from '../../../apps/client/src/edit-undo.js'
 import { prepareRestore } from '../../../apps/client/src/edit-duplicate.js'
@@ -36,13 +36,17 @@ async function waitFor(pred, ms = 4000) {
   return false
 }
 
-async function startWorld() {
+// grouping GR5 (GR-L12 (a)) — a stale tab's hello is refused now. The R6 test
+// below reaches the layer behind it with `refuseStaleHello: false` (the
+// product never sets it); the GR5 test after it checks the refusal itself.
+async function startWorld({ refuseStaleHello = true } = {}) {
   const world = await createWorld(SPACE)
   const http = createServer()
   const port = await new Promise((res) => http.listen(0, '127.0.0.1', () => res(http.address().port)))
   const wss = new WebSocketServer({ noServer: true })
   const { closeKeepalive } = attachSessionHandlers({
     wss, world, sessions: new Map(), presence: createPresence(), worldOwnerUserId: OWNER, worldId: 'lifecycle',
+    refuseStaleHello,
   })
   http.on('upgrade', (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req, OWNER)))
   closers.push(async () => { closeKeepalive(); wss.close(); http.close() })
@@ -111,8 +115,8 @@ function wireUndo(client) {
   return { undo, clickDelete, messages }
 }
 
-test('R6 (review M1): a stale tab’s Delete is refused by the real server; nothing is recorded, and the object stays everywhere', async () => {
-  const { world, port } = await startWorld()
+test('R6 (review M1, second layer): a stale tab’s Delete is refused by the real server; nothing is recorded, and the object stays everywhere', async () => {
+  const { world, port } = await startWorld({ refuseStaleHello: false })
   const { client, hellos } = await ownerTab(port, { stale: true })
   assert.deepEqual(Object.keys(hellos[0].capabilities).sort(), ['scriptRunner', 'tick'], 'the hello a cdfe88a8 page sends')
   const { undo, clickDelete } = wireUndo(client)
@@ -128,10 +132,34 @@ test('R6 (review M1): a stale tab’s Delete is refused by the real server; noth
   assert.ok(client.som.getNodeByName('crate-01'), 'and in the tab’s')
 })
 
+test('grouping GR5 (GR-L12 (a)): a stale tab’s hello is refused by the real server, with the reload text, and it never becomes ready', async () => {
+  const { port } = await startWorld()
+  const client = new AtriumClient({ connectTimeout: 0 })
+  const errors = []
+  let ready = false
+  client.on('error', (e) => errors.push(e))
+  client.on('session:ready', () => { ready = true })
+  client.connect(`ws://127.0.0.1:${port}`, { scriptRunner: true })
+  const ws = client._ws
+  const send = ws.send.bind(ws)
+  ws.send = (data) => {
+    const msg = JSON.parse(data)
+    if (msg.type === 'hello') { delete msg.capabilities.addFields; return send(JSON.stringify(msg)) }
+    return send(data)
+  }
+  closers.push(async () => client.disconnect?.())
+  assert.ok(await waitFor(() => errors.length > 0), 'an error arrives')
+  assert.equal(errors[0].code, 'PERMISSION_DENIED')
+  assert.equal(errors[0].message, `PERMISSION_DENIED: ${STALE_HELLO_MESSAGE}`, 'the text the page shows after "Connect failed: "')
+  await delay(200)
+  assert.equal(ready, false, 'never ready')
+  assert.equal(client.som?.getNodeByName?.('crate-01') ?? null, null, 'no world arrived')
+})
+
 test('R6: a current tab’s Delete and Undo work through the real server', async () => {
   const { world, port } = await startWorld()
   const { client, hellos } = await ownerTab(port, { stale: false })
-  assert.equal(hellos[0].capabilities.addFields, 3)
+  assert.equal(hellos[0].capabilities.addFields, 4, 'grouping GR5: the level is 4')
   const { undo, clickDelete } = wireUndo(client)
   const before = prepareRestore(world.som.getNodeByName('crate-01')._node).descriptor
   clickDelete('crate-01')

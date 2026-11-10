@@ -80,7 +80,7 @@ function waitForClose(ws) {
 }
 
 // richer-add R6 — the first-party app's hello carries addFields beside scriptRunner.
-async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 3 }) {
+async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }) {   // grouping GR5: the level is 4
   ws.send(JSON.stringify({ type: 'hello', id, capabilities }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'the hello reply arrives')
@@ -492,17 +492,19 @@ test('G2/R14: the registry loads a document world with the world id as its `logI
 // Election on `3` in BOTH places, each alone (P22)
 // ===========================================================================
 
+// grouping GR5 — the `scriptRunner: 2` owners below declare a current page's
+// `addFields`, so they test the `=== 3` rule alone (a stale hello is refused).
 test('G2: the `hello` election — a `scriptRunner: 2` owner is never the host, a `3` is', async () => {
   const { port } = await startHostWorld()
   const two = await connect(port)
   const three = await connect(port)
   try {
-    const h2 = await hello(two.ws, two.messages, 'owner-2', { tick: { interval: 5000 }, scriptRunner: 2 })
+    const h2 = await hello(two.ws, two.messages, 'owner-2', { tick: { interval: 5000 }, scriptRunner: 2, addFields: 4 })
     assert.equal(h2.canEdit, true, 'a 2 still owns the world')
     assert.equal(h2.scriptHost, false, 'but the hello election requires 3')
     assert.equal('hostGen' in h2, false)
 
-    const h3 = await hello(three.ws, three.messages, 'owner-3', { tick: { interval: 5000 }, scriptRunner: 3 })
+    const h3 = await hello(three.ws, three.messages, 'owner-3', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 })
     assert.equal(h3.scriptHost, true, 'the 3 takes the role')
     assert.equal(h3.hostGen, 1)
   } finally {
@@ -516,8 +518,8 @@ test('G2: the HANDOVER election (`canRunBehaviors`) — the role goes to a `3` a
   const three = await connect(port)
   try {
     // A `2` connects first: it can never hold the role, so the `3` takes it.
-    await hello(two.ws, two.messages, 'owner-2', { tick: { interval: 5000 }, scriptRunner: 2 })
-    const h3 = await hello(three.ws, three.messages, 'owner-3', { tick: { interval: 5000 }, scriptRunner: 3 })
+    await hello(two.ws, two.messages, 'owner-2', { tick: { interval: 5000 }, scriptRunner: 2, addFields: 4 })
+    const h3 = await hello(three.ws, three.messages, 'owner-3', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 })
     assert.equal(h3.scriptHost, true)
     assert.equal(h3.hostGen, 1)
 
@@ -527,7 +529,7 @@ test('G2: the HANDOVER election (`canRunBehaviors`) — the role goes to a `3` a
     three.ws.close()
     await waitForClose(three.ws)
     await delay(120)
-    const h2b = await hello(four.ws, four.messages, 'owner-2b', { tick: { interval: 5000 }, scriptRunner: 2 })
+    const h2b = await hello(four.ws, four.messages, 'owner-2b', { tick: { interval: 5000 }, scriptRunner: 2, addFields: 4 })
     assert.equal(h2b.scriptHost, false, 'the handover refused to hand the role to a 2')
     assert.equal(two.messages.filter((m) => m.type === 'script-host' && m.active === true).length, 0,
       'and the earlier 2 was never offered it')

@@ -117,7 +117,7 @@ const KINDS = {
 }
 
 /** An owned world; `owner` is a session whose world adds are the owner's. */
-async function startWorld(kind = 'file', { userIdFor = () => 'user-a' } = {}) {
+async function startWorld(kind = 'file', { userIdFor = () => 'user-a', refuseStaleHello = true } = {}) {
   const world = await KINDS[kind]()
   const http = createServer()
   const port = await listen(http)
@@ -130,6 +130,7 @@ async function startWorld(kind = 'file', { userIdFor = () => 'user-a' } = {}) {
     wss, world, sessions, presence,
     worldOwnerUserId: 'user-a',
     onSaveableMutation: () => { state.saves += 1 },
+    refuseStaleHello,
   })
   http.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => { wss.emit('connection', ws, req, userIdFor(n++)) })
@@ -610,20 +611,23 @@ describe('T7: the level', () => {
     return { ws, messages, reply }
   }
 
-  test('the server’s hello carries capabilities.addFields 3, valid against hello.server.json', async () => {
+  // grouping GR5 — the level is 4 now (a client that applies parent changes).
+  test('the server’s hello carries capabilities.addFields 4, valid against hello.server.json', async () => {
     const { validate } = await import('@atrium/protocol')
     const { port } = await startWorld()
     const s = await session(port, CAPS)
     try {
-      assert.equal(s.reply.capabilities.addFields, 3)
+      assert.equal(s.reply.capabilities.addFields, 4)
       assert.equal(validate('server', s.reply).valid, true)
     } finally {
       s.ws.close()
     }
   })
 
-  test('a 42aa56ff tab (scriptRunner 3, addFields 2): its world add and remove are refused with R6’s text; its avatar add is accepted', async () => {
-    const { world, port } = await startWorld()
+  // grouping GR5 (GR-L12 (a)) — a stale tab's hello is refused now
+  // (grouping.test.js); this reaches the second layer behind it.
+  test('a 42aa56ff tab (scriptRunner 3, addFields 2), second layer: its world add and remove are refused with R6’s text; its avatar add is accepted', async () => {
+    const { world, port } = await startWorld('file', { refuseStaleHello: false })
     const s = await session(port, { tick: { interval: 5000 }, scriptRunner: 3, addFields: 2 })
     try {
       const a = await sendAdd(s, { name: 'from-stale' })
@@ -648,8 +652,8 @@ describe('T7: the level', () => {
   })
 
   for (const [label, capabilities] of [
-    ['addFields 3', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 3 }],
     ['addFields 4', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }],
+    ['addFields 5', { tick: { interval: 5000 }, scriptRunner: 3, addFields: 5 }],
     ['neither capability', { tick: { interval: 5000 } }],
   ]) {
     test(`a session with ${label} adds a tree and removes it`, async () => {

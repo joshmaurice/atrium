@@ -565,9 +565,12 @@ export async function createWorld(gltfPath, { baseUrl, logId: worldLogId = null 
     return som.getNodeByName(name)
   }
 
-  function setField(nodeName, field, value) {
+  function setField(nodeName, field, value, judged = null) {
     const target = som.getObjectByName(nodeName)
     if (!target) return { ok: false, code: 'NODE_NOT_FOUND' }
+    // grouping GR3 — the parent change's own branch, as the rename's. R3: it
+    // applies to the node session.js judged, and to the parent it checked.
+    if (field === 'parent') return reparent(target, value, judged)
     // A8 — the explicit rename path. `world.setField` handles `field === 'name'`
     // itself through SOMDocument.renameNode's return value, so a duplicate or
     // invalid name comes back INVALID_VALUE instead of setPath's INVALID_FIELD.
@@ -584,6 +587,20 @@ export async function createWorld(gltfPath, { baseUrl, logId: worldLogId = null 
       return { ok: false, code: 'INVALID_FIELD' }
     }
     return { ok: true }
+  }
+
+  /**
+   * grouping GR3 — apply a parent change checked by session.js. `judged` is
+   * `{ target, parent }`: the node authorizeSend judged and the parent
+   * parentChangeProblem checked (R3: only those may be touched).
+   */
+  function reparent(target, value, judged) {
+    const node = judged?.target ?? target
+    if (node !== target) return { ok: false, code: 'INVALID_VALUE', message: 'move target is not the named node' }
+    const parent = value?.parent == null ? null : (judged?.parent ?? som.getNodeByName(value.parent))
+    if (value?.parent != null && !parent) return { ok: false, code: 'NODE_NOT_FOUND' }
+    const result = som.reparentNode(node, parent, value)
+    return result.ok ? { ok: true } : { ok: false, code: result.code, message: result.message }
   }
 
   function addNode(nodeDescriptor, parentName) {
@@ -720,9 +737,11 @@ export async function createWorldFromDocument(documentJson, { logId: worldLogId 
 
   function getNode(name) { return som.getNodeByName(name) }
 
-  function setField(nodeName, field, value) {
+  function setField(nodeName, field, value, judged = null) {
     const target = som.getObjectByName(nodeName)
     if (!target) return { ok: false, code: 'NODE_NOT_FOUND' }
+    // grouping GR3 — the parent change (see createWorld's setField).
+    if (field === 'parent') return reparent(target, value, judged)
     // A8 — explicit rename path (see createWorld's setField). R3 — the resolved
     // target is handed to renameNode so only the authorized object is renamed.
     if (field === 'name') {
@@ -732,6 +751,20 @@ export async function createWorldFromDocument(documentJson, { logId: worldLogId 
     }
     try { som.setPath(target, field, value) } catch { return { ok: false, code: 'INVALID_FIELD' } }
     return { ok: true }
+  }
+
+  /**
+   * grouping GR3 — apply a parent change checked by session.js. `judged` is
+   * `{ target, parent }`: the node authorizeSend judged and the parent
+   * parentChangeProblem checked (R3: only those may be touched).
+   */
+  function reparent(target, value, judged) {
+    const node = judged?.target ?? target
+    if (node !== target) return { ok: false, code: 'INVALID_VALUE', message: 'move target is not the named node' }
+    const parent = value?.parent == null ? null : (judged?.parent ?? som.getNodeByName(value.parent))
+    if (value?.parent != null && !parent) return { ok: false, code: 'NODE_NOT_FOUND' }
+    const result = som.reparentNode(node, parent, value)
+    return result.ok ? { ok: true } : { ok: false, code: result.code, message: result.message }
   }
 
   function addNode(nodeDescriptor, parentName) {

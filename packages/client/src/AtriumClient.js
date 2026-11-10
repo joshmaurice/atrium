@@ -829,7 +829,9 @@ export class AtriumClient extends EventEmitter {
       const capabilities = { tick: { interval: 5000 } }
       if (scriptRunner) {
         capabilities.scriptRunner = 3
-        capabilities.addFields = 3
+        // grouping GR5 — 4: this client applies a `parent` change. A server at
+        // 4 refuses the hello of a page below it (GR-L12 (a)).
+        capabilities.addFields = 4
       }
       const helloMsg = {
         type: 'hello',

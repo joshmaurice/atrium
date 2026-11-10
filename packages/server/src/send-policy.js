@@ -68,6 +68,8 @@ const MATERIAL_PROPS = new Set([
 
 /** The one node extras leaf that first-party code writes (teleporter). */
 const TELEPORTER_LEAF = 'extras.atrium.teleporter.destination'
+/** grouping GR2 — the parent-change field of a node `send`. */
+export const PARENT_FIELD = 'parent'
 
 const CAMERA_FIELDS = new Set(['type', 'yfov', 'aspectRatio', 'znear', 'zfar', 'xmag', 'ymag'])
 const CAMERA_TYPES  = new Set(['perspective', 'orthographic'])
@@ -548,8 +550,9 @@ export function animationValueProblem(value) {
   return null
 }
 
-/** Z2 — a node carries a model (the leaf is only allowed there). */
-function carriesModel(node) {
+/** Z2 — a node carries a model (the leaf is only allowed there). grouping GR3
+ *  step 3 — exported: a node that carries a model can't be a new parent. */
+export function carriesModel(node) {
   const model = node?.extras?.atrium?.model
   return model !== undefined && model !== null
 }
@@ -1856,6 +1859,14 @@ function authorizeNodeSend({ node, field, value, isLiveAvatar, objectIdInUse = n
       : deny(SEND_INVALID, `name must be a non-empty string of at most ${NAME_MAX} characters`)
   }
 
+  // grouping GR2 — a parent change: the new parent's name (or null for the top
+  // level) and the local placement that keeps the node where it is. The checks
+  // that need the world (the parent exists, isn't blocked, no cycle, the
+  // bounds, the behaviour rule) are session.js's, after this.
+  if (field === PARENT_FIELD) {
+    return checkParentValue(value)
+  }
+
   // The single node extras leaf (D2): the teleporter destination. L5/K4 — the
   // same exported checker the `add` path uses.
   if (field === TELEPORTER_LEAF) {
@@ -2588,4 +2599,177 @@ export function checkAddNode(node, { avatar = false } = {}) {
   // T12 — the material references, once over the whole message.
   const refs = materialRefsProblem(node)
   return refs ? addDeny(refs) : null
+}
+
+
+// ---------------------------------------------------------------------------
+// grouping GR2 — the parent change's value
+// ---------------------------------------------------------------------------
+
+const PARENT_KEYS = ['parent', 'rotation', 'scale', 'translation']
+
+/**
+ * GR2 — `{ parent, translation, rotation, scale }`, exactly those keys:
+ * `parent` null or a non-empty name of at most 256 characters, the three
+ * vectors with `send`'s own predicates and texts.
+ */
+export function checkParentValue(value) {
+  if (!isPlainObject(value)) return deny(SEND_INVALID, 'parent must be an object { parent, translation, rotation, scale }')
+  const keys = Object.keys(value).sort()
+  if (keys.length !== PARENT_KEYS.length || keys.some((k, i) => k !== PARENT_KEYS[i])) {
+    return deny(SEND_INVALID, 'parent must have exactly the keys parent, translation, rotation and scale')
+  }
+  const { parent, translation, rotation, scale } = value
+  if (parent !== null && !(typeof parent === 'string' && parent.length > 0 && parent.length <= NAME_MAX)) {
+    return deny(SEND_INVALID, `parent.parent must be null or a non-empty name of at most ${NAME_MAX} characters`)
+  }
+  if (!isVec3(translation)) return deny(SEND_INVALID, 'translation must be 3 finite numbers')
+  if (!isVec4(rotation)) return deny(SEND_INVALID, 'rotation must be 4 finite numbers')
+  if (!isUnitQuaternion(rotation)) return deny(SEND_INVALID, 'rotation must be a unit quaternion')
+  if (!isVec3(scale)) return deny(SEND_INVALID, 'scale must be 3 finite numbers')
+  if (!isNonZeroScale(scale)) return deny(SEND_INVALID, 'scale components must be non-zero')
+  return allow()
+}
+
+// ---------------------------------------------------------------------------
+// grouping GR4 — the bounds on a live tree (SA-L2 against created content).
+//
+// TWO COPIES: this one and `packages/client/src/add-spec.js`'s, which the
+// panel uses to ask first. `packages/server/test/grouping-counts.test.js`
+// holds them to the same answers on the same trees. Both work on SOM nodes
+// through their public getters only (`parent`, `children`, `mesh`, `extras`).
+// ---------------------------------------------------------------------------
+
+const ownSource = (n) => {
+  const a = n?.extras?.atrium
+  return a !== null && typeof a === 'object' && a.source != null
+}
+
+/** The top-level ancestor of `node` (itself at the top level). */
+export function topLevelOf(node) {
+  let n = node
+  while (n.parent) n = n.parent
+  return n
+}
+
+/** Generations from `top` down to `node` (0 when they are the same). */
+export function generationBelow(top, node) {
+  let g = 0
+  for (let n = node; n && n !== top; n = n.parent) g += 1
+  return g
+}
+
+/**
+ * GR4 — the nodes (the root included), the deepest generation below `root`
+ * (the root is 0) and the primitives of a live tree. A `source` container
+ * counts as one node and nothing under it is counted (review S7: the server
+ * holds a container's loaded nodes in file worlds only, the client always).
+ * `exclude` leaves one subtree out (a move inside one tree is not counted
+ * twice).
+ */
+export function treeCounts(root, exclude = null) {
+  let nodes = 0, depth = 0, primitives = 0
+  const stack = [[root, 0]]
+  while (stack.length > 0) {
+    const [n, g] = stack.pop()
+    if (n === exclude) continue
+    nodes += 1
+    if (g > depth) depth = g
+    const prims = n.mesh?.primitives
+    if (Array.isArray(prims)) primitives += prims.length
+    if (ownSource(n)) continue
+    for (const c of n.children) stack.push([c, g + 1])
+  }
+  return { nodes, depth, primitives }
+}
+
+const BOUND_OF = { nodes: SUBTREE_NODES_MAX, depth: SUBTREE_DEPTH_MAX, primitives: SUBTREE_PRIMITIVES_MAX }
+
+/**
+ * GR4 — the destination's top-level tree before and after `node` moves under
+ * `parent`, or null for a move to the top level (never refused by size).
+ * `sub` stands in for the moved tree's counts (an `add`'s descriptor).
+ */
+export function moveCounts(node, parent, sub = null) {
+  if (!parent) return null
+  const top = topLevelOf(parent)
+  const before = treeCounts(top)
+  const inside = node ? topLevelOf(node) === top : false
+  const base = inside ? treeCounts(top, node) : before
+  const moved = sub ?? treeCounts(node)
+  const g = generationBelow(top, parent)
+  return {
+    before,
+    after: {
+      nodes: base.nodes + moved.nodes,
+      depth: Math.max(base.depth, g + 1 + moved.depth),
+      primitives: base.primitives + moved.primitives,
+    },
+  }
+}
+
+/**
+ * GR4 (GR-L5 (a)) — the count a change would take past its bound that it is
+ * not already past, or null. A tree already over a count may grow.
+ */
+export function treeBoundsProblem(counts) {
+  if (!counts) return null
+  for (const k of ['nodes', 'depth', 'primitives']) {
+    if (counts.after[k] > BOUND_OF[k] && !(counts.before[k] > BOUND_OF[k])) return k
+  }
+  return null
+}
+
+/** GR4's refusal text. */
+export const TREE_BOUNDS_MESSAGE = 'the group would be too large to copy'
+
+/**
+ * GR4 — an `add` descriptor's own counts, in `treeCounts`' terms (the root is
+ * generation 0). Server only: the `add` case runs GR4 when `parent` is given.
+ */
+export function descriptorCounts(desc) {
+  let nodes = 0, depth = 0, primitives = 0
+  const stack = [[desc, 0]]
+  while (stack.length > 0) {
+    const [d, g] = stack.pop()
+    if (!isPlainObject(d)) continue
+    nodes += 1
+    if (g > depth) depth = g
+    const prims = isPlainObject(d.mesh) ? d.mesh.primitives : undefined
+    if (Array.isArray(prims)) primitives += prims.length
+    if (Array.isArray(d.children)) for (const c of d.children) stack.push([c, g + 1])
+  }
+  return { nodes, depth, primitives }
+}
+
+// ---------------------------------------------------------------------------
+// grouping GR3 — the parent checks that walk the tree
+// ---------------------------------------------------------------------------
+
+/** GR3 step 2 (review S7) — `node` carries, or is under a node that carries, an own `source`. */
+export function inSourceContainer(node) {
+  for (let n = node; n; n = n.parent) if (ownSource(n)) return true
+  return false
+}
+
+const carriesBehavior = (n) => {
+  const a = n?.extras?.atrium
+  return a !== null && typeof a === 'object' && a.behavior != null
+}
+
+/**
+ * GR3 step 6 (GR-L10 (a)) — would moving `node` under `parent` change which
+ * behaviours may write it? A behaviour may write its own node and that node's
+ * descendants, so the behaviour-carrying ANCESTORS of `node` (not `node`
+ * itself, and not its subtree, which move along) must be the same set before
+ * and after. "Behaviour-carrying": has the leaf, enabled or not.
+ */
+export function behaviorAncestorsChange(node, parent) {
+  const before = new Set()
+  for (let n = node.parent; n; n = n.parent) if (carriesBehavior(n)) before.add(n)
+  const after = new Set()
+  for (let n = parent; n; n = n.parent) if (carriesBehavior(n)) after.add(n)
+  if (before.size !== after.size) return true
+  for (const n of before) if (!after.has(n)) return true
+  return false
 }

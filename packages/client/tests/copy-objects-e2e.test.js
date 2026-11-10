@@ -480,7 +480,7 @@ test('subtree-add: a visitor copies a lamp with parts in A, pastes it in B; the 
   }
   const alice = tab()
   await alice.go(A.url('/worlds/alice/garden', 'user-alice'))
-  assert.equal(alice.client.serverAddFields, 3, 'the hello says level 3')
+  assert.equal(alice.client.serverAddFields, 4, 'the hello says level 4 (grouping GR5)')
   const aliceAnswer = answers(alice.client)
   assert.equal(await aliceAnswer(alice.client.addNode(cube('Front door', DOOR))), 'accepted')
   assert.equal(await aliceAnswer(alice.client.addNode(lamp)), 'accepted', 'the tree, in one add')

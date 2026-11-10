@@ -33,7 +33,7 @@
         "physics": { "type": "boolean" },
         "chat": { "type": "boolean" },
         "scriptRunner": { "type": "integer", "enum": [1, 2, 3], "description": "scripting-4b-2 F-L6 / scripting-4c S2 / scripting-4d G-L9: 1 declares this tab runs behaviour graphs (4b-2); 2 also handles forwarded `activate` (4c); 3 runs 4d graphs. Election and handover require 3. The enum keeps 1 and 2 so an unreloaded 4c tab still connects and is simply never the host." },
-        "addFields": { "type": "integer", "minimum": 1, "description": "richer-add R6, subtree-add T7: the `add` field set this client keeps (2 = richer-add's, 3 = children and material refs). Sent only beside `scriptRunner`. A server refuses a world `add` or a `remove` from a session that sends `scriptRunner` without `addFields` of the server's own level or more (3 since subtree-add): an unreloaded tab, whose older ingestNode drops fields and whose Undo would restore a poorer copy. An integer, not an enum, so a later page with a higher value still connects." }
+        "addFields": { "type": "integer", "minimum": 1, "description": "richer-add R6, subtree-add T7, grouping GR5: the `add` field set this client keeps (2 = richer-add's, 3 = children and material refs, 4 = it applies parent changes). Sent only beside `scriptRunner`. A server refuses the hello of a session that sends `scriptRunner` without `addFields` of the server's own level or more (4 since grouping; before it, a world `add` or a `remove`): an unreloaded tab, which could not apply a parent change. An integer, not an enum, so a later page with a higher value still connects." }
       },
       "additionalProperties": false
     }

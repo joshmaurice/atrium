@@ -21,6 +21,9 @@ import {
   BEHAVIOR_WORLD_BYTES_MAX, behaviorBytesIn, behaviorLeafBytes,
   // scripting-4c AC3 — the server's copies of the shared click rule.
   listensForSelect, withinActivateDistance,
+  // grouping GR3/GR4 — the parent change's world checks and the bounds.
+  PARENT_FIELD, moveCounts, descriptorCounts, treeBoundsProblem, TREE_BOUNDS_MESSAGE,
+  inSourceContainer, carriesModel, behaviorAncestorsChange,
 } from './send-policy.js'
 
 const MIN_TICK_INTERVAL = 50
@@ -143,6 +146,40 @@ function isBlockedParent(parentName, world, avatarNames) {
   return false
 }
 
+/**
+ * grouping GR3 — the world checks for moving `node` under the node named
+ * `parentName` (null: the top level), in the contract's order. Returns null,
+ * or `{ code, message }`. `authorizeSend` has already refused a live avatar or
+ * external node as the node moved, and GR2 the value's shape.
+ *   1. the parent, when named, exists;
+ *   2. it isn't, or isn't under, a live avatar or external content
+ *      (isBlockedParent), nor a `source` container or under one (review S7);
+ *   3. it carries no model;
+ *   4. no cycle, and not "already there" (GR1's checks, before any count, so
+ *      the bounds never walk a tree with a cycle: review N1);
+ *   5. GR4's bounds;
+ *   6. the same behaviour-carrying ancestors before and after (GR-L10 (a)).
+ */
+export function parentChangeProblem(node, parentName, world, avatarNames) {
+  let parent = null
+  if (parentName !== null) {
+    parent = world.som.getNodeByName(parentName)
+    if (!parent) return { code: 'NODE_NOT_FOUND', message: `parent not found: ${parentName}` }
+    if (isBlockedParent(parentName, world, avatarNames) || inSourceContainer(parent)) {
+      return { code: 'PERMISSION_DENIED', message: 'a node may not be moved under a live avatar or an externally loaded node' }
+    }
+    if (carriesModel(parent)) return { code: 'INVALID_VALUE', message: 'a node may not be moved into a model' }
+  }
+  const structural = world.som.reparentProblem(node, parent)
+  if (structural) return { code: structural.code, message: structural.message }
+  const bound = treeBoundsProblem(moveCounts(node, parent))
+  if (bound) return { code: 'INVALID_VALUE', message: `${TREE_BOUNDS_MESSAGE} (${bound})` }
+  if (behaviorAncestorsChange(node, parent)) {
+    return { code: 'INVALID_VALUE', message: 'this would change which behaviours can move it' }
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // S2 source guards — no client may set extras.atrium.source, in any world
 // (owner included, avatars included). These are pure predicates so they can be
@@ -177,13 +214,22 @@ export function addSetsAtriumSource(node) {
 export const STALE_CLIENT_MESSAGE = 'this page is older than the server: reload it to keep editing'
 
 /**
+ * grouping GR5 (GR-L12 (a)) — the text a stale tab's refused `hello` carries.
+ * The released page shows it as "Connect failed: PERMISSION_DENIED: <this>"
+ * (the pre-brief's g5, on the page at 172b816d).
+ */
+export const STALE_HELLO_MESSAGE = 'this page is older than the server: reload it'
+
+/**
  * subtree-add T7 — the `add` field set this server keeps: 3 = children and
- * material refs (2 was richer-add's). The server's `hello` sends it in
+ * material refs (2 was richer-add's). grouping GR5 — 4 = the client applies a
+ * `parent` change (`set` with `field: 'parent'`); a page below 4 throws on one
+ * and keeps the node under its old parent (PREBRIEF-grouping §2.3). The server's `hello` sends it in
  * `capabilities.addFields`, so a client knows what it may send (a client on an
  * older server, after a rollback, sees no key and handles groups as before),
  * and `isStaleEditor` refuses an editing session below it.
  */
-export const ADD_FIELDS_LEVEL = 3
+export const ADD_FIELDS_LEVEL = 4
 
 /**
  * richer-add R6 — is this session an unreloaded first-party tab? Every app tab
@@ -413,6 +459,12 @@ export function attachSessionHandlers({
   // scripting-4c AC3 — the clock both rate-limit buckets read. A parameter, so
   // the tests drive it and no test waits a real second.
   now = () => Date.now(),
+  // grouping GR5 (GR-L12 (a)) — a stale tab's hello is refused. Always true in
+  // the product (every caller leaves it). Tests set it false only to reach the
+  // second layer behind it (a stale session's `send`, `add` and `remove`
+  // refused, never the host), which the hello refusal otherwise makes
+  // unreachable (selection-parts lesson 5: both layers are proved).
+  refuseStaleHello = true,
 } = {}) {
 
   // Track pre-hello connections by WebSocket instance so eviction (V5) and the
@@ -596,7 +648,11 @@ export function attachSessionHandlers({
    * inline election in the `hello` case, and both must say `=== 3`.
    */
   function canRunBehaviors(session) {
-    return session?.canEdit === true && session?.capabilities?.scriptRunner === 3
+    // grouping GR5 — never a stale tab: its behaviour writes would land in the
+    // old frame of a regrouped node. The hello refuses such a tab first
+    // (GR-L12 (a)); this is the second layer.
+    return session?.canEdit === true && session?.capabilities?.scriptRunner === 3 &&
+      !isStaleEditor(session?.capabilities)
   }
 
   /**
@@ -782,6 +838,17 @@ export function attachSessionHandlers({
               return
             }
 
+            // grouping GR5 (GR-L12 (a)) — an unreloaded first-party tab can't
+            // apply a parent change (it throws, and an Ungroup elsewhere then
+            // removes the parts from its view), so it is refused before it
+            // joins, as WORLD_FULL is: it gets no som-dump and no presence. A
+            // session with neither capability is not judged (isStaleEditor).
+            if (refuseStaleHello && isStaleEditor(msg.capabilities)) {
+              sendError(ws, null, 'PERMISSION_DENIED', STALE_HELLO_MESSAGE)
+              ws.close()
+              return
+            }
+
             const clientInterval = msg.capabilities?.tick?.interval ?? DEFAULT_TICK_INTERVAL
             const negotiated = Math.max(clientInterval, MIN_TICK_INTERVAL)
             const sessionId = msg.id ?? randomUUID()
@@ -871,7 +938,10 @@ export function attachSessionHandlers({
             // (4c) and a `scriptRunner: 1` page (4b-2) are never the host.
             let isScriptHost = false
             let hostGen
-            if (canEdit && session.capabilities?.scriptRunner === 3 && scriptHost.sessionId === null) {
+            // grouping GR5 — and never a stale tab (the second layer: the hello
+            // refused it above).
+            if (canEdit && session.capabilities?.scriptRunner === 3 &&
+                !isStaleEditor(session.capabilities) && scriptHost.sessionId === null) {
               scriptHost.hostGen += 1
               scriptHost.sessionId = session.id
               // Rev 1 M1 — the grant clears readiness: the page must say
@@ -1219,6 +1289,15 @@ export function attachSessionHandlers({
               break
             }
 
+            // --- grouping GR5: an unreloaded tab may not send either (its
+            // edits of a regrouped node would land in the old frame). The
+            // hello refuses such a tab first (GR-L12 (a)); this is the second
+            // layer, before authorizeSend.
+            if (isStaleEditor(session.capabilities)) {
+              sendError(ws, msg.seq, 'INVALID_VALUE', STALE_CLIENT_MESSAGE)
+              break
+            }
+
             // --- SEND FIELD ALLOWLIST (Phase 3 step 0c) ---
             // Default deny. Resolve the target the same way world.setField does,
             // then classify the RESOLVED object by its class — never by its name
@@ -1273,6 +1352,26 @@ export function attachSessionHandlers({
               break
             }
 
+            // --- grouping GR3 — a parent change's world checks, in order, after
+            // authorizeSend (GR2 checked the value's shape). Nothing below
+            // changes the world, so a refusal applies, broadcasts and saves
+            // nothing. Fails closed (V9).
+            let moveParent = null
+            if (msg.field === PARENT_FIELD) {
+              let refusal = null
+              try {
+                refusal = parentChangeProblem(sendTarget, msg.value.parent, world, liveAvatarNames(sessions.values()))
+                if (!refusal && msg.value.parent !== null) moveParent = world.som.getNodeByName(msg.value.parent)
+              } catch (error) {
+                logCheckFailure(session, msg.field, error)
+                refusal = { code: 'INVALID_VALUE', message: 'the value could not be checked' }
+              }
+              if (refusal) {
+                sendError(ws, msg.seq, refusal.code, refusal.message)
+                break
+              }
+            }
+
             // scripting-4a Z2 / L5(b) — the server stamps a Play. The stamp runs
             // AFTER `authorizeSend` accepted (so a refused value is never stamped)
             // and before the apply and the broadcast, and the SAME stamped object is
@@ -1284,7 +1383,11 @@ export function attachSessionHandlers({
               appliedValue = { ...msg.value, startedAt: Date.now() }
             }
 
-            const result = world.setField(msg.node, msg.field, appliedValue)
+            // grouping GR3 / R3 — a parent change applies to the very node
+            // authorizeSend judged (and the parent checked above).
+            const result = msg.field === PARENT_FIELD
+              ? world.setField(msg.node, msg.field, appliedValue, { target: sendTarget, parent: moveParent })
+              : world.setField(msg.node, msg.field, appliedValue)
             if (!result.ok) {
               sendError(ws, msg.seq, result.code, result.message ?? `${result.code}: ${msg.node}`)
               break
@@ -1408,6 +1511,25 @@ export function attachSessionHandlers({
                 sendError(ws, msg.seq, 'PERMISSION_DENIED',
                   'a node may not be added under a live avatar or an externally loaded node')
                 break
+              }
+              // grouping GR4 — a parented add (Duplicate in place, a part's
+              // re-add) may not take the destination's top-level tree past an
+              // SA-L2 count it is not already past. A missing parent is
+              // world.addNode's NODE_NOT_FOUND, below.
+              if (msg.parent != null) {
+                const addParent = world.som.getNodeByName(msg.parent)
+                let bound = null
+                try {
+                  bound = addParent ? treeBoundsProblem(moveCounts(null, addParent, descriptorCounts(msg.node))) : null
+                } catch (error) {
+                  logCheckFailure(session, 'add', error)
+                  sendError(ws, msg.seq, 'INVALID_VALUE', 'the value could not be checked')
+                  break
+                }
+                if (bound) {
+                  sendError(ws, msg.seq, 'INVALID_VALUE', `${TREE_BOUNDS_MESSAGE} (${bound})`)
+                  break
+                }
               }
               const nameRefusal = members.map((m) => world.som.checkNewName(m.name)).find((c) => !c.ok)
               if (nameRefusal) {

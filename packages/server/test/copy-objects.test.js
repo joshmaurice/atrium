@@ -82,7 +82,7 @@ async function connect(port) {
   return { ws, messages }
 }
 
-const CAPS = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 3 }
+const CAPS = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }   // grouping GR5: the level is 4
 
 async function hello(ws, messages, id, capabilities = CAPS) {
   ws.send(JSON.stringify({ type: 'hello', id, capabilities }))

@@ -98,7 +98,11 @@ const seq = () => ++seqCounter
 // The harness: one real world host, on port 0, with an injectable clock
 // ---------------------------------------------------------------------------
 
-async function startWorld({ clock = null } = {}) {
+// grouping GR5 (GR-L12 (a)) — a page older than the server's level is refused
+// at its hello now, a legacy `scriptRunner: 1` page included. The AC3/S2 tests
+// below keep proving that such a page is never the host, the layer behind the
+// hello refusal, with `refuseStaleHello: false` (the product never sets it).
+async function startWorld({ clock = null, refuseStaleHello = true } = {}) {
   const world = await createWorld(SPACE)
   const http = createServer()
   const port = await listen(http)
@@ -110,6 +114,7 @@ async function startWorld({ clock = null } = {}) {
     worldOwnerUserId: OWNER,
     worldId: 'activate-test',
     ...(clock ? { now: () => clock.t } : {}),
+    refuseStaleHello,
   })
   http.on('upgrade', (req, socket, head) => {
     // `?as=<userId>` names a signed-in session; no `as` at all is an ANONYMOUS,
@@ -173,7 +178,7 @@ class Peer {
 
 async function open(port, id, {
   as = null,
-  capabilities = { tick: { interval: 5000 }, scriptRunner: 3 },
+  capabilities = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 },   // grouping GR5: the level is 4
 } = {}) {
   const url = as ? `ws://127.0.0.1:${port}/?as=${encodeURIComponent(as)}` : `ws://127.0.0.1:${port}`
   const ws = new WebSocket(url)
@@ -314,7 +319,7 @@ test('AC3: the schema and handshake refusals come first', async () => {
     host.forget()
 
     // Check 1: a message the schema refuses (event must be 'select').
-    raw.send(JSON.stringify({ type: 'hello', id: 'h1', capabilities: { tick: { interval: 5000 }, scriptRunner: 2 } }))
+    raw.send(JSON.stringify({ type: 'hello', id: 'h1', capabilities: { tick: { interval: 5000 }, scriptRunner: 2, addFields: 4 } }))
     await waitFor(rawMessages, (m) => m.type === 'hello')
     const badSeq = seq()
     raw.send(JSON.stringify({ type: 'activate', seq: badSeq, node: 'Switch', event: 'hover' }))
@@ -698,7 +703,7 @@ test('AC3/M1: a script-ready from a NON-host, or for an OLD generation, changes 
 // ===========================================================================
 
 test('AC3/S2: a scriptRunner: 1 owner is never the host, and the forward skips it', async () => {
-  const { world, port, sessions } = await startWorld()
+  const { world, port, sessions } = await startWorld({ refuseStaleHello: false })
   addNodes(world, [behaviourNode('Switch')])
   // The 4b-2 owner connects FIRST: it is the earliest eligible canEdit session.
   const legacy = await open(port, 'legacy-owner', {
@@ -731,7 +736,7 @@ test('AC3/S2: a scriptRunner: 1 owner is never the host, and the forward skips i
 })
 
 test('AC3/S2: with ONLY a scriptRunner: 1 owner connected, the world has no host', async () => {
-  const { world, port, sessions } = await startWorld()
+  const { world, port, sessions } = await startWorld({ refuseStaleHello: false })
   addNodes(world, [behaviourNode('Switch')])
   const legacy = await open(port, 'legacy-owner', {
     as: OWNER, capabilities: { tick: { interval: 5000 }, scriptRunner: 1 },
@@ -755,7 +760,7 @@ test('AC3/S2: with ONLY a scriptRunner: 1 owner connected, the world has no host
 // ===========================================================================
 
 test('AC3/S1: a handover forwards to exactly one OPEN socket, and only to a READY host', async () => {
-  const { world, port, sessions } = await startWorld()
+  const { world, port, sessions } = await startWorld({ refuseStaleHello: false })
   addNodes(world, [behaviourNode('Switch')])
   const a = await open(port, 'owner-a', { as: OWNER })
   const b = await open(port, 'owner-b', { as: OWNER })
@@ -810,7 +815,7 @@ test('AC3/S1/W6: the handover skips an EARLIER scriptRunner: 1 owner and goes to
   // had the legacy owner AFTER the capable one, so the map order never put it in
   // the way. Here the order is A (the host), then the legacy owner, then B — so
   // a handover that accepted `scriptRunner: 1` would elect the legacy owner.
-  const { world, port, sessions } = await startWorld()
+  const { world, port, sessions } = await startWorld({ refuseStaleHello: false })
   addNodes(world, [behaviourNode('Switch')])
   const a = await open(port, 'owner-a', { as: OWNER })
   const legacy = await open(port, 'legacy-owner', {

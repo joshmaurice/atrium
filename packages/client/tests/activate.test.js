@@ -138,11 +138,11 @@ test('AC4/G5: the hello carries scriptRunner: 3 only when asked, and NO key othe
   assert.equal(helloOff.capabilities.tick.interval, 5000, 'the rest of the capabilities are unchanged')
 })
 
-test('richer-add R6 (subtree-add T7): the hello carries addFields: 3 exactly when it carries scriptRunner', () => {
+test('richer-add R6 (subtree-add T7, grouping GR5): the hello carries addFields: 4 exactly when it carries scriptRunner', () => {
   const on = makeClient({ scriptRunner: true })
   on.mock._fire('open')
   const helloOn = on.mock.of('hello')[0]
-  assert.equal(helloOn.capabilities.addFields, 3, 'beside scriptRunner')
+  assert.equal(helloOn.capabilities.addFields, 4, 'beside scriptRunner')
   assert.deepEqual(Object.keys(helloOn.capabilities).sort(), ['addFields', 'scriptRunner', 'tick'])
   assert.equal(validate('client', helloOn).valid, true)
 

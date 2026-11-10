@@ -103,7 +103,7 @@ async function readDump(dump) {
   return io.readJSON({ json: dump.gltf, resources: {} })
 }
 
-async function startOwnerWorld() {
+async function startOwnerWorld({ refuseStaleHello = true } = {}) {
   const world = await createWorld(SPACE)
   const http = createServer()
   const port = await listen(http)
@@ -115,6 +115,7 @@ async function startOwnerWorld() {
     wss, world, sessions, presence,
     worldOwnerUserId: 'user-a',
     onSaveableMutation: () => { state.saves += 1 },
+    refuseStaleHello,
   })
   http.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => { wss.emit('connection', ws, req, 'user-a') })
@@ -395,24 +396,29 @@ test('R2: an avatar add with any richer field is refused with avatar-fields, bro
 // ---------------------------------------------------------------------------
 
 const STALE = { tick: { interval: 5000 }, scriptRunner: 3 }
-// subtree-add T7 — a current tab is addFields 3 now; a richer-add tab (2) is stale.
-const CURRENT = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 3 }
+// subtree-add T7 — a current tab was addFields 3; grouping GR5 — it is 4 now,
+// and a subtree-add tab (3) is stale.
+const CURRENT = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }
 
-test('R6 (subtree-add T7): isStaleEditor is exactly scriptRunner without addFields of 3 or more', () => {
+test('R6 (subtree-add T7, grouping GR5): isStaleEditor is exactly scriptRunner without addFields of 4 or more', () => {
   assert.equal(isStaleEditor(STALE), true)
   assert.equal(isStaleEditor({ scriptRunner: 2 }), true, 'a 4c tab')
   assert.equal(isStaleEditor({ scriptRunner: 1, addFields: 1 }), true, 'a field set older than 2')
-  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 2 }), true, 'a richer-add tab (42aa56ff): older than 3')
+  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 2 }), true, 'a richer-add tab (42aa56ff): older than 4')
+  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 3 }), true, 'a subtree-add tab (331e4aed): older than 4')
   assert.equal(isStaleEditor(CURRENT), false)
-  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 4 }), false, 'a later page')
+  assert.equal(isStaleEditor({ scriptRunner: 3, addFields: 5 }), false, 'a later page')
   assert.equal(isStaleEditor({ tick: { interval: 5000 } }), false, 'neither capability: tests, the inspector')
   assert.equal(isStaleEditor({}), false)
   assert.equal(isStaleEditor(undefined), false)
   assert.equal(STALE_CLIENT_MESSAGE.includes('already in use'), false, 'the palette retries on that phrase')
 })
 
-test('R6: a stale session\u2019s world add and remove are refused with the reload text; its avatar add is accepted', async () => {
-  const { world, port } = await startOwnerWorld()
+// grouping GR5 (GR-L12 (a)) — a stale tab's hello is refused now
+// (grouping.test.js), so the two R6 tests below reach the second layer with
+// the hello refusal switched off, as the product never does.
+test('R6 (second layer): a stale session\u2019s world add and remove are refused with the reload text; its avatar add is accepted', async () => {
+  const { world, port } = await startOwnerWorld({ refuseStaleHello: false })
   const witness = await visitor(port, 'witness-r6')
   const { ws, messages } = await connect(port)
   try {
@@ -442,8 +448,8 @@ test('R6: a stale session\u2019s world add and remove are refused with the reloa
   }
 })
 
-test('R6 (review M1): a stale tab\u2019s Delete then Undo leaves the object where it was', async () => {
-  const { world, port } = await startOwnerWorld()
+test('R6 (review M1, second layer): a stale tab\u2019s Delete then Undo leaves the object where it was', async () => {
+  const { world, port } = await startOwnerWorld({ refuseStaleHello: false })
   const { ws, messages } = await connect(port)
   try {
     await hello(ws, messages, 'stale-b', STALE)
@@ -458,9 +464,9 @@ test('R6 (review M1): a stale tab\u2019s Delete then Undo leaves the object wher
   }
 })
 
-test('R6: a current session (addFields 3 or 4) and a session with neither capability add and remove as before', async () => {
+test('R6: a current session (addFields 4 or 5) and a session with neither capability add and remove as before', async () => {
   const { world, port } = await startOwnerWorld()
-  const caps = [['current', CURRENT], ['later', { ...CURRENT, addFields: 4 }], ['neither', { tick: { interval: 5000 } }]]
+  const caps = [['current', CURRENT], ['later', { ...CURRENT, addFields: 5 }], ['neither', { tick: { interval: 5000 } }]]
   let seq = 20
   for (const [label, capabilities] of caps) {
     const { ws, messages } = await connect(port)

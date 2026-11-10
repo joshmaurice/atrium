@@ -51,7 +51,7 @@
         },
         "physics": { "type": "boolean" },
         "chat": { "type": "boolean" },
-        "addFields": { "type": "integer", "minimum": 1, "description": "subtree-add T7: the `add` field set this server keeps (3 = children and material refs). A client handles a group (Duplicate, restore, Paste, material refs) only when it is 3 or more; an older server sends none." }
+        "addFields": { "type": "integer", "minimum": 1, "description": "subtree-add T7, grouping GR5: the `add` field set this server keeps (3 = children and material refs, 4 = parent changes). A client handles a group (Duplicate, restore, Paste, material refs) only when it is 3 or more, and offers Group, Ungroup and Move to only when it is 4 or more; an older server sends none." }
       },
       "additionalProperties": false
     }

@@ -82,7 +82,7 @@ async function connect(port, as = null) {
   return { ws, messages }
 }
 
-async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3 }) {
+async function hello(ws, messages, id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }) {
   ws.send(JSON.stringify({ type: 'hello', id, capabilities }))
   const reply = await waitFor(messages, (m) => m.type === 'hello')
   assert.ok(reply, 'hello reply should arrive')
@@ -291,7 +291,7 @@ class FakeSocket {
   close(code) { this.closed = true; this.readyState = 3; this._fire('close', code) }
   _fire(event, ...args) { for (const fn of this._handlers[event] ?? []) fn(...args) }
   ofType(type) { return this.sent.filter((m) => m.type === type) }
-  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
+  sendHello(id, capabilities = { tick: { interval: 5000 }, scriptRunner: 3, addFields: 4 }) { this._fire('message', JSON.stringify({ type: 'hello', id, capabilities })) }
 }
 
 class FakeWss {
@@ -496,13 +496,13 @@ test('F-L6/S2/R1: a hello whose scriptRunner is 2 is ACCEPTED by the schema, and
     // scripting-4d R1/G-L9 — the schema's enum keeps 1 and 2 so an unreloaded
     // 4c tab still connects, and step 4 flipped the election to require 3. A
     // `2` owner connects and owns the world but is not the host.
-    const h = await hello(a.ws, a.messages, 'cap-2', { scriptRunner: 2 })
+    const h = await hello(a.ws, a.messages, 'cap-2', { scriptRunner: 2, addFields: 4 })   // grouping GR5: a current page's level, so this tests the === 3 rule alone
     assert.equal(h.canEdit, true, 'a scriptRunner: 2 page still owns the world')
     assert.equal(h.scriptHost, false, 'the election requires 3, so a 2 is never the host')
     assert.equal('hostGen' in h, false)
 
     // The `3` owner that follows takes the role.
-    const h3 = await hello(b.ws, b.messages, 'cap-3', { scriptRunner: 3 })
+    const h3 = await hello(b.ws, b.messages, 'cap-3', { scriptRunner: 3, addFields: 4 })
     assert.equal(h3.canEdit, true, 'a scriptRunner: 3 page owns the world')
     assert.equal(h3.scriptHost, true, 'and the election elects it')
     assert.equal(h3.hostGen, 1)
