@@ -140,6 +140,11 @@ harness checks smoke and c1–c6 all pass on commit 9's page, and so do the 38
 proofs.
 
 ## 6. Next
+**The release package is `devtasks/RELEASE-grouping.md`:** the commands, the
+acceptance checklist and the release notes, with the stale-tab line
+corrected. The next round's pre-brief (multi-select) starts in a new session
+from `devtasks/NOTE-2026-11-10-grouping-unreleased-next-round.md`, on its own
+branch.
 1. The operator's go, then the release path (§6 of the pre-brief): DEV
    acceptance steps 1–8; the release note says a stale tab is **refused at
    Connect** (§2's note).
