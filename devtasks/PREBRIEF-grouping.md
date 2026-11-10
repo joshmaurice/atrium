@@ -20,7 +20,7 @@ The operator's decisions (2026-11-09):
 - GR-L2, GR-L4 to GR-L7 and GR-L9 as recommended ("no preference");
   GR-L12 (a) too, until the second review reopened it;
 - **GR-L12 (a), Rev 1.3's: refuse the hello of a judged stale session**
-  (23:59 PT). The operator agreed by voice ("Sure"). He said it hardly
+  (23:59 PT). The operator agreed by voice ("Sure"), saying it hardly
   matters, because the account log shows no users yet, so the easiest real
   fix should win. A hello refusal is one check, with nothing to keep track
   of, and was tried on the released page (g5);
