@@ -348,5 +348,15 @@ export function moveUndoProblem(node, target) {
   return treeBoundsProblem({ before: treeCounts(oldTop, node), after: treeCounts(oldTop) })
 }
 
+/**
+ * GR-L5 (a) — would the Undo of deleting `node` (its re-add under its
+ * parent) be refused by GR4? The tree it leaves is counted without it and
+ * with it; a top-level node never is. "A Delete in a tree just over a bound"
+ * asks first (the code check's finding 4).
+ */
+export function deleteUndoProblem(node) {
+  return moveUndoProblem(node, null)
+}
+
 /** GR4's bounds, re-exported for the panel's ask-first. */
 export const BOUNDS = Object.freeze({ nodes: SUBTREE_NODES_MAX, depth: SUBTREE_DEPTH_MAX, primitives: SUBTREE_PRIMITIVES_MAX })

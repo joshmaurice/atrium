@@ -648,3 +648,25 @@ export function treeBoundsProblem(counts) {
 
 /** GR4's refusal text. */
 export const TREE_BOUNDS_MESSAGE = 'the group would be too large to copy'
+
+/**
+ * GR4 — an `add` descriptor's counts (nested `children` descriptors, each
+ * one node; a mesh's primitives), the server's `descriptorCounts`: the
+ * client's re-add checks (an Undo of a Delete, a Redo of an Add) count as
+ * the server will. Held to the server's answers by grouping-counts.test.js.
+ */
+export function descriptorCounts(desc) {
+  let nodes = 0, depth = 0, primitives = 0
+  const stack = [[desc, 0]]
+  const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+  while (stack.length > 0) {
+    const [d, g] = stack.pop()
+    if (!plain(d)) continue
+    nodes += 1
+    if (g > depth) depth = g
+    const prims = plain(d.mesh) ? d.mesh.primitives : undefined
+    if (Array.isArray(prims)) primitives += prims.length
+    if (Array.isArray(d.children)) for (const c of d.children) stack.push([c, g + 1])
+  }
+  return { nodes, depth, primitives }
+}

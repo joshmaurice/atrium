@@ -14,7 +14,7 @@ import { SOMDocument } from '../../som/src/SOMDocument.js'
 import * as server from '../src/send-policy.js'
 import * as client from '../../client/src/add-spec.js'
 
-const NAMES = ['topLevelOf', 'generationBelow', 'treeCounts', 'moveCounts', 'treeBoundsProblem', 'TREE_BOUNDS_MESSAGE']
+const NAMES = ['topLevelOf', 'generationBelow', 'treeCounts', 'moveCounts', 'treeBoundsProblem', 'TREE_BOUNDS_MESSAGE', 'descriptorCounts']
 
 test('GR4: both copies export the same names', () => {
   for (const n of NAMES) {
@@ -87,4 +87,18 @@ test('GR4: moveCounts and treeBoundsProblem agree for every (node, parent) pair 
   assert.equal(client.treeBoundsProblem(client.moveCounts(n('deep-3'), n('g-b'))), 'depth', 'deep-3 (6 below it) under generation 2 reaches 9')
   assert.equal(client.treeBoundsProblem(client.moveCounts(n('heavy-0'), n('g'))), null, '64 primitives')
   assert.equal(client.moveCounts(n('single'), null), null, 'the top level is never counted')
+})
+
+test('GR4: descriptorCounts agrees (the client’s copy counts a re-add as the server will; the code check’s finding 4)', () => {
+  const prim = { attributes: {} }
+  const chain = (n) => { let d = { name: 'x' }; const top = d; for (let i = 0; i < n; i++) { const c = { name: `x${i}` }; d.children = [c]; d = c } return top }
+  const samples = [
+    { name: 'a' },
+    { name: 'a', mesh: { primitives: [prim, prim] } },
+    { name: 'g', children: [{ name: 'p', mesh: { primitives: [prim] } }, { name: 'q', children: [{ name: 'r' }] }] },
+    { name: 'w', children: Array.from({ length: 300 }, (_, i) => ({ name: `w${i}`, mesh: { primitives: [prim, prim, prim, prim] } })) },
+    chain(12),
+    { name: 'odd', children: [null, 3, 'x', [], { name: 'ok', mesh: { primitives: 'no' } }], mesh: null },
+  ]
+  for (const d of samples) assert.deepEqual(client.descriptorCounts(d), server.descriptorCounts(d), d.name)
 })

@@ -307,6 +307,20 @@ describe('GR3: the world checks', () => {
     assert.equal(b?.code, 'PERMISSION_DENIED', 'step 2 before step 3')
   })
 
+  test('the order: a cycle that would also break a bound reports step 4 (the cycle), not step 5 (the code check’s finding 5)', async () => {
+    const { world, port } = await startWorld()
+    const o = await session(port)
+    // a chain of 7 at the top level, moved into its own deepest part: a cycle
+    // AND, if it were counted, 13 generations (past the bound of 8)
+    let d = { name: 'c-0' }
+    const top = d
+    for (let i = 1; i <= 6; i++) { const n = { name: `c-${i}` }; d.children = [n]; d = n }
+    world.som.scene.addChild(world.som.ingestNode(top))
+    const a = await move(o, 'c-0', 'c-6')
+    assert.equal(a?.type, 'error')
+    assert.equal(a?.message, 'a node can’t go inside itself', 'step 4 before step 5')
+  })
+
   test('step 6 (GR-L10 (a)): a behaviour-carrying ancestor gained, or lost, is refused; the node\u2019s own behaviour moves with it', async () => {
     const { world, port } = await startWorld()
     const o = await session(port)

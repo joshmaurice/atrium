@@ -95,6 +95,8 @@ function page(som, { block = null, serverAddFields = 4 } = {}) {
     ownNodeProblem, isReferenced, treeBoundsProblem,
     ...group,
     ANIMATED_REASON: 'an animation moves it in local values',
+    AFTER_DIALOG_MS: 50,
+    clearSelectionErrors: () => {},
   }
   const api = new Function('env', `with (env) { ${NAMES.map(functionText).join('\n')}\n return { ${NAMES.join(', ')} } }`)(env)
   Object.assign(env, api)
@@ -357,5 +359,123 @@ describe('GR8: som:reparent', () => {
     env.listeners['som:reparent'][0]({ nodeName: 'crate-01' })
     assert.ok(env.activeGesture === gesture)
     assert.ok(env.calls.includes('refreshEditPanel'), 'the selectForEdit early return is not relied on (§2.4)')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The code check of de33cf8..9716caf (findings 1-4), each reproduced first
+// ---------------------------------------------------------------------------
+
+/** A top-level group `big` with `n` empty parts, in space.gltf. */
+async function bigWorld(n) {
+  const som = await world()
+  const big = som.ingestNode({ name: 'big', translation: [-3, 0, 0] })
+  som.scene.addChild(big)
+  for (let i = 0; i < n; i++) big.addChild(som.ingestNode({ name: `big-${i}`, translation: [0, 0.25, 0] }))
+  return som
+}
+/** Another tab's message, queued while the dialog is open: it lands after the handler's synchronous part. */
+const queued = (fn) => setTimeout(fn, 0)
+
+describe('the code check, finding 2: after an ask-first question, Ungroup and Move to plan from the values as they are NOW', () => {
+  test('Ungroup of a 257-node group: another tab moves the group while the question is open; the parts keep the moved places', async () => {
+    const som = await bigWorld(256)
+    const env = page(som)
+    let plan = null
+    env.undo.ungroup = (node, p) => { plan = p; return true }
+    env.window.confirm = () => { queued(() => { som.getNodeByName('big').translation = [-3, 0, 4] }); return true }
+    new Function('env', `with (env) { ${blockFrom("epUngroup?.addEventListener('click'")} }`)(env)
+    env.selected = som.getNodeByName('big')
+    await env.epUngroup.handlers.click()
+    assert.ok(plan, 'Ungroup was started')
+    const part = plan.parts.find((p) => p.node.name === 'big-0')
+    assert.deepEqual([...part.value.translation].map((v) => Math.round(v * 1e6) / 1e6), [-3, 0.25, 4], 'planned from the moved group')
+  })
+
+  test('Move to → Top level out of a 257-node tree: another tab moves the group while the question is open; the value is computed after', async () => {
+    const som = await bigWorld(256)
+    const env = page(som)
+    let sent = null
+    env.undo.moveTo = (node, target, value, opts) => { sent = { value, opts }; return true }
+    env.window.confirm = () => { queued(() => { som.getNodeByName('big').translation = [-3, 0, 4] }); return true }
+    env.selected = som.getNodeByName('big-0')
+    env.buildMoveOptions()
+    new Function('env', `with (env) { ${blockFrom("epMoveTo?.addEventListener('change'")} }`)(env)
+    env.epMoveTo.value = String(env.moveOptions.findIndex((o) => o.node === null))
+    await env.epMoveTo.handlers.change()
+    assert.ok(sent, 'the move was started')
+    assert.equal(sent.opts.record, false, 'asked first: not recorded')
+    assert.deepEqual([...sent.value.translation].map((v) => Math.round(v * 1e6) / 1e6), [-3, 0.25, 4], 'the world place after the other tab’s move')
+  })
+
+  test('the selection changed while the question was open: nothing is sent', async () => {
+    const som = await bigWorld(256)
+    const env = page(som)
+    let started = false
+    env.undo.ungroup = () => { started = true; return true }
+    env.window.confirm = () => { queued(() => { env.selected = som.getNodeByName('crate-01') }); return true }
+    new Function('env', `with (env) { ${blockFrom("epUngroup?.addEventListener('click'")} }`)(env)
+    env.selected = som.getNodeByName('big')
+    await env.epUngroup.handlers.click()
+    assert.equal(started, false)
+  })
+})
+
+describe('the code check, finding 3: Ungroup’s own-node rule is the Delete capture’s, credit included', () => {
+  test('a group with a malformed credit is not offered Ungroup (its removal could not be captured)', async () => {
+    const som = await world()
+    const env = page(som)
+    const lamp = som.getNodeByName('lamp-01')
+    lamp.extras = { atrium: { origin: 'not an object' } }
+    env.selected = lamp
+    env.refreshGroupActions()
+    assert.equal(env.epUngroup.disabled, true)
+    assert.match(env.epUngroup.title, /credit/)
+  })
+})
+
+describe('the code check, finding 4: a Delete in a tree just over a GR4 bound asks first and is not recorded', () => {
+  function deletePage(som) {
+    const env = page(som)
+    env.questions = []
+    env.registered = []
+    Object.assign(env, {
+      epDelete: el(),
+      countDescendants: (n) => n.children.length,
+      collectSubtree: () => [],
+      structure: { ...env.structure, begin: () => {} },
+    })
+    env.client.removeNode = () => 7
+    env.undo.capture = () => ({ ok: true, descriptor: { name: 'x' } })
+    env.undo.registerDelete = (seq, r) => env.registered.push(r)
+    env.window.confirm = (q) => { env.questions.push(q); return true }
+    new Function('env', `with (env) { ${blockFrom("epDelete.addEventListener('click'")} }`)(env)
+    return env
+  }
+
+  test('a part of a 257-node group: asks with GR4’s reason, then registers no descriptor (not recorded, W5)', async () => {
+    const som = await bigWorld(256)
+    const env = deletePage(som)
+    env.selected = som.getNodeByName('big-0')
+    await env.epDelete.handlers.click()
+    assert.equal(env.questions.length, 1)
+    assert.match(env.questions[0], /This can’t be undone: the group would be too large to copy\./)
+    assert.equal(env.registered.length, 1)
+    assert.equal(env.registered[0].descriptor, null)
+  })
+
+  test('a part of a 256-node group: no question, the descriptor is kept (its Delete undoes)', async () => {
+    const som = await bigWorld(255)
+    const env = deletePage(som)
+    env.selected = som.getNodeByName('big-0')
+    await env.epDelete.handlers.click()
+    assert.equal(env.questions.length, 0)
+    assert.deepEqual(env.registered[0].descriptor, { name: 'x' })
+  })
+})
+
+describe('the code check, finding 1: the structural dependency sends nothing while the slot is taken (text)', () => {
+  test('structural returns null before calling the client when structure.pending is set', () => {
+    assert.match(code, /structural: \(request, direction\) => \{\s*if \(structure\.pending\) return null\s*let seq/)
   })
 })

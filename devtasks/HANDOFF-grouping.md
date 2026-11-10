@@ -1,6 +1,7 @@
 # Handoff: `grouping`, implemented on `claude/grouping`
 
-**IMPLEMENTED; awaiting the fresh-agent code check** (this file is also the
+**IMPLEMENTED; the fresh-agent code check taken (§7); awaiting the outside
+code review** (this file is also the
 working note: if a session loses its context, start here, then `git log` on
 the branch).
 
@@ -19,6 +20,7 @@ Started 2026-11-10, 00:09 PT ("Yes, please").
 | 4 | `apps/client/src/edit-group.js` (new): `inverseAffine`, `moveValue` (the exact path one level up out of, or down into, a plain group; else the matrices, refusing a shear and a computed scale under 0.01 or negative), `groupPlan`, `groupName`, `ungroupPlan`, `isBareNode`, `bareNodes`, `bareNodesKey`, `breadcrumbText`, `behaviorAncestorsChange` (client copy), `visibilityChange`, `moveProblem`, `moveTargets`, `regroupCounts`. `edit-duplicate.js` exports `ownNodeProblem` and `isReferenced`. GR7 in `edit-undo.js`: `move`, `group`, `ungroup` entries; the composite runner (phases, every seq answered; a move's `applied: false` is out of step); `moveTo`, `group`, `ungroup` starters (`record: false` for an asked-first action); Group's one "already in use" retry; a refused Group move removes the empty group; "Ungroup (partly)"; GR-L7 (a)'s "Undo stopped"; re-adds re-point the group's handle (r5); the group's removal through the capture window; GR4 and GR-L10 in the checks; the pending-delete parent re-read (f2). Tests: `grouping-edit-group.test.js` (12), `grouping-undo.test.js` (19: 0 of 19 pass on commit 3's `edit-undo.js`). App 1,795 pass, 1 skip | done |
 | 5 | GR8's glue: `index.html` (`#ep-group-actions` with Group and Ungroup, `#ep-move-row`'s Move to select and `#ep-move-note`, `#ep-empty-row`'s Empty groups select beside the sky row, both selects width-capped); `app.js` (the enable rules `groupHint`, `ungroupHint`, `movableProblem`; ask-first `askUnundoable` with `ungroupUndoProblem`/`moveUndoProblem`, added to `edit-group.js`; the Move to list built on open or key change, indices into `moveOptions`, a choice checked again; the Empty groups list keyed on its labels, waiting while this tab's request is in flight; `som:reparent` cancels the node's gesture then ends the drag, refreshes the panel, both breadcrumbs and the lists; the engine's `move`, `freeName`, `holdNode` deps; `edit:accepted` passes `applied`/`landed`; a composite original counts as pending, not undoing; the hold released by the answer; the row hidden below level 4). `edit-structure.js`: `reparentSeen` (the review's nit). `edit-undo.js`: the composite's `holdNode` and `doing()`. `tools/som-inspector/src/app.js`: the tree rebuilds on `som:reparent`. New `grouping-wiring.test.js` (13 tests; 0 of 13 pass on commit 4's `app.js`); `app-wiring.test.js`'s `undo.onAccepted(seq` match loosened. App 1,808 pass, 1 skip | done |
 | 6 | The harness checks (§3), with three findings they turned up, each fixed in `app.js` with a wiring test that fails without the fix (§3); a new pending-delete test C in `grouping-undo.test.js` for the parent re-read when the removal window opens (the proof of `openRemovalWindow`'s re-read turned nothing red before it, §4); `grouping.test.js`'s sockets closed by the closers and its two `c.closed` waits bounded, so a red stale-hello test fails instead of hanging the file (§4). The proofs (§4), the full suites (§5), this file | done |
+| 7 | The fresh-agent code check's findings 1–5, each reproduced first and fixed with tests that fail without the fix (§7); finding 6 not taken | done |
 
 ## 2. Notes for the record
 - **`refuseStaleHello`** (commit 2) is an option of `attachSessionHandlers`,
@@ -99,21 +101,67 @@ file run alone under `timeout 180`:
 | 17 | finding 2's `remoteSet` before the cancel | `grouping-wiring.test.js` 1 |
 | 18 | finding 1's focused rebuild | `grouping-wiring.test.js` 1 |
 | 19 | finding 3's refresh on add/remove/rename | `grouping-wiring.test.js` 1 |
+| 20 | code check 5: the cycle before the counts (steps 4 and 5 swapped) | `grouping.test.js` 1 (the new order test) |
+| 21 | code check 1: `structural` sends while the slot is taken | `grouping-wiring.test.js` 1 |
+| 22 | code check 1: an unsent later step drops `inFlight` silently | `grouping-undo.test.js` 2 |
+| 23 | code check 2: Ungroup's wait after the dialog | `grouping-wiring.test.js` 2 |
+| 24 | code check 2: Move to's value recomputed after the dialog | `grouping-wiring.test.js` 1 |
+| 25 | code check 3: Ungroup's rule without the credit | `grouping-wiring.test.js` 1 |
+| 26 | code check 4: Delete's ask-first at a bound | `grouping-wiring.test.js` 1 |
+| 27 | code check 4: `checkEntry`'s GR4 on a parented re-add | `grouping-undo.test.js` 1 |
 
 Test C's route: the Undo of a moved Duplicate, or a Redo of a Delete after
 a move, is refused "changed elsewhere" when the local values changed; the
 re-read at the window's opening matters when another tab moved the node
 into a group at the origin (same local values). Test C does that.
 
-## 5. The full suites at commit 6
-SOM 296; protocol 155; interaction 23; behaviors 263; renderer-three 318;
-client 760; app 1,812 pass, 1 skip; every one of the 64 server files alone
-under `timeout 180`, 1,067 pass, 0 fail. All 0 fail.
+## 5. The full suites
+At commit 6: SOM 296; protocol 155; interaction 23; behaviors 263;
+renderer-three 318; client 760; app 1,812 pass, 1 skip; every one of the 64
+server files alone under `timeout 180`, 1,067 pass. All 0 fail.
+
+At commit 7: the same, except app 1,823 pass, 1 skip, and server 1,069. All
+0 fail. The harness checks smoke and c1–c5 all pass on commit 7's page.
 
 ## 6. Next
-1. The fresh-agent code check of `de33cf8..` (commits 1–6); its findings
-   reproduced before they are taken.
-2. The outside code review, its prompt pinned to the reviewed SHA.
-3. The operator's go, then the release path (§6 of the pre-brief): DEV
+1. The outside code review, its prompt pinned to the reviewed SHA.
+2. The operator's go, then the release path (§6 of the pre-brief): DEV
    acceptance steps 1–8; the release note says a stale tab is **refused at
    Connect** (§2's note).
+
+## 7. The fresh-agent code check (`9716caf`)
+A fresh agent with no prior context, given the contract and the branch.
+Its report and scripts are in `devtasks/spike-grouping/code-check/`.
+I reproduced every finding myself before taking it, by running its scripts
+against the harness at `9716caf` and the repository.
+
+| # | Finding | Reproduced | Taken | Fix (commit 7) |
+|---|---|---|---|---|
+| 1 | must-fix: Ungroup, then the Model form's Save within a round trip, leaves the Undo engine in flight until a reconnect (the panel says "Waiting for the server…") | yes, `stuck_model.py` | yes | `app.js`'s `structural` sends nothing while `structure.pending` is set. A later composite step that can't be sent stops the composite as a refusal would (`runPhase`), so GR-L7 (a)'s rules apply: Ungroup records "Ungroup (partly)" and keeps the empty group; an Undo stops and says so. Afterwards `stuck_model.py` passes: idle, "Ungroup (partly)" recorded. |
+| 2 | should-fix: Ungroup and Move to use values from before an ask-first dialog, so another tab's move made during it is overwritten | yes, `dialog_race.py` | yes | Both handlers wait `AFTER_DIALOG_MS` after the dialog (as Delete does), check identity, the selection and the rules again, and plan or compute from the values as they are then. `dialog_race.py` passes. |
+| 3 | should-fix: Ungroup's own-node rule skipped the credit that the Delete capture checks | yes, `credit.test.mjs` | yes | `ownNodeProblem(node._node)`, credit on (GR-L6 (a): "the Delete capture's own rule"). The script hard-codes the old call, so it still fails; the wiring test runs `app.js`'s own `ungroupHint`. |
+| 4 | should-fix: a Delete in a tree just over a bound neither asks first (GR-L5 (a)) nor has its Undo checked by GR4 (GR7) | yes, `delete-bounds.test.mjs` | yes | Delete asks "This can’t be undone: the group would be too large to copy." and registers no descriptor (W5); `edit-group.js`'s `deleteUndoProblem`. `checkEntry` runs GR4 on a parented re-add with a client copy of `descriptorCounts` in `add-spec.js`; `grouping-counts.test.js` holds it to the server's answers. `subtree-add-wiring.test.js`'s SA-L4 text match now names the new condition. |
+| 5 | nit: no test pinned the cycle (step 4) before the counts (step 5) | yes, `order.mjs` | yes | A new order test in `grouping.test.js`. It passes on the code, as a guard; proof 20 swaps the steps and it turns red. |
+| 6 | nit: no listener for `som:desync` | **no** | no | `apps/client/src/app.js` L1145 listens and reconnects (A7/C7), so the comment at `AtriumClient.js` L1437 is right. The agent's grep missed it. |
+
+**Not changed, outside §6's file list:** the check also suggested gating
+the Model form's Save on `editDispatchBlocked()` (`model-form.js`). The fix
+above makes the collision safe without it: the Save is sent, and the
+composite stops cleanly and says so. The gate is a follow-up for the
+operator; it would also cover a plain Undo or Redo in flight, which predates
+this round.
+
+**Tests added (each fails on `9716caf`'s sources, except two named guards):**
+- `grouping-undo.test.js`:
+  - an unsent later step, for Ungroup and for a Group's Undo;
+  - a re-add over a bound, refused before sending;
+  - guard: a Delete in a 256-node tree still undoes.
+- `grouping-wiring.test.js`:
+  - the two re-plans after the dialog, and a selection change during it;
+  - the credit;
+  - Delete's ask-first;
+  - guard: no question in a 256-node tree;
+  - the `structural` guard (a text test).
+- `grouping.test.js`: the order (a guard; proof 20).
+- `grouping-counts.test.js`: `descriptorCounts` (fails without the client
+  copy).

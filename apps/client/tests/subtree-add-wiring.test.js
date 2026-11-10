@@ -67,10 +67,10 @@ test('T6 (the fresh-agent code check\u2019s S-2): the Inspect name, both Copy no
   assert.match(code, /const pastedLine = prepared\.parts\.parts > 0 \? \[`Pasted “\$\{name\}”\$\{partsText\(prepared\.parts\)\}\.`\] : \[\]\s*epPasteNotes\.textContent = \[\.\.\.pastedLine, \.\.\.prepared\.notes\]\.join\('\\n'\)/)
 })
 
-test('SA-L4 (a): Delete asks only when the capture fails, and then with the count', () => {
+test('SA-L4 (a): Delete asks only when it can’t be undone (the capture fails, or, since grouping GR-L5 (a), its re-add would pass a GR4 bound), and then with the count', () => {
   const start = code.indexOf("epDelete.addEventListener('click'")
   const body = code.slice(start, code.indexOf('\n})', start))
-  assert.match(body, /const capture = undo\.capture\(node\)\s*if \(!capture\.ok\) \{\s*const n = countDescendants\(node\)/)
+  assert.match(body, /const capture = undo\.capture\(node\)\s*const tooLarge = capture\.ok && groupingAllowed\(\) && !!deleteUndoProblem\(node\)\s*if \(!capture\.ok \|\| tooLarge\) \{\s*const n = countDescendants\(node\)/)
 })
 
 // ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@
 
 import { addMessageBytes, hasSharedMaterial } from './edit-duplicate.js'
 import { collectSubtree } from './edit-structure.js'
-import { moveCounts, treeBoundsProblem } from '@atrium/client/add-spec'
+import { moveCounts, treeBoundsProblem, descriptorCounts } from '@atrium/client/add-spec'
 import { behaviorAncestorsChange, regroupCounts, BOUNDS_REASON } from './edit-group.js'
 
 /** W8 — at most this many entries per stack. */
@@ -922,12 +922,24 @@ export function createEditUndo({
     runPhase()
   }
 
+  /** A later step that couldn't be sent: its stand-in refusal text. */
+  const UNSENT_TEXT = 'another request was still waiting for the server'
+
   function runPhase() {
     const c = inFlight
     c.outcomes = []
     const sent = c.phases[c.phase]()
     if (inFlight !== c) return
     if (!sent && c.bySeq.size === 0) {
+      if (c.phase > 0) {
+        // a later step couldn't be sent (another structural request held the
+        // page's one slot: the code check's must-fix 1). The composite stops as
+        // if the server had refused that step, so what was done is recorded or
+        // stopped by the same rules (GR-L7 (a)), and nothing waits forever.
+        c.outcomes = [{ type: 'unsent', node: null, status: 'rejected', text: UNSENT_TEXT }]
+        phaseDone()
+        return
+      }
       // nothing could be sent (the app reported why): the step stops here
       inFlight = null
       return
@@ -1298,6 +1310,12 @@ export function createEditUndo({
       }
       const check = checkNewName(entry.descriptor.name)
       if (check && !check.ok) return { ok: false, message: `${verb}: “${name}” the name is in use.` }
+      // grouping GR7 (review M1; the code check's finding 4) — the checks
+      // before sending include GR4: a re-add into a tree the bounds rule
+      // would refuse is not started
+      if (p && treeBoundsProblem(moveCounts(null, p, descriptorCounts(entry.descriptor)))) {
+        return { ok: false, message: `${verb}: “${name}” ${BOUNDS_REASON}.` }
+      }
       return { ok: true }
     }
 

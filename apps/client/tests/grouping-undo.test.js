@@ -30,6 +30,7 @@ function harness(som, { editOn = () => true } = {}) {
   const messages = []
   const selected = []
   const refuse = []          // [{ test(i) → bool, text }]: the server refuses matching requests
+  const busy = { structural: false }   // the page's structural slot is taken: `structural` sends nothing
   const undo = createEditUndo({
     getNodeByName: (n) => som.getNodeByName(n),
     getObjectByName: (n) => som.getObjectByName(n),
@@ -44,6 +45,7 @@ function harness(som, { editOn = () => true } = {}) {
     },
     rename: () => null,
     structural: (req, dir) => {
+      if (busy.structural) return null
       const s = ++seq
       info.set(s, { kind: 'structural', req, dir }); pending.push(s)
       return s
@@ -115,7 +117,7 @@ function harness(som, { editOn = () => true } = {}) {
     else (add.parent ? som.getNodeByName(add.parent) : som.scene).addChild(som.ingestNode(add.descriptor))
     undo.onStructureAnswer({ request: { seq: s, name: i.req.name }, status: 'accepted', removedMessage: null })
   }
-  return { undo, answer, settle, pending, info, messages, selected, refuse, remoteMove, clickDelete, answerPlain, sent: () => [...info.values()] }
+  return { undo, answer, settle, pending, info, messages, selected, refuse, busy, remoteMove, clickDelete, answerPlain, sent: () => [...info.values()] }
 }
 
 const group = (h, som, name) => { const n = som.getNodeByName(name); const plan = groupPlan(n, { isFree: (x) => som.checkNewName(x).ok }); assert.equal(h.undo.group(n, plan), true); h.settle(); return plan }
@@ -405,6 +407,75 @@ describe('GR7: the pending-delete fix (fresh check must-fix 1, f2)', () => {
     run(h, 'undo')
     assert.equal(parentName(som, 'crate-01'), 'group-09', 'back where it was when deleted')
     assert.ok(near(worldT(som, 'crate-01'), w0), `world ${worldT(som, 'crate-01')} vs ${w0}`)
+  })
+})
+
+describe('GR7: a later step that can’t be sent (the code check’s must-fix 1)', () => {
+  const answerMoves = (h) => { while (h.pending.length > 0 && h.info.get(h.pending[0]).kind === 'move') h.answer(h.pending[0]) }
+
+  test('Ungroup: the moves land, the group’s remove can’t be sent: “Ungroup (partly)” is recorded, nothing stays in flight, and its Undo puts the parts back', async () => {
+    const som = await world()
+    const h = harness(som)
+    const lamp = som.getNodeByName('lamp-01')
+    const w = { stand: worldT(som, 'lamp-stand'), shade: worldT(som, 'lamp-shade') }
+    const plan = ungroupPlan(lamp)
+    assert.equal(h.undo.ungroup(lamp, plan), true)
+    h.busy.structural = true                   // another request takes the slot
+    answerMoves(h)
+    assert.equal(h.undo.inFlight(), false, 'not stuck')
+    assert.equal(h.pending.length, 0, 'no remove was sent')
+    assert.deepEqual(h.undo.undoLabels, ['Ungroup (partly) “lamp-01”'])
+    assert.match(h.messages.at(-1), /another request was still waiting for the server/)
+    assert.ok(som.getNodeByName('lamp-01'), 'the group stays, empty')
+    assert.equal(parentName(som, 'lamp-stand'), null)
+    h.busy.structural = false
+    run(h, 'undo')
+    assert.equal(parentName(som, 'lamp-stand'), 'lamp-01')
+    assert.equal(parentName(som, 'lamp-shade'), 'lamp-01')
+    assert.ok(near(worldT(som, 'lamp-stand'), w.stand) && near(worldT(som, 'lamp-shade'), w.shade))
+  })
+
+  test('Undo of a Group: the object moves out, the group’s remove can’t be sent: the Undo stops and says so, nothing stays in flight', async () => {
+    const som = await world()
+    const h = harness(som)
+    group(h, som, 'crate-01')
+    assert.equal(h.undo.run('undo'), true)
+    h.busy.structural = true
+    answerMoves(h)
+    assert.equal(h.undo.inFlight(), false, 'not stuck')
+    assert.equal(parentName(som, 'crate-01'), null, 'the move out was done')
+    assert.match(h.messages.at(-1), /another request was still waiting for the server/)
+    assert.equal(h.undo.undoCount + h.undo.redoCount, 0, 'the entry is dropped (GR-L7 (a))')
+  })
+})
+
+describe('GR7: a re-add the bounds would refuse is not started (review M1; the code check’s finding 4)', () => {
+  test('Delete a part of a group just over 256 nodes, then Undo: refused before sending, with GR4’s reason', async () => {
+    const som = await world()
+    const h = harness(som)
+    const big = som.ingestNode({ name: 'big' })
+    som.scene.addChild(big)
+    for (let i = 0; i < 256; i++) big.addChild(som.ingestNode({ name: `big-${i}` }))
+    const part = som.getNodeByName('big-0')
+    const s = h.clickDelete(part)
+    h.answerPlain(s)
+    assert.equal(h.undo.undoCount, 1)
+    const before = h.sent().length
+    assert.equal(h.undo.run('undo'), false)
+    assert.equal(h.sent().length, before, 'nothing sent')
+    assert.match(h.messages.at(-1), /Can’t undo: “big-0” the group would be too large to copy\./)
+  })
+
+  test('a Delete in a 256-node tree still undoes (it was not over before)', async () => {
+    const som = await world()
+    const h = harness(som)
+    const big = som.ingestNode({ name: 'big' })
+    som.scene.addChild(big)
+    for (let i = 0; i < 255; i++) big.addChild(som.ingestNode({ name: `big-${i}` }))
+    const s = h.clickDelete(som.getNodeByName('big-0'))
+    h.answerPlain(s)
+    run(h, 'undo')
+    assert.equal(parentName(som, 'big-0'), 'big')
   })
 })
 

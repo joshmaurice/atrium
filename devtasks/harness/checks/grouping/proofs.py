@@ -26,6 +26,15 @@ PROOFS = [
  ('c3: records marked remote before the cancel', A, "    for (const f of ['translation', 'rotation', 'scale']) editTracker.remoteSet(node, f, node[f] == null ? node[f] : [...node[f]])\n", "", ['apps/client/tests/grouping-wiring.test.js']),
  ('c1: a focused Move to rebuilt', A, "  else if (typeof document !== 'undefined' && document.activeElement === epMoveTo) syncMoveOptions()\n", "", ['apps/client/tests/grouping-wiring.test.js']),
  ('c5: another tab’s add/remove refreshes Empty groups', A, "emptyKey = null; refreshEmptyGroups() })", "emptyKey = null })", ['apps/client/tests/grouping-wiring.test.js']),
+ # the code check of de33cf8..9716caf (HANDOFF §7)
+ ('code check 5: the cycle checked before the counts', S, "  const structural = world.som.reparentProblem(node, parent)\n  if (structural) return { code: structural.code, message: structural.message }\n  const bound = treeBoundsProblem(moveCounts(node, parent))\n  if (bound) return { code: 'INVALID_VALUE', message: `${TREE_BOUNDS_MESSAGE} (${bound})` }\n", "  const bound = treeBoundsProblem(moveCounts(node, parent))\n  if (bound) return { code: 'INVALID_VALUE', message: `${TREE_BOUNDS_MESSAGE} (${bound})` }\n  const structural = world.som.reparentProblem(node, parent)\n  if (structural) return { code: structural.code, message: structural.message }\n", ['packages/server/test/grouping.test.js']),
+ ('code check 1: structural sends nothing while the slot is taken', A, "    if (structure.pending) return null\n", "", ['apps/client/tests/grouping-wiring.test.js']),
+ ('code check 1: an unsent later step stops the composite', U, "      if (c.phase > 0) {", "      if (false) {", ['apps/client/tests/grouping-undo.test.js']),
+ ('code check 2: Ungroup waits and re-checks after the dialog', A, "  if (!ask.record) await new Promise((r) => setTimeout(r, AFTER_DIALOG_MS))\n", "", ['apps/client/tests/grouping-wiring.test.js']),
+ ('code check 2: Move to recomputes its value after the dialog', A, "    value = moveValue(node, target)\n    if (!value.ok) { showEditError(`Couldn’t move: ${MOVE_REASONS[value.rule]}`); return }\n  }", "  }", ['apps/client/tests/grouping-wiring.test.js']),
+ ('code check 3: Ungroup’s rule checks the credit', A, "  const own = ownNodeProblem(node._node)\n", "  const own = ownNodeProblem(node._node, { credit: false })\n", ['apps/client/tests/grouping-wiring.test.js']),
+ ('code check 4: Delete asks first at a bound', A, "  const tooLarge = capture.ok && groupingAllowed() && !!deleteUndoProblem(node)", "  const tooLarge = false", ['apps/client/tests/grouping-wiring.test.js']),
+ ('code check 4: a re-add past a bound is not started', U, "      if (p && treeBoundsProblem(moveCounts(null, p, descriptorCounts(entry.descriptor)))) {", "      if (false) {", ['apps/client/tests/grouping-undo.test.js']),
 ]
 only = sys.argv[1:]
 for i, (what, f, old, new, tests) in enumerate(PROOFS):

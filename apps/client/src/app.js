@@ -49,7 +49,7 @@ import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animatio
 import { prepareDuplicate, duplicateRuleProblem, prepareRestore, DUPLICATE_OFFSET_X, ownNodeProblem, isReferenced } from './edit-duplicate.js'
 import {
   groupPlan, ungroupPlan, groupName, moveValue, moveProblem, moveTargets, bareNodes, bareNodesKey, isBareNode,
-  regroupCounts, ungroupUndoProblem, moveUndoProblem, MOVE_REASONS, BOUNDS_REASON,
+  regroupCounts, ungroupUndoProblem, moveUndoProblem, deleteUndoProblem, MOVE_REASONS, BOUNDS_REASON,
 } from './edit-group.js'   // grouping GR8
 import { treeBoundsProblem } from '@atrium/client/add-spec'   // grouping GR4 (the client's copy)
 import { parentFrameOffset } from './part-transform.js'   // selection-parts T11
@@ -1960,6 +1960,12 @@ const undo = createEditUndo({
   },
   // Y4 — a remove or a re-add through the structure tracker, marked as ours
   structural: (request, direction) => {
+    // grouping, the code check's must-fix 1 — the tracker has one slot. A
+    // composite's later step (a group's remove) comes a round trip after its
+    // check; if another request took the slot meanwhile, send nothing: the
+    // runner stops the composite and says why, instead of waiting forever for
+    // an answer the tracker would never hand it.
+    if (structure.pending) return null
     let seq
     try {
       seq = request.kind === 'delete'
@@ -3358,11 +3364,15 @@ epDelete.addEventListener('click', async () => {
   // Y2 — captured at click time, before the delete is sent, from current
   // values only (a pending transform send blocks the click, U14)
   const capture = undo.capture(node)
-  if (!capture.ok) {
+  // grouping GR-L5 (a) (the code check's finding 4) — a Delete in a tree just
+  // over a GR4 bound can't come back either: its re-add would be refused
+  const tooLarge = capture.ok && groupingAllowed() && !!deleteUndoProblem(node)
+  if (!capture.ok || tooLarge) {
     const n = countDescendants(node)
+    const why = tooLarge ? `This can’t be undone: ${BOUNDS_REASON}.` : 'This can’t be undone.'
     const question = n > 0
-      ? `Delete "${node.name}" and ${n} object${n === 1 ? '' : 's'} inside it? This can’t be undone.`
-      : `Delete "${node.name}"? This can’t be undone.`
+      ? `Delete "${node.name}" and ${n} object${n === 1 ? '' : 's'} inside it? ${why}`
+      : `Delete "${node.name}"? ${why}`
     if (!window.confirm(question)) return
     // Outside review S1: the dialog paused this page, so messages that arrived
     // meanwhile are still queued. Let them land before sending: if another tab
@@ -3382,7 +3392,7 @@ epDelete.addEventListener('click', async () => {
   }
   structure.begin('delete', seq, { name: node.name, node, subtree })
   // W5 — a delete that can't come back isn't recorded; its answer clears redo
-  undo.registerDelete(seq, { node, name: node.name, descriptor: capture.ok ? capture.descriptor : null })
+  undo.registerDelete(seq, { node, name: node.name, descriptor: capture.ok && !tooLarge ? capture.descriptor : null })
   clearEditError()
   refreshEditActions()
 })
@@ -3449,7 +3459,8 @@ function ungroupHint(node) {
   if (isTeleporter(node)) return 'It is a teleporter'
   if (node.visible === false) return 'Show the group first'
   if (isGrantedTarget(node)) return 'A behaviour is allowed to change it'
-  const own = ownNodeProblem(node._node, { credit: false })
+  // the Delete capture's own rule, credit included (GR-L6 (a); the code check's finding 3)
+  const own = ownNodeProblem(node._node)
   if (own) return own.reason
   if (!isAddressable(node)) return 'This group can’t be found by its own name'
   if (node.parent && !isAddressable(node.parent)) return 'Its group can’t be found by its name'
@@ -3481,14 +3492,19 @@ epGroup?.addEventListener('click', () => {
   refreshEditActions()
 })
 
-epUngroup?.addEventListener('click', () => {
+epUngroup?.addEventListener('click', async () => {
   if (!modes.edit || !selected || !groupingAllowed()) return
   const node = selected
   const reason = ungroupHint(node)
   if (reason) { showEditError(reason); refreshEditActions(); return }
   const ask = askUnundoable(ungroupUndoProblem(node))
   if (!ask.go) return
-  if (!modes.edit || selected !== node || ungroupHint(node)) return   // the question paused the page
+  // The question paused the page: messages that arrived meanwhile are still
+  // queued. Let them land, then check again and plan from the values as they
+  // are NOW (the code check's finding 2; Delete's outside review S1).
+  if (!ask.record) await new Promise((r) => setTimeout(r, AFTER_DIALOG_MS))
+  if (!modes.edit || selected !== node || !groupingAllowed() || ungroupHint(node)) return
+  if (client.som?.getNodeByName(node.name) !== node) return
   const plan = ungroupPlan(node)
   if (!plan.ok) { showEditError(`“${plan.node.name}”: ${MOVE_REASONS[plan.rule]}`); return }
   if (undo.ungroup(node, plan, { record: ask.record })) clearEditError()
@@ -3542,7 +3558,7 @@ function syncMoveOptions() {
 
 epMoveTo?.addEventListener('focus', () => syncMoveOptions())
 epMoveTo?.addEventListener('mousedown', () => syncMoveOptions())
-epMoveTo?.addEventListener('change', () => {
+epMoveTo?.addEventListener('change', async () => {
   const choice = moveOptions[Number(epMoveTo.value)]
   epMoveTo.value = ''
   if (!choice || !modes.edit || !selected || !groupingAllowed()) return
@@ -3554,10 +3570,25 @@ epMoveTo?.addEventListener('change', () => {
   if (target && client.som?.getNodeByName(target.name) !== target) { showEditError('That group is gone'); buildMoveOptions(); return }
   const problem = moveProblem(node, target, client.som, groupRules())
   if (problem) { showEditError(`Couldn’t move: ${problem.reason}`); buildMoveOptions(); return }
-  const value = moveValue(node, target)
+  let value = moveValue(node, target)
   if (!value.ok) { showEditError(`Couldn’t move: ${MOVE_REASONS[value.rule]}`); return }
   const ask = askUnundoable(moveUndoProblem(node, target))
   if (!ask.go) return
+  if (!ask.record) {
+    // The question paused the page: let the queued messages land, check
+    // again, and compute the move from the values as they are NOW (the code
+    // check's finding 2).
+    await new Promise((r) => setTimeout(r, AFTER_DIALOG_MS))
+    if (!modes.edit || selected !== node || !groupingAllowed()) return
+    if (client.som?.getNodeByName(node.name) !== node) return
+    if (target && client.som?.getNodeByName(target.name) !== target) { showEditError('That group is gone'); return }
+    const block = structuralBlock() ?? movableProblem(node)
+    if (block) { showEditError(block); refreshEditActions(); return }
+    const again = moveProblem(node, target, client.som, groupRules())
+    if (again) { showEditError(`Couldn’t move: ${again.reason}`); return }
+    value = moveValue(node, target)
+    if (!value.ok) { showEditError(`Couldn’t move: ${MOVE_REASONS[value.rule]}`); return }
+  }
   if (undo.moveTo(node, target, value.value, { record: ask.record })) clearEditError()
   refreshEditActions()
 })
