@@ -1,6 +1,11 @@
 # Pre-brief: grouping and ungrouping (`grouping`)
 
-Status: **DRAFT, Revision 1.4 (2026-11-09). Every decision is taken.**
+Status: **FINAL, Revision 2.0 (2026-11-10).** The operator approved Rev 1.4
+as FINAL by voice ("Yes, I do"), and confirmed it in text at 00:05 PT ("Go
+ahead, please"). Rev 2.0 is Rev 1.4 unchanged but for this line and §7.
+**This is the contract for the implementation.**
+
+Rev 1.4 (2026-11-09) took every decision.
 Rev 1.4 records GR-L12 (a), refuse a stale tab's hello (the operator, by
 voice, 23:59 PT). Earlier: **Revision 1.3**, Rev 1.2 plus **a second
 outside review**, of `95d7a096` (§7), by the same Claude Fable 5.2 session per
@@ -32,8 +37,7 @@ The operator's decisions (2026-11-09):
   (`checks/grouping/g4.py`, 10 checks, all PASS; Rev 1.2 said 9, second
   review N6) showed the panel already holds a bare node as its selection.
 
-§4 is the contract for every decision. **Next: the operator's approval as
-FINAL.**
+§4 is the contract for every decision.
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -1059,6 +1063,8 @@ specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 2.0, FINAL** (2026-11-10, 00:05 PT): approved by the operator (status
+  line).
 - **Rev 1.4** (2026-11-09, 23:59 PT): GR-L12 (a) decided (status line). Claude
   reran r7, r8, r9 and g5 at Rev 1.3 before recording it.
 - **Rev 1.3** (2026-11-09): **the second outside review, of `95d7a096`**, by
