@@ -6,6 +6,23 @@ while the grouping round waits for its release.
 There is no shipped passdown for grouping yet. That gets written after PROD,
 in the grouping session.
 
+## Remind the operator: the grouping release is NOT done
+**DEV acceptance has not been done**, and nothing is deployed. The deploy,
+the DEV acceptance (steps 1–8), MAIN, PROD and the shipped passdown all
+happen **in the grouping session**, not in yours:
+https://claude.ai/code/session_01FmgBcrPRmmGxPjg5k2XkRC
+
+That session holds the release package (`devtasks/RELEASE-grouping.md`). It
+fills in the SHAs, checks DEV's actual SHA after the deploy, and fixes
+anything the acceptance turns up.
+
+- Tell the operator this in your first reply, and again whenever they
+  mention being back at a laptop, deploying or testing.
+- Don't run the release yourself, and don't give the host commands from
+  your session.
+- Before the deploy, the operator opens one DEV tab and leaves it alone:
+  step 7 needs a tab from before the deploy.
+
 ## First instruction for the new session's Claude
 1. **Get the repo.** Use `add_repo` on `joshmaurice/atrium` with access
    `push`, and clone to `/home/claude/atrium`.
