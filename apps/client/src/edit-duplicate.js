@@ -580,6 +580,31 @@ function parentNodeOf(node) {
   return (node.listParents?.() ?? []).find((p) => p.propertyType === 'Node') ?? null
 }
 
+/**
+ * grouping GR-L6 (a) (second review S3) — the node's own rules, without its
+ * children: what "its capture without its children succeeds" means for
+ * Ungroup. Rules 3–8 of N3 (`nodeRuleProblem`), exported on their own,
+ * because `prepareRestore` with `trees: false` refuses any node that has
+ * children and with `trees: true` judges every member and the size.
+ * @param {object} node  the glTF-Transform Node
+ * @returns {null | {ok: false, rule: string, reason: string}}
+ */
+export function ownNodeProblem(node, { credit = true } = {}) {
+  return nodeRuleProblem(node, { credit })
+}
+
+/**
+ * grouping GR8 (review S3, r6) — a node an animation channel or a skin
+ * references (any parent that isn't the scene graph). Its own test, because
+ * `duplicateRuleProblem` checks `attached` first and so can't stand in (an
+ * animated camera host would read as "attached"). Such a node can't be
+ * grouped, moved or ungrouped: an animation moves it in local values.
+ * @param {object} node  the glTF-Transform Node
+ */
+export function isReferenced(node) {
+  return (node?.listParents?.() ?? []).some((p) => !SCENE_GRAPH_PARENTS.has(p.propertyType))
+}
+
 /** Rules 3–8 of N3: everything about the node itself (not its place in the tree). */
 function nodeRuleProblem(node, { credit }) {
   const parents = node.listParents().map((p) => p.propertyType)

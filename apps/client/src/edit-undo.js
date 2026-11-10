@@ -13,6 +13,12 @@
  * - `add` — an add or a duplicate was accepted; the `add` descriptor that
  *   brings the node back exactly (`prepareRestore`, Y2);
  * - `delete` — a delete Y2 could capture was accepted; its last capture.
+ * - grouping GR7 — `move` (Move to: where the node was and where it went,
+ *   each `{ parent: handle|null, translation, rotation, scale }`, exact), `group`
+ *   (the group's descriptor and the object's move) and `ungroup` (each part's
+ *   move and the group's capture; "Ungroup (partly)" when some part stayed).
+ *   They run as phases (`startComposite`): the group's `add`, then the moves;
+ *   the moves, then the group's `remove` through the capture window.
  *
  * Identity (W2): every entry points at a handle, `{ node }`, one per node
  * object, kept in a WeakMap. When a re-add is accepted the handle is pointed at
@@ -27,6 +33,8 @@
 
 import { addMessageBytes, hasSharedMaterial } from './edit-duplicate.js'
 import { collectSubtree } from './edit-structure.js'
+import { moveCounts, treeBoundsProblem } from '@atrium/client/add-spec'
+import { behaviorAncestorsChange, regroupCounts, BOUNDS_REASON } from './edit-group.js'
 
 /** W8 — at most this many entries per stack. */
 export const MAX_ENTRIES = 100
@@ -67,10 +75,21 @@ const groupReplaced = (verb, name) => `${verb}: “${name}” its group was repl
 const groupRenamedOrRemoved = (verb, name) => `${verb}: “${name}” its group was renamed or removed.`
 const landedElsewhere = (name, parent) => `“${name}” went into a newer “${parent}”: its group was replaced elsewhere.`
 
+/** grouping GR7 (GR-L7 (a)) — an undo or a redo of several messages the server stopped. */
+const stoppedMessage = (direction, names, text) =>
+  `${direction === 'undo' ? 'Undo' : 'Redo'} stopped: ${names.map((n) => `“${n}”`).join(', ')} changed elsewhere${text ? ` (${text})` : ''}.`
+
 /** How the panel names a transform field in a message. */
 const FIELD_NAME = { translation: 'position', rotation: 'rotation', scale: 'scale', visible: 'visibility' }
 /** The verb a single-field transform entry's label uses (Y1). */
 const FIELD_VERB = { translation: 'Move', rotation: 'Rotate', scale: 'Scale', visible: 'Show or hide' }
+
+/** JSON with sorted keys, for comparing two `extras` objects. */
+function stableJson(v) {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(',')}}`
+  return JSON.stringify(v)
+}
 
 function same(a, b) {
   if (a === b) return true
@@ -248,6 +267,10 @@ export function createEditUndo({
   hasPendingStructural = () => false,
   getObjectByName = null,
   trees = () => false,
+  // grouping GR7 — send a parent change (`client.moveNode`), returning its seq
+  // or null; and the next free name for Group's one retry ("already in use").
+  move = () => null,
+  freeName = () => null,
 }) {
   const objectByName = getObjectByName ?? getNodeByName
   /** @type {WeakMap<object, {node: object}>} */
@@ -487,6 +510,10 @@ export function createEditUndo({
    */
   function openRemovalWindow(entry, direction, node) {
     const cap = capture(node)
+    // grouping GR7 (the fresh check's must-fix 1, f2) — the re-add will go
+    // where the node is NOW: another tab may have moved it since the entry
+    // was recorded. reCapture keeps it current until the removal.
+    entry.parent = parentHandle(node)
     deleteWindow = {
       kind: 'removal',
       name: node.name,
@@ -517,11 +544,15 @@ export function createEditUndo({
     req.descriptor = cap.descriptor
     req.sharedMaterial = cap.sharedMaterial
     req.members = cap.members
+    // grouping GR7 (f2) — and its parent: a node another tab moved while its
+    // delete was pending comes back where it was, not where it had been
+    req.parent = parentHandle(node)
     // R4 — a removal's entry keeps the descriptor its later re-add will use
     if (req.entry) {
       req.entry.descriptor = cap.descriptor
       req.entry.sharedMaterial = cap.sharedMaterial
       req.entry.members = cap.members
+      req.entry.parent = parentHandle(node)
     }
   }
 
@@ -568,11 +599,16 @@ export function createEditUndo({
 
   // ── Answers ────────────────────────────────────────────────────────────
 
-  function onAccepted(seq) {
+  function onAccepted(seq, info = {}) {
     const req = requests.get(seq)
     if (req && req.kind === 'rename') {
       requests.delete(seq)
       return renameAccepted(req)
+    }
+    // grouping GR7 — a composite's move
+    if (inFlight?.kind === 'composite' && inFlight.bySeq.get(seq)?.type === 'move') {
+      stepAnswered(seq, 'accepted', { applied: info.applied !== false, landed: info.landed ?? null })
+      return true
     }
     const tracked = inFlight?.bySeq?.get(seq)
     if (!tracked || tracked.field === null) return false   // a structural answer
@@ -590,6 +626,10 @@ export function createEditUndo({
       req.message = text || code
       return renameRejected(req)
     }
+    if (inFlight?.kind === 'composite' && inFlight.bySeq.get(seq)?.type === 'move') {
+      stepAnswered(seq, 'rejected', { text: text || code || 'refused' })
+      return true
+    }
     const tracked = inFlight?.bySeq?.get(seq)
     if (!tracked || tracked.field === null) return false   // a structural answer
     inFlight.bySeq.delete(seq)
@@ -604,6 +644,14 @@ export function createEditUndo({
   function onUnknown(seq) {
     const req = requests.get(seq)
     if (req) requests.delete(seq)
+    if (inFlight?.kind === 'composite' && inFlight.bySeq.has(seq)) {
+      // the session is ending; the stacks go with it (W7)
+      inFlight = null
+      deleteWindow = null
+      requests.clear()
+      clearBoth()
+      return true
+    }
     const tracked = inFlight?.bySeq?.get(seq)
     if (!tracked || tracked.field === null) return false
     inFlight.bySeq.delete(seq)
@@ -623,6 +671,23 @@ export function createEditUndo({
    * palette retry could ever see it.
    */
   function onStructureAnswer({ request, status, removedMessage }, text = null) {
+    if (request.undo && inFlight?.kind === 'composite' && inFlight.bySeq.has(request.seq)) {
+      const removal = deleteWindow && deleteWindow.kind === 'removal' && deleteWindow.entry === inFlight.entry ? deleteWindow : null
+      const removalFailed = !!removal && removal.failed
+      if (removal) deleteWindow = null
+      if (status === 'unknown') {
+        inFlight = null
+        deleteWindow = null
+        requests.clear()
+        clearBoth()
+        return true
+      }
+      const outcome = status === 'accepted'
+        ? (removedMessage === 'replaced' ? 'replaced' : removalFailed ? 'changed' : 'accepted')
+        : 'rejected'
+      stepAnswered(request.seq, outcome, { text })
+      return true
+    }
     if (request.undo) {
       if (!inFlight || !inFlight.bySeq.has(request.seq)) return false
       inFlight.bySeq.delete(request.seq)
@@ -695,10 +760,518 @@ export function createEditUndo({
     return kind === 'undo' && entry.kind === 'delete' && entry.sharedMaterial ? `${base} ${SHARED_MATERIAL_NOTE}` : base
   }
 
+
+  // ── grouping GR7 — Move to, Group and Ungroup ──────────────────────────
+
+  /** Where a node is now, as a move entry keeps it (exact copies of the vectors). */
+  function placeOf(node) {
+    return {
+      parent: parentHandle(node),
+      translation: copyValue(node.translation),
+      rotation: copyValue(node.rotation),
+      scale: copyValue(node.scale),
+    }
+  }
+  /** The wire value for a place: the parent by its CURRENT name (the handle follows renames and re-adds). */
+  function valueFor(place) {
+    return {
+      parent: place.parent ? place.parent.node?.name ?? null : null,
+      translation: copyValue(place.translation),
+      rotation: copyValue(place.rotation),
+      scale: copyValue(place.scale),
+    }
+  }
+  /** Addressable: the node of its own non-empty name in the objects namespace. */
+  const addressable = (node) => !!node && !!node.name && objectByName(node.name) === node && getNodeByName(node.name) === node
+  /** A place's parent is still there to go back to (null: the top level always is). */
+  const placeParentOk = (place) => !place.parent || addressable(place.parent.node)
+  /** The node is where `place` says, exactly (GR7: parent by identity, the three vectors bitwise). */
+  function isAt(node, place) {
+    if ((node.parent ?? null) !== (place.parent ? place.parent.node : null)) return false
+    return same(node.translation, place.translation) && same(node.rotation, place.rotation) && same(node.scale, place.scale)
+  }
+  /** GR4 and GR-L10, the server's rules the client can predict for one move. */
+  function moveRuleProblem(node, parent) {
+    if (parent && treeBoundsProblem(moveCounts(node, parent))) return BOUNDS_REASON
+    if (behaviorAncestorsChange(node, parent)) return 'this would change which behaviours can move it'
+    return null
+  }
+  /** A group's own fields still match what was added (GR7: "its own capture without children"). */
+  function groupOwnMatches(group, descriptor) {
+    if (!descriptor || group.name !== descriptor.name) return false
+    if (group._node?.getMesh?.()) return false
+    if (!same(group.translation, descriptor.translation ?? [0, 0, 0])) return false
+    if (!same(group.rotation, descriptor.rotation ?? [0, 0, 0, 1])) return false
+    if (!same(group.scale, descriptor.scale ?? [1, 1, 1])) return false
+    return stableJson(group.extras ?? {}) === stableJson(descriptor.extras ?? {})
+  }
+
+  /** W4 for the three new kinds: is the world still the way this entry left it? */
+  function checkComposite(entry, direction) {
+    const verb = direction === 'undo' ? 'Can’t undo' : 'Can’t redo'
+    const changed = (name) => ({ ok: false, message: `${verb}: “${name}” was changed elsewhere.` })
+    const removed = (name) => ({ ok: false, message: `${verb}: “${name}” was removed.` })
+    const bounds = (name, text) => ({ ok: false, message: `${verb}: “${name}” ${text}.` })
+
+    if (entry.kind === 'move') {
+      const node = entry.handle.node
+      const here = direction === 'undo' ? entry.to : entry.from
+      const there = direction === 'undo' ? entry.from : entry.to
+      if (!alive(node)) return removed(entry.name)
+      if (!addressable(node) || !isAt(node, here)) return changed(entry.name)
+      if (!placeParentOk(there)) return changed(entry.name)
+      const rule = moveRuleProblem(node, there.parent ? there.parent.node : null)
+      if (rule) return bounds(entry.name, rule)
+      return { ok: true }
+    }
+
+    if (entry.kind === 'group') {
+      const object = entry.object.handle.node
+      if (!alive(object)) return removed(entry.object.name)
+      if (direction === 'undo') {
+        const group = entry.handle.node
+        if (!alive(group)) return removed(entry.name)
+        if (!addressable(group) || !addressable(object)) return changed(entry.name)
+        const kids = group.children
+        if (kids.length !== 1 || kids[0] !== object) return changed(entry.name)
+        if (!groupOwnMatches(group, entry.descriptor)) return changed(entry.name)
+        if (!isAt(object, entry.object.to)) return changed(entry.object.name)
+        if (!placeParentOk(entry.object.from)) return changed(entry.object.name)
+        const rule = moveRuleProblem(object, entry.object.from.parent ? entry.object.from.parent.node : null)
+        if (rule) return bounds(entry.object.name, rule)
+        return { ok: true }
+      }
+      if (!addressable(object) || !isAt(object, entry.object.from)) return changed(entry.object.name)
+      if (entry.parent && !addressable(entry.parent.node)) return changed(entry.name)
+      const check = checkNewName(entry.descriptor.name)
+      if (check && !check.ok) return { ok: false, message: `${verb}: “${entry.name}” the name is in use.` }
+      if (treeBoundsProblem(regroupCounts(entry.parent ? entry.parent.node : null, [object]))) return bounds(entry.name, BOUNDS_REASON)
+      return { ok: true }
+    }
+
+    // ungroup
+    const parts = entry.parts.map((p) => p.handle.node)
+    for (let i = 0; i < parts.length; i++) {
+      if (!alive(parts[i])) return removed(entry.parts[i].name)
+      if (!addressable(parts[i])) return changed(entry.parts[i].name)
+    }
+    const group = entry.handle.node
+    if (direction === 'undo') {
+      for (let i = 0; i < parts.length; i++) if (!isAt(parts[i], entry.parts[i].to)) return changed(entry.parts[i].name)
+      if (entry.partial) {
+        if (!alive(group) || !addressable(group)) return changed(entry.name)
+        for (const part of parts) {
+          const rule = moveRuleProblem(part, group)
+          if (rule) return bounds(entry.name, rule)
+        }
+        return { ok: true }
+      }
+      if (entry.parent && !addressable(entry.parent.node)) return changed(entry.name)
+      const check = checkNewName(entry.descriptor.name)
+      if (check && !check.ok) return { ok: false, message: `${verb}: “${entry.name}” the name is in use.` }
+      if (treeBoundsProblem(regroupCounts(entry.parent ? entry.parent.node : null, parts))) return bounds(entry.name, BOUNDS_REASON)
+      return { ok: true }
+    }
+    if (!alive(group)) return removed(entry.name)
+    if (!addressable(group)) return changed(entry.name)
+    for (let i = 0; i < parts.length; i++) if (!isAt(parts[i], entry.parts[i].from)) return changed(entry.parts[i].name)
+    if (!entry.partial) {
+      const kids = group.children
+      if (kids.length !== parts.length || kids.some((k) => !parts.includes(k))) return changed(entry.name)
+      if (!groupOwnMatches(group, entry.descriptor)) return changed(entry.name)
+    }
+    return { ok: true }
+  }
+
+  // The composite runner. One phase at a time; a phase's requests go together
+  // and it is done when every seq is answered (GR7's accounting).
+
+  function sendMoveStep(node, value) {
+    const seq = move(node, value, inFlight.direction)
+    if (seq == null) return false
+    inFlight.bySeq.set(seq, { type: 'move', field: 'parent', node, value })
+    return true
+  }
+  function sendAddStep(descriptor, parentName) {
+    const seq = structural({ kind: 'add', name: descriptor.name, descriptor, parent: parentName ?? null }, inFlight.direction)
+    if (seq == null) return false
+    inFlight.bySeq.set(seq, { type: 'add', field: null, name: descriptor.name })
+    return true
+  }
+  /** A group's removal: through the capture window (GR7, second review N5), unless `window` is false (Group's own cleanup). */
+  function sendRemoveStep(node, { window = true } = {}) {
+    const req = { kind: 'delete', name: node.name, node, subtree: collectSubtree(node) }
+    const seq = structural(req, inFlight.direction)
+    if (seq == null) return false
+    inFlight.bySeq.set(seq, { type: 'remove', field: null, node })
+    if (window) {
+      openRemovalWindow(inFlight.entry, inFlight.direction, node)
+      if (deleteWindow?.descriptor) inFlight.entry.descriptor = deleteWindow.descriptor
+    }
+    return true
+  }
+
+  function startComposite(direction, entry, phases, onPhase, { record = true } = {}) {
+    inFlight = { kind: 'composite', direction, entry, phases, onPhase, phase: 0, bySeq: new Map(), outcomes: [], record }
+    runPhase()
+  }
+
+  function runPhase() {
+    const c = inFlight
+    c.outcomes = []
+    const sent = c.phases[c.phase]()
+    if (inFlight !== c) return
+    if (!sent && c.bySeq.size === 0) {
+      // nothing could be sent (the app reported why): the step stops here
+      inFlight = null
+      return
+    }
+    if (c.bySeq.size === 0) phaseDone()
+  }
+
+  function stepAnswered(seq, status, info = {}) {
+    const c = inFlight
+    const step = c.bySeq.get(seq)
+    c.bySeq.delete(seq)
+    if (step.type === 'move' && status === 'accepted' && info.applied === false) {
+      // U15 for a move: accepted, but this tab's SOM couldn't apply it, so this
+      // window no longer matches the server
+      inFlight = null
+      deleteWindow = null
+      clearBoth()
+      message(OUT_OF_STEP_MESSAGE)
+      return
+    }
+    c.outcomes.push({ ...step, status, ...info })
+    if (c.bySeq.size === 0) phaseDone()
+  }
+
+  function phaseDone() {
+    const c = inFlight
+    const verdict = c.onPhase(c.phase, c.outcomes)
+    if (inFlight !== c) return
+    if (verdict === 'next') { c.phase += 1; runPhase() } else if (verdict === 'retry') runPhase()
+  }
+
+  /** The original action is done: record it, or (asked first: GR-L5 (a)) not, clearing Redo (W5). */
+  function finishDo(entry, selectNode) {
+    const record = inFlight.record
+    inFlight = null
+    if (record) pushEntry(entry); else clearRedo()
+    select({ node: alive(selectNode) ? selectNode : null, removed: null })
+  }
+  /** An undo or a redo is done: the entry moves (Y4). */
+  function finishRun(selectNode) {
+    const { direction, entry } = inFlight
+    inFlight = null
+    moveEntry(entry, direction)
+    select({ node: alive(selectNode) ? selectNode : null, removed: null })
+  }
+  /** GR-L7 (a) — an undo or a redo the server stopped: say which, drop the entry. */
+  function stopRun(names, text) {
+    const { direction } = inFlight
+    dropEntry()
+    inFlight = null
+    message(stoppedMessage(direction, names, text))
+  }
+  const refused = (outs) => outs.filter((o) => o.status !== 'accepted')
+  const firstText = (outs) => refused(outs)[0]?.text ?? null
+
+  /** Did the move land where it was sent? If not (a race), say so and record where it landed (N-4). */
+  function noteLanding(node, place) {
+    const wanted = place.parent ? place.parent.node : null
+    if ((node.parent ?? null) !== wanted) {
+      message(landedElsewhere(node.name, node.parent?.name ?? ''))
+      place.parent = parentHandle(node)
+    }
+  }
+
+  // ── The original actions (the panel's buttons) ──
+
+  /**
+   * Move to: `node` under `parent` (a SOM node, or null) with `value`'s vectors.
+   * `record: false` when the panel asked first (GR-L5 (a)): not recorded.
+   * @returns {boolean} started
+   */
+  function moveTo(node, parent, value, { record = true } = {}) {
+    if (busyReason() !== null) return false
+    const entry = {
+      kind: 'move', label: 'Move to', name: node.name, handle: handleFor(node),
+      from: placeOf(node),
+      to: { parent: parent ? handleFor(parent) : null, translation: copyValue(value.translation), rotation: copyValue(value.rotation), scale: copyValue(value.scale) },
+    }
+    startComposite('do', entry, [() => sendMoveStep(node, valueFor(entry.to))], (phase, outs) => {
+      if (outs[0].status !== 'accepted') {
+        inFlight = null
+        message(`Couldn’t move “${entry.name}”: ${outs[0].text ?? 'refused'}`)
+        return 'stop'
+      }
+      noteLanding(node, entry.to)
+      finishDo(entry, node)
+      return 'done'
+    }, { record })
+    return true
+  }
+
+  /**
+   * Group: `plan` is edit-group.js's `groupPlan(node)`. The group's `add`, then,
+   * once it is accepted, the object's move (an `add` refused because the name
+   * is taken retries once with the next free name). A refused move removes the
+   * empty group again, and nothing is recorded.
+   */
+  function group(node, plan, { record = true } = {}) {
+    if (busyReason() !== null) return false
+    const parent = plan.parent ?? null
+    let addDescriptor = { ...plan.descriptor }
+    let retried = false
+    let failure = null
+    const entry = {
+      kind: 'group', label: 'Group', name: addDescriptor.name, handle: null, descriptor: null,
+      parent: parent ? handleFor(parent) : null,
+      object: {
+        name: node.name, handle: handleFor(node), from: placeOf(node),
+        to: { parent: null, translation: copyValue(plan.objectValue.translation), rotation: copyValue(plan.objectValue.rotation), scale: copyValue(plan.objectValue.scale) },
+      },
+    }
+    const phases = [
+      () => sendAddStep(addDescriptor, parent ? parent.name : null),
+      () => sendMoveStep(node, valueFor(entry.object.to)),
+      () => sendRemoveStep(entry.handle.node, { window: false }),
+    ]
+    startComposite('do', entry, phases, (phase, outs) => {
+      const o = outs[0]
+      if (phase === 0) {
+        if (o.status !== 'accepted') {
+          if (!retried && /already in use/.test(o.text ?? '')) {
+            const name = freeName(addDescriptor.name)
+            if (name) { retried = true; addDescriptor = { ...addDescriptor, name }; return 'retry' }
+          }
+          inFlight = null
+          message(`Couldn’t group: ${o.text ?? 'refused'}`)
+          return 'stop'
+        }
+        const fresh = getNodeByName(addDescriptor.name)
+        if (!fresh) { inFlight = null; clearRedo(); message(OUT_OF_STEP_MESSAGE); return 'stop' }
+        entry.handle = handleFor(fresh)
+        entry.name = fresh.name
+        const cap = capture(fresh)
+        entry.descriptor = cap.ok ? cap.descriptor : { ...addDescriptor }
+        entry.object.to.parent = entry.handle
+        return 'next'
+      }
+      if (phase === 1) {
+        if (o.status !== 'accepted') {
+          failure = o.text ?? 'refused'
+          if (alive(entry.handle.node)) return 'next'        // remove the empty group again
+          inFlight = null
+          message(`Couldn’t group: ${failure}`)
+          return 'stop'
+        }
+        noteLanding(node, entry.object.to)
+        finishDo(entry, entry.handle.node)
+        return 'done'
+      }
+      inFlight = null                                        // the cleanup's answer
+      message(`Couldn’t group: ${failure}`)
+      return 'stop'
+    }, { record })
+    return true
+  }
+
+  /**
+   * Ungroup: `plan` is edit-group.js's `ungroupPlan(group)`. Every part's move
+   * together; once every one is accepted, the group's `remove` through the
+   * capture window. A part the server refuses stays, and so does the group:
+   * the accepted moves are recorded as "Ungroup (partly)" (GR-L7 (a)).
+   */
+  function ungroup(groupNode, plan, { record = true } = {}) {
+    if (busyReason() !== null) return false
+    const toParent = groupNode.parent ? handleFor(groupNode.parent) : null
+    const entry = {
+      kind: 'ungroup', label: 'Ungroup', name: groupNode.name, handle: handleFor(groupNode), descriptor: null,
+      parent: toParent, partial: false,
+      parts: plan.parts.map(({ node, value }) => ({
+        name: node.name, handle: handleFor(node), from: placeOf(node),
+        to: { parent: toParent, translation: copyValue(value.translation), rotation: copyValue(value.rotation), scale: copyValue(value.scale) },
+      })),
+    }
+    const first = entry.parts[0]?.handle.node ?? null
+    const phases = [
+      () => entry.parts.every((p) => sendMoveStep(p.handle.node, valueFor(p.to))) || inFlight.bySeq.size > 0,
+      () => sendRemoveStep(groupNode),
+    ]
+    startComposite('do', entry, phases, (phase, outs) => {
+      if (phase === 0) {
+        const bad = refused(outs)
+        if (bad.length === 0) {
+          for (const p of entry.parts) noteLanding(p.handle.node, p.to)
+          return 'next'
+        }
+        const stayed = new Set(bad.map((o) => o.node))
+        const moved = entry.parts.filter((p) => !stayed.has(p.handle.node))
+        const names = entry.parts.filter((p) => stayed.has(p.handle.node)).map((p) => `“${p.name}”`).join(', ')
+        if (moved.length === 0) {
+          inFlight = null
+          message(`Couldn’t ungroup: ${firstText(outs) ?? 'refused'}`)
+          return 'stop'
+        }
+        entry.parts = moved
+        entry.partial = true
+        entry.label = 'Ungroup (partly)'
+        message(`Ungroup stopped: ${names} stayed in the group (${firstText(outs) ?? 'refused'}).`)
+        finishDo(entry, moved[0].handle.node)
+        return 'done'
+      }
+      const o = outs[0]
+      if (o.status === 'accepted' && entry.descriptor) { finishDo(entry, first); return 'done' }
+      if (o.status === 'rejected') {
+        // the group stays (another tab's delete won, or a refusal): the moves are what happened
+        entry.partial = true
+        entry.label = 'Ungroup (partly)'
+        message(`Couldn’t remove “${entry.name}”: ${o.text ?? 'refused'}`)
+        finishDo(entry, first)
+        return 'done'
+      }
+      // removed, but changed while it was being removed (or not capturable): not recorded
+      inFlight = null
+      clearRedo()
+      if (o.status === 'changed') message(DELETE_CHANGED_MESSAGE)
+      select({ node: alive(first) ? first : null, removed: null })
+      return 'done'
+    }, { record })
+    return true
+  }
+
+  // ── Undo and Redo of the three kinds ──
+
+  function startCompositeEntry(entry, direction) {
+    if (entry.kind === 'move') {
+      const node = entry.handle.node
+      const place = direction === 'undo' ? entry.from : entry.to
+      startComposite(direction, entry, [() => sendMoveStep(node, valueFor(place))], (phase, outs) => {
+        if (outs[0].status !== 'accepted') { stopRun([entry.name], outs[0].text); return 'stop' }
+        noteLanding(node, place)
+        finishRun(node)
+        return 'done'
+      })
+      return
+    }
+
+    if (entry.kind === 'group') {
+      const object = entry.object.handle.node
+      if (direction === 'undo') {
+        startComposite(direction, entry, [
+          () => sendMoveStep(object, valueFor(entry.object.from)),
+          () => sendRemoveStep(entry.handle.node),
+        ], (phase, outs) => {
+          const o = outs[0]
+          if (phase === 0) {
+            if (o.status !== 'accepted') { stopRun([entry.object.name], o.text); return 'stop' }
+            noteLanding(object, entry.object.from)
+            return 'next'
+          }
+          if (o.status === 'accepted') { finishRun(object); return 'done' }
+          dropEntry()
+          inFlight = null
+          message(o.status === 'changed' ? DELETE_CHANGED_MESSAGE : `Couldn’t undo: ${o.text ?? 'refused'}`)
+          return 'stop'
+        })
+        return
+      }
+      startComposite(direction, entry, [
+        () => sendAddStep(entry.descriptor, entry.parent ? entry.parent.node.name : null),
+        () => sendMoveStep(object, valueFor(entry.object.to)),
+      ], (phase, outs) => {
+        const o = outs[0]
+        if (phase === 0) {
+          if (o.status !== 'accepted') { failEntry(o.text); return 'stop' }
+          // M2 (r5) — the re-added group is a new node: every older entry that
+          // points at the group follows it
+          const fresh = getNodeByName(entry.descriptor.name)
+          if (!fresh) { dropEntry(); inFlight = null; message(OUT_OF_STEP_MESSAGE); return 'stop' }
+          repoint(entry.handle, fresh)
+          return 'next'
+        }
+        if (o.status !== 'accepted') { stopRun([entry.object.name], o.text); return 'stop' }
+        noteLanding(object, entry.object.to)
+        finishRun(entry.handle.node)
+        return 'done'
+      })
+      return
+    }
+
+    // ungroup
+    const parts = entry.parts
+    const moveAll = (key) => () => parts.every((p) => sendMoveStep(p.handle.node, valueFor(p[key]))) || inFlight.bySeq.size > 0
+    const movesDone = (key, outs) => {
+      const bad = refused(outs)
+      if (bad.length > 0) {
+        const stayed = new Set(bad.map((o) => o.node))
+        stopRun(parts.filter((p) => stayed.has(p.handle.node)).map((p) => p.name), firstText(outs))
+        return false
+      }
+      for (const p of parts) noteLanding(p.handle.node, p[key])
+      return true
+    }
+    if (direction === 'undo') {
+      if (entry.partial) {
+        startComposite(direction, entry, [moveAll('from')], (phase, outs) => {
+          if (!movesDone('from', outs)) return 'stop'
+          finishRun(entry.handle.node)
+          return 'done'
+        })
+        return
+      }
+      startComposite(direction, entry, [
+        () => sendAddStep(entry.descriptor, entry.parent ? entry.parent.node.name : null),
+        moveAll('from'),
+      ], (phase, outs) => {
+        if (phase === 0) {
+          if (outs[0].status !== 'accepted') { failEntry(outs[0].text); return 'stop' }
+          const fresh = getNodeByName(entry.descriptor.name)
+          if (!fresh) { dropEntry(); inFlight = null; message(OUT_OF_STEP_MESSAGE); return 'stop' }
+          repoint(entry.handle, fresh)                       // M2 (r5)
+          return 'next'
+        }
+        if (!movesDone('from', outs)) return 'stop'
+        finishRun(entry.handle.node)
+        return 'done'
+      })
+      return
+    }
+    const firstPart = parts[0]?.handle.node ?? null
+    const phases = [moveAll('to')]
+    if (!entry.partial) phases.push(() => sendRemoveStep(entry.handle.node))
+    startComposite(direction, entry, phases, (phase, outs) => {
+      if (phase === 0) {
+        if (!movesDone('to', outs)) return 'stop'
+        if (entry.partial) { finishRun(firstPart); return 'done' }
+        return 'next'
+      }
+      const o = outs[0]
+      if (o.status === 'accepted') { finishRun(firstPart); return 'done' }
+      dropEntry()
+      inFlight = null
+      message(o.status === 'changed' ? DELETE_CHANGED_MESSAGE : `Couldn’t redo: ${o.text ?? 'refused'}`)
+      return 'stop'
+    })
+  }
+
+  /** Why Move to, Group or Ungroup can't start now (the engine's own half of the block), or null. */
+  function busyReason() {
+    if (hasPendingStructural()) return WAITING_MESSAGE
+    if (isDragging()) return 'Finish moving the object first'
+    if (isRenamePending()) return 'Waiting for the rename…'
+    if (hasPendingSend()) return WAITING_MESSAGE
+    if (inFlight) return WAITING_MESSAGE
+    return null
+  }
+
   // ── The engine (Y4) ────────────────────────────────────────────────────
 
   /** W4 — is the world still the way this entry left it? */
   function checkEntry(entry, direction) {
+    if (entry.kind === 'move' || entry.kind === 'group' || entry.kind === 'ungroup') return checkComposite(entry, direction)
     const node = entry.handle.node
     const name = entry.name
     const verb = direction === 'undo' ? 'Can’t undo' : 'Can’t redo'
@@ -882,6 +1455,7 @@ export function createEditUndo({
 
   function startEntry(entry, direction) {
     if (entry.kind === 'transform') { startTransform(entry, direction); return }
+    if (entry.kind === 'move' || entry.kind === 'group' || entry.kind === 'ungroup') { startCompositeEntry(entry, direction); return }
 
     if (entry.kind === 'rename') {
       const from = direction === 'undo' ? entry.to : entry.from
@@ -968,6 +1542,11 @@ export function createEditUndo({
     onRejected,
     onUnknown,
     onStructureAnswer,
+    // grouping GR7 — the panel's three structural actions
+    moveTo,
+    group,
+    ungroup,
+    busyReason,
     // the engine
     run,
     reason,
