@@ -64,3 +64,17 @@ def centre(p):
 def stick_centre(p):
     return p.ev("(() => { const r = document.getElementById('touch-stick').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
 
+
+def synth(p, kind, pid, x, y, primary=False):
+    """A second finger as in-page PointerEvents (pointerType touch) at the element under
+    (x, y), or the canvas when it holds the capture. Chromium's CDP touch emulation on
+    this page often withholds one finger's release until every finger lifts (probe
+    dbg10: two fingers on the canvas, Edit on or off), which left touches stuck; the
+    checks of a SECOND finger use this instead, with the first finger real."""
+    return p.ev(f"""(() => {{ const el = document.elementFromPoint({x}, {y});
+        const target = window.__synthTarget?.[{pid}] ?? el;
+        if ('{kind}' === 'pointerdown') (window.__synthTarget ??= {{}})[{pid}] = target;
+        if ('{kind}' === 'pointerup' || '{kind}' === 'pointercancel') delete window.__synthTarget[{pid}];
+        target.dispatchEvent(new PointerEvent('{kind}', {{ pointerId: {pid}, pointerType: 'touch', isPrimary: {str(primary).lower()},
+          bubbles: true, cancelable: true, composed: true, clientX: {x}, clientY: {y}, button: 0, buttons: '{kind}' === 'pointerup' ? 0 : 1 }}));
+        return target.id || target.tagName }})()""")

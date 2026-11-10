@@ -61,7 +61,10 @@ with sync_playwright() as pw:
     check('t5 two thumbs: the stick strafes while the other finger turns', abs(b['yaw'] - a['yaw'] + 0.3) < 0.05 and math.hypot(b['pos'][0] - a['pos'][0], b['pos'][2] - a['pos'][2]) > 0.3,
           f"Δyaw {b['yaw'] - a['yaw']:.3f}, moved {math.hypot(b['pos'][0] - a['pos'][0], b['pos'][2] - a['pos'][2]):.2f} m")
 
-    # t3 — taps in Edit. At 390 px the Edit panel covers the middle: turn until the cube is left of it.
+    # t3 — taps in Edit. Back at the spawn point first: t5 strafed through the atrium's
+    # wall, which would hide the cube. At 390 px the Edit panel covers the middle:
+    # turn until the cube is left of it.
+    p.ev("stage.nav._avatar.localNode.translation = [0, 0.7, 0]; stage.nav.yaw = 0; stage.nav.pitch = 0"); time.sleep(0.5)
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.6)
     p.ev("document.querySelector('#ep-palette button[data-kind=\"cube\"]').click()"); time.sleep(1.5)
     home(p)
@@ -97,18 +100,19 @@ with sync_playwright() as pw:
     t.down(5, scr[0], scr[1]); t.move(5, scr[0] + 2.5, scr[1] + 1); t.move(5, scr[0] + 5, scr[1] + 2); t.up(5); time.sleep(0.8)
     check('t3d S-1: a tap that rolls 5 px selects and does not look', p.ev(SEL) == cube and abs(p.ev(NAV)['yaw'] - y0) < 1e-9,
           f"selected {p.ev(SEL)}, Δyaw {p.ev(NAV)['yaw'] - y0:.4f}")
+    # S-2 — the stick held by a real finger; the tapping finger synthetic (tn_lib.synth says why)
     deselect(); sx, sy = stick_centre(p); c0 = clk()
     t.down(11, sx, sy); t.move(11, sx, sy - 2)          # a thumb resting on the stick
-    t.down(5, scr[0], scr[1]); t.up(5); time.sleep(0.8)
+    synth(p, 'pointerdown', 901, scr[0], scr[1]); synth(p, 'pointerup', 901, scr[0], scr[1]); time.sleep(0.8)
     c1 = clk()
-    check('t3e S-2: with a thumb on the stick, a tap on the cube selects it (Chrome sends no click; the page makes one)',
+    check('t3e S-2: with a thumb on the stick, a tap on the cube selects it (the page makes the click)',
           p.ev(SEL) == cube and c1[0] - c0[0] == 1, f"selected {p.ev(SEL)}, clicks {c1[0] - c0[0]}")
     bfp = p.ev("(() => { const r = document.getElementById('touch-fp').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
     cam0 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
-    t.down(12, bfp[0], bfp[1]); t.up(12); time.sleep(0.6)
+    synth(p, 'pointerdown', 902, bfp[0], bfp[1]); synth(p, 'pointerup', 902, bfp[0], bfp[1]); time.sleep(0.6)
     cam1 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
     check('t3f S-2: with a thumb on the stick, a tap on First person works, once', cam0 != cam1 and cam1 == 1.6, f'camera y {cam0} → {cam1}')
-    t.down(12, bfp[0], bfp[1]); t.up(12); time.sleep(0.6)
+    synth(p, 'pointerdown', 903, bfp[0], bfp[1]); synth(p, 'pointerup', 903, bfp[0], bfp[1]); time.sleep(0.6)
     t.up(11); time.sleep(0.4)
     check('t3g ... and a second tap goes back to third person', p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0)
     # t6 — a drag that starts on the handle's centre moves the cube, not the view (B3)
@@ -123,17 +127,18 @@ with sync_playwright() as pw:
     t.down(6, scr[0], scr[1])
     for s in range(1, 6): t.move(6, scr[0] + 4 * s, scr[1]); time.sleep(0.03)
     o1 = obj()
-    t.down(13, cx + 100, cy + 200)
-    for s in range(1, 8): t.move(13, cx + 100 - 10 * s, cy + 200 - 10 * s); time.sleep(0.03)
-    o2 = obj(); t.up(13); time.sleep(0.3)
+    synth(p, 'pointerdown', 913, cx + 100, cy + 200)
+    for j in range(1, 8): synth(p, 'pointermove', 913, cx + 100 - 10 * j, cy + 200 - 10 * j); time.sleep(0.03)
+    o2 = obj(); synth(p, 'pointerup', 913, cx + 30, cy + 130); time.sleep(0.3)
     for s in range(6, 9): t.move(6, scr[0] + 4 * s, scr[1]); time.sleep(0.03)
     o3 = obj(); t.up(6); time.sleep(1.0)
-    check('t6b S-3: a second finger moving during a handle drag leaves the cube still, and the first finger drags on after it lifts',
+    check('t6b S-3: a second (synthetic) finger moving during a handle drag leaves the cube still, and the first finger drags on after it lifts',
           math.dist(o1, o2) < 1e-6 and math.dist(o2, o3) > 0.05, f'jump {math.dist(o1, o2):.4f}, after the lift {math.dist(o2, o3):.3f}')
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)
 
     # t4 — ORBIT: the stick hides; a drag orbits; a pinch out zooms in
     p.ev("(() => { const s = document.getElementById('mode-switcher'); s.value = 'ORBIT'; s.dispatchEvent(new Event('change')) })()"); time.sleep(0.5)
+    p.ev("stage.nav.orbitRadius = 10"); time.sleep(0.2)       # away from the 0.5 clamp (the avatar is at the spawn point)
     ui = p.ev(UI); n0 = p.ev(NAV)
     check('t4a ORBIT hides the stick and says pinch', n0['mode'] == 'ORBIT' and not ui['stick'] and 'Pinch to zoom' in ui['hint'], json.dumps(ui))
     t.down(7, cx - 40, cy); t.down(8, cx + 40, cy)

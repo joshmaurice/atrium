@@ -4252,7 +4252,6 @@ viewportEl.addEventListener('pointerdown', (e) => {
     touchStickEl.setPointerCapture?.(e.pointerId)
   } else if (e.target === canvas) {
     on = gizmo?.dragging ? 'handle' : 'view'
-    if (on === 'handle' && handlePointerId === null) handlePointerId = e.pointerId
   }
   applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre, primary: e.isPrimary }))
 })
@@ -4265,7 +4264,6 @@ document.addEventListener('pointermove', (e) => {
 for (const type of ['pointerup', 'pointercancel']) {
   document.addEventListener(type, (e) => {
     if (e.pointerType !== 'touch') return
-    if (e.pointerId === handlePointerId) handlePointerId = null
     applyTouch(touchNav.up({ id: e.pointerId }))
   }, true)
 }
@@ -4276,13 +4274,15 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) reset
  * The outside review's S-3 — TransformControls reads every pointer on the
  * canvas and checks no `pointerId`, so a second finger during a handle drag
  * steered the object (probe 7: it jumped 0.05). While a handle drags, the
- * canvas hears only the finger that grabbed it.
+ * canvas hears only the finger that last pressed it before the drag began:
+ * a handle press only becomes a drag after 4 px (T17), so the grabbing finger
+ * is known by its press, not by `dragging` at that moment.
  */
 let handlePointerId = null
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
   viewportEl.addEventListener(type, (e) => {
     if (e.pointerType !== 'touch' || e.target !== canvas) return
-    if (!gizmo?.dragging) { if (type === 'pointerdown') handlePointerId = null; return }
+    if (!gizmo?.dragging) { if (type === 'pointerdown') handlePointerId = e.pointerId; return }
     if (handlePointerId === null || e.pointerId === handlePointerId) return
     e.stopPropagation()
   }, true)
