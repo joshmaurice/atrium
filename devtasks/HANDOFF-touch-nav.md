@@ -1,6 +1,6 @@
 # Handoff: `touch-nav`, implemented on `claude/touch-nav`
 
-**IMPLEMENTED; the fresh-agent code check (§5) taken; the outside code
+**IMPLEMENTED; the fresh-agent code check (§5) taken (`c8dbbd0`); the outside code
 review not yet run; released only after `grouping` is `COMPLETE` on PROD**
 (TN-L0 (a)). This file is also the working note: if a session loses its
 context, start here, then `git log` on the branch.
@@ -16,7 +16,7 @@ candidate `98f916c6` plus `devtasks/` notes). **Rebase onto grouping's final
 tip before release** if grouping's DEV acceptance changes anything.
 **Implemented by Claude** (Opus 5.5), 2026-11-10.
 
-## 1. What changed (6 files of code and tests, +710/−22 at `4391460`)
+## 1. What changed (6 files of code and tests)
 - `packages/client/src/NavigationController.js` (T1): `setMoveInput`
   (analog, a held key wins), `onTouchLook` (0.005 rad/px), `onPinch`
   (ORBIT), `moveInput`; `onMouseMove` now calls a shared `_look`.
@@ -68,5 +68,24 @@ HARNESS_ROOT=/tmp/atrium-harness python3 devtasks/harness/checks/touch-nav/tn.py
    `STICK_RADIUS_PX` (48) and `STICK_DEAD_ZONE` (0.12): constants, no design
    change.
 
-## 5. The fresh-agent code check
-(pending)
+## 5. The fresh-agent code check (at `4391460`)
+A fresh Claude agent (general-purpose, no context from the building session)
+read the contract and the diff, and ran scratch probes. Verdict **CHANGES
+REQUESTED**: one should-fix, nits. Each finding was reproduced before it was
+taken; the fixes are commit `c8dbbd0`.
+
+| # | Finding | Reproduced | Fix (`c8dbbd0`) |
+|---|---|---|---|
+| F1 | should-fix: every look armed the click swallow for 500 ms, but Chrome sends no click after a drag past its tap slop, so the next tap within 500 ms on anything in `#viewport` (the First person button, the Edit panel) was eaten | `spike-touch-nav/probe6.py` on the real page at `4391460`: a 60 px touch look, then the button's click: `buttonWorked: False`. (probe 5's real-gesture try couldn't: the emulated page took 2.3 s between the look and the tap) | Only a click on the **canvas** is swallowed, and the next touch `pointerdown` disarms it. probe 6 after: `buttonWorked: True`, and the short drag's canvas click is still swallowed (`reached: 0`) |
+| F2 | nit (inferred): a swallowed short look might count toward a double-tap and drill | `probe5.py`: a 6 px look on `Table-Center-Top`, then a tap 0.12 s later: two clicks, both `detail` 1, and the selection is `Furniture`, the same as a plain tap | Not reproduced; nothing changed. To watch at DEV on the phone |
+| F3 | nit: the hint differed from T4's wording (WALK lacked "👤 first person"; Inspect differed) | read | `touchHint()` as the contract words it |
+| — | note: a finger whose release is lost stays tracked, so the next finger pinches | the agent's probe 3 | `down({ primary })`: a primary touch (no other finger down) drops whatever is still tracked and stops the stick. Two unit tests |
+| — | nit: on a touch laptop a tap on the button takes focus off the canvas, so WASD stop | read | the button gives focus back to the canvas |
+
+Checked and found OK by the agent: load order (no TDZ at load), when the
+stick shows (disconnect, ORBIT, a world whose first mode is ORBIT), pointer
+capture and TransformControls, V and the button sharing
+`toggleFirstPerson`, mouse/key/wheel unchanged, the controller's rules.
+
+After the fixes: the T2 unit tests 20/20, the client app suite 1,856 pass,
+the navigation tests 33, the harness `tn.py` 23/23.

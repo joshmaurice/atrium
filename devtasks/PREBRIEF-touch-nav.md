@@ -1,6 +1,6 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **Revision 1.1 (2026-11-10), decisions taken; built at `50af5c2`+.** The
+Status: **Revision 1.2 (2026-11-10), decisions taken; built (HANDOFF-touch-nav.md).** The
 operator, by voice (about 14:10 PT): "I'm using Android and Chrome browser.
 And uh, we can build this now, I'm thinking, and go with your
 recommendations otherwise"; then in text, 14:15 PT: "Okay go ahead with that
@@ -232,9 +232,13 @@ events of `pointerType` `touch` and returning effects:
   release (selection-parts lesson 4), so `isSelectClick` can't see the
   travel. A `'view'` finger that looked or was part of a pinch returns
   `{ type: 'swallow-click' }` on release; the page then drops the next
-  `click` on the viewport within 500 ms (a capture listener,
-  `stopImmediatePropagation`). Otherwise a 6 px drag would turn the view
-  **and** select or activate.
+  `click` **on the canvas** within 500 ms (a capture listener on the
+  viewport, `stopImmediatePropagation`), and the next touch press disarms
+  it (Rev 1.2, the fresh check's F1). Otherwise a 6 px drag would turn the
+  view **and** select or activate.
+- `down({ primary })` (Rev 1.2): a primary touch means no other finger is
+  down, so anything still tracked lost its release; it is dropped and the
+  stick stops.
 - `releaseStick()`: lets the stick go and leaves a look or pinch in progress
   alone (the page calls it when the stick hides, e.g. on entering ORBIT
   mid-pinch); `reset()` drops everything.
@@ -312,6 +316,7 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 1.2 (2026-11-10): the fresh-agent check's fixes (HANDOFF §5): the swallow only eats a canvas click and is disarmed by the next press; `primary`; the hint as T4 words it.
 - Rev 1.1 (2026-11-10): swallow the click after a look; `releaseStick`; §5's results.
 - Rev 1.0 (2026-11-10): the decisions (Status), the full contract (§4).
 - Rev 0.2 (2026-11-10): the operator's report of his phone (§2.2): only
