@@ -3096,6 +3096,8 @@ function duplicateHint(node) {
 // Enabled state and tooltips. A hint only: every click checks again.
 function refreshEditActions() {
   const blocked = editDispatchBlocked()
+  // the open Model form's Save follows the same block (it re-reads dispatchAllowed)
+  if (modelForm?.isOpen()) modelForm.render()
   // R3 — the block reaches the handles and the fields, not only the buttons:
   // a handle left live during an undo or a pending request would move the
   // object with nothing sent, and the next real drag would commit the hidden
@@ -4710,6 +4712,9 @@ modelForm = createModelForm({
     refreshActions: () => refreshEditActions(),
     selectNode: (name) => selectAdded(name),
     onDropResult: () => endCheck(),
+    // grouping (the code check's finding 1) — no Save while an edit is waiting
+    // for the server: it would take the structural slot a pending step needs
+    dispatchAllowed: () => modes.edit && !editDispatchBlocked(),
   },
 })
 modelForm.wire()

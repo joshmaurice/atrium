@@ -126,6 +126,10 @@ export function createFormGate() {
  * @param {(seq: number, entry: object) => void} [args.deps.undoRegisterAdd]
  * @param {() => void} [args.deps.refreshActions]
  * @param {(name: string) => void} [args.deps.selectNode]
+ * @param {() => boolean} [args.deps.dispatchAllowed]  Edit is on and no edit is
+ *   waiting for the server (an undo, a redo, a pending structural request): Save
+ *   is offered only then, as the teleporter form and the Library grid do
+ *   (grouping, the code check's finding 1). Absent: allowed.
  * @param {object} [args.gate]     `createFormGate()`'s object
  * @param {string} [args.name]     this form's name in the gate
  */
@@ -199,13 +203,18 @@ export function createModelForm({ elements, deps = {}, gate = null, name = 'mode
     if (elements.save) {
       elements.save.disabled = !canSave()
       elements.save.textContent = state.saving ? 'Saving...' : 'Save'
+      elements.save.title = state.open && !state.saving && !dispatchAllowed() ? 'Wait for the edit in progress to finish' : ''
     }
     if (elements.cancel) elements.cancel.disabled = Boolean(state.saving)
     if (elements.url) elements.url.disabled = Boolean(state.saving)
   }
 
+  function dispatchAllowed() {
+    return deps.dispatchAllowed ? deps.dispatchAllowed() === true : true
+  }
+
   function canSave() {
-    return state.open && Boolean(state.result) && !state.checking && !state.saving
+    return state.open && Boolean(state.result) && !state.checking && !state.saving && dispatchAllowed()
   }
 
   /** The spec Check holds: what Save stores and what the cache is seeded with. */

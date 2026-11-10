@@ -21,6 +21,7 @@ Started 2026-11-10, 00:09 PT ("Yes, please").
 | 5 | GR8's glue: `index.html` (`#ep-group-actions` with Group and Ungroup, `#ep-move-row`'s Move to select and `#ep-move-note`, `#ep-empty-row`'s Empty groups select beside the sky row, both selects width-capped); `app.js` (the enable rules `groupHint`, `ungroupHint`, `movableProblem`; ask-first `askUnundoable` with `ungroupUndoProblem`/`moveUndoProblem`, added to `edit-group.js`; the Move to list built on open or key change, indices into `moveOptions`, a choice checked again; the Empty groups list keyed on its labels, waiting while this tab's request is in flight; `som:reparent` cancels the node's gesture then ends the drag, refreshes the panel, both breadcrumbs and the lists; the engine's `move`, `freeName`, `holdNode` deps; `edit:accepted` passes `applied`/`landed`; a composite original counts as pending, not undoing; the hold released by the answer; the row hidden below level 4). `edit-structure.js`: `reparentSeen` (the review's nit). `edit-undo.js`: the composite's `holdNode` and `doing()`. `tools/som-inspector/src/app.js`: the tree rebuilds on `som:reparent`. New `grouping-wiring.test.js` (13 tests; 0 of 13 pass on commit 4's `app.js`); `app-wiring.test.js`'s `undo.onAccepted(seq` match loosened. App 1,808 pass, 1 skip | done |
 | 6 | The harness checks (§3), with three findings they turned up, each fixed in `app.js` with a wiring test that fails without the fix (§3); a new pending-delete test C in `grouping-undo.test.js` for the parent re-read when the removal window opens (the proof of `openRemovalWindow`'s re-read turned nothing red before it, §4); `grouping.test.js`'s sockets closed by the closers and its two `c.closed` waits bounded, so a red stale-hello test fails instead of hanging the file (§4). The proofs (§4), the full suites (§5), this file | done |
 | 7 | The fresh-agent code check's findings 1–5, each reproduced first and fixed with tests that fail without the fix (§7); finding 6 not taken | done |
+| 8 | With the operator's go (2026-11-10, 03:21 PT): the Model form's Save waits for an edit in flight (`model-form.js`, outside §6's list; §7). Harness `c6.py` | done |
 
 ## 2. Notes for the record
 - **`refuseStaleHello`** (commit 2) is an option of `attachSessionHandlers`,
@@ -108,7 +109,9 @@ file run alone under `timeout 180`:
 | 24 | code check 2: Move to's value recomputed after the dialog | `grouping-wiring.test.js` 1 |
 | 25 | code check 3: Ungroup's rule without the credit | `grouping-wiring.test.js` 1 |
 | 26 | code check 4: Delete's ask-first at a bound | `grouping-wiring.test.js` 1 |
-| 27 | code check 4: `checkEntry`'s GR4 on a parented re-add | `grouping-undo.test.js` 1 |
+| 27 | commit 8: the Model form's Save gated (`canSave` without `dispatchAllowed`) | `model-form.test.js` 1 |
+| 28 | commit 8: `refreshEditActions` re-renders the open form | `grouping-wiring.test.js` 1 |
+| 29 | code check 4: `checkEntry`'s GR4 on a parented re-add | `grouping-undo.test.js` 1 |
 
 Test C's route: the Undo of a moved Duplicate, or a Redo of a Delete after
 a move, is refused "changed elsewhere" when the local values changed; the
@@ -146,12 +149,26 @@ against the harness at `9716caf` and the repository.
 | 5 | nit: no test pinned the cycle (step 4) before the counts (step 5) | yes, `order.mjs` | yes | A new order test in `grouping.test.js`. It passes on the code, as a guard; proof 20 swaps the steps and it turns red. |
 | 6 | nit: no listener for `som:desync` | **no** | no | `apps/client/src/app.js` L1145 listens and reconnects (A7/C7), so the comment at `AtriumClient.js` L1437 is right. The agent's grep missed it. |
 
-**Not changed, outside §6's file list:** the check also suggested gating
-the Model form's Save on `editDispatchBlocked()` (`model-form.js`). The fix
-above makes the collision safe without it: the Save is sent, and the
-composite stops cleanly and says so. The gate is a follow-up for the
-operator; it would also cover a plain Undo or Redo in flight, which predates
-this round.
+**Outside §6's file list, with the operator's go (commit 8):** the check also
+suggested gating the Model form's Save on `editDispatchBlocked()`. The fix
+above already made the collision safe: the composite stops cleanly and says
+so. I asked rather than change `model-form.js`. The operator said go
+(2026-11-10, 03:21 PT: "making it unavailable to be added if there's a
+pending edit").
+
+- `model-form.js` takes an optional `dispatchAllowed` dep, as the teleporter
+  form does. `canSave` requires it, and Save's tooltip reads "Wait for the
+  edit in progress to finish".
+- `app.js` passes `modes.edit && !editDispatchBlocked()`, and
+  `refreshEditActions` re-renders the open form, so Save comes back when the
+  edit lands.
+- This also covers an Undo or a Redo in flight, which predates this round.
+- Tests: `model-form.test.js` (1) and `grouping-wiring.test.js` (1), both
+  failing without the change; proofs 27 and 28.
+- Harness `c6.py` uses real clicks. Ungroup, then Save at once: Save is
+  disabled with its reason; the Ungroup completes and is recorded whole; then
+  Save is offered again and adds the model.
+- App suite 1,825 pass (1 skip); client 760; smoke and c1–c6 pass.
 
 **Tests added (each fails on `9716caf`'s sources, except two named guards):**
 - `grouping-undo.test.js`:

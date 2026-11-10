@@ -31,7 +31,7 @@ function fakeElement() {
   }
 }
 
-function harness({ checkResult = { ok: true, vertices: 12400, bytes: 3250586, bounds: [1, 2, 3], sha256: 'abc', kind: 'glb' }, gate = createFormGate(), isNameFree = () => true } = {}) {
+function harness({ checkResult = { ok: true, vertices: 12400, bytes: 3250586, bounds: [1, 2, 3], sha256: 'abc', kind: 'glb' }, gate = createFormGate(), isNameFree = () => true, dispatchAllowed = undefined } = {}) {
   const elements = {
     form: fakeElement(), url: fakeElement(), privacy: fakeElement(), check: fakeElement(),
     status: fakeElement(), pinRow: fakeElement(), pin: fakeElement(), error: fakeElement(),
@@ -54,6 +54,7 @@ function harness({ checkResult = { ok: true, vertices: 12400, bytes: 3250586, bo
       refreshActions: () => { calls.refreshed += 1 },
       selectNode: (name) => calls.selected.push(name),
       onDropResult: () => { calls.dropped += 1 },
+      ...(dispatchAllowed ? { dispatchAllowed } : {}),
     },
   })
   form.wire()
@@ -611,4 +612,24 @@ test('Z2: render leaves a focused URL box alone', () => {
   h.elements.url.ownerDocument = null
   h.form.render()
   assert.equal(h.elements.url.value, 'https://host/chair.glb', 'and it mirrors again once blurred')
+})
+
+test('grouping (the code check’s finding 1): no Save while an edit is waiting for the server; Save comes back when it lands', async () => {
+  let allowed = false
+  const h = harness({ dispatchAllowed: () => allowed })
+  h.form.open()
+  h.elements.url.value = 'https://host/chair.glb'
+  h.elements.url.fire('input')
+  await h.form.check()
+  assert.equal(h.elements.save.disabled, true, 'Save is off while blocked')
+  assert.equal(h.elements.save.title, 'Wait for the edit in progress to finish')
+  assert.equal(h.form.save(), null, 'a Save that slips through sends nothing')
+  assert.equal(h.calls.descriptors.length, 0)
+  assert.equal(h.calls.structure.length, 0, 'the structural slot is left alone')
+  allowed = true
+  h.form.render()
+  assert.equal(h.elements.save.disabled, false)
+  assert.equal(h.elements.save.title, '')
+  assert.ok(h.form.save(), 'Save works once the edit has landed')
+  assert.equal(h.calls.descriptors.length, 1)
 })

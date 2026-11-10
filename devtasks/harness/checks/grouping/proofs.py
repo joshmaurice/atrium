@@ -34,6 +34,8 @@ PROOFS = [
  ('code check 2: Move to recomputes its value after the dialog', A, "    value = moveValue(node, target)\n    if (!value.ok) { showEditError(`Couldn’t move: ${MOVE_REASONS[value.rule]}`); return }\n  }", "  }", ['apps/client/tests/grouping-wiring.test.js']),
  ('code check 3: Ungroup’s rule checks the credit', A, "  const own = ownNodeProblem(node._node)\n", "  const own = ownNodeProblem(node._node, { credit: false })\n", ['apps/client/tests/grouping-wiring.test.js']),
  ('code check 4: Delete asks first at a bound', A, "  const tooLarge = capture.ok && groupingAllowed() && !!deleteUndoProblem(node)", "  const tooLarge = false", ['apps/client/tests/grouping-wiring.test.js']),
+ ('code check 1 (operator’s go): the Model form’s Save gated', 'apps/client/src/model-form.js', "    return state.open && Boolean(state.result) && !state.checking && !state.saving && dispatchAllowed()", "    return state.open && Boolean(state.result) && !state.checking && !state.saving", ['apps/client/tests/model-form.test.js']),
+ ('code check 1 (operator’s go): refreshEditActions re-renders the form', A, "  if (modelForm?.isOpen()) modelForm.render()\n", "", ['apps/client/tests/grouping-wiring.test.js']),
  ('code check 4: a re-add past a bound is not started', U, "      if (p && treeBoundsProblem(moveCounts(null, p, descriptorCounts(entry.descriptor)))) {", "      if (false) {", ['apps/client/tests/grouping-undo.test.js']),
 ]
 only = sys.argv[1:]

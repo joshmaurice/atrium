@@ -479,3 +479,10 @@ describe('the code check, finding 1: the structural dependency sends nothing whi
     assert.match(code, /structural: \(request, direction\) => \{\s*if \(structure\.pending\) return null\s*let seq/)
   })
 })
+
+describe('the code check, finding 1 (operator’s go, 2026-11-10): the Model form’s Save follows the edit block (text)', () => {
+  test('the form gets dispatchAllowed from the same block the other forms use, and refreshEditActions re-renders it', () => {
+    assert.match(blockFrom('modelForm = createModelForm({'), /dispatchAllowed: \(\) => modes\.edit && !editDispatchBlocked\(\),/)
+    assert.match(functionText('refreshEditActions'), /const blocked = editDispatchBlocked\(\)\s*if \(modelForm\?\.isOpen\(\)\) modelForm\.render\(\)/)
+  })
+})
