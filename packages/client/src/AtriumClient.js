@@ -1399,6 +1399,87 @@ export class AtriumClient extends EventEmitter {
   }
 
   /**
+   * grouping GR6 — ask the server to move a node to another parent. Sends
+   * `{type:'send', node: name, field: 'parent', value}` with
+   * `value = { parent: name|null, translation, rotation, scale }` (GR2) and
+   * returns the request seq, exactly as `renameNode` does.
+   *
+   * Nothing changes locally until the server accepts: the own echo applies the
+   * move through `SOMDocument.reparentNode` (`_applyReparent`). On
+   * `edit:rejected` or `edit:unknown` nothing changed.
+   *
+   * @param {string} name
+   * @param {{parent: string|null, translation: number[], rotation: number[], scale: number[]}} value
+   * @returns {number} the seq of the request
+   * @throws {Error} 'World not loaded' when _worldReady is false
+   */
+  moveNode(name, value) {
+    if (!this._worldReady) throw new Error('World not loaded')
+    const seq = ++this._sendSeq
+    this.lastSendSeq = seq
+    this._trackEdit(seq, { type: 'send', node: name, field: 'parent', value })
+    this._wsSend({ type: 'send', seq, node: name, field: 'parent', value })
+    return seq
+  }
+
+  /**
+   * grouping GR6 — apply a parent change (an own echo or another session's
+   * `set`) inside `applyLocally`, then emit, in this order:
+   *   `som:reparent { nodeName, from, to, origin }` (parent names, null for
+   *     the top level);
+   *   `som:set` for `parent`;
+   *   `som:set` for `translation`, `rotation` and `scale`, each with
+   *     `origin: 'remote'` and `reparent: true`: the node's local values changed
+   *     frame, so the edit tracker takes them as another session's (its
+   *     confirmed values follow) and the behaviour runner drops a queued
+   *     old-frame write, as for any remote transform.
+   * A node or parent this client can't find, or a move `reparentNode` refuses,
+   * emits `som:desync` (the connection layer resyncs) and changes nothing.
+   * @returns {{applied: boolean, landed: string|null}} `landed`: the parent the
+   *   node is under afterwards (N-4: a race can land it in another node of the
+   *   parent's name; the caller records what happened, not what was asked)
+   */
+  _applyReparent(nodeName, value, { origin, requestSeq = undefined } = {}) {
+    const node = this._som.getNodeByName(nodeName)
+    const parentName = value?.parent ?? null
+    if (!node) {
+      if (this._debug) this._log(`som:desync — node "${nodeName}" not found for a parent change`)
+      this.emit('som:desync', { reason: 'node-not-found', node: nodeName, parent: parentName })
+      return { applied: false, landed: null }
+    }
+    let parent = null
+    if (parentName !== null) {
+      parent = this._som.getNodeByName(parentName)
+      if (!parent) {
+        if (this._debug) this._log(`som:desync — parent "${parentName}" not found for "${nodeName}"`)
+        this.emit('som:desync', { reason: 'parent-not-found', node: nodeName, parent: parentName })
+        return { applied: false, landed: null }
+      }
+    }
+    const from = node.parent?.name ?? null
+    let result = null
+    this.applyLocally(() => { result = this._som.reparentNode(node, parent, value) })
+    if (!result?.ok) {
+      if (this._debug) this._log(`som:desync — the move of "${nodeName}" was refused here: ${result?.message}`)
+      this.emit('som:desync', { reason: 'reparent-refused', node: nodeName, parent: parentName })
+      return { applied: false, landed: null }
+    }
+    const landed = node.parent?.name ?? null
+    // G5 — every som:set site names its origin literally (behavior-origin.test.js).
+    if (origin === 'own') {
+      this.emit('som:reparent', { nodeName, from, to: landed, origin: 'own', requestSeq })
+      this.emit('som:set', { nodeName, path: 'parent', value, origin: 'own', requestSeq })
+    } else {
+      this.emit('som:reparent', { nodeName, from, to: landed, origin: 'remote' })
+      this.emit('som:set', { nodeName, path: 'parent', value, origin: 'remote' })
+    }
+    for (const path of ['translation', 'rotation', 'scale']) {
+      this.emit('som:set', { nodeName, path, value: [...node[path]], origin: 'remote', reparent: true })
+    }
+    return { applied: true, landed }
+  }
+
+  /**
    * Z2a (scripting-4a) — set a model node's animation state. Sends
    * `{type:'send', node: name, field: 'extras.atrium.animation', value}` and
    * returns the request seq, exactly as `renameNode` does.
@@ -1770,6 +1851,13 @@ export class AtriumClient extends EventEmitter {
       return
     }
 
+    // grouping GR6 — another session's parent change. Before GR6 this reached
+    // setPath below and threw (SOMNode.parent has only a getter: §2.3).
+    if (msg.field === 'parent') {
+      this._applyReparent(msg.node, msg.value, { origin: 'remote' })
+      return
+    }
+
     // Case 2 — A8/C6: another client's rename is applied through the name
     // setter, which goes through SOMDocument.renameNode. A thrown rename error
     // is logged and changes nothing.
@@ -1843,6 +1931,14 @@ export class AtriumClient extends EventEmitter {
       this.emit('som:set', { nodeName: edit.node, path: 'name', value: edit.value, origin: 'own', requestSeq: msg.requestSeq })
     }
 
+    // grouping GR6 — an accepted parent change is applied on its own echo, as
+    // a rename is. `edit:accepted` below carries whether it applied and where
+    // the node landed (U15 for a rename; N-4 for an add).
+    let moved = null
+    if (edit.type === 'send' && edit.field === 'parent') {
+      moved = this._applyReparent(edit.node, msg.value, { origin: 'own', requestSeq: msg.requestSeq })
+    }
+
     if (edit.type === 'send' && edit.field === MODEL_ANIMATION_FIELD) {
       this.applyLocally(() => {
         const target = this._som?.getObjectByName?.(edit.node) ?? null
@@ -1875,7 +1971,7 @@ export class AtriumClient extends EventEmitter {
       this.emit('som:set', { nodeName: edit.node, path: edit.field, value: msg.value, origin: 'own', requestSeq: msg.requestSeq })
     }
 
-    this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit })
+    this.emit('edit:accepted', { seq: msg.requestSeq, requestSeq: msg.requestSeq, ...edit, ...(moved ? { applied: moved.applied, landed: moved.landed } : {}) })
   }
 
   _onView(msg, record) {

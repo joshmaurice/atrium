@@ -556,3 +556,95 @@ export function checkAddNode(node, { avatar = false } = {}) {
   const refs = materialRefsProblem(node)
   return refs ? addDeny(refs) : null
 }
+
+// ---------------------------------------------------------------------------
+// grouping GR4 — the bounds on a live tree (SA-L2 against created content).
+//
+// TWO COPIES: `packages/server/src/send-policy.js`'s and this one, which the
+// panel uses to ask first (and `edit-group.js` imports). `packages/server/test/grouping-counts.test.js`
+// holds them to the same answers on the same trees. Both work on SOM nodes
+// through their public getters only (`parent`, `children`, `mesh`, `extras`).
+// ---------------------------------------------------------------------------
+
+const ownSource = (n) => {
+  const a = n?.extras?.atrium
+  return a !== null && typeof a === 'object' && a.source != null
+}
+
+/** The top-level ancestor of `node` (itself at the top level). */
+export function topLevelOf(node) {
+  let n = node
+  while (n.parent) n = n.parent
+  return n
+}
+
+/** Generations from `top` down to `node` (0 when they are the same). */
+export function generationBelow(top, node) {
+  let g = 0
+  for (let n = node; n && n !== top; n = n.parent) g += 1
+  return g
+}
+
+/**
+ * GR4 — the nodes (the root included), the deepest generation below `root`
+ * (the root is 0) and the primitives of a live tree. A `source` container
+ * counts as one node and nothing under it is counted (review S7: the server
+ * holds a container's loaded nodes in file worlds only, the client always).
+ * `exclude` leaves one subtree out (a move inside one tree is not counted
+ * twice).
+ */
+export function treeCounts(root, exclude = null) {
+  let nodes = 0, depth = 0, primitives = 0
+  const stack = [[root, 0]]
+  while (stack.length > 0) {
+    const [n, g] = stack.pop()
+    if (n === exclude) continue
+    nodes += 1
+    if (g > depth) depth = g
+    const prims = n.mesh?.primitives
+    if (Array.isArray(prims)) primitives += prims.length
+    if (ownSource(n)) continue
+    for (const c of n.children) stack.push([c, g + 1])
+  }
+  return { nodes, depth, primitives }
+}
+
+const BOUND_OF = { nodes: SUBTREE_NODES_MAX, depth: SUBTREE_DEPTH_MAX, primitives: SUBTREE_PRIMITIVES_MAX }
+
+/**
+ * GR4 — the destination's top-level tree before and after `node` moves under
+ * `parent`, or null for a move to the top level (never refused by size).
+ * `sub` stands in for the moved tree's counts (an `add`'s descriptor).
+ */
+export function moveCounts(node, parent, sub = null) {
+  if (!parent) return null
+  const top = topLevelOf(parent)
+  const before = treeCounts(top)
+  const inside = node ? topLevelOf(node) === top : false
+  const base = inside ? treeCounts(top, node) : before
+  const moved = sub ?? treeCounts(node)
+  const g = generationBelow(top, parent)
+  return {
+    before,
+    after: {
+      nodes: base.nodes + moved.nodes,
+      depth: Math.max(base.depth, g + 1 + moved.depth),
+      primitives: base.primitives + moved.primitives,
+    },
+  }
+}
+
+/**
+ * GR4 (GR-L5 (a)) — the count a change would take past its bound that it is
+ * not already past, or null. A tree already over a count may grow.
+ */
+export function treeBoundsProblem(counts) {
+  if (!counts) return null
+  for (const k of ['nodes', 'depth', 'primitives']) {
+    if (counts.after[k] > BOUND_OF[k] && !(counts.before[k] > BOUND_OF[k])) return k
+  }
+  return null
+}
+
+/** GR4's refusal text. */
+export const TREE_BOUNDS_MESSAGE = 'the group would be too large to copy'

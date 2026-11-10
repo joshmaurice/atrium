@@ -167,12 +167,15 @@ test('G5: every `som:set` emit in AtriumClient carries an origin', () => {
   // that exist: a seventh site added without `origin` would pass them all.
   const source = readFileSync(new URL('../src/AtriumClient.js', import.meta.url), 'utf8')
   const emits = source.match(/emit\('som:set', \{[^}]*\}/g) ?? []
-  assert.equal(emits.length, 6, `expected six som:set emit sites, saw ${emits.length}`)
+  // grouping GR6 — three more sites: a parent change's own and remote `parent`
+  // sets, and its three transform sets (one site, origin remote: the local
+  // values changed frame, whoever moved it).
+  assert.equal(emits.length, 9, `expected nine som:set emit sites, saw ${emits.length}`)
   for (const emit of emits) {
     assert.match(emit, /origin: '(own|remote)'/, `no origin in ${emit}`)
   }
   const own = emits.filter((emit) => emit.includes("origin: 'own'")).length
   const remote = emits.filter((emit) => emit.includes("origin: 'remote'")).length
-  assert.equal(own, 4, 'four own echoes (name, animation, objectId, applyEcho)')
-  assert.equal(remote, 2, 'two remote sites (rename and field set)')
+  assert.equal(own, 5, 'five own echoes (name, animation, objectId, applyEcho, parent)')
+  assert.equal(remote, 4, 'four remote sites (rename, field set, parent, a reparent\'s transforms)')
 })
