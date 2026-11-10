@@ -30,7 +30,7 @@ function harness(som, { editOn = () => true } = {}) {
   const messages = []
   const selected = []
   const refuse = []          // [{ test(i) → bool, text }]: the server refuses matching requests
-  const busy = { structural: false }   // the page's structural slot is taken: `structural` sends nothing
+  const busy = { structural: false, move: () => false }   // `structural` / `move` send nothing (a slot taken; a throw)
   const undo = createEditUndo({
     getNodeByName: (n) => som.getNodeByName(n),
     getObjectByName: (n) => som.getObjectByName(n),
@@ -51,6 +51,7 @@ function harness(som, { editOn = () => true } = {}) {
       return s
     },
     move: (node, value, dir) => {
+      if (busy.move(node.name)) return null
       const s = ++seq
       info.set(s, { kind: 'move', name: node.name, value, dir }); pending.push(s)
       return s
@@ -491,5 +492,86 @@ describe('GR7: out of step', () => {
     assert.equal(h.undo.undoCount + h.undo.redoCount, 0)
     assert.equal(h.messages.at(-1), OUT_OF_STEP_MESSAGE)
     assert.equal(h.undo.inFlight(), false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The outside code review (Fable 5.2, Rev 2, at 98f916c6), each reproduced first
+// ---------------------------------------------------------------------------
+
+describe('outside review S-1: a Move to inside one tree whose Undo GR4 would refuse asks first', () => {
+  test('a chain 9 deep (past the depth bound): moving its deepest part up is predicted unundoable; a move that keeps the depth is not', async () => {
+    const { moveUndoProblem } = await import('../src/edit-group.js')
+    const som = await world()
+    let p = 'crate-01'
+    for (let i = 1; i <= 9; i++) { som.getNodeByName(p).addChild(som.ingestNode({ name: 'n' + i })); p = 'n' + i }
+    assert.equal(moveUndoProblem(som.getNodeByName('n9'), som.getNodeByName('n3')), 'depth', 'its Undo would take the tree past 8 again')
+    assert.equal(moveUndoProblem(som.getNodeByName('n9'), som.getNodeByName('n8')), null, 'already there: nothing changes')
+    assert.equal(moveUndoProblem(som.getNodeByName('n2'), som.getNodeByName('crate-01')), 'depth', 'one level up lowers the depth too')
+    assert.equal(moveUndoProblem(som.getNodeByName('lamp-shade'), som.getNodeByName('lamp-stand')), null, 'a shallow tree: no problem')
+  })
+})
+
+describe('outside review N-1: a part of a model-carrying node', () => {
+  test('an older Move to out of it: its Undo is refused before sending ("a model can’t hold objects"), nothing is sent', async () => {
+    const som = await world()
+    const h = harness(som)
+    moveTo(h, som, 'lamp-shade', null)
+    const lamp = som.getNodeByName('lamp-01')
+    lamp.extras = { atrium: { model: { url: 'https://example.com/m.glb' } } }    // another tab made it a model
+    const before = h.sent().length
+    assert.equal(h.undo.run('undo'), false)
+    assert.equal(h.sent().length, before, 'nothing sent')
+    assert.match(h.messages.at(-1), /a model can’t hold objects/)
+  })
+})
+
+describe('outside review N-2: the group’s remove is not sent while something is inside it', () => {
+  test('Ungroup: another tab moves a node into the group while the parts are moving out; the group stays with it, “Ungroup (partly)” is recorded', async () => {
+    const som = await world()
+    const h = harness(som)
+    const lamp = som.getNodeByName('lamp-01')
+    assert.equal(h.undo.ungroup(lamp, ungroupPlan(lamp)), true)
+    h.remoteMove('crate-01', 'lamp-01')           // lands while the moves are in flight
+    while (h.pending.length > 0 && h.info.get(h.pending[0]).kind === 'move') h.answer(h.pending[0])
+    assert.equal(h.pending.length, 0, 'no remove sent')
+    assert.equal(h.undo.inFlight(), false)
+    assert.ok(som.getNodeByName('crate-01'), 'the newcomer is kept')
+    assert.equal(parentName(som, 'crate-01'), 'lamp-01')
+    assert.deepEqual(h.undo.undoLabels, ['Ungroup (partly) “lamp-01”'])
+    assert.match(h.messages.at(-1), /something else is inside it now/)
+  })
+})
+
+describe('outside review N-4: a part whose move can’t be sent stays, and the group with it', () => {
+  test('Ungroup: the second part’s send fails after the first went: only the first is recorded as moved, the group is not removed', async () => {
+    const som = await world()
+    const h = harness(som)
+    const lamp = som.getNodeByName('lamp-01')
+    const plan = ungroupPlan(lamp)
+    const second = plan.parts[1].node.name
+    h.busy.move = (name) => name === second
+    assert.equal(h.undo.ungroup(lamp, plan), true)
+    h.settle()
+    assert.ok(som.getNodeByName('lamp-01'), 'the group stays')
+    assert.equal(parentName(som, second), 'lamp-01', 'the unsent part stays inside')
+    assert.deepEqual(h.undo.undoLabels, ['Ungroup (partly) “lamp-01”'])
+    h.busy.move = () => false
+    run(h, 'undo')
+    assert.equal(parentName(som, plan.parts[0].node.name), 'lamp-01', 'the moved part goes back')
+  })
+})
+
+describe('outside review N-6: an Undo of an Ungroup whose moves can’t be sent names the parts', () => {
+  test('the group is re-added, then no move can be sent: the message names the parts', async () => {
+    const som = await world()
+    const h = harness(som)
+    ungroup(h, som, 'lamp-01')
+    assert.equal(h.undo.run('undo'), true)
+    h.busy.move = () => true
+    h.settle()
+    assert.equal(h.undo.inFlight(), false)
+    assert.match(h.messages.at(-1), /“lamp-stand”/)
+    assert.match(h.messages.at(-1), /“lamp-shade”/)
   })
 })

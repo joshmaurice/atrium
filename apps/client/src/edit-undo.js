@@ -797,6 +797,8 @@ export function createEditUndo({
   }
   /** GR4 and GR-L10, the server's rules the client can predict for one move. */
   function moveRuleProblem(node, parent) {
+    // GR3 step 3: the server refuses a move into a model (the outside review's N-1)
+    if (parent && parent.extras?.atrium?.model != null) return 'a model can’t hold objects'
     if (parent && treeBoundsProblem(moveCounts(node, parent))) return BOUNDS_REASON
     if (behaviorAncestorsChange(node, parent)) return 'this would change which behaviours can move it'
     return null
@@ -905,6 +907,9 @@ export function createEditUndo({
   }
   /** A group's removal: through the capture window (GR7, second review N5), unless `window` is false (Group's own cleanup). */
   function sendRemoveStep(node, { window = true } = {}) {
+    // the outside review's N-2 — this tab already sees something inside (another
+    // tab moved or copied it in meanwhile): keep the group, and what's in it
+    if (node.children.length > 0) { inFlight.unsentText = 'something else is inside it now'; return false }
     const req = { kind: 'delete', name: node.name, node, subtree: collectSubtree(node) }
     const seq = structural(req, inFlight.direction)
     if (seq == null) return false
@@ -936,7 +941,8 @@ export function createEditUndo({
         // page's one slot: the code check's must-fix 1). The composite stops as
         // if the server had refused that step, so what was done is recorded or
         // stopped by the same rules (GR-L7 (a)), and nothing waits forever.
-        c.outcomes = [{ type: 'unsent', node: null, status: 'rejected', text: UNSENT_TEXT }]
+        c.outcomes = [{ type: 'unsent', node: null, status: 'rejected', text: c.unsentText ?? UNSENT_TEXT }]
+        c.unsentText = null
         phaseDone()
         return
       }
@@ -993,6 +999,7 @@ export function createEditUndo({
     message(stoppedMessage(direction, names, text))
   }
   const refused = (outs) => outs.filter((o) => o.status !== 'accepted')
+  const acceptedNodes = (outs) => new Set(outs.filter((o) => o.status === 'accepted' && o.node).map((o) => o.node))
   const firstText = (outs) => refused(outs)[0]?.text ?? null
 
   /** Did the move land where it was sent? If not (a race), say so and record where it landed (N-4). */
@@ -1120,14 +1127,15 @@ export function createEditUndo({
     ]
     startComposite('do', entry, phases, (phase, outs) => {
       if (phase === 0) {
-        const bad = refused(outs)
-        if (bad.length === 0) {
+        // the parts that moved are the ACCEPTED ones: a part whose send failed
+        // has no outcome at all (the outside review's N-4)
+        const landed = acceptedNodes(outs)
+        const moved = entry.parts.filter((p) => landed.has(p.handle.node))
+        if (moved.length === entry.parts.length) {
           for (const p of entry.parts) noteLanding(p.handle.node, p.to)
           return 'next'
         }
-        const stayed = new Set(bad.map((o) => o.node))
-        const moved = entry.parts.filter((p) => !stayed.has(p.handle.node))
-        const names = entry.parts.filter((p) => stayed.has(p.handle.node)).map((p) => `“${p.name}”`).join(', ')
+        const names = entry.parts.filter((p) => !landed.has(p.handle.node)).map((p) => `“${p.name}”`).join(', ')
         if (moved.length === 0) {
           inFlight = null
           message(`Couldn’t ungroup: ${firstText(outs) ?? 'refused'}`)
@@ -1136,7 +1144,7 @@ export function createEditUndo({
         entry.parts = moved
         entry.partial = true
         entry.label = 'Ungroup (partly)'
-        message(`Ungroup stopped: ${names} stayed in the group (${firstText(outs) ?? 'refused'}).`)
+        message(`Ungroup stopped: ${names} stayed in the group (${firstText(outs) ?? 'it couldn’t be sent'}).`)
         finishDo(entry, moved[0].handle.node)
         return 'done'
       }
@@ -1222,10 +1230,12 @@ export function createEditUndo({
     const parts = entry.parts
     const moveAll = (key) => () => parts.every((p) => sendMoveStep(p.handle.node, valueFor(p[key]))) || inFlight.bySeq.size > 0
     const movesDone = (key, outs) => {
-      const bad = refused(outs)
-      if (bad.length > 0) {
-        const stayed = new Set(bad.map((o) => o.node))
-        stopRun(parts.filter((p) => stayed.has(p.handle.node)).map((p) => p.name), firstText(outs))
+      // the parts that moved are the accepted ones (N-4); a stand-in refusal
+      // names no node, so every part not accepted is named (N-6)
+      const landed = acceptedNodes(outs)
+      const stayed = parts.filter((p) => !landed.has(p.handle.node))
+      if (stayed.length > 0) {
+        stopRun(stayed.map((p) => p.name), firstText(outs) ?? 'it couldn’t be sent')
         return false
       }
       for (const p of parts) noteLanding(p.handle.node, p[key])

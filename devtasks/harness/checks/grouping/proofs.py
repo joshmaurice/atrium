@@ -37,6 +37,15 @@ PROOFS = [
  ('code check 1 (operator’s go): the Model form’s Save gated', 'apps/client/src/model-form.js', "    return state.open && Boolean(state.result) && !state.checking && !state.saving && dispatchAllowed()", "    return state.open && Boolean(state.result) && !state.checking && !state.saving", ['apps/client/tests/model-form.test.js']),
  ('code check 1 (operator’s go): refreshEditActions re-renders the form', A, "  if (modelForm?.isOpen()) modelForm.render()\n", "", ['apps/client/tests/grouping-wiring.test.js']),
  ('code check 4: a re-add past a bound is not started', U, "      if (p && treeBoundsProblem(moveCounts(null, p, descriptorCounts(entry.descriptor)))) {", "      if (false) {", ['apps/client/tests/grouping-undo.test.js']),
+ # the outside code review (Fable 5.2, Rev 2, at 98f916c6; HANDOFF §8)
+ ('review S-1: a same-tree Move to predicts its Undo', 'apps/client/src/edit-group.js', "    if (node.parent === target) return null\n    return treeBoundsProblem({ before: moveCounts(node, target).after, after: treeCounts(oldTop) })", "    return null", ['apps/client/tests/grouping-undo.test.js']),
+ ('review S-2: Empty groups rescanned only when its key is cleared', A, "  if (emptyKey === null) refreshEmptyGroups()\n}", "  refreshEmptyGroups()\n}", ['apps/client/tests/grouping-wiring.test.js']),
+ ('review N-1: the engine refuses a move into a model', U, "    if (parent && parent.extras?.atrium?.model != null) return 'a model can’t hold objects'\n", "", ['apps/client/tests/grouping-undo.test.js']),
+ ('review N-1: a part of a model can’t be moved out', A, "  if (hasModel(node.parent)) return 'It is part of a model'\n", "", ['apps/client/tests/grouping-wiring.test.js']),
+ ('review N-2: no remove while something is inside', U, "    if (node.children.length > 0) { inFlight.unsentText = 'something else is inside it now'; return false }\n", "", ['apps/client/tests/grouping-undo.test.js']),
+ ('review N-4: the moved parts are the accepted ones', U, "        const moved = entry.parts.filter((p) => landed.has(p.handle.node))", "        const moved = entry.parts.filter((p) => !refused(outs).some((o) => o.node === p.handle.node))", ['apps/client/tests/grouping-undo.test.js']),
+ ('review N-6: an unsent moves phase names every part', U, "      const stayed = parts.filter((p) => !landed.has(p.handle.node))", "      const stayed = parts.filter((p) => refused(outs).some((o) => o.node === p.handle.node))", ['apps/client/tests/grouping-undo.test.js']),
+ ('review N-5: the Move to header acts on nothing', A, "  if (epMoveTo.value === '') return   // the header (the outside review's N-5: Number('') is 0)\n", "", ['apps/client/tests/grouping-wiring.test.js']),
 ]
 only = sys.argv[1:]
 for i, (what, f, old, new, tests) in enumerate(PROOFS):

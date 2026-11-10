@@ -3419,6 +3419,7 @@ function groupRules() { return { isExcluded: isEditExcluded } }
 function isAddressable(node) { return !!node && !!node.name && client.som?.getObjectByName(node.name) === node }
 function underOrIs(node, test) { for (let n = node; n; n = n.parent) if (test(n)) return true; return false }
 function hasOwnSource(n) { return n?.extras?.atrium?.source != null }
+function hasModel(n) { return n?.extras?.atrium?.model != null }
 var ANIMATED_REASON = 'an animation moves it in local values'   // var: read by hoisted functions
 
 /** Why the selected object can't be moved at all (Group, Move to), or null. */
@@ -3428,6 +3429,8 @@ function movableProblem(node) {
   if (underOrIs(node, hasOwnSource)) return 'External content can’t be grouped'
   if (!isAddressable(node)) return 'This object can’t be found by its own name'
   if (isReferenced(node._node)) return ANIMATED_REASON
+  // GR3 step 3: nothing goes back into a model, so its parts don't leave (the outside review's N-1)
+  if (hasModel(node.parent)) return 'It is part of a model'
   return null
 }
 
@@ -3460,6 +3463,7 @@ function ungroupHint(node) {
   if (atrium.behavior != null) return 'It has a behaviour'
   if (isTeleporter(node)) return 'It is a teleporter'
   if (node.visible === false) return 'Show the group first'
+  if (hasModel(node.parent)) return 'It is inside a model'   // its parts would go into the model (N-1)
   if (isGrantedTarget(node)) return 'A behaviour is allowed to change it'
   // the Delete capture's own rule, credit included (GR-L6 (a); the code check's finding 3)
   const own = ownNodeProblem(node._node)
@@ -3561,6 +3565,7 @@ function syncMoveOptions() {
 epMoveTo?.addEventListener('focus', () => syncMoveOptions())
 epMoveTo?.addEventListener('mousedown', () => syncMoveOptions())
 epMoveTo?.addEventListener('change', async () => {
+  if (epMoveTo.value === '') return   // the header (the outside review's N-5: Number('') is 0)
   const choice = moveOptions[Number(epMoveTo.value)]
   epMoveTo.value = ''
   if (!choice || !modes.edit || !selected || !groupingAllowed()) return
@@ -3624,6 +3629,7 @@ function refreshEmptyGroups() {
 }
 
 epEmptyGroups?.addEventListener('change', () => {
+  if (epEmptyGroups.value === '') return   // the header (N-5)
   const node = emptyList[Number(epEmptyGroups.value)]
   epEmptyGroups.value = ''           // it picks; it holds no state
   if (!node || !modes.edit || !client.som) return
@@ -3637,7 +3643,10 @@ function refreshGroupActions() {
   const allowed = groupingAllowed() && modes.edit
   epGroupActions.style.display = allowed ? '' : 'none'
   epMoveRow.style.display = allowed ? '' : 'none'
-  if (!allowed) { epMoveNote.style.display = 'none'; refreshEmptyGroups(); return }
+  // the Empty groups list is rescanned only when its key was cleared (a
+  // structural event, a bareness set) — never on every som:set (the outside
+  // review's S-2); a hidden row is scanned again when it shows
+  if (!allowed) { epMoveNote.style.display = 'none'; refreshEmptyGroups(); emptyKey = null; return }
   const g = groupHint(selected)
   epGroup.disabled = !!g
   epGroup.title = g ?? 'Put the selected object in a new group'
@@ -3652,7 +3661,7 @@ function refreshGroupActions() {
   // mousedown before the keyboard's next choice: rebuild it here when its key
   // has changed (harness c1, a stale list after a move).
   else if (typeof document !== 'undefined' && document.activeElement === epMoveTo) syncMoveOptions()
-  refreshEmptyGroups()
+  if (emptyKey === null) refreshEmptyGroups()
 }
 
 // GR8 — a parent change (this tab's own or another's). The local values of the
@@ -3687,7 +3696,7 @@ client.on('som:reparent', ({ nodeName }) => {
 for (const ev of ['som:add', 'som:remove', 'som:rename']) client.on(ev, () => { structureStamp += 1; emptyKey = null; refreshEmptyGroups() })
 // a set that can change bareness (a mesh, a model, a node's extras) refreshes the list
 client.on('som:set', ({ path }) => {
-  if (typeof path === 'string' && (path === 'extras' || path.startsWith('extras.atrium.model') || path === 'mesh')) refreshEmptyGroups()
+  if (typeof path === 'string' && (path === 'extras' || path.startsWith('extras.atrium.model') || path === 'mesh')) { emptyKey = null; refreshEmptyGroups() }
 })
 
 const STRUCTURE_VERB = { add: 'add', duplicate: 'duplicate', delete: 'delete' }

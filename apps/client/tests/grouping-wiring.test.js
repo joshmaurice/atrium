@@ -54,7 +54,7 @@ function el() {
 }
 
 const NAMES = [
-  'groupingAllowed', 'groupRules', 'isAddressable', 'underOrIs', 'hasOwnSource', 'movableProblem', 'groupHint',
+  'groupingAllowed', 'groupRules', 'isAddressable', 'underOrIs', 'hasOwnSource', 'hasModel', 'movableProblem', 'groupHint',
   'isGrantedTarget', 'ungroupHint', 'askUnundoable', 'moveListKey', 'buildMoveOptions', 'syncMoveOptions',
   'refreshEmptyGroups', 'refreshGroupActions',
 ]
@@ -484,5 +484,75 @@ describe('the code check, finding 1 (operator’s go, 2026-11-10): the Model for
   test('the form gets dispatchAllowed from the same block the other forms use, and refreshEditActions re-renders it', () => {
     assert.match(blockFrom('modelForm = createModelForm({'), /dispatchAllowed: \(\) => modes\.edit && !editDispatchBlocked\(\),/)
     assert.match(functionText('refreshEditActions'), /const blocked = editDispatchBlocked\(\)\s*if \(modelForm\?\.isOpen\(\)\) modelForm\.render\(\)/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The outside review (Fable 5.2, Rev 2, at 98f916c6), each reproduced first
+// ---------------------------------------------------------------------------
+
+describe('outside review N-1: a part of a model-carrying node can’t be grouped or moved out (its Undo would be refused)', () => {
+  test('Group and Move to are disabled for a child of a model; Ungroup for a group inside a model', async () => {
+    const som = await world()
+    const env = page(som)
+    const lamp = som.getNodeByName('lamp-01')
+    lamp.extras = { atrium: { model: { url: 'https://example.com/m.glb' } } }
+    env.selected = som.getNodeByName('lamp-shade')
+    env.refreshGroupActions()
+    assert.equal(env.epGroup.disabled, true)
+    assert.equal(env.epGroup.title, 'It is part of a model')
+    assert.equal(env.epMoveTo.disabled, true)
+    const g = som.ingestNode({ name: 'g', children: [{ name: 'gc' }] })
+    lamp.addChild(g)
+    env.selected = som.getNodeByName('g')
+    env.refreshGroupActions()
+    assert.equal(env.epUngroup.disabled, true)
+    assert.equal(env.epUngroup.title, 'It is inside a model')
+  })
+})
+
+describe('outside review S-2: the Empty groups list is not rescanned on every refresh', () => {
+  test('refreshGroupActions scans again only after the key was cleared (a structural event or a bareness set) or the row was hidden', async () => {
+    const som = await world()
+    const env = page(som)
+    let scans = 0
+    const real = env.bareNodes
+    env.bareNodes = (...a) => { scans += 1; return real(...a) }
+    env.selected = som.getNodeByName('crate-01')
+    env.refreshGroupActions()
+    const first = scans
+    assert.ok(first >= 1, 'the first refresh scans')
+    env.refreshGroupActions(); env.refreshGroupActions()
+    assert.equal(scans, first, 'a refresh with nothing structural changed (an ordinary som:set) does not scan')
+    env.emptyKey = null
+    env.refreshGroupActions()
+    assert.equal(scans, first + 1, 'a cleared key scans again')
+    env.modes.edit = false
+    env.refreshGroupActions()
+    env.modes.edit = true
+    env.refreshGroupActions()
+    assert.equal(env.epEmptyRow.style.display !== undefined, true)
+    assert.ok(scans >= first + 2, 'turning Edit back on scans again')
+  })
+})
+
+describe('outside review N-5: the select headers ("", the first option) act on nothing', () => {
+  test('a change with the header selected: Move to sends nothing, Empty groups selects nothing', async () => {
+    const som = await world()
+    const env = page(som)
+    env.selected = som.getNodeByName('crate-01')
+    env.buildMoveOptions()
+    new Function('env', `with (env) { ${blockFrom("epMoveTo?.addEventListener('change'")} }`)(env)
+    new Function('env', `with (env) { ${blockFrom("epEmptyGroups?.addEventListener('change'")} }`)(env)
+    env.epMoveTo.value = ''
+    await env.epMoveTo.handlers.change()
+    assert.equal(env.calls.some((c) => Array.isArray(c) && c[0] === 'moveTo'), false)
+    const lamp = som.getNodeByName('lamp-01')
+    for (const part of [...lamp.children]) som.reparentNode(part, null, { translation: [...part.translation], rotation: [...part.rotation], scale: [...part.scale] })
+    env.emptyKey = null
+    env.refreshEmptyGroups()
+    env.epEmptyGroups.value = ''
+    env.epEmptyGroups.handlers.change()
+    assert.equal(env.calls.some((c) => Array.isArray(c) && c[0] === 'selectForEdit'), false)
   })
 })

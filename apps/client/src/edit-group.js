@@ -339,12 +339,18 @@ export function ungroupUndoProblem(group) {
 /**
  * GR-L5 (a) — would the Undo of moving `node` under `target` be refused by
  * GR4? The Undo moves it back into the tree it is leaving. Never at the top
- * level, and not within one tree (the counts don't grow back).
+ * level. Within one tree the nodes and primitives don't change, but the depth
+ * can: a move up in a tree already past the depth bound lowers it, and the
+ * Undo would raise it again (the outside review's S-1). The tree after the
+ * move is compared with the tree now, which the Undo restores.
  */
 export function moveUndoProblem(node, target) {
   if (!node.parent) return null
   const oldTop = topLevelOf(node.parent)
-  if (target && topLevelOf(target) === oldTop) return null
+  if (target && topLevelOf(target) === oldTop) {
+    if (node.parent === target) return null
+    return treeBoundsProblem({ before: moveCounts(node, target).after, after: treeCounts(oldTop) })
+  }
   return treeBoundsProblem({ before: treeCounts(oldTop, node), after: treeCounts(oldTop) })
 }
 

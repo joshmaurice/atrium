@@ -1,7 +1,7 @@
 # Handoff: `grouping`, implemented on `claude/grouping`
 
-**IMPLEMENTED; the fresh-agent code check taken (§7); awaiting the outside
-code review** (this file is also the
+**IMPLEMENTED; the fresh-agent code check (§7) and the outside code review
+(§8) taken; awaiting the operator's go for the release** (this file is also the
 working note: if a session loses its context, start here, then `git log` on
 the branch).
 
@@ -22,6 +22,7 @@ Started 2026-11-10, 00:09 PT ("Yes, please").
 | 6 | The harness checks (§3), with three findings they turned up, each fixed in `app.js` with a wiring test that fails without the fix (§3); a new pending-delete test C in `grouping-undo.test.js` for the parent re-read when the removal window opens (the proof of `openRemovalWindow`'s re-read turned nothing red before it, §4); `grouping.test.js`'s sockets closed by the closers and its two `c.closed` waits bounded, so a red stale-hello test fails instead of hanging the file (§4). The proofs (§4), the full suites (§5), this file | done |
 | 7 | The fresh-agent code check's findings 1–5, each reproduced first and fixed with tests that fail without the fix (§7); finding 6 not taken | done |
 | 8 | With the operator's go (2026-11-10, 03:21 PT): the Model form's Save waits for an edit in flight (`model-form.js`, outside §6's list; §7). Harness `c6.py` | done |
+| 9 | The outside code review (Fable 5.2, Rev 1 and Rev 2, at `98f916c6`): S-1 and the nits N-0 (S-2), N-1, N-2, N-4, N-5, N-6, each reproduced first with a test that fails on `98f916c6`; N-3 stated (§8) | done |
 
 ## 2. Notes for the record
 - **`refuseStaleHello`** (commit 2) is an option of `attachSessionHandlers`,
@@ -112,6 +113,14 @@ file run alone under `timeout 180`:
 | 27 | commit 8: the Model form's Save gated (`canSave` without `dispatchAllowed`) | `model-form.test.js` 1 |
 | 28 | commit 8: `refreshEditActions` re-renders the open form | `grouping-wiring.test.js` 1 |
 | 29 | code check 4: `checkEntry`'s GR4 on a parented re-add | `grouping-undo.test.js` 1 |
+| 30 | review S-1: a same-tree Move to predicts its Undo | `grouping-undo.test.js` 1 |
+| 31 | review S-2: Empty groups rescanned only when its key is cleared | `grouping-wiring.test.js` 1 |
+| 32 | review N-1: the engine refuses a move into a model | `grouping-undo.test.js` 1 |
+| 33 | review N-1: a part of a model can't be moved out | `grouping-wiring.test.js` 1 |
+| 34 | review N-2: no remove while something is inside | `grouping-undo.test.js` 1 |
+| 35 | review N-4: the moved parts are the accepted ones | `grouping-undo.test.js` 1 |
+| 36 | review N-6: an unsent moves phase names every part | `grouping-undo.test.js` 1 |
+| 37 | review N-5: the Move to header acts on nothing | `grouping-wiring.test.js` 1 |
 
 Test C's route: the Undo of a moved Duplicate, or a Redo of a Delete after
 a move, is refused "changed elsewhere" when the local values changed; the
@@ -126,11 +135,12 @@ server files alone under `timeout 180`, 1,067 pass. All 0 fail.
 At commit 7: the same, except app 1,823 pass, 1 skip, and server 1,069. All
 0 fail. The harness checks smoke and c1–c5 all pass on commit 7's page.
 
+At commit 9: the same, except app 1,833 pass, 1 skip. All 0 fail. The
+harness checks smoke and c1–c6 all pass on commit 9's page, and so do the 38
+proofs.
+
 ## 6. Next
-1. The outside code review: `devtasks/OUTSIDE-CODE-REVIEW-PROMPT-grouping.md`,
-   pinned to `98f916c6` (commit 8). Its findings are reproduced before they
-   are taken.
-2. The operator's go, then the release path (§6 of the pre-brief): DEV
+1. The operator's go, then the release path (§6 of the pre-brief): DEV
    acceptance steps 1–8; the release note says a stale tab is **refused at
    Connect** (§2's note).
 
@@ -184,3 +194,30 @@ pending edit").
 - `grouping.test.js`: the order (a guard; proof 20).
 - `grouping-counts.test.js`: `descriptorCounts` (fails without the client
   copy).
+
+## 8. The outside code review (Fable 5.2, at `98f916c6`)
+- **The reviews:** `devtasks/REVIEW-grouping-code-fable.md` (Rev 1, source
+  only: that session wasn't allowed to run the code) and
+  `devtasks/REVIEW-grouping-code-fable-r2.md` (Rev 2, a second session).
+  Both are copied from the reviewing sessions' chats, and their first lines
+  name the SHA and the model.
+- **Rev 2's verdict:** **APPROVE WITH NITS**, no must-fix. It ran:
+  - the prompt's tests: 138 of 138 pass;
+  - the 30 proofs: all red when broken;
+  - a probe reproducing S-1 and N-1, and timing S-2.
+- **Process:** I reproduced each finding with a test against `98f916c6`
+  before taking it. Every test below fails there and passes at commit 9.
+
+| # | Finding | How I reproduced it | Fix (commit 9) |
+|---|---|---|---|
+| S-1 | should-fix: a Move to within one tree already past the depth bound (seed content) is recorded with no question, and its Undo is then refused | `grouping-undo.test.js`: a chain 9 deep; `moveUndoProblem(n9 → n3)` was null | `moveUndoProblem` compares the tree after the move with the tree now (the reviewer's formula), so the panel asks first "This can’t be undone: the group would be too large to copy" |
+| N-0 (S-2) | nit: the Empty groups scan ran on every `som:set` through `refreshEditActions` (measured 0.04 ms at 56 nodes, 3.3 ms at 2,000) | `grouping-wiring.test.js`: three refreshes, three scans | `refreshGroupActions` rescans only when `emptyKey` was cleared. A structural event, a bareness `som:set` (which now clears the key first) or hiding the row clears it. Not taken: caching `ungroupHint`'s plan, measured at 0.1 ms in atrium.gltf and about 1 ms at 249 rotated parts; a follow-up if worlds grow |
+| N-1 | nit: a part of a model-carrying node could be grouped or moved out, but its Undo is refused ("a model can’t hold objects") | `grouping-undo.test.js`: the Undo was sent and refused. `grouping-wiring.test.js`: Group was enabled | Group and Move to say "It is part of a model" for a child of one, and Ungroup says "It is inside a model" for a group inside one. The engine's `moveRuleProblem` refuses a move into a model before sending, for older entries |
+| N-2 | nit: the group's `remove` was sent even with a newcomer inside (another tab moved it in during the moves) | `grouping-undo.test.js`: the remove was sent | `sendRemoveStep` sends nothing while the group has children, and the composite stops: Ungroup records "Ungroup (partly)", saying "something else is inside it now". The newcomer is kept |
+| N-3 | nit: a custom graph that writes an object's transform makes its Group entry "changed elsewhere" | not run (the reviewer's inference; the engine's `isAt` is bitwise by design) | Stated here as a limit of GR-L10: the five templates write no transform |
+| N-4 | nit: a half-sent moves phase counted as sent | `grouping-undo.test.js`: a part's send fails (the harness's `move` returns null). Before: the group was removed with the part inside | The moved parts are the accepted ones (`acceptedNodes`), in Ungroup's do path and in `movesDone` |
+| N-5 | nit: `Number('')` is 0, so a `change` with the header selected acted on the first entry | `grouping-wiring.test.js`: the lifted handler started a Move to | Both select handlers return on `''` |
+| N-6 | nit: an Undo of an Ungroup whose moves couldn't be sent named no part | `grouping-undo.test.js`: the message named no part | With N-4's fix, every part not accepted is named |
+
+**Not run by the reviewer, and run here:** the harness checks smoke and
+c1–c6, and the full suites (§5).
