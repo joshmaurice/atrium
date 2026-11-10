@@ -23,12 +23,12 @@ deployed site.
 
 Repository: https://github.com/joshmaurice/atrium (public)
 Branch: claude/touch-nav
-Review commit: __SHA__
+Review commit: cba7f8b575f679404aad68c2db178aaec1023a4d
 Contract: devtasks/PREBRIEF-touch-nav.md (Rev 1.1, §4 T1–T5; every decision
 taken by the operator; built before an outside review, by the operator's
 choice).
 Base: b37c482 (the tip of claude/grouping, an unreleased round; review only
-the touch-nav diff: `git diff b37c482 __SHA__ -- apps packages`).
+the touch-nav diff: `git diff b37c482 cba7f8b575f679404aad68c2db178aaec1023a4d -- apps packages`).
 devtasks/HANDOFF-touch-nav.md is the implementer's record. Read it, but test
 its claims rather than trusting them.
 
@@ -41,10 +41,10 @@ and say which model you are.**
 
 STEP 1 — GET THE CODE
   git clone https://github.com/joshmaurice/atrium && cd atrium
-  git fetch origin claude/touch-nav && git checkout __SHA__
+  git fetch origin claude/touch-nav && git checkout cba7f8b575f679404aad68c2db178aaec1023a4d
 Say whether the clone worked. If it didn't, read the files at the pinned
 commit through
-  https://raw.githubusercontent.com/joshmaurice/atrium/__SHA__/<path>
+  https://raw.githubusercontent.com/joshmaurice/atrium/cba7f8b575f679404aad68c2db178aaec1023a4d/<path>
 A source-only review is still valuable; label it as one.
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
