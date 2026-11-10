@@ -1,10 +1,12 @@
 # Pre-brief: grouping and ungrouping (`grouping`)
 
-Status: **DRAFT, Revision 0.3 (2026-11-09).** Rev 0.2 (the fresh-agent check,
-§7) plus the operator's decisions: **GR-L1 (a) and GR-L3 (a)**, and GR-L2 and
-GR-L4 to GR-L9 as recommended ("no preference"). **GR-L10 is open**: the
-operator asked why (a) is recommended (answered in the session). §4 is written
-for the recommendations.
+Status: **DRAFT, Revision 1.0 (2026-11-09).** Rev 0.2 (the fresh-agent
+check, §7) plus **every decision taken** (operator, 2026-11-09):
+- **GR-L1 (a)** and **GR-L3 (a)**;
+- GR-L2 and GR-L4 to GR-L9 as recommended ("no preference");
+- **GR-L10 (a)** (20:24 PT, "go with recs", after asking why (a)).
+
+§4 is the contract for them. Next: the outside review, then FINAL.
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -84,7 +86,7 @@ once, and nothing jumps.**
   L1853–1857). `world.setField` applies it in its own branch, through
   `SOMDocument.renameNode` (`world.js` L571–580). The client applies it
   **only on the server's answer**: `AtriumClient.renameNode` L1384,
-  `_resolveOwnSetEcho` L1812ff, and a remote rename at L1771–1793.
+  `_resolveOwnSetEcho` L1820ff, and a remote rename at L1771–1793.
 
 ### 2.2 What glTF-Transform and the view do (g1, g3, f1)
 - **`Node.addChild` detaches first** (`@gltf-transform/core` 4.3.0,
@@ -340,8 +342,10 @@ everyone. **Decided (operator, 2026-11-09: "no preference"): (a), as recommended
 **GR-L10. Behaviours** (fresh check, missing decision 3). A behaviour may
 write its own node and its descendants (§2.5), so a move into a scripted
 node gives its behaviour the moved object without the grant question, and a
-move out takes it away. **Open: the operator asked why (a) is recommended
-(2026-11-09); answered in the session.**
+move out takes it away. **Decided (operator, 2026-11-09, 20:24 PT): (a), as
+recommended**, after asking why. The answer given: Group and Ungroup never
+trip it, and a scripted object can still be grouped. The price is that
+nothing can be put into a scripted group on purpose this round (§8).
 - **(a) Recommended: refuse a move that changes which behaviours may write
   the object.** The set of behaviour-carrying ancestors of the moved object
   must be the same before and after. The server checks it (it holds the
@@ -429,7 +433,7 @@ tree as the moved subtree.
     level);
   - `som:set` with `path: 'parent'`;
   - **`som:set` for `translation`, `rotation` and `scale`**, so `app.js`'s
-    existing `TRANSFORM_FIELDS` branch (L1061–1064) treats it as another
+    existing `TRANSFORM_FIELDS` branch (L1060–1064) treats it as another
     session's transform change. That branch reaches `remoteSet`, the pads,
     the spawn note and the runner's overlay.
 - A parent it can't find emits `som:desync` (`parent-not-found`), as `_onAdd`
@@ -642,8 +646,8 @@ specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
-- **Rev 0.3** (2026-11-09): the operator's decisions (status line). GR-L10
-  open.
+- **Rev 1.0** (2026-11-09): every decision taken (status line).
+- **Rev 0.3** (2026-11-09): the operator's decisions but GR-L10.
 - **Rev 0.2** (2026-11-09): **the fresh-agent check of Rev 0.1.** Claude
   reproduced before taking: f1, f2 (cases A and B, 3 m off), f3 (the 3.009 m
   jump, in the browser), and in the source the stale host (`session.js`
@@ -687,6 +691,9 @@ specifics:
   part back last among its siblings, not at its old index (as a part's re-add
   does today). Nothing reads the order yet.
 - Models as parents (GR-L4 (b)), if a use appears.
+- A move into a scripted group that asks the Enable grant question
+  ("the behaviour on X will be able to change Y"), instead of GR-L10 (a)'s
+  refusal.
 - Duplicate's rule refusals inside groups (§1: a camera host makes its group
   uncopyable), whatever the counts.
 - Making the SOM Inspector declare its level, so an unreloaded Inspector is
