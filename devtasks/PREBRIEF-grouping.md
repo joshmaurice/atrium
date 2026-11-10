@@ -1,12 +1,17 @@
 # Pre-brief: grouping and ungrouping (`grouping`)
 
-Status: **DRAFT, Revision 1.0 (2026-11-09).** Rev 0.2 (the fresh-agent
-check, §7) plus **every decision taken** (operator, 2026-11-09):
+Status: **DRAFT, Revision 1.1 (2026-11-09).** Rev 1.0 plus the outside
+review of `34917de8` (§7). The review is by Claude Fable 5.2, per its own
+first lines; its verdict is CHANGES REQUESTED, with 2 must-fix, 9
+should-fix and 7 nits. Claude reproduced every finding before taking it.
+The operator's decisions (2026-11-09):
 - **GR-L1 (a)** and **GR-L3 (a)**;
 - GR-L2 and GR-L4 to GR-L9 as recommended ("no preference");
 - **GR-L10 (a)** (20:24 PT, "go with recs", after asking why (a)).
 
-§4 is the contract for them. Next: the outside review, then FINAL.
+**Two new decisions from the review are open:** GR-L11 (groups left empty
+by other paths) and GR-L12 (unreloaded tabs lose objects). §4 is written
+for their recommendations. Next: those two, then FINAL.
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -23,14 +28,21 @@ check, §7) plus **every decision taken** (operator, 2026-11-09):
   - `g3-order-and-save.mjs`;
   - **a real-browser probe on the released page**,
     `devtasks/harness/checks/grouping/g2.py` (lesson 1 of the selection-parts
-    passdown): **17 PASS** on the harness at `172b816d`.
+    passdown): **13 checks, all PASS** on the harness at `172b816d` (Rev
+    1.0 said 17; review N7).
 
   **A fresh Claude agent then checked Rev 0.1** (§7). It checked 26 facts:
   20 confirmed, 2 wrong, 2 imprecise, 2 line numbers off by one. It wrote
   three probes in `devtasks/spike-grouping/fresh/`, and Claude reran all
   three: `f1` (a GR1 prototype, the move value, the bounds), `f2` (the real
   Undo engine) and `f3` (real mouse, on the harness).
-- **Not yet done:** no suite was run (nothing has changed); no outside review.
+  **The outside review** (Claude Fable 5.2, from a clone, of `34917de8`)
+  wrote six probes, now in `devtasks/spike-grouping/review/`. Claude reran
+  all six at `172b816d`'s code with the same output: `r1` (GR4 and its
+  Undo), `r2` (an unreloaded tab), `r3` (a transform in flight), `r4` (a
+  mirrored scale), `r5` (older entries after an Ungroup's Undo) and `r6`
+  (an animated node, in the browser).
+- **Not yet done:** no suite was run (nothing has changed).
 
 ## 1. What this delivers
 **An owner can make groups, take them apart, and move an object into or out
@@ -54,12 +66,20 @@ once, and nothing jumps.**
 - **Groups stay inside SA-L2's counts** (GR-L5 (a)): 256 nodes, 8
   generations, 1,024 primitives. The server refuses a move **or an add**
   (Duplicate in place, a part's re-add) that would take a top-level group
-  past a count it is not already past. **Counts aren't everything:** a group
-  holding something Duplicate refuses (a camera, light or skin host, an
-  animated node, external content) still can't be copied, as today.
+  past a count **it is not already past**. A tree that is already past one
+  may still grow. **An action whose Undo that rule would refuse asks first,**
+  as a Delete that can't be restored does today (GR4, review M1).
+  **Counts aren't everything:** a group holding something Duplicate refuses
+  (a camera, light or skin host, an animated node, external content) still
+  can't be copied, as today.
 - **An unreloaded tab can no longer edit, or be the behaviour host,** once
-  this ships (GR-L3 (a)). It can't apply a parent change (§2.3), so its
-  edits would land in the wrong place.
+  this ships (GR-L3 (a)). It can't apply a parent change (§2.3): its edits
+  would land in the wrong place, and an Ungroup elsewhere would remove the
+  parts from its view (review S1). **The server disconnects it** at the first
+  parent change in its world (GR-L12 (a)), and a reload brings the new page.
+- **Objects something else moves in local values aren't regrouped:** a node
+  an animation channel or a skin targets can't be grouped, moved or
+  ungrouped this round (review S3).
 
 ## 2. Verified facts (at `172b816d`)
 
@@ -124,11 +144,21 @@ once, and nothing jumps.**
   visitor, its drawing of later moves) are then in the old frame.
 - **Today a stale tab can still `send`:** `isStaleEditor` (`session.js`
   L201–206) refuses only `add` (L1370) and `remove` (L1638).
+- **An Ungroup removes the parts from a stale tab's view** (review r2, the
+  released `AtriumClient`). Each `parent` set throws; then the group's
+  `remove` takes the parts with it. Both cubes are gone from its SOM while the
+  server holds both. A Node process with an older client gets an unhandled
+  rejection, which ends it by default.
 - **A stale tab can be the behaviour host.** The role goes on
   `scriptRunner === 3` alone (`canRunBehaviors` L598–600, the hello's
   election L874), and a released page sends `scriptRunner: 3, addFields: 3`
   (`AtriumClient.js` L830–832). The runner writes through `client.sendField`
   → `send` (`runner.js` L604–605, `AtriumClient.js` L1497).
+- **A `source` container passes `isBlockedParent`**: that rule knows the
+  names of the nodes loaded into a container, not the container itself, and
+  in a document world the set is empty (clients load external content). On
+  the client a container is atomic (`edit-selection.js` L49–58), so an
+  object moved into one couldn't be selected again (review S7).
 - **Not judged:** a session that sends neither `scriptRunner` nor
   `addFields`, i.e. tests, the protocol inspector, cross-origin clients
   and **the SOM Inspector, which can edit** (`tools/som-inspector/src/app.js`
@@ -150,6 +180,17 @@ the page (world placement kept, through `applyLocally`), then back.
   (world 1.13 → 4.14). TransformControls keeps the drag's start in the old
   frame. The drag sent an old-frame translation and recorded "Move
   “crate-01”" with an old-frame "from".
+- **A transform already in flight lands in the new frame** (review r3, the
+  real tracker). Tab A commits `crate-01`'s translation (1.5, 0.25, 0); tab
+  B's move into `lamp-01` reaches the server first; the server applies A's
+  local value under `lamp-01`, and every tab and the saved world end with
+  the crate at world (4.5, 0.25, 0). Ending the drag (f3) can't cover a send
+  made before the reparent.
+- **An animation plays in local values** (review r6, in the browser).
+  `space-anim.gltf`'s clip `CrateBob` writes `crate-01`'s translation around
+  (1, 0.25, 0). After a Group as GR-L6 (a) makes it (the group at that
+  spot, the crate at 0), the crate rests in the right place, but the
+  playing clip draws it at x = 2.
 
 ### 2.5 What the client already has, and the gaps
 - **A free name:** `isNameFree` (`app.js` L3005). **An empty node is a legal
@@ -184,8 +225,24 @@ the page (world placement kept, through `applyLocally`), then back.
   pending rename or structural request only).
 - **Duplicate's rule** (`duplicateRuleProblem` → `nodeRuleProblem`,
   `edit-duplicate.js` L586–602) refuses camera, light and skin hosts,
-  animated nodes, `source` containers and nodes with extensions, whatever the
-  counts.
+  animated nodes (`referenced`: any parent that isn't the scene graph, such
+  as an animation channel or a skin), `source` containers, morph weights,
+  extensions, a non-unit rotation and `extras.atrium` values the add rules
+  refuse, whatever the counts. **The Delete capture is the same rule**
+  (`capture`, `edit-undo.js` L420–440), so a group's Undo-able delete needs
+  it to pass.
+- **The panel clamps every scale component to at least 0.01**
+  (`MIN_SCALE`, `sanitizeTransform`, `edit-gesture.js` L83, L99). A move into
+  a mirrored group gives a local scale like (−1, 0.5, 2) (f1). The next
+  scale edit then sends (0.01, …), and the Move to entry's exact check fails
+  (review r4). A group scaled above 100 gives a positive component under
+  0.01, with the same result.
+- **A pending delete still points at the group's old node after an Ungroup's
+  Undo** (review r5, the real engine, one tab, no race). The sequence:
+  Delete `lamp-shade`; Ungroup `lamp-01`; Undo; Undo. The Delete's Undo then
+  says "its group was replaced elsewhere", and the entry is dropped. Only
+  `completeAccepted`'s re-add branch (L793–816) points a handle at a
+  re-added node, and only the entry's own `handle`.
 - **A behaviour may write its own node and that node's descendants**
   (`isOwnOrDescendant`, `runner.js` L274–281), plus the targets its owner
   granted. So a parent change can widen or narrow what a behaviour may write,
@@ -238,8 +295,10 @@ multi-select is a separate candidate round. **Decided (operator, 2026-11-09): (a
   the two places that decide the role. **The cost:** until it reloads, an
   old tab can't move, recolour or rename anything (today it can). **Stated
   limits:** an unreloaded SOM Inspector tab isn't judged (it declares
-  neither capability), and an unreloaded visitor draws later moves of a
-  regrouped object in the old frame until it reloads.
+  neither capability). An unreloaded page that isn't judged draws later
+  moves of a regrouped object in the old frame, and **loses an ungrouped
+  group's parts from its view**, until it reloads (r2). For judged tabs,
+  GR-L12 (a) disconnects them first.
 - (b) Keep today's rule (only `add` and `remove`). A stale tab's edit of a
   regrouped object then lands in the wrong frame, for every visitor, and is
   saved. A stale host's behaviour writes would do the same.
@@ -263,12 +322,20 @@ multi-select is a separate candidate round. **Decided (operator, 2026-11-09): (a
 - (b) As (a), but models may be parents too. One rule fewer, and untried.
 
 **GR-L5. The bounds** (SA-L2 against created content). **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
-- **(a) Recommended: the server refuses a move or a parented `add` when,
-  afterwards, the destination's top-level tree is past one of SA-L2's counts
-  and the change made that count larger than it was.**
-  - So a move within, or out of, an oversized seed group is never refused,
-    and neither is its Undo.
+- **(a) Recommended: the server refuses a move or a parented `add` that
+  would take the destination's top-level tree past one of SA-L2's counts
+  that it is not already past** (Rev 1.1, review M1: one rule, §1's
+  wording).
+  - A tree already past a count may grow, so Delete → Undo inside an
+    oversized seed group keeps working, and so does a move within it.
   - A move to the top level is never refused by size.
+  - **Its Undo isn't always possible:** a move out of a 257-node group leaves
+    256, and moving back would pass the bound (r1). **Every action whose Undo
+    the rule would refuse asks first** ("this can't be undone: the group
+    would be too large to copy"), as an unrestorable Delete does. This
+    covers a Move to out of, or a Delete in, a tree at the bound, and an
+    Ungroup of a group over it. GR7 runs the same check before any
+    multi-step Undo, so a predictable refusal never starts one.
   - The 1,000,000-byte cap stays the client's, as now: an oversized Delete
     asks first.
 - (b) Only the panel refuses. A hand-made `send` or Duplicate could still
@@ -285,18 +352,25 @@ multi-select is a separate candidate round. **Decided (operator, 2026-11-09): (a
        and never a shear (f1). If the name was taken (a race), the palette's
        retry with the next free name applies.
     3. If the move is refused, the client removes the empty group it made,
-       and nothing is recorded.
+       and nothing is recorded. This continuation doesn't depend on Edit
+       mode staying on (review N5): the palette's retry checks `modes.edit`
+       (`app.js` L3453), and Group's must not, or the group stays empty.
     4. One Undo step; the group ends up selected.
   - **Ungroup** is offered only for a group with nothing of its own:
-    - It has parts and no mesh, model, behaviour, camera, light or
-      teleporter.
+    - It has parts and no mesh, model, behaviour or teleporter.
+    - **Its capture without its children succeeds** (the Delete capture's
+      own rule, §2.5, review S5). That refuses camera, light and skin hosts,
+      animated nodes, `source` containers, extensions and the rest, with the
+      capture's reason as the tooltip.
     - It is not hidden (GR-L9).
     - Its `objectId` is not in any behaviour's granted targets.
     - Other `extras` go with it, and Undo brings them back.
 
     Each part moves to the group's parent, keeping its world placement.
-    **Once every move is accepted,** the group is deleted. Ungroup is
-    disabled, with the reason as its tooltip, if a part would need a shear.
+    **Once every move is accepted,** the group is deleted, through the
+    existing capture window (GR7). Ungroup is disabled, with the reason as
+    its tooltip, if a part would need a shear or a scale component under
+    0.01 (GR8), or is targeted by an animation or a skin.
 - (b) Group places the new group at the world origin. The object's local
   values are then its world placement, with a shear refusal.
 - (c) Ungroup any node with parts, keeping a node with its own mesh as an
@@ -320,7 +394,7 @@ Moving the last part out of a group leaves a node with no mesh and no parts:
 nothing to click, not in Move to's list, so it can't be selected or deleted. **Decided (operator, 2026-11-09: "no preference"): (a), as recommended.**
 - **(a) Recommended: delete it in the same step**, when it would have
   qualified for Ungroup (GR-L6 (a)). The Undo entry ("Move to") brings it
-  back, then the part.
+  back, then the part. GR-L11 extends this to the other paths.
 - (b) Leave it, and list empty groups in Move to so they can be refilled.
   They still can't be selected or deleted.
 - (c) Leave it, and make empty nodes selectable (a list, or a marker in the
@@ -358,6 +432,50 @@ nothing can be put into a scripted group on purpose this round (§8).
   behaviour. Safer, but a scripted object can never be grouped.
 - (c) Allow it; the Enable grant question isn't asked.
 
+**Stated (Rev 1.1, review S3, N3):**
+- "Behaviour-carrying" means "has the leaf, enabled or not".
+- A parented `add` under a scripted ancestor isn't covered, so the server's
+  rule is a courtesy to the panel and not a boundary.
+- A custom graph may write `translation`, `rotation` or `scale`
+  (`behavior-spec.js` L199). After a Group, a translation write lands
+  relative to the group. After a Move to into a turned or scaled group, so
+  do all three. The five templates write none of them.
+
+**GR-L11. Groups left empty by other paths** (review S6; new in Rev 1.1).
+GR-L8 covers a Move to of the last part, but a group can be left with no
+parts in other ways:
+- **upward:** Group a cube, Group `group-01`, then Move the cube to the top
+  level, and `group-02` is left empty;
+- **Delete** of a group's last part, possible today and ordinary once users
+  make groups;
+- **a composite that stops halfway:** for example a disconnect between
+  Group's `add` and its move.
+
+Each leaves a node nothing can click, whose name stays taken.
+- **(a) Recommended: one rule.** Whenever an Edit-panel action leaves a
+  group with no parts that would qualify for Ungroup, the same step also
+  deletes it, and then any ancestor it leaves empty in turn. One Undo brings
+  them all back. **That includes Delete** (a change: deleting a group's last
+  part now also removes the emptied group, inside the Delete's Undo). A
+  composite that re-added a group and ends with it empty removes it. **Stated
+  limit:** a disconnect mid-composite still leaves an empty group, with no
+  way to reach it in the viewport (§8).
+- (b) GR-L8 only (a Move to of the last part), and the other paths leave
+  empty groups, as Delete does today.
+- (c) A way to reach empty groups: list them in Move to, plus a Delete for a
+  chosen one. This is new panel surface, but it covers the disconnect too.
+
+**GR-L12. Unreloaded tabs that lose objects** (review S1; new in Rev 1.1).
+An Ungroup elsewhere removes the parts from an unreloaded tab's view (§2.3,
+r2), and so does a Move to that empties a group (GR-L8).
+- **(a) Recommended: the server ends every judged stale session in a world
+  when it first broadcasts a `parent` change there.** It knows each
+  session's level from its hello. The page shows "disconnected", and a reload
+  brings the new client. Sessions that aren't judged (the SOM Inspector,
+  cross-origin clients) stay a stated limit (GR-L3).
+- (b) Only name it in GR-L3's limits and the release notes. A visitor's view
+  stays wrong until reload; the world itself is safe.
+
 ## 4. The contract (written for the recommendations)
 
 **GR1. The SOM: one way to move a node** (`packages/som/src/SOMDocument.js`).
@@ -389,14 +507,20 @@ refused before this.
 `authorizeSend`, in this order:
 1. the parent, when named, must exist (`NODE_NOT_FOUND`);
 2. it must not be blocked (`isBlockedParent`, `PERMISSION_DENIED`, "a node
-   may not be moved under a live avatar or an externally loaded node");
+   may not be moved under a live avatar or an externally loaded node").
+   **It also must not carry, or be under a node that carries, an own
+   `extras.atrium.source`** (review S7: `isBlockedParent` doesn't know the
+   container itself);
 3. it must not carry a model (`INVALID_VALUE`);
-4. GR4's bounds must hold;
-5. the behaviour rule (GR-L10 (a)) must hold: the same behaviour-carrying
+4. **GR1's cycle and "already there" checks**, run here before any count,
+   so GR4 never walks an "after" tree with a cycle (review N1);
+5. GR4's bounds must hold;
+6. the behaviour rule (GR-L10 (a)) must hold: the same behaviour-carrying
    ancestors before and after (`INVALID_VALUE`, "this would change which
    behaviours can move it").
 
-Then `world.setField`'s own `parent` branch calls `som.reparentNode`. The
+Then `world.setField`'s own `parent` branch calls `som.reparentNode` **on the
+node object `authorizeSend` judged**, as a rename does (R3, review N6). The
 broadcast `set` carries the value as received, and autosave is notified,
 unchanged.
 
@@ -406,12 +530,22 @@ tree. For a move, the server compares the destination's top-level tree
 before and after:
 - "after" counts the moved subtree once (no double count for a move inside
   one tree), at its new depth;
-- the move is refused only when a count is over its bound after **and** larger
-  than before (`INVALID_VALUE`, "the group would be too large to copy");
+- the move is refused only when a count is **over its bound after and not
+  over it before** (`INVALID_VALUE`, "the group would be too large to copy").
+  A tree already over may grow (GR-L5 (a), review M1);
 - a move to the top level is skipped.
 
 The `add` case runs the same rule when `parent` is given, with the added
 tree as the moved subtree.
+
+**What is counted** (review S7): the nodes the server holds, **except nodes
+under a `source` container** (the container itself counts as one node). In a
+file world the server holds a container's loaded nodes and the client always
+does, so both sides skip them, and GR8's pre-check agrees with the server.
+
+**`treeCounts` is shared with the client** (`edit-group.js` imports it from
+`add-spec.js`, where the bounds already live). The panel uses it to ask
+first before any action whose Undo the rule would refuse (GR-L5 (a)).
 
 **GR5. Version skew** (GR-L3 (a)).
 - `ADD_FIELDS_LEVEL` is 4 (`session.js` L186), and the client's hello sends
@@ -420,6 +554,10 @@ tree as the moved subtree.
   `authorizeSend`, with `STALE_CLIENT_MESSAGE`.
 - `canRunBehaviors` and the hello's election also require
   `!isStaleEditor(capabilities)`.
+- **GR-L12 (a):** when the server first broadcasts a `parent` `set` in a
+  world, it closes every session in that world that `isStaleEditor` judges
+  (close code 1008, as the server's other policy closes do at `session.js` L465–513, with the reason "this page is older than the server: reload it").
+  The page shows "disconnected".
 - A level-4 page facing a level-3 server (a rollback) hides the Group row, as
   `treesAllowed()` hides group paths today.
 - The hello schemas' `addFields` descriptions say 4.
@@ -437,7 +575,14 @@ tree as the moved subtree.
     session's transform change. That branch reaches `remoteSet`, the pads,
     the spawn note and the runner's overlay.
 - A parent it can't find emits `som:desync` (`parent-not-found`), as `_onAdd`
-  does; a refusal by `reparentNode` emits `som:desync` (`reparent-refused`).
+  does. **So does a `parent` set for a node it can't find** (review N4). A
+  refusal by `reparentNode` emits `som:desync` (`reparent-refused`).
+- **A move that lands in another node of the parent's name** (a race) is
+  reported: the entry's `to.parent` is read from the node after the apply,
+  as N-4 does for adds (review N4).
+- **A pending move takes the behaviour hold on its node** (`app.js` L1868,
+  as a panel write does), so the runner sends no old-frame write between the
+  move and its echo (review S2).
 - A move that didn't apply locally is reported, so Undo doesn't record it
   (as U15 does for a rename).
 
@@ -449,9 +594,12 @@ tree as the moved subtree.
       addressable; its parent is `to.parent`; its vectors equal `to`'s
       exactly; `from.parent`, if any, is alive and addressable. Otherwise
       "changed elsewhere". Redo is the mirror.
-    - With GR-L8 (a), the entry also holds the emptied group's capture:
-      Undo re-adds it first, then moves the node back after the `add` is
-      accepted.
+    - **With GR-L8 or GR-L11 (a), the entry also holds the emptied
+      groups' captures.** Its Undo has its own checks (review M2), in place
+      of "`from.parent` is alive": each group's name is free; each group's
+      own parent (a handle) is alive and addressable. Then it re-adds them,
+      outermost first, points each group's handle at its new node, and moves
+      the node back once every `add` is accepted.
   - **`group`:** the object's move and the group's descriptor.
     - Undo checks that the group's children are exactly [the object], and
       that the group's own capture without children equals the add's. Then
@@ -463,8 +611,25 @@ tree as the moved subtree.
       with its exact old values.
     - Redo moves them out, then deletes the group once every move is
       accepted.
+- **Every re-add inside a composite points the group's handle at the new
+  node** (review M2, r5): Undo of `ungroup`, Redo of `group`, and Undo of a
+  `move` that deleted emptied groups. This is what `completeAccepted` does
+  for `entry.handle` (L793–816), so older entries that point at the group
+  keep working. Those are a Delete of a part, a Move to into or out of it,
+  a transform or Rename of the group, and a Rename after Undo and Redo of
+  its Group.
+- **The group's delete goes through the existing capture window**, in
+  Ungroup and in GR-L8/GR-L11 (`registerDelete`, with the parent re-read).
+  So a node another tab moves into the group, or a move of the group itself,
+  between this tab's check and its `remove` is neither lost nor restored in
+  the wrong place (review M2).
+- **The checks before sending include GR4** (review M1): a step the bounds
+  rule would refuse is not started. The panel asked first when the entry was
+  made (GR-L5 (a)), so such an entry is recorded as not undoable.
 - **Accounting:** one in-flight record per step, completing when every seq is
-  answered.
+  answered. The composites have phases (the `add`, then the moves; the moves,
+  then the `remove`). A move's seq gets a non-null marker in `bySeq`
+  (L577–578).
   - A move's answer is routed by seq (as `requests` does for a rename), not
     by `field === null`.
   - Group's `add` and Ungroup's `delete` are marked so that `acceptAdd` and
@@ -480,6 +645,12 @@ a new pure module `apps/client/src/edit-group.js`).
   select is width-capped as `#ep-anim-row select` is (index.html L554–559);
   its option values are indices, never names (a node may be called "Top
   level").
+- **When the list is built** (review S8): when the select opens, or when its
+  key changes (the selected node, and the world's structure), as the sky
+  select (R4) does. Never on every `som:set`: a running behaviour produces
+  those constantly, and `moveTargets` is too heavy. The node objects are kept
+  beside the options. The `change` handler resolves the chosen option to its
+  node object and checks it again before sending.
 - **A move, a Group and an Ungroup are structural requests.** One at a time,
   each blocks everything a pending structural request blocks: the gizmo, the
   fields, Undo/Redo, Delete, Duplicate, Copy, Paste and the row itself, until
@@ -490,19 +661,31 @@ a new pure module `apps/client/src/edit-group.js`).
   - for Group, its parent addressable by a non-empty name, and GR4's
     bounds;
   - for Ungroup, the group's parent and every part addressable;
-  - GR-L9 and GR-L10.
+  - GR-L9 and GR-L10;
+  - **not a node an animation channel or a skin targets** (review S3, r6),
+    for the object moved, and for every part of an Ungroup. This is
+    `nodeRuleProblem`'s `referenced` test (`edit-duplicate.js` L587).
+    Reason: "an animation moves it in local values";
+  - GR-L5 (a)'s ask-first when the Undo would be refused.
 - **`edit-group.js`**, pure, unit-tested on turned, scaled, mirrored and
   nested groups (selection-parts lesson 3). It holds:
   - `inverseAffine`;
   - `moveValue(node, newParent)`: `inverse(world(newParent)) × world(node)`,
-    decomposed, or a shear refusal;
+    decomposed, or a refusal: a shear, or **a scale component under 0.01
+    or negative** (review S4: the panel's clamp would destroy it, §2.5);
+  - **exact when the frames allow it** (review N2): when the old and the new
+    parent's world matrices have exactly equal linear parts, rotation and
+    scale are kept bitwise and only the translation is computed. That holds
+    for a group made by Group, so Group then Ungroup, without Undo, leaves
+    the values other tabs' entries expect;
   - `groupPlan(node, { isFree })`;
   - `ungroupPlan(group)`;
   - `moveTargets(node, som, rules)`: the groups (nodes that have parts)
     the object may go into, sorted, each with its breadcrumb text, then
-    "Top level" for a part. Targets that would shear, or that GR-L4, GR4,
-    GR-L9 or GR-L10 refuse, are **left out**. A line under the select says
-    how many were left out for a shear, so the list isn't silently short.
+    "Top level" for a part. Targets that `moveValue` refuses, or that GR-L4
+    (with GR3's `source` rule), GR4, GR-L9 or GR-L10 refuse, are **left
+    out**. A line under the select says how many were left out for a shear
+    or a scale, so the list isn't silently short.
 - **On `som:reparent`:**
   - a handle drag or open gesture on that node ends (`endHandleDrag`,
     the tracker's cancel), as for another session's transform (f3);
@@ -531,11 +714,21 @@ can't, with the reason). Server test files run one at a time under
   - **GR2:** each malformed value.
   - **GR3:** each refusal in order; a behaviour-carrying ancestor gained,
     and one lost.
-  - **GR4:**
+  - **GR3:** a `source` container as the parent, and a parent under one,
+    refused; the cycle checked before the counts.
+  - **GR4** (r1's cases, review M1):
     - each count just past the bound refused, and at it accepted;
-    - a move inside an oversized seed group, and its Undo, accepted;
+    - a tree already over a count may grow: in a 300-node seed group, a
+      move back in after a move out, and a Delete's re-add, both accepted;
+    - a move out of a 257-node group accepted, and moving it back refused;
+    - the deepest part of a 9-generation tree to the top level accepted, and
+      back refused;
     - a move to the top level of an oversized part accepted;
-    - a Duplicate-in-place `add` past the bound refused.
+    - a Duplicate-in-place `add` past the bound refused;
+    - nodes under a `source` container not counted.
+  - **GR-L12:** a judged stale session in the world is closed with 1008 at
+    the first `parent` broadcast, a level-4 one isn't, and a session in
+    another world isn't.
   - **Broadcast and save:** the broadcast `set` to two other sessions; a
     save and reload.
   - **GR5:**
@@ -549,6 +742,12 @@ can't, with the reason). Server test files run one at a time under
     `subtree-add.test.js` L613–652 (it asserts 3);
   - `behavior-walk.test.js` (`scriptRunner` without `addFields`, and a
     `send`);
+  - **`packages/server/test/script-host.test.js` L85 and L294, and
+    `activate.test.js` L176** (review S9). They default to `scriptRunner: 3`
+    with no `addFields`, and they are the suites that test the host election
+    and the hand-over, which GR5 changes;
+  - **`devtasks/harness/checks/scripting-4d/c1.py` L53** (it asserts
+    `addFields: 3`);
   - `packages/client/tests/richer-add-lifecycle.test.js` L134,
     `activate.test.js` L141–145 and `subtree-add-hello.test.js`.
 
@@ -557,12 +756,15 @@ can't, with the reason). Server test files run one at a time under
 - **Client:** `moveNode` sends and changes nothing until the echo; the own
   echo and a remote `set` apply and emit, in order, `som:reparent`,
   `som:set` for `parent`, then the three transform `som:set`s; a missing
-  parent desyncs.
+  parent desyncs, and so does a missing node; a move that lands in another
+  node of the parent's name is reported with that node.
 - **`edit-group.js`:**
   - every plan on a group turned 90° about y, scaled 2, translated and nested
     two deep, with the world placement kept to 1e-9;
-  - a mirrored ancestor;
+  - a mirrored ancestor, and a group scaled above 100: both refused (a
+    scale under 0.01 or negative; r4);
   - a shear refused in both directions;
+  - equal linear parts give bitwise rotation and scale (N2);
   - `moveTargets`' exclusions.
 - **`edit-undo.js`:**
   - `move`, `group` and `ungroup` undo and redo, with the exact values
@@ -571,14 +773,34 @@ can't, with the reason). Server test files run one at a time under
   - a race refusal drops the entry and names the part;
   - "Ungroup (partly)";
   - **f2's cases A and B** (a delete, and an Undo of a Duplicate, pending
-    while another tab moves the node): restored in the right place.
-- **Wiring:** the row's enable rules; a pending move blocks the gizmo and the
-  fields; `som:reparent` ends a drag and refreshes (lift the page's own
-  handlers, subtree-add lesson 1).
+    while another tab moves the node): restored in the right place;
+  - **r5's sequence and its relatives** (review M2): Delete a part, Ungroup,
+    Undo, Undo; a Move into a group, Ungroup, Undo, Undo; a drag of the
+    group, Ungroup, Undo, Undo; Group, Move to the top level (GR-L8), Undo,
+    Undo. Each ends with every entry undone;
+  - GR-L11: a Delete of a group's last part removes the emptied group (and an
+    emptied ancestor), and one Undo brings back all of them;
+  - a Group whose `add` is refused "already in use" because another node holds
+    that name: nothing is moved until the retry's `add` is accepted, and the
+    object ends in the retry's group. **This is the test for "the wait for
+    the group's `add`"** (review S9: pipelined on one socket, the old proof
+    turned nothing red);
+  - Group's continuation completes with Edit mode turned off after the `add`
+    (N5).
+- **Wiring:** the row's enable rules (an animated node, r6's `crate-01`,
+  disabled); a pending move blocks the gizmo and the fields and holds the
+  runner; `som:reparent` ends a drag and refreshes; the Move to list is not
+  rebuilt by a `som:set`, and a chosen option is checked again (lift the
+  page's own handlers, subtree-add lesson 1).
 - **Harness** (`devtasks/harness/checks/grouping/`, real mouse):
   - Group, Move to, Ungroup, and Undo and Redo of each, in two tabs, on
     `group.gltf`'s rotated group;
-  - **f3 as a check:** no jump when another tab regroups the dragged object.
+  - **f3 as a check:** no jump when another tab regroups the dragged object;
+  - **r6 as a check:** Group is disabled for `space-anim.gltf`'s
+    `crate-01`, and enabled for its plain cubes.
+
+  **Stated, not tested:** r3's in-flight race between two tabs of one owner
+  (one round trip wide; §8).
 
   Each asserts the selection, the world positions, the drawn parent, the
   server's copy (`/__doc`) and the Undo stack (selection-parts lesson 2).
@@ -587,7 +809,9 @@ can't, with the reason). Server test files run one at a time under
   - the cycle check, the bounds, the behaviour rule;
   - the stale `send` refusal, the stale host refusal;
   - the exact Undo values, the parent re-read;
-  - the wait for the group's `add`;
+  - the wait for the group's `add` (the "already in use" test above);
+  - the handle re-pointing (r5), the delete through the capture window;
+  - the stale-session close;
   - the drag's end, the breadcrumb refresh.
 
 **DEV acceptance (operator), each step naming the control and what happens:**
@@ -604,8 +828,11 @@ can't, with the reason). Server test files run one at a time under
    cubes stay where they are, `group-01` is gone, Undo brings it back with
    both inside.
 6. In a second tab (a visitor), watch steps 1–5: nothing jumps.
-7. A tab opened before the deploy: any edit says "this page is older than
-   the server: reload it to keep editing".
+7. A tab opened before the deploy, not reloaded: at the first Group or Move
+   to in another tab, it shows "disconnected" (GR-L12). Press **Connect** in
+   it without reloading, then drag a cube: it snaps back, and the panel says
+   "Couldn't save: this page is older than the server: reload it to keep
+   editing" (`edit-gesture.js` L514; review S9).
 8. PROD: steps 1, 2 and 5 on a scratch cube.
 
 ## 6. Worker rules and release path
@@ -621,7 +848,8 @@ specifics:
     `edit-structure.js`, `app.js`;
   - `apps/client/index.html`;
   - `tools/som-inspector/src/app.js`;
-  - `devtasks/harness/checks/grouping/`;
+  - `devtasks/harness/checks/grouping/`, and
+    `devtasks/harness/checks/scripting-4d/c1.py` (its hello assertion only);
   - test files under `packages/*/test/`, `packages/*/tests/` and
     `apps/client/tests/`, including §5's existing hellos.
 
@@ -641,11 +869,42 @@ specifics:
     needed.
   - **A rollback** to `331e4aed` loads every world as saved, and the old
     server refuses `parent` again.
-  - **The release notes name:** the stale-tab change (no edits, no host),
-    the stated limits (GR-L3), and the pending-delete fix (f2).
+  - **The release notes name:**
+    - the stale-tab change: no edits, no host, and disconnected at the first
+      regroup;
+    - the stated limits (GR-L3, GR-L10, GR-L11, r3's race);
+    - Delete of a group's last part now also removes the emptied group
+      (GR-L11);
+    - the pending-delete fix (f2).
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.1** (2026-11-09): **the outside review of `34917de8`**, by Claude
+  Fable 5.2, per its first lines. It ran on a clone with code: 121 + 30 + 30
+  tests passing, the four design probes, the harness, and six probes of its
+  own. **CHANGES REQUESTED.** Claude reran all six probes (`review/r1`–`r6`,
+  same output, `r6` in the browser), and checked the source-only findings
+  (S5, S7, S8, S9) at the cited lines.
+  - **Must-fix, both taken:**
+    - **M1:** one bounds rule, "past a count it is not already past"; the
+      Undo promise replaced by ask-first, plus GR4 in GR7's checks; r1's
+      tests;
+    - **M2:** the handle re-pointing; the group's delete through the
+      capture window; the `move` entry's own checks; r5's tests.
+  - **Should-fix, all taken:**
+    - **S1:** GR-L12, new and open;
+    - **S2:** the behaviour hold; the two-tab race stated;
+    - **S3:** animated and skinned nodes refused; GR-L10's limit widened;
+    - **S4:** a scale under 0.01 or negative left out;
+    - **S5:** Ungroup needs the capture to pass;
+    - **S6:** GR-L11, new and open;
+    - **S7:** `source` containers refused as parents, and not counted;
+    - **S8:** when the Move to list is built;
+    - **S9:** the "already in use" test, three more hellos and the 4d
+      harness check, and DEV step 7's gesture.
+  - **Nits, all taken:** N1 (the order), N2 (exact when frames allow), N3
+    (GR-L10 stated), N4 (desync, landing reported), N5 (Edit mode), N6 (R3),
+    N7 (13 checks, not 17).
 - **Rev 1.0** (2026-11-09): every decision taken (status line).
 - **Rev 0.3** (2026-11-09): the operator's decisions but GR-L10.
 - **Rev 0.2** (2026-11-09): **the fresh-agent check of Rev 0.1.** Claude
@@ -691,6 +950,13 @@ specifics:
   part back last among its siblings, not at its old index (as a part's re-add
   does today). Nothing reads the order yet.
 - Models as parents (GR-L4 (b)), if a use appears.
+- Grouping animated or skinned nodes (review S3): the clip's keys would need
+  re-basing into the group's frame.
+- r3's in-flight race between two tabs of one owner (review S2): a tab that
+  sees its own transform accepted after a `som:reparent` of that node could
+  re-send the reparent's value.
+- A way to reach an empty group that a disconnect mid-composite leaves
+  (GR-L11's stated limit).
 - A move into a scripted group that asks the Enable grant question
   ("the behaviour on X will be able to change Y"), instead of GR-L10 (a)'s
   refusal.
