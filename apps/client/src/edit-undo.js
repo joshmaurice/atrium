@@ -271,6 +271,11 @@ export function createEditUndo({
   // or null; and the next free name for Group's one retry ("already in use").
   move = () => null,
   freeName = () => null,
+  // grouping GR8 (second review S4) — the behaviour hold while a composite is
+  // in flight: the node whose subtree it moves (the app's createBehaviorHold
+  // takes one node, and covers its descendants and ancestors). The app
+  // releases it when the composite is no longer in flight (its answer).
+  holdNode = () => {},
 }) {
   const objectByName = getObjectByName ?? getNodeByName
   /** @type {WeakMap<object, {node: object}>} */
@@ -911,8 +916,9 @@ export function createEditUndo({
     return true
   }
 
-  function startComposite(direction, entry, phases, onPhase, { record = true } = {}) {
+  function startComposite(direction, entry, phases, onPhase, { record = true, hold = null } = {}) {
     inFlight = { kind: 'composite', direction, entry, phases, onPhase, phase: 0, bySeq: new Map(), outcomes: [], record }
+    holdNode(hold)
     runPhase()
   }
 
@@ -1009,7 +1015,7 @@ export function createEditUndo({
       noteLanding(node, entry.to)
       finishDo(entry, node)
       return 'done'
-    }, { record })
+    }, { record, hold: node })
     return true
   }
 
@@ -1074,7 +1080,7 @@ export function createEditUndo({
       inFlight = null                                        // the cleanup's answer
       message(`Couldn’t group: ${failure}`)
       return 'stop'
-    }, { record })
+    }, { record, hold: node })
     return true
   }
 
@@ -1138,7 +1144,7 @@ export function createEditUndo({
       if (o.status === 'changed') message(DELETE_CHANGED_MESSAGE)
       select({ node: alive(first) ? first : null, removed: null })
       return 'done'
-    }, { record })
+    }, { record, hold: groupNode })
     return true
   }
 
@@ -1153,7 +1159,7 @@ export function createEditUndo({
         noteLanding(node, place)
         finishRun(node)
         return 'done'
-      })
+      }, { hold: node })
       return
     }
 
@@ -1175,7 +1181,7 @@ export function createEditUndo({
           inFlight = null
           message(o.status === 'changed' ? DELETE_CHANGED_MESSAGE : `Couldn’t undo: ${o.text ?? 'refused'}`)
           return 'stop'
-        })
+        }, { hold: object })
         return
       }
       startComposite(direction, entry, [
@@ -1196,7 +1202,7 @@ export function createEditUndo({
         noteLanding(object, entry.object.to)
         finishRun(entry.handle.node)
         return 'done'
-      })
+      }, { hold: object })
       return
     }
 
@@ -1219,7 +1225,7 @@ export function createEditUndo({
           if (!movesDone('from', outs)) return 'stop'
           finishRun(entry.handle.node)
           return 'done'
-        })
+        }, { hold: entry.parent ? entry.parent.node : null })
         return
       }
       startComposite(direction, entry, [
@@ -1236,7 +1242,7 @@ export function createEditUndo({
         if (!movesDone('from', outs)) return 'stop'
         finishRun(entry.handle.node)
         return 'done'
-      })
+      }, { hold: entry.parent ? entry.parent.node : null })   // at the top level nothing is held (stated)
       return
     }
     const firstPart = parts[0]?.handle.node ?? null
@@ -1254,7 +1260,7 @@ export function createEditUndo({
       inFlight = null
       message(o.status === 'changed' ? DELETE_CHANGED_MESSAGE : `Couldn’t redo: ${o.text ?? 'refused'}`)
       return 'stop'
-    })
+    }, { hold: entry.handle.node })
   }
 
   /** Why Move to, Group or Ungroup can't start now (the engine's own half of the block), or null. */
@@ -1552,6 +1558,8 @@ export function createEditUndo({
     reason,
     label,
     inFlight: () => !!inFlight,
+    /** grouping GR8 — an original Move to, Group or Ungroup is in flight (not an undo or a redo). */
+    doing: () => inFlight?.kind === 'composite' && inFlight.direction === 'do',
     endSession,
     // for the panel and for tests
     get undoCount() { return undoStack.length },

@@ -22,7 +22,7 @@
  */
 
 import { worldMatrix } from '@atrium/som'
-import { moveCounts, treeBoundsProblem, SUBTREE_NODES_MAX, SUBTREE_DEPTH_MAX, SUBTREE_PRIMITIVES_MAX } from '@atrium/client/add-spec'
+import { moveCounts, treeBoundsProblem, treeCounts, topLevelOf, generationBelow, SUBTREE_NODES_MAX, SUBTREE_DEPTH_MAX, SUBTREE_PRIMITIVES_MAX } from '@atrium/client/add-spec'
 import { multiply, decomposeTRS, SHEAR_TOLERANCE } from './part-transform.js'
 import { localMatrix } from '@atrium/som'
 
@@ -309,6 +309,43 @@ export function moveTargets(node, som, rules = {}) {
     else skipped += 1
   }
   return { targets, topLevel, skipped }
+}
+
+/**
+ * GR-L5 (a) — would the Undo of this Ungroup be refused by GR4? The Undo
+ * re-adds the group and moves every part back in: the tree it rebuilds is
+ * the group's tree as it is now. At the top level the group starts alone (one
+ * node); under a parent, the parent's tree starts as it will be after the
+ * Ungroup (the parts lifted one generation, the group gone).
+ * @returns {null|string} the count it would pass
+ */
+export function ungroupUndoProblem(group) {
+  if (!group.parent) {
+    return treeBoundsProblem({ before: { nodes: 1, depth: 0, primitives: 0 }, after: treeCounts(group) })
+  }
+  const top = topLevelOf(group)
+  const now = treeCounts(top)
+  const base = treeCounts(top, group)
+  const g = generationBelow(top, group)
+  let nodes = base.nodes, depth = base.depth, primitives = base.primitives
+  for (const part of group.children) {
+    const c = treeCounts(part)
+    nodes += c.nodes; primitives += c.primitives
+    depth = Math.max(depth, g + c.depth)
+  }
+  return treeBoundsProblem({ before: { nodes, depth, primitives }, after: now })
+}
+
+/**
+ * GR-L5 (a) — would the Undo of moving `node` under `target` be refused by
+ * GR4? The Undo moves it back into the tree it is leaving. Never at the top
+ * level, and not within one tree (the counts don't grow back).
+ */
+export function moveUndoProblem(node, target) {
+  if (!node.parent) return null
+  const oldTop = topLevelOf(node.parent)
+  if (target && topLevelOf(target) === oldTop) return null
+  return treeBoundsProblem({ before: treeCounts(oldTop, node), after: treeCounts(oldTop) })
 }
 
 /** GR4's bounds, re-exported for the panel's ask-first. */

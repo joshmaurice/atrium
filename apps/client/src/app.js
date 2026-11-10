@@ -46,7 +46,12 @@ import { createDiagnosticListeners } from './model-listeners.js'
 import { fetchModel, fetchImage } from '@atrium/client/model-fetch'
 import { createModelBridge, countVertices, measureBounds, specTemplateKey, MODEL_STATUS, createModelAnimations } from '@atrium/renderer-three'
 import { createAnimationControls, MODEL_ANIMATION_FIELD } from './model-animation-panel.js'
-import { prepareDuplicate, duplicateRuleProblem, prepareRestore, DUPLICATE_OFFSET_X } from './edit-duplicate.js'
+import { prepareDuplicate, duplicateRuleProblem, prepareRestore, DUPLICATE_OFFSET_X, ownNodeProblem, isReferenced } from './edit-duplicate.js'
+import {
+  groupPlan, ungroupPlan, groupName, moveValue, moveProblem, moveTargets, bareNodes, bareNodesKey, isBareNode,
+  regroupCounts, ungroupUndoProblem, moveUndoProblem, MOVE_REASONS, BOUNDS_REASON,
+} from './edit-group.js'   // grouping GR8
+import { treeBoundsProblem } from '@atrium/client/add-spec'   // grouping GR4 (the client's copy)
 import { parentFrameOffset } from './part-transform.js'   // selection-parts T11
 import { copyObject, preparePaste, renamePaste, treeMembers, partsSummary, partsText, descriptorPartsSummary, creditLines, behaviorSummary, behaviorSummaryLines, refsRecordText, shownText, VISIBILITY_NOTE, partCopyProblem } from './copy-paste.js'   // copy-objects K4–K9; subtree-add T6; selection-parts T11
 import { createStructureTracker, countDescendants, collectSubtree, structuralBlockReason, editBlocked, fieldsDisabled, isActiveCameraStale } from './edit-structure.js'
@@ -1825,6 +1830,15 @@ const epPasteNotes   = document.getElementById('ep-paste-notes')    // copy-obje
 const epCreditRow    = document.getElementById('ep-credit-row')     // copy-objects, post-review
 const epCredit       = document.getElementById('ep-credit')
 const epDelete       = document.getElementById('ep-delete')         // 1b-2 N2
+// grouping GR8 — Group, Ungroup, Move to, and the world's Empty groups
+const epGroupActions = document.getElementById('ep-group-actions')
+const epGroup        = document.getElementById('ep-group')
+const epUngroup      = document.getElementById('ep-ungroup')
+const epMoveRow      = document.getElementById('ep-move-row')
+const epMoveTo       = document.getElementById('ep-move-to')
+const epMoveNote     = document.getElementById('ep-move-note')
+const epEmptyRow     = document.getElementById('ep-empty-row')
+const epEmptyGroups  = document.getElementById('ep-empty-groups')
 const epPath         = document.getElementById('ep-path')           // selection-parts T14
 const epUndo         = document.getElementById('ep-undo')           // step 2, Y5
 const epRedo         = document.getElementById('ep-redo')           // step 2, Y5
@@ -1839,6 +1853,13 @@ let outline       = null   // BoxHelper on selectedObj
 let activeGesture = null   // the handle drag under way (B4)
 let pressDown     = null   // { x, y, onHandle } at the last viewport mousedown
 let pendingRename = null   // { seq, node } while a rename is unanswered
+// grouping GR8 — the Group row's state (declared here: refreshEditActions reads it early)
+let compositeHold  = false // a composite's behaviour hold is ours to release
+let structureStamp = 0     // bumped on every add, remove, rename and reparent (Move to's key)
+let moveOptions    = []    // the Move to select's choices: [{ node: SOMNode|null (Top level) }]
+let moveOptionsKey = null
+let emptyList      = []    // the Empty groups select's nodes, by option index
+let emptyKey       = null
 
 // F-L5 — the drag rule's hold (undo-hold, H2/H3). ONE collaborator keeps the
 // runner's gesture: it holds one node OBJECT. `writeSend` and a handle drag's
@@ -1969,6 +1990,25 @@ const undo = createEditUndo({
     if (node) selectAddedNode(node)
   },
   message: (text) => showEditError(text),
+  // grouping GR7 — a parent change (Move to, Group, Ungroup, and their Undo
+  // and Redo). A throw from the client is reported like `structural`'s.
+  move: (node, value, direction) => {
+    try {
+      return client.moveNode(node.name, value)
+    } catch (err) {
+      showEditError(`Couldn’t ${direction === 'do' ? 'move' : direction}: ${err.message}`)
+      return null
+    }
+  },
+  // Group's one retry when another tab took the name ("already in use")
+  freeName: () => groupName(isNameFree),
+  // GR8 (second review S4) — the runner is held off the subtree a composite
+  // moves; the request's own answer releases it (refreshEditActions)
+  holdNode: (node) => {
+    if (!node) return
+    hold.hold(node)
+    compositeHold = true
+  },
   isEditOn: () => modes.edit,
   isDragging: () => !!activeGesture || !!gizmo?.dragging,
   isRenamePending: () => !!pendingRename,
@@ -2900,7 +2940,7 @@ function clearEditError() {
 
 // ── Answers from the server (B4, B6, B7) ────────────────────────────────
 
-client.on('edit:accepted', ({ seq }) => {
+client.on('edit:accepted', ({ seq, applied, landed }) => {
   const mine = editTracker.accepted(seq)
   if (mine) {
     clearEditError()
@@ -2908,7 +2948,7 @@ client.on('edit:accepted', ({ seq }) => {
     if (subtreeSome(mine.node, isTeleporter)) rebuildPads()
   }
   // Y4 — the undo engine's own answers (a transform send, or a rename it sent)
-  if (undo.onAccepted(seq)) {
+  if (undo.onAccepted(seq, { applied, landed })) {   // grouping GR7: a move's applied/landed
     refreshEditVectors()          // the node holds the undone value now
     refreshEditActions()
     // Z7 — an undo or a redo of a transform moves its pads too.
@@ -3023,11 +3063,13 @@ function checkDuplicate(node) {
 function structuralBlock() {
   return structuralBlockReason({
     hasSelection: !!selected,
-    pending:      !!structure.pending,
+    // grouping GR8 — a Move to, Group or Ungroup in flight is a structural
+    // request: it blocks what a pending one blocks, and says so
+    pending:      !!structure.pending || undo.doing(),
     dragging:     !!activeGesture || !!gizmo?.dragging,
     renaming:     !!pendingRename && pendingRename.node === selected,
     sending:      editTracker.pendingCount > 0,     // Y2, U14
-    undoing:      undo.inFlight(),                  // Y4, Rev 2 #3
+    undoing:      undo.inFlight() && !undo.doing(), // Y4, Rev 2 #3
   })
 }
 
@@ -3100,6 +3142,10 @@ function refreshEditActions() {
   const redoReason = undo.reason('redo')
   epRedo.disabled = !!redoReason
   epRedo.title = redoReason ?? undo.label('redo')
+  // grouping GR8 — the composite's hold is released by its own answer (the
+  // tracker's idle never fires for a move), and the Group row follows
+  if (compositeHold && !undo.inFlight()) { compositeHold = false; hold.clear() }
+  refreshGroupActions()
 }
 
 // Y5 — the two buttons. A click checks again (Y4): the reason is the tooltip,
@@ -3339,6 +3385,266 @@ epDelete.addEventListener('click', async () => {
   undo.registerDelete(seq, { node, name: node.name, descriptor: capture.ok ? capture.descriptor : null })
   clearEditError()
   refreshEditActions()
+})
+
+
+// ---------------------------------------------------------------------------
+// grouping GR8 — Group, Ungroup, Move to and Empty groups
+// (devtasks/PREBRIEF-grouping.md FINAL Rev 2). The plans and lists are
+// edit-group.js's; the messages and the Undo entries are edit-undo.js's
+// (`undo.group`, `undo.ungroup`, `undo.moveTo`). Each is a structural request:
+// one at a time, blocking what a pending one blocks (`structuralBlock`).
+// ---------------------------------------------------------------------------
+
+/** GR5 — the server applies parent changes (level 4); below it the row is hidden. */
+function groupingAllowed() {
+  return Number.isInteger(client.serverAddFields) && client.serverAddFields >= 4
+}
+
+// Function declarations (hoisted): refreshEditActions can run before this
+// block is reached while the module evaluates.
+function groupRules() { return { isExcluded: isEditExcluded } }
+function isAddressable(node) { return !!node && !!node.name && client.som?.getObjectByName(node.name) === node }
+function underOrIs(node, test) { for (let n = node; n; n = n.parent) if (test(n)) return true; return false }
+function hasOwnSource(n) { return n?.extras?.atrium?.source != null }
+var ANIMATED_REASON = 'an animation moves it in local values'   // var: read by hoisted functions
+
+/** Why the selected object can't be moved at all (Group, Move to), or null. */
+function movableProblem(node) {
+  if (!node) return 'Select an object first'
+  if (underOrIs(node, isEditExcluded)) return 'Avatars can’t be grouped'
+  if (underOrIs(node, hasOwnSource)) return 'External content can’t be grouped'
+  if (!isAddressable(node)) return 'This object can’t be found by its own name'
+  if (isReferenced(node._node)) return ANIMATED_REASON
+  return null
+}
+
+/** GR8's Group rule, or null. */
+function groupHint(node) {
+  const block = structuralBlock() ?? movableProblem(node)
+  if (block) return block
+  if (node.parent && !isAddressable(node.parent)) return 'Its group can’t be found by its name'
+  if (treeBoundsProblem(regroupCounts(node.parent ?? null, [node]))) return BOUNDS_REASON
+  return null
+}
+
+/** A behaviour's granted targets name this objectId (GR-L6 (a): Ungroup would delete a grant's target). */
+function isGrantedTarget(node) {
+  const id = node.extras?.atrium?.objectId
+  if (id == null || !client.som) return false
+  return client.som.nodes.some((n) => (n.extras?.atrium?.behavior?.targets ?? []).includes(id))
+}
+
+/** GR-L6 (a)'s Ungroup rule, or null: a group with nothing of its own. */
+function ungroupHint(node) {
+  const block = structuralBlock()
+  if (block) return block
+  if (!node) return 'Select a group first'
+  if (node.children.length === 0) return 'It has nothing inside to take out'
+  if (underOrIs(node, isEditExcluded) || underOrIs(node, hasOwnSource)) return 'This can’t be ungrouped'
+  if (node._node.getMesh()) return 'It is an object with a shape of its own: use Move to on its parts'
+  const atrium = node.extras?.atrium ?? {}
+  if (atrium.model != null) return 'It is a model'
+  if (atrium.behavior != null) return 'It has a behaviour'
+  if (isTeleporter(node)) return 'It is a teleporter'
+  if (node.visible === false) return 'Show the group first'
+  if (isGrantedTarget(node)) return 'A behaviour is allowed to change it'
+  const own = ownNodeProblem(node._node, { credit: false })
+  if (own) return own.reason
+  if (!isAddressable(node)) return 'This group can’t be found by its own name'
+  if (node.parent && !isAddressable(node.parent)) return 'Its group can’t be found by its name'
+  for (const part of node.children) {
+    if (!isAddressable(part)) return `“${part.name}” can’t be found by its own name`
+    if (isReferenced(part._node)) return `“${part.name}”: ${ANIMATED_REASON}`
+  }
+  const plan = ungroupPlan(node)
+  if (!plan.ok) return `“${plan.node.name}”: ${MOVE_REASONS[plan.rule]}`
+  return null
+}
+
+/** GR-L5 (a) — an action whose Undo GR4 would refuse asks first; not recorded if confirmed. */
+function askUnundoable(problem) {
+  if (!problem) return { go: true, record: true }
+  const ok = typeof window !== 'undefined' && typeof window.confirm === 'function' &&
+    window.confirm(`This can’t be undone: ${BOUNDS_REASON}. Go ahead?`)
+  return { go: ok, record: false }
+}
+
+epGroup?.addEventListener('click', () => {
+  if (!modes.edit || !selected || !groupingAllowed()) return
+  const node = selected
+  const reason = groupHint(node)
+  if (reason) { showEditError(reason); refreshEditActions(); return }
+  const plan = groupPlan(node, { isFree: isNameFree })
+  if (!plan.ok) { showEditError(`Couldn’t group: ${plan.reason}`); return }
+  if (undo.group(node, plan)) clearEditError()
+  refreshEditActions()
+})
+
+epUngroup?.addEventListener('click', () => {
+  if (!modes.edit || !selected || !groupingAllowed()) return
+  const node = selected
+  const reason = ungroupHint(node)
+  if (reason) { showEditError(reason); refreshEditActions(); return }
+  const ask = askUnundoable(ungroupUndoProblem(node))
+  if (!ask.go) return
+  if (!modes.edit || selected !== node || ungroupHint(node)) return   // the question paused the page
+  const plan = ungroupPlan(node)
+  if (!plan.ok) { showEditError(`“${plan.node.name}”: ${MOVE_REASONS[plan.rule]}`); return }
+  if (undo.ungroup(node, plan, { record: ask.record })) clearEditError()
+  refreshEditActions()
+})
+
+// ── Move to: the list is built when the select opens (and when its key
+// changes), never on every som:set (review S8); option values are indices
+// into `moveOptions`, which keeps the node objects; a choice is checked again.
+
+function moveListKey() {
+  return selected ? `${selected.name}\u0000${structureStamp}` : ''
+}
+
+function buildMoveOptions() {
+  if (!epMoveTo) return
+  const node = selected
+  epMoveTo.textContent = ''
+  moveOptions = []
+  const head = document.createElement('option')
+  head.value = ''
+  head.textContent = 'Move to…'
+  epMoveTo.appendChild(head)
+  epMoveNote.style.display = 'none'
+  if (!node || !client.som || movableProblem(node)) { moveOptionsKey = moveListKey(); return }
+  const list = moveTargets(node, client.som, groupRules())
+  for (const t of list.targets) {
+    const o = document.createElement('option')
+    o.value = String(moveOptions.length)
+    o.textContent = t.label
+    epMoveTo.appendChild(o)
+    moveOptions.push({ node: t.node })
+  }
+  if (list.topLevel) {
+    const o = document.createElement('option')
+    o.value = String(moveOptions.length)
+    o.textContent = 'Top level'
+    epMoveTo.appendChild(o)
+    moveOptions.push({ node: null })
+  }
+  if (list.skipped > 0) {
+    epMoveNote.textContent = `${list.skipped} group${list.skipped === 1 ? '' : 's'} can’t take it without distorting it.`
+    epMoveNote.style.display = ''
+  }
+  moveOptionsKey = moveListKey()
+}
+
+function syncMoveOptions() {
+  if (moveOptionsKey !== moveListKey()) buildMoveOptions()
+}
+
+epMoveTo?.addEventListener('focus', () => syncMoveOptions())
+epMoveTo?.addEventListener('mousedown', () => syncMoveOptions())
+epMoveTo?.addEventListener('change', () => {
+  const choice = moveOptions[Number(epMoveTo.value)]
+  epMoveTo.value = ''
+  if (!choice || !modes.edit || !selected || !groupingAllowed()) return
+  const node = selected
+  const target = choice.node
+  // the choice is resolved to its node object and checked again (S8)
+  const block = structuralBlock() ?? movableProblem(node)
+  if (block) { showEditError(block); refreshEditActions(); return }
+  if (target && client.som?.getNodeByName(target.name) !== target) { showEditError('That group is gone'); buildMoveOptions(); return }
+  const problem = moveProblem(node, target, client.som, groupRules())
+  if (problem) { showEditError(`Couldn’t move: ${problem.reason}`); buildMoveOptions(); return }
+  const value = moveValue(node, target)
+  if (!value.ok) { showEditError(`Couldn’t move: ${MOVE_REASONS[value.rule]}`); return }
+  const ask = askUnundoable(moveUndoProblem(node, target))
+  if (!ask.go) return
+  if (undo.moveTo(node, target, value.value, { record: ask.record })) clearEditError()
+  refreshEditActions()
+})
+
+// ── Empty groups: the bare nodes the viewport can't reach. Its key is the
+// list of their names (a cheap scan, no matrices); the DOM is rebuilt only
+// when the key changes (second review N4).
+
+function refreshEmptyGroups() {
+  if (!epEmptyRow) return
+  const on = modes.edit && groupingAllowed() && !!client.som
+  // this tab's own request makes a group bare for one round trip: wait for it
+  if (on && undo.inFlight()) return
+  const list = on ? bareNodes(client.som, groupRules()) : []
+  const key = bareNodesKey(list)
+  epEmptyRow.style.display = list.length > 0 ? '' : 'none'
+  if (key === emptyKey) return
+  emptyKey = key
+  emptyList = list.map((e) => e.node)
+  epEmptyGroups.textContent = ''
+  const head = document.createElement('option')
+  head.value = ''
+  head.textContent = `Empty groups (${list.length})`
+  epEmptyGroups.appendChild(head)
+  list.forEach((e, i) => {
+    const o = document.createElement('option')
+    o.value = String(i)
+    o.textContent = e.label
+    epEmptyGroups.appendChild(o)
+  })
+}
+
+epEmptyGroups?.addEventListener('change', () => {
+  const node = emptyList[Number(epEmptyGroups.value)]
+  epEmptyGroups.value = ''           // it picks; it holds no state
+  if (!node || !modes.edit || !client.som) return
+  if (client.som.getNodeByName(node.name) !== node || !isBareNode(node)) { emptyKey = null; refreshEmptyGroups(); return }
+  selectForEdit(node)
+})
+
+/** GR8 — the row's enabled state and tooltips. A hint only: every click checks again. */
+function refreshGroupActions() {
+  if (!epGroupActions) return
+  const allowed = groupingAllowed() && modes.edit
+  epGroupActions.style.display = allowed ? '' : 'none'
+  epMoveRow.style.display = allowed ? '' : 'none'
+  if (!allowed) { epMoveNote.style.display = 'none'; refreshEmptyGroups(); return }
+  const g = groupHint(selected)
+  epGroup.disabled = !!g
+  epGroup.title = g ?? 'Put the selected object in a new group'
+  const u = ungroupHint(selected)
+  epUngroup.disabled = !!u
+  epUngroup.title = u ?? 'Take the selected group apart, keeping every part where it is'
+  const m = structuralBlock() ?? movableProblem(selected)
+  epMoveTo.disabled = !!m
+  epMoveTo.title = m ?? 'Move the selected object into a group'
+  if (m) epMoveNote.style.display = 'none'
+  refreshEmptyGroups()
+}
+
+// GR8 — a parent change (this tab's own or another's). The local values of the
+// moved node changed frame: a handle drag or gesture on it is CANCELLED, not
+// ended (second review S1, r7: ending makes a final send of an old-frame
+// value), before the transform som:sets that follow mark it as another
+// session's. Then the panel, both breadcrumbs, the handles and the lists.
+client.on('som:reparent', ({ nodeName }) => {
+  structureStamp += 1
+  structure.reparentSeen()
+  const node = client.som?.getNodeByName(nodeName) ?? null
+  if (node && activeGesture && activeGesture.node === node) {
+    activeGesture.cancel()
+    activeGesture = null
+    hold.clear()
+  }
+  if (node && node === selected && gizmo?.dragging) endHandleDrag()
+  if (selected) {
+    attachSelected()
+    refreshEditPanel()
+  }
+  if (inspected) renderInspectPanel()
+  emptyKey = null
+  refreshEditActions()
+})
+for (const ev of ['som:add', 'som:remove', 'som:rename']) client.on(ev, () => { structureStamp += 1; emptyKey = null })
+// a set that can change bareness (a mesh, a model, a node's extras) refreshes the list
+client.on('som:set', ({ path }) => {
+  if (typeof path === 'string' && (path === 'extras' || path.startsWith('extras.atrium.model') || path === 'mesh')) refreshEmptyGroups()
 })
 
 const STRUCTURE_VERB = { add: 'add', duplicate: 'duplicate', delete: 'delete' }

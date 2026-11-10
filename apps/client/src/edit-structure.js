@@ -114,6 +114,17 @@ export function createStructureTracker() {
     },
 
     /**
+     * grouping GR8 (the review's nit) — a parent change arrived. A node another
+     * tab moved INTO the group our pending delete removes goes with it, so its
+     * removal is ours too: the held subtree is taken again from the pending
+     * node (kept as a union, so a node moved out stays held, harmlessly).
+     */
+    reparentSeen() {
+      if (!pending || pending.kind !== 'delete' || !pending.node) return
+      pending.subtree = [...new Set([...pending.subtree, ...collectSubtree(pending.node)])]
+    },
+
+    /**
      * A `som:add` of `name` arrived (outside review S1). While a removal of
      * our pending delete is held, a new node with its name means someone
      * removed ours and made another: our delete-by-name, if the server

@@ -309,6 +309,13 @@ client.on('som:remove', ({ nodeName }) => {
   if (!sel || sel.name === nodeName) propSheet.clear()
 })
 
+// grouping GR8 — a parent change moves a node in the tree: rebuild it, as an
+// add or a remove does. The property sheet matches by name, which a move
+// doesn't change, so a selected node stays selected.
+client.on('som:reparent', () => {
+  if (client.som) treeView.rebuild(client.som)
+})
+
 // A10 — a rename re-keys the tree and the property sheet (PropertySheet
 // matches by name). Re-select the renamed node so the sheet follows it.
 client.on('som:rename', ({ from, to }) => {

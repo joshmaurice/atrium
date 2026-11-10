@@ -287,7 +287,8 @@ describe('Z7 — refreshSpawnNote() is called from every listed site', () => {
   }
 
   test('an undo or a redo of a transform refreshes it', () => {
-    const handler = handlers('edit:accepted').find((body) => body.includes('undo.onAccepted(seq)'))
+    // grouping GR7 — the call also passes a move's applied/landed: match its start
+    const handler = handlers('edit:accepted').find((body) => body.includes('undo.onAccepted(seq'))
     assert.ok(handler, 'the edit:accepted handler routes the undo engine’s answers')
     assert.match(handler, /refreshSpawnNote\(\)/)
   })

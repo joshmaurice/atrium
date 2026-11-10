@@ -556,6 +556,14 @@
      below its content's intrinsic width, so a 300-character clip id is cut short
      by the control, and Play and Stop — on their own row below — stay inside the
      250px panel. The chosen id is shown in full by the select's `title`. */
+  /* grouping GR8 — Move to and Empty groups shrink inside the 250px panel, as
+     the clip select does: a long breadcrumb is cut short by the control. */
+  #edit-panel #ep-move-row select, #edit-panel #ep-empty-row select {
+    flex: 1 1 auto; min-width: 0; max-width: 100%;
+    background: #222; border: 1px solid #444; color: #e2e8f0;
+    padding: 4px 8px; border-radius: 4px;
+  }
+  #edit-panel #ep-move-note { font-size: 11px; color: #94a3b8; margin-bottom: 6px; }
   #edit-panel #ep-anim-row select {
     flex: 1 1 auto; min-width: 0; max-width: 100%;
     background: #222; border: 1px solid #444; color: #e2e8f0;
@@ -730,6 +738,11 @@
     <div class="ep-label">World</div>
     <div class="ep-row" id="ep-sky-row">
       <select id="ep-sky" title="Choose the sky every visitor sees"></select>
+    </div>
+    <!-- grouping GR8 (GR-L8/GR-L11 (c)) — the groups the viewport can't reach:
+         choosing one selects it. Hidden when the world has none. -->
+    <div class="ep-row" id="ep-empty-row" style="display:none">
+      <select id="ep-empty-groups" aria-label="Empty groups" title="Select a group that has nothing in it"></select>
     </div>
     <div id="ep-sky-status" style="display:none"></div>
     <div style="display:flex;gap:6px;margin-bottom:6px">
@@ -924,6 +937,16 @@
         <button id="ep-copy" title="Copy the selected object">Copy</button>
         <button id="ep-delete" class="ep-danger" title="Delete the selected object">Delete</button>
       </div>
+      <!-- grouping GR8 — Group, Ungroup and Move to, for the selected object.
+           Hidden when the server is older than level 4 (a rollback). -->
+      <div class="ep-buttons ep-actions" id="ep-group-actions">
+        <button id="ep-group" title="Put the selected object in a new group">Group</button>
+        <button id="ep-ungroup" title="Take the selected group apart">Ungroup</button>
+      </div>
+      <div class="ep-row" id="ep-move-row">
+        <select id="ep-move-to" aria-label="Move to" title="Move the selected object into a group"></select>
+      </div>
+      <div id="ep-move-note" style="display:none"></div>
     </div>
     <div class="ep-error" id="ep-error"></div>
   </div>
