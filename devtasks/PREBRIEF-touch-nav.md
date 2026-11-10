@@ -28,7 +28,6 @@ This round, for a visitor or an owner on a touch screen:
 - **zoom:** a pinch zooms in ORBIT, as the wheel does (TN-L3);
 - **a tap stays a tap:** it still selects in Edit and Inspect, and still
   sends `activate` outside them (§2.3: this already works);
-- **the controls you need are reachable** at phone width (TN-L5);
 - the hint text says what touch does.
 
 **Not in this round** (unless a decision says so): editing on a phone beyond
