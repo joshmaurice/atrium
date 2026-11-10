@@ -9,10 +9,14 @@ function forwardVec(yaw) { return [-Math.sin(yaw), 0, -Math.cos(yaw)] }
 function rightVec(yaw)   { return [ Math.cos(yaw), 0, -Math.sin(yaw)] }
 
 export class NavigationController {
-  constructor(avatar, { mode = 'WALK', mouseSensitivity = 0.002 } = {}) {
+  constructor(avatar, { mode = 'WALK', mouseSensitivity = 0.002, touchSensitivity = 0.005 } = {}) {
     this._avatar           = avatar
     this._mode             = mode
     this._mouseSensitivity = mouseSensitivity
+    // touch-nav T1 — rad per CSS pixel of a touch look-drag (a 390 px drag ≈ 112°)
+    this._touchSensitivity = touchSensitivity
+    // touch-nav T1 — the on-screen stick's vector: x right, z back (forward is −1)
+    this._moveInput        = [0, 0]
     this._yaw              = 0
     this._pitch            = 0
     this._keys             = new Set()
@@ -56,15 +60,20 @@ export class NavigationController {
   // Input
   // ---------------------------------------------------------------------------
 
-  onMouseMove(dx, dy) {
+  onMouseMove(dx, dy) { this._look(dx, dy, this._mouseSensitivity) }
+
+  /** touch-nav T1 — a touch look-drag: the mouse's rule at the touch sensitivity. */
+  onTouchLook(dx, dy) { this._look(dx, dy, this._touchSensitivity) }
+
+  _look(dx, dy, sensitivity) {
     if (this._mode === 'ORBIT') {
-      this._orbitAzimuth  -= dx * this._mouseSensitivity
-      this._orbitElevation += dy * this._mouseSensitivity
+      this._orbitAzimuth  -= dx * sensitivity
+      this._orbitElevation += dy * sensitivity
       this._orbitElevation = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this._orbitElevation))
       return
     }
-    this._yaw   -= dx * this._mouseSensitivity
-    this._pitch -= dy * this._mouseSensitivity
+    this._yaw   -= dx * sensitivity
+    this._pitch -= dy * sensitivity
     this._pitch  = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, this._pitch))
   }
 
@@ -73,6 +82,30 @@ export class NavigationController {
     this._orbitRadius *= deltaY > 0 ? 1.1 : 0.9
     this._orbitRadius  = Math.max(0.5, Math.min(100, this._orbitRadius))
   }
+
+  /**
+   * touch-nav T1 — a pinch in ORBIT: `ratio` is the fingers' distance over
+   * their last distance, so spreading (> 1) zooms in. Clamped as the wheel's.
+   */
+  onPinch(ratio) {
+    if (this._mode !== 'ORBIT') return
+    if (!Number.isFinite(ratio) || ratio <= 0) return
+    this._orbitRadius /= ratio
+    this._orbitRadius  = Math.max(0.5, Math.min(100, this._orbitRadius))
+  }
+
+  /**
+   * touch-nav T1 — the on-screen stick: x to the right, z backwards (forward
+   * is −1, as the keys'). The length is clamped to 1; (0, 0) stops.
+   */
+  setMoveInput(x, z) {
+    x = Number.isFinite(x) ? x : 0
+    z = Number.isFinite(z) ? z : 0
+    const m = Math.hypot(x, z)
+    this._moveInput = m > 1 ? [x / m, z / m] : [x, z]
+  }
+
+  get moveInput() { return [...this._moveInput] }
 
   onKeyDown(key) { this._keys.add(key) }
   onKeyUp(key)   { this._keys.delete(key) }
@@ -142,13 +175,21 @@ export class NavigationController {
     if (lft) dx -= 1
     if (rgt) dx += 1
 
+    // touch-nav T1 — a held key wins; otherwise the stick, at speed × its length
+    let scale = 1
+    if (dx === 0 && dz === 0 && !(fwd || bwd || lft || rgt)) {
+      const [sx, sz] = this._moveInput
+      const m = Math.hypot(sx, sz)
+      if (m > 0) { dx = sx; dz = sz; scale = m }
+    }
+
     const len    = Math.sqrt(dx * dx + dz * dz)
     const moving = len > 0
 
     if (moving) {
       const ndx   = dx / len
       const ndz   = dz / len
-      const speed = this._speed * dt
+      const speed = this._speed * scale * dt
       const fwdV  = forwardVec(this._yaw)
       const rgtV  = rightVec(this._yaw)
       const pos   = localNode.translation ?? [0, 0.7, 0]
@@ -162,7 +203,7 @@ export class NavigationController {
     const pos      = localNode.translation ?? [0, 0.7, 0]
     const look     = forwardVec(this._yaw)
     const move     = moving ? [dx / len, 0, dz / len] : [0, 0, 0]
-    const velocity = moving ? this._speed : 0
+    const velocity = moving ? this._speed * scale : 0
 
     this._avatar.setView({ position: [...pos], look, move, velocity })
   }

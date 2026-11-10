@@ -18,6 +18,7 @@ import { createEditModes } from './edit-modes.js'
 import { createEditTracker, createBehaviorHold, handleUpdate, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject, selectionPath, breadcrumbItems, escapeTarget, DUPLICATE_NAME_MESSAGE } from './edit-selection.js'
 import { createHandlePress } from './edit-press.js'   // selection-parts T17
+import { createTouchNav } from './touch-nav.js'       // touch-nav T2
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
 import { createGraphImportPanel } from './graph-import-panel.js'
@@ -82,6 +83,13 @@ const hudWorldEl    = document.getElementById('hud-world')
 const hudYouEl      = document.getElementById('hud-you')
 const hudPeersEl    = document.getElementById('hud-peers')
 const hudHintEl     = document.getElementById('hud-hint')
+// touch-nav T4 — the stick, its knob, the first-person button and the gesture state
+const touchStickEl  = document.getElementById('touch-stick')
+const touchKnobEl   = document.getElementById('touch-stick-knob')
+const touchFpBtn    = document.getElementById('touch-fp')
+const touchNav      = createTouchNav()
+/** TN-L7 (a) — set by the first touch `pointerdown` on the page; never cleared. */
+let touchSeen = false
 // scripting-4c AC6 — the transient notice for a refused click, beside the HUD hint.
 const activateNoticeEl = document.getElementById('activate-notice')
 const activateNotice   = createActivateNotice({ element: activateNoticeEl })
@@ -647,8 +655,15 @@ function updateHud() {
 }
 
 function updateHintText() {
+  updateTouchUI()     // touch-nav T4 — the stick follows the same state changes
   const activeCam = nav.activeCamera
   const camSuffix = activeCam ? ` · 🎥 ${activeCam.name}` : ''
+
+  // touch-nav T4 — once a touch has been seen, the hint says what touch does
+  if (touchSeen) {
+    hudHintEl.textContent = touchHint() + camSuffix
+    return
+  }
 
   if (nav.mode === 'ORBIT') {
     hudHintEl.textContent = `Drag to orbit · Scroll to zoom${camSuffix}`
@@ -887,6 +902,7 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl, signedIn,
 // ---------------------------------------------------------------------------
 
 function teardownWorld() {
+  resetTouch()        // touch-nav T4 — a disconnect lets go of the stick
   labels.clear()
   padLabelNames = new Set()
   firstPerson = false   // reset to third-person for next session
@@ -4073,20 +4089,7 @@ document.addEventListener('keydown', (e) => {
 
   // V — toggle camera perspective (third-person ↔ first-person); ignored in ORBIT
   if (e.code === 'KeyV' && avatar.localNode && nav.mode !== 'ORBIT') {
-    firstPerson = !firstPerson
-    if (firstPerson) {
-      avatar.cameraNode.translation = [0, 1.6, 0]
-      avatar.localNode.visible = false
-    } else {
-      avatar.cameraNode.translation = [0, CAMERA_OFFSET_Y, CAMERA_OFFSET_Z]
-      avatar.localNode.visible = true
-    }
-    // V6 (round 5) — F6's ONE visibility path is the node's view object, and
-    // `setNodeVisible` only runs on a `som:set`. The avatar's visibility is
-    // local (nothing is sent), so nothing would redraw it: the own capsule is
-    // written here the same way. §5.1 check 9 watches this.
-    if (docView) setNodeVisible(docView, avatar.localNode, !firstPerson)
-    updateHintText()
+    toggleFirstPerson()
     return
   }
 
@@ -4109,6 +4112,7 @@ document.addEventListener('keyup', (e) => { if (e.target === canvas) nav.onKeyUp
 
 modeSwitcher.addEventListener('change', (e) => {
   nav.setMode(e.target.value)
+  resetTouch()        // touch-nav T4 — a mode change drops every touch gesture
   updateHintText()
 })
 
@@ -4117,6 +4121,120 @@ viewportEl.addEventListener('wheel', (e) => {
   e.preventDefault()
   nav.onWheel(e.deltaY)
 }, { passive: false })
+
+/**
+ * V — third person ↔ first person (the V key and, touch-nav T4, the
+ * first-person button). Ignored in ORBIT and without an avatar.
+ */
+function toggleFirstPerson() {
+  if (!avatar.localNode || nav.mode === 'ORBIT') return
+  firstPerson = !firstPerson
+  if (firstPerson) {
+    avatar.cameraNode.translation = [0, 1.6, 0]
+    avatar.localNode.visible = false
+  } else {
+    avatar.cameraNode.translation = [0, CAMERA_OFFSET_Y, CAMERA_OFFSET_Z]
+    avatar.localNode.visible = true
+  }
+  // V6 (round 5) — F6's ONE visibility path is the node's view object, and
+  // `setNodeVisible` only runs on a `som:set`. The avatar's visibility is
+  // local (nothing is sent), so nothing would redraw it: the own capsule is
+  // written here the same way. §5.1 check 9 watches this.
+  if (docView) setNodeVisible(docView, avatar.localNode, !firstPerson)
+  updateHintText()
+}
+
+// ---------------------------------------------------------------------------
+// touch-nav T4 — walking and looking on a touch screen.
+// The gestures are touch-nav.js's (pure); this is the DOM half. Touch pointers
+// only: the mouse, key and wheel paths above are unchanged.
+// ---------------------------------------------------------------------------
+
+// (touch-nav T4's elements and state are declared at the top of the file,
+// beside hudHintEl: updateHintText reads them.)
+
+function touchHint() {
+  if (nav.mode === 'ORBIT') return 'Drag to orbit · Pinch to zoom'
+  const walk = avatar.localNode ? 'Drag to look · Stick to walk' : 'Drag to look'
+  if (modes.edit)    return `Edit mode · Tap to select · Double-tap goes into a group · ${walk}`
+  if (modes.inspect) return `Inspect mode · Tap an object to see it and copy it · ${walk}`
+  return walk
+}
+
+/** TN-L3 (a), TN-L7 (a), TN-L8 (a) — the stick shows after a touch, with an avatar, outside ORBIT. */
+function updateTouchUI() {
+  const show = touchSeen && !!avatar.localNode && nav.mode !== 'ORBIT'
+  // A hidden stick lets go; a look or a pinch in progress (ORBIT's) goes on.
+  if (!show) applyTouch(touchNav.releaseStick())
+  touchStickEl.hidden = !show
+  touchFpBtn.hidden   = !show
+  touchFpBtn.textContent = firstPerson ? '👤 Third person' : '👤 First person'
+}
+
+function applyTouch(effects) {
+  for (const fx of effects) {
+    if (fx.type === 'move') nav.setMoveInput(fx.x, fx.z)
+    else if (fx.type === 'knob') touchKnobEl.style.transform = `translate(${fx.dx}px, ${fx.dy}px)`
+    else if (fx.type === 'look') { if (!gizmo?.dragging) nav.onTouchLook(fx.dx, fx.dy) }
+    else if (fx.type === 'pinch') nav.onPinch(fx.ratio)
+    else if (fx.type === 'swallow-click') swallowClickUntil = performance.now() + SWALLOW_CLICK_MS
+  }
+}
+
+/**
+ * A view finger that looked or pinched: the click Chrome may still send for a
+ * drag inside its own tap slop (wider than our 4 px) must not select or
+ * activate. Capture phase on the viewport runs before every click listener there.
+ */
+const SWALLOW_CLICK_MS = 500
+let swallowClickUntil = 0
+viewportEl.addEventListener('click', (e) => {
+  if (performance.now() > swallowClickUntil) return
+  swallowClickUntil = 0
+  e.stopImmediatePropagation()
+  e.preventDefault()
+}, true)
+
+/** Mode change, disconnect, blur, hidden page: the stick lets go. */
+function resetTouch() { applyTouch(touchNav.reset()) }
+
+// Seen anywhere on the page (capture), so a first tap on a panel counts too.
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch' || touchSeen) return
+  touchSeen = true
+  updateHintText()
+}, true)
+
+// Bubble phase on the viewport: TransformControls' own pointerdown on the
+// canvas has already run, so `gizmo.dragging` says whether it took the press (B3).
+viewportEl.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return
+  let on = 'other'
+  let stickCentre
+  if (!touchStickEl.hidden && touchStickEl.contains(e.target)) {
+    on = 'stick'
+    const r = touchStickEl.getBoundingClientRect()
+    stickCentre = { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+    touchStickEl.setPointerCapture?.(e.pointerId)
+  } else if (e.target === canvas) {
+    on = gizmo?.dragging ? 'handle' : 'view'
+  }
+  applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre }))
+})
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'touch') return
+  applyTouch(touchNav.move({ id: e.pointerId, x: e.clientX, y: e.clientY }))
+})
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(type, (e) => {
+    if (e.pointerType !== 'touch') return
+    applyTouch(touchNav.up({ id: e.pointerId }))
+  })
+}
+window.addEventListener('blur', resetTouch)
+document.addEventListener('visibilitychange', () => { if (document.hidden) resetTouch() })
+
+touchFpBtn.addEventListener('click', () => toggleFirstPerson())
 
 // ---------------------------------------------------------------------------
 // Tick loop

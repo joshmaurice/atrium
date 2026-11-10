@@ -1,9 +1,17 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **DRAFT, Revision 0.2 (2026-11-10).** Written by Claude for the
-operator's decisions (§3). Not reviewed yet. **No implementation until
-`grouping` is `COMPLETE` on PROD and the operator says go**, unless the
-operator decides otherwise (TN-L0).
+Status: **Revision 1.0 (2026-11-10), decisions taken; building.** The
+operator, by voice (about 14:10 PT): "I'm using Android and Chrome browser.
+And uh, we can build this now, I'm thinking, and go with your
+recommendations otherwise"; then in text, 14:15 PT: "Okay go ahead with that
+please". So **TN-L0 (a)** (build now on this branch, release only after
+`grouping` is `COMPLETE` on PROD), **TN-L9: Android, Chrome**, and every
+other decision as recommended: **TN-L1 (a)**, **TN-L2 (a)**, **TN-L3 (a)**,
+**TN-L4 (a)**, **TN-L5 (c)**, **TN-L6 (a)**, **TN-L7 (a)**, **TN-L8 (a)**.
+
+**Not yet reviewed.** Building before the outside review is the operator's
+choice (TN-L0 (a)); the fresh-agent check and the outside review read this
+contract and the code together, before any release (§6).
 
 **Branch:** `claude/touch-nav`, made from `origin/claude/grouping` at
 `b37c482` (grouping's release candidate plus `devtasks/` notes). Grouping is
@@ -109,7 +117,7 @@ navigation section (L4024–4119, which grouping didn't change) and
 change `app.js` and `index.html`; this round's changes there are additive and
 in other sections, so a rebase is expected to be mechanical.
 
-## 3. Decisions (for the operator)
+## 3. Decisions (all taken 2026-11-10, as recommended: see Status)
 
 **TN-L0. When to build.**
 - (a) **Recommended:** pre-brief and reviews now; build now on
@@ -181,28 +189,77 @@ The operator uses Edit mode on his phone today (§2.2), so this matters.
 (iOS Safari or Android Chrome, and which). The harness can emulate touch in
 Chromium only; Safari's touch is checked on the real phone at DEV.
 
-## 4. The contract (sketch, for the recommendations)
-To be written in full after the decisions. Its parts:
-- **T1 `NavigationController`:** `setMoveInput(x, z)` (each −1…1, the
-  stick's vector, magnitude clamped to 1), read by `tick` beside the keys
-  (keys win when both are held; analog speed per TN-L4); `onLookDrag(dx,
-  dy)` = `onMouseMove` with a touch sensitivity of its own (to tune on the
-  phone); `onPinch(ratio)` for ORBIT. Unit tests in
-  `packages/client/tests/`.
-- **T2 `apps/client/src/touch-nav.js` (new, pure):** the gesture state
-  machine over pointer events: which `pointerId` owns the stick, which owns
-  the look, two fingers as a pinch, the 4 px slop so a tap stays a tap,
-  `pointercancel` and a lost pointer ending a gesture, a handle drag (B3)
-  taking the pointer. No DOM; tested in node with event sequences, including
-  touch's order (selection-parts lesson 4).
-- **T3 `index.html`:** `touch-action: none` on the canvas; the stick
-  (TN-L2); the first-person button (TN-L6); no layout change (TN-L5 (c)).
-- **T4 `app.js` wiring** in the navigation section: pointer listeners for
-  `pointerType` `touch` only (mouse paths unchanged); the hint text for
-  touch; the stick hidden in ORBIT and while disconnected.
-- **T5 the move's `setView`:** `move` and `velocity` carry the analog values,
-  so other viewers' avatar animation sees walking (check what peers do with
-  `velocity` before FINAL).
+## 4. The contract
+**T1 `NavigationController`** (`packages/client/src/NavigationController.js`):
+- `setMoveInput(x, z)`: the stick's vector, x to the right, z backwards (as
+  the keys' `dz`: forward is −1); its length is clamped to 1. `(0, 0)` stops.
+- `tick` in WALK/FLY: **any movement key held wins** and moves exactly as
+  today. Otherwise a stick input of length m > 0 moves in its direction at
+  `speed × m` (TN-L4 (a)), and `setView` sends `move` = the unit direction,
+  `velocity` = `speed × m`. ORBIT ignores the stick.
+- `onTouchLook(dx, dy)`: `onMouseMove`'s rule at `touchSensitivity`
+  (constructor option, default **0.005 rad per CSS pixel**, so a drag across
+  a 390 px screen turns about 112°; tuned on the phone at DEV).
+- `onPinch(ratio)`: ORBIT only: `radius /= ratio`, clamped to 0.5–100 as the
+  wheel's. A ratio ≤ 0 or not finite does nothing.
+- Nothing else changes: keys, mouse and wheel paths are as they were.
+
+**T2 `apps/client/src/touch-nav.js`** (new, pure, no DOM): `createTouchNav(
+{ slop = CLICK_SLOP_PX, stickRadius = 48, deadZone = 0.12 })`, fed pointer
+events of `pointerType` `touch` and returning effects:
+- `down({ id, x, y, on, stickCentre })`, `on` is `'stick'`, `'view'`,
+  `'handle'` (a press TransformControls took: B3) or `'other'`;
+  `move({ id, x, y })`; `up({ id })` (also for `pointercancel`); `reset()`.
+- Effects: `{ type: 'move', x, z }`, `{ type: 'knob', dx, dy }` (the knob's
+  offset in px), `{ type: 'look', dx, dy }`, `{ type: 'pinch', ratio }`.
+- **Stick:** one pointer owns it. Its offset from the centre is clamped to
+  `stickRadius`; the vector is offset / radius; below `deadZone` it is
+  (0, 0), above it is rescaled so the edge of the dead zone is 0 and the rim
+  is 1. Up, cancel or `reset()` sends `move (0, 0)` and `knob (0, 0)`.
+  A second press on the stick while it is owned is ignored.
+- **Look:** the first `'view'` pointer. It sends nothing until it has
+  travelled `slop` from its press (so **a tap stays a tap**: no look, and the
+  browser's click follows as today); then it sends the whole travel since
+  the press, then each move's delta.
+- **Pinch:** a second `'view'` pointer while one is down: look stops; every
+  move sends `pinch` with the ratio of the fingers' distance to their last
+  distance. When one lifts, the other goes on looking from where it is,
+  without a jump. A third `'view'` pointer is ignored.
+- `'handle'` and `'other'` pointers are never tracked.
+
+**T3 `apps/client/index.html`:**
+- `#viewport canvas { touch-action: none }`, so the browser doesn't take a
+  drag for panning (§2.2).
+- `#touch-stick` (a ring, 2 × `stickRadius` across, with a knob) at the
+  bottom left of the viewport, above the hint; `#touch-fp` (a small
+  "first person" button) beside it. Both `hidden` until shown (T4), below
+  the panels in stacking order, `touch-action: none`.
+- No other layout change (TN-L5 (c)).
+
+**T4 `apps/client/src/app.js`**, the navigation section:
+- `pointerdown` on the viewport (bubble phase, after TransformControls'
+  own listener has set `dragging`), `pointerType` `touch` only: classify it
+  (on the stick, on the canvas with a handle dragging = `'handle'`, on the
+  canvas = `'view'`, else `'other'`); `pointermove`, `pointerup` and
+  `pointercancel` on `document`. Apply effects: `look` → `nav.onTouchLook`
+  unless a handle is dragging; `move` → `nav.setMoveInput`; `pinch` →
+  `nav.onPinch`; `knob` → the knob's transform.
+- **Shown** (TN-L7 (a)): from the first touch `pointerdown` on the page,
+  `#touch-stick` and `#touch-fp` show while there is an avatar and the mode
+  is not ORBIT (TN-L3 (a)); in Edit and Inspect too (TN-L8 (a)).
+- The touch state resets (stick released) on a mode change, on disconnect,
+  on `blur` and when the page is hidden.
+- `#touch-fp` does what V does: V's body moves into one function
+  `toggleFirstPerson()` that both call.
+- The hint, once a touch has been seen: WALK "Drag to look · Stick to walk
+  · 👤 first person"; ORBIT "Drag to orbit · Pinch to zoom"; Edit and Inspect
+  "Tap to select · Double-tap goes into a group · Drag to look · Stick to
+  walk" after the mode's name. Mouse hints are unchanged.
+- Mouse, key and wheel listeners are unchanged.
+
+**T5** `setView` carries the analog `move` and `velocity` (T1). Peers only
+pass these on (`AtriumClient` L2004, L2205); nothing animates from them, so
+no peer change and no schema change (`velocity` is already a number).
 
 ## 5. Tests and checks (sketch)
 - Unit: T1, T2 as above; every gesture asserts the outcome (selection-parts
@@ -224,6 +281,7 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 1.0 (2026-11-10): the decisions (Status), the full contract (§4).
 - Rev 0.2 (2026-11-10): the operator's report of his phone (§2.2): only
   navigation is missing; TN-L5 now recommends (c), TN-L8 notes Edit on a
   phone is in use.

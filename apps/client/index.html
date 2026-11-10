@@ -324,7 +324,49 @@
     display: block;
     width: 100% !important;
     height: 100% !important;
+    /* touch-nav T3 — the browser must not take a drag on the view for panning */
+    touch-action: none;
   }
+
+  /* ── touch-nav T3 — the on-screen stick and the first-person button ── */
+  #touch-stick {
+    position: absolute;
+    left: 20px;
+    bottom: 60px;
+    width: 96px;              /* 2 × STICK_RADIUS_PX */
+    height: 96px;
+    border-radius: 50%;
+    border: 2px solid rgba(226, 232, 240, 0.45);
+    background: rgba(15, 23, 42, 0.35);
+    touch-action: none;
+    z-index: 5;               /* below the panels (10) */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #touch-stick-knob {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 44px; height: 44px;
+    margin: -22px 0 0 -22px;
+    border-radius: 50%;
+    background: rgba(226, 232, 240, 0.55);
+    pointer-events: none;
+  }
+  #touch-fp {
+    position: absolute;
+    left: 130px;
+    bottom: 60px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(226, 232, 240, 0.45);
+    background: rgba(15, 23, 42, 0.55);
+    color: #e2e8f0;
+    font-size: 13px;
+    touch-action: manipulation;
+    z-index: 5;
+  }
+  #touch-stick[hidden], #touch-fp[hidden] { display: none; }
 
   /* ── HUD — top-left world info ─────────────────────── */
   #hud {
@@ -693,6 +735,9 @@
   <!-- scripting-4c AC6 — the click notice. Empty and hidden until one is shown. -->
   <div id="activate-notice" style="display:none"></div>
   <div id="crosshair"></div>
+  <!-- touch-nav T3 — shown from the first touch (TN-L7 (a)), not in ORBIT -->
+  <div id="touch-stick" hidden><div id="touch-stick-knob"></div></div>
+  <button id="touch-fp" type="button" hidden>👤 First person</button>
 
   <!-- Edit mode panel (Phase 3 step 1b-1) -->
   <div id="edit-panel" style="display:none">

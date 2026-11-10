@@ -1,0 +1,186 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
+// touch-nav.test.js — touch-nav T2: the gesture state machine, event sequence by sequence
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { createTouchNav, STICK_RADIUS_PX, STICK_DEAD_ZONE } from '../src/touch-nav.js'
+import { CLICK_SLOP_PX } from '../src/edit-selection.js'
+
+const C = { x: 70, y: 700 }                       // the stick's centre
+const byType = (fx, t) => fx.filter(e => e.type === t)
+const one = (fx, t) => { const l = byType(fx, t); assert.equal(l.length, 1, `one ${t} in ${JSON.stringify(fx)}`); return l[0] }
+const close = (a, b, eps = 1e-9) => Math.abs(a - b) < eps
+
+test('T2 — the defaults: slop is the click slop, radius 48, dead zone 0.12', () => {
+  assert.equal(CLICK_SLOP_PX, 4)
+  assert.equal(STICK_RADIUS_PX, 48)
+  assert.equal(STICK_DEAD_ZONE, 0.12)
+})
+
+test('T2 stick — pushed to the rim straight up: move (0, -1), knob at the rim', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  const fx = t.move({ id: 1, x: C.x, y: C.y - 48 })
+  const m = one(fx, 'move')
+  assert.ok(close(m.x, 0) && close(m.z, -1), JSON.stringify(m))
+  assert.deepEqual(one(fx, 'knob'), { type: 'knob', dx: 0, dy: -48 })
+})
+
+test('T2 stick — past the rim is clamped: the vector stays length 1, the knob at the rim', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  const fx = t.move({ id: 1, x: C.x + 300, y: C.y })
+  const m = one(fx, 'move')
+  assert.ok(close(m.x, 1) && close(m.z, 0), JSON.stringify(m))
+  const k = one(fx, 'knob')
+  assert.ok(close(k.dx, 48) && close(k.dy, 0))
+})
+
+test('T2 stick, TN-L4 (a) — inside the dead zone is (0, 0); just past it is near 0; halfway is rescaled', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  let m = one(t.move({ id: 1, x: C.x, y: C.y - 5 }), 'move')          // 5/48 = 0.104 < 0.12
+  assert.deepEqual([m.x, m.z], [0, 0])
+  m = one(t.move({ id: 1, x: C.x, y: C.y - 6 }), 'move')              // 0.125: just past
+  assert.ok(m.z < 0 && m.z > -0.01, `just past the dead zone: ${m.z}`)
+  m = one(t.move({ id: 1, x: C.x, y: C.y - 24 }), 'move')             // 0.5 → (0.5-0.12)/0.88
+  assert.ok(close(m.z, -(0.5 - 0.12) / 0.88), `halfway: ${m.z}`)
+})
+
+test('T2 stick — the press itself sends its vector (a thumb landing off-centre walks at once)', () => {
+  const t = createTouchNav()
+  const fx = t.down({ id: 1, x: C.x + 48, y: C.y, on: 'stick', stickCentre: C })
+  assert.ok(close(one(fx, 'move').x, 1))
+})
+
+test('T2 stick — release and pointercancel both stop: move (0, 0), knob home', () => {
+  for (const end of ['up', 'cancel']) {
+    const t = createTouchNav()
+    t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+    t.move({ id: 1, x: C.x, y: C.y - 40 })
+    const fx = t.up({ id: 1 })          // the page sends pointercancel through up()
+    assert.deepEqual(one(fx, 'move'), { type: 'move', x: 0, z: 0 }, end)
+    assert.deepEqual(one(fx, 'knob'), { type: 'knob', dx: 0, dy: 0 }, end)
+    assert.equal(t.active, false)
+  }
+})
+
+test('T2 stick — a second press on the stick while it is held is ignored', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  assert.deepEqual(t.down({ id: 2, x: C.x, y: C.y - 48, on: 'stick', stickCentre: C }), [])
+  assert.deepEqual(t.move({ id: 2, x: C.x, y: C.y - 48 }), [])
+  assert.deepEqual(t.up({ id: 2 }), [])
+  const m = one(t.move({ id: 1, x: C.x, y: C.y - 48 }), 'move')
+  assert.ok(close(m.z, -1), 'the first pointer still owns it')
+})
+
+test('T2 look — a tap (no travel, or under the slop) sends nothing at all', () => {
+  const t = createTouchNav()
+  assert.deepEqual(t.down({ id: 1, x: 200, y: 400, on: 'view' }), [])
+  assert.deepEqual(t.move({ id: 1, x: 203, y: 400 }), [])
+  assert.deepEqual(t.move({ id: 1, x: 200, y: 403 }), [])
+  assert.deepEqual(t.up({ id: 1 }), [])
+  assert.equal(t.active, false)
+})
+
+test('T2 look — past the slop it sends the whole travel since the press, then each delta', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: 200, y: 400, on: 'view' })
+  assert.deepEqual(t.move({ id: 1, x: 202, y: 400 }), [])
+  assert.deepEqual(t.move({ id: 1, x: 206, y: 401 }), [{ type: 'look', dx: 6, dy: 1 }])
+  assert.deepEqual(t.move({ id: 1, x: 216, y: 399 }), [{ type: 'look', dx: 10, dy: -2 }])
+  // a finger that looked swallows the click the browser may still send
+  assert.deepEqual(t.up({ id: 1 }), [{ type: 'swallow-click' }])
+})
+
+test('T2 look and stick at once (two thumbs): each pointer keeps its own role', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  t.down({ id: 2, x: 300, y: 400, on: 'view' })
+  const a = t.move({ id: 1, x: C.x, y: C.y - 48 })
+  assert.ok(close(one(a, 'move').z, -1))
+  assert.equal(byType(a, 'look').length, 0)
+  const b = t.move({ id: 2, x: 320, y: 400 })
+  assert.deepEqual(b, [{ type: 'look', dx: 20, dy: 0 }])
+  assert.deepEqual(t.up({ id: 2 }), [{ type: 'swallow-click' }], 'lifting the look finger leaves the stick alone')
+  assert.ok(close(one(t.move({ id: 1, x: C.x + 48, y: C.y }), 'move').x, 1))
+})
+
+test('T2 pinch — a second view finger: look stops, moves send the distance ratio', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: 100, y: 400, on: 'view' })
+  t.move({ id: 1, x: 110, y: 400 })                   // live look
+  t.down({ id: 2, x: 210, y: 400, on: 'view' })       // distance 100
+  const fx = t.move({ id: 2, x: 310, y: 400 })        // distance 200
+  assert.deepEqual(fx, [{ type: 'pinch', ratio: 2 }])
+  assert.deepEqual(t.move({ id: 1, x: 210, y: 400 }), [{ type: 'pinch', ratio: 0.5 }])  // 100 again
+})
+
+test('T2 pinch — when one finger lifts, the other looks on from where it is, without a jump', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: 100, y: 400, on: 'view' })
+  t.down({ id: 2, x: 200, y: 400, on: 'view' })
+  t.move({ id: 1, x: 50, y: 400 })
+  assert.deepEqual(t.up({ id: 2 }), [{ type: 'swallow-click' }], 'a pinch finger swallows its click')
+  // the first move after the lift is a small delta, not the travel since its press
+  assert.deepEqual(t.move({ id: 1, x: 52, y: 400 }), [{ type: 'look', dx: 2, dy: 0 }])
+})
+
+test('T2 pinch — a third view finger is ignored', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: 100, y: 400, on: 'view' })
+  t.down({ id: 2, x: 200, y: 400, on: 'view' })
+  assert.deepEqual(t.down({ id: 3, x: 300, y: 400, on: 'view' }), [])
+  assert.deepEqual(t.move({ id: 3, x: 350, y: 450 }), [])
+})
+
+test('T2 — handle and other presses are never tracked (B3: a handle drag never looks)', () => {
+  const t = createTouchNav()
+  for (const on of ['handle', 'other']) {
+    assert.deepEqual(t.down({ id: 7, x: 100, y: 100, on }), [])
+    assert.deepEqual(t.move({ id: 7, x: 300, y: 300 }), [])
+    assert.deepEqual(t.up({ id: 7 }), [])
+  }
+  // and a view finger pressed meanwhile is the first look, not a pinch
+  t.down({ id: 7, x: 100, y: 100, on: 'handle' })
+  t.down({ id: 8, x: 200, y: 200, on: 'view' })
+  assert.deepEqual(t.move({ id: 8, x: 220, y: 200 }), [{ type: 'look', dx: 20, dy: 0 }])
+})
+
+test('T2 — moves and ups of unknown pointers do nothing', () => {
+  const t = createTouchNav()
+  assert.deepEqual(t.move({ id: 9, x: 1, y: 1 }), [])
+  assert.deepEqual(t.up({ id: 9 }), [])
+})
+
+test('T2 reset — drops every gesture and stops the stick; nothing held after', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  t.move({ id: 1, x: C.x, y: C.y - 48 })
+  t.down({ id: 2, x: 300, y: 400, on: 'view' })
+  const fx = t.reset()
+  assert.deepEqual(one(fx, 'move'), { type: 'move', x: 0, z: 0 })
+  assert.equal(t.active, false)
+  assert.deepEqual(t.move({ id: 1, x: C.x, y: C.y - 48 }), [], 'the old stick pointer is forgotten')
+  assert.deepEqual(t.move({ id: 2, x: 400, y: 400 }), [], 'the old look pointer is forgotten')
+  assert.deepEqual(t.reset(), [], 'a second reset sends nothing')
+})
+
+test('T2 — a stick press without a centre is ignored (the stick is not on screen)', () => {
+  const t = createTouchNav()
+  assert.deepEqual(t.down({ id: 1, x: 10, y: 10, on: 'stick' }), [])
+  assert.equal(t.active, false)
+})
+
+test('T2 releaseStick — lets the stick go and leaves a look or pinch in progress alone', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  t.down({ id: 2, x: 300, y: 400, on: 'view' })
+  t.move({ id: 2, x: 310, y: 400 })
+  const fx = t.releaseStick()
+  assert.deepEqual(one(fx, 'move'), { type: 'move', x: 0, z: 0 })
+  assert.deepEqual(t.move({ id: 2, x: 315, y: 400 }), [{ type: 'look', dx: 5, dy: 0 }], 'the look goes on')
+  assert.deepEqual(t.releaseStick(), [], 'nothing to release twice')
+})
