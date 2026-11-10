@@ -1,6 +1,6 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **DRAFT, Revision 0.1 (2026-11-10).** Written by Claude for the
+Status: **DRAFT, Revision 0.2 (2026-11-10).** Written by Claude for the
 operator's decisions (§3). Not reviewed yet. **No implementation until
 `grouping` is `COMPLETE` on PROD and the operator says go**, unless the
 operator decides otherwise (TN-L0).
@@ -76,8 +76,10 @@ WebXR.
   screen (`scrollWidth`), so Chromium's mobile emulation lays the page out at
   `innerWidth` 780. The screenshots show the World field, Connect, the mode
   switcher and the Edit button off the right edge or shifted
-  (`shots/touch-0*.png`). **Not yet checked on a real phone** (TN-L5 asks
-  the operator what PROD looks like on his).
+  (`shots/touch-0*.png`). **On a real phone this is not a problem:** the
+  operator (2026-11-10, 14:04 PT): "You can currently do pretty much
+  everything except navigate on mobile, you can use edit mode." The
+  emulation's layout is not evidence of the real page.
 - The hint reads "Drag to look · WASD to move · [M] mouse lock · [V] first
   person".
 
@@ -148,14 +150,14 @@ in other sections, so a rebase is expected to be mechanical.
 - (b) Digital, like the keys: any push walks at full speed.
 
 **TN-L5. The page at phone width.** The top bar is twice a phone's width
-(§2.2).
-- (a) **Recommended, the minimum:** the top bar wraps onto more lines (or
+in emulation (§2.2), but the operator reports everything but navigation
+works on his phone, Edit mode included.
+- (c) **Recommended now: nothing:** leave layout alone this round.
+- (a) The minimum: the top bar wraps onto more lines (or
   scrolls sideways inside itself) so World, Connect, the mode switcher and
   Edit are all reachable at 390 px, with nothing else redesigned.
 - (b) A compact phone top bar (a menu button that opens the rest).
-- (c) Nothing: leave layout for its own round.
-First, the operator's report of PROD on his phone today decides how much of
-this is real (§2.2's last fact is an emulation).
+
 
 **TN-L6. V (first person) and Space (world cameras) on touch.**
 - (a) **Recommended:** one small on-screen button for first person, shown on
@@ -170,6 +172,7 @@ this is real (§2.2's last fact is an emulation).
 - (b) Whenever the device reports a coarse pointer (`(pointer: coarse)`).
 
 **TN-L8. Edit mode on a phone.**
+The operator uses Edit mode on his phone today (§2.2), so this matters.
 - (a) **Recommended:** the stick and drag-look work in Edit and Inspect too;
   a drag that starts on a move handle drags the handle (B3, as the mouse
   does), and taps select as today. No Edit panel layout work.
@@ -194,8 +197,7 @@ To be written in full after the decisions. Its parts:
   taking the pointer. No DOM; tested in node with event sequences, including
   touch's order (selection-parts lesson 4).
 - **T3 `index.html`:** `touch-action: none` on the canvas; the stick
-  (TN-L2); the first-person button (TN-L6); the top bar at phone width
-  (TN-L5).
+  (TN-L2); the first-person button (TN-L6); no layout change (TN-L5 (c)).
 - **T4 `app.js` wiring** in the navigation section: pointer listeners for
   `pointerType` `touch` only (mouse paths unchanged); the hint text for
   touch; the stick hidden in ORBIT and while disconnected.
@@ -209,8 +211,8 @@ To be written in full after the decisions. Its parts:
 - Harness (Chromium, mobile emulation, CDP touch): t1 a drag looks; t2 the
   stick walks onto a teleporter pad in `atrium.gltf` and the teleport
   happens; t3 a tap still activates and selects; t4 a pinch zooms ORBIT;
-  t5 a stick push plus a look-drag at once (two pointers); t6 the top bar at
-  390 px; t7 a mouse session is unchanged (the existing harness checks still
+  t5 a stick push plus a look-drag at once (two pointers); t6 a handle
+  drag in Edit on touch is unchanged; t7 a mouse session is unchanged (the existing harness checks still
   pass).
 - **A gesture design needs a real-browser probe before it is approved**
   (selection-parts lesson 1): before FINAL, a prototype on the harness, and
@@ -223,3 +225,6 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 0.2 (2026-11-10): the operator's report of his phone (§2.2): only
+  navigation is missing; TN-L5 now recommends (c), TN-L8 notes Edit on a
+  phone is in use.
