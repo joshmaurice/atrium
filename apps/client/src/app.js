@@ -4153,12 +4153,13 @@ function toggleFirstPerson() {
 // (touch-nav T4's elements and state are declared at the top of the file,
 // beside hudHintEl: updateHintText reads them.)
 
+/** T4's hint once a touch has been seen (the fresh check's F3: as the contract words it). */
 function touchHint() {
   if (nav.mode === 'ORBIT') return 'Drag to orbit · Pinch to zoom'
   const walk = avatar.localNode ? 'Drag to look · Stick to walk' : 'Drag to look'
   if (modes.edit)    return `Edit mode · Tap to select · Double-tap goes into a group · ${walk}`
-  if (modes.inspect) return `Inspect mode · Tap an object to see it and copy it · ${walk}`
-  return walk
+  if (modes.inspect) return `Inspect mode · Tap to select · Double-tap goes into a group · ${walk}`
+  return avatar.localNode ? `${walk} · 👤 first person` : walk
 }
 
 /** TN-L3 (a), TN-L7 (a), TN-L8 (a) — the stick shows after a touch, with an avatar, outside ORBIT. */
@@ -4185,11 +4186,17 @@ function applyTouch(effects) {
  * A view finger that looked or pinched: the click Chrome may still send for a
  * drag inside its own tap slop (wider than our 4 px) must not select or
  * activate. Capture phase on the viewport runs before every click listener there.
+ * Only a click on the canvas is dropped (the drag's own click lands there; a
+ * button or a panel is never eaten), and the next touch press disarms it:
+ * Chrome sends a drag's click right after its `pointerup`, before any new
+ * press (the fresh-agent check's F1: a look with no click of its own left the
+ * window armed, and the next tap on the First person button was lost).
  */
 const SWALLOW_CLICK_MS = 500
 let swallowClickUntil = 0
 viewportEl.addEventListener('click', (e) => {
   if (performance.now() > swallowClickUntil) return
+  if (e.target !== canvas) return
   swallowClickUntil = 0
   e.stopImmediatePropagation()
   e.preventDefault()
@@ -4200,7 +4207,9 @@ function resetTouch() { applyTouch(touchNav.reset()) }
 
 // Seen anywhere on the page (capture), so a first tap on a panel counts too.
 document.addEventListener('pointerdown', (e) => {
-  if (e.pointerType !== 'touch' || touchSeen) return
+  if (e.pointerType !== 'touch') return
+  swallowClickUntil = 0      // F1 — a new press: the last drag's click has come or never will
+  if (touchSeen) return
   touchSeen = true
   updateHintText()
 }, true)
@@ -4219,7 +4228,7 @@ viewportEl.addEventListener('pointerdown', (e) => {
   } else if (e.target === canvas) {
     on = gizmo?.dragging ? 'handle' : 'view'
   }
-  applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre }))
+  applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre, primary: e.isPrimary }))
 })
 document.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'touch') return
@@ -4234,7 +4243,10 @@ for (const type of ['pointerup', 'pointercancel']) {
 window.addEventListener('blur', resetTouch)
 document.addEventListener('visibilitychange', () => { if (document.hidden) resetTouch() })
 
-touchFpBtn.addEventListener('click', () => toggleFirstPerson())
+touchFpBtn.addEventListener('click', () => {
+  toggleFirstPerson()
+  canvas.focus?.({ preventScroll: true })   // a touch laptop's keys go back to the view
+})
 
 // ---------------------------------------------------------------------------
 // Tick loop

@@ -20,6 +20,8 @@
  *   'view'   — on the canvas (the first looks, a second makes a pinch)
  *   'handle' — on the canvas, but TransformControls took it (B3): never tracked
  *   'other'  — panels, buttons: never tracked
+ * `primary` is the event's `isPrimary`: a primary touch means no other finger
+ * is down, so whatever is still tracked lost its release and is dropped.
  *
  * A 'view' press sends nothing until it has travelled `slop` px, so a tap stays
  * a tap and the browser's click (select, Inspect, activate) follows as today.
@@ -62,7 +64,14 @@ export function createTouchNav({ slop = CLICK_SLOP_PX, stickRadius = STICK_RADIU
   }
 
   return {
-    down({ id, x, y, on, stickCentre }) {
+    down({ id, x, y, on, stickCentre, primary = false }) {
+      // A primary touch means no other finger is down: anything still tracked
+      // lost its release (the fresh check's note). Drop it, stopping the stick.
+      const stale = primary && (stick || views.length) ? this.reset() : []
+      return stale.concat(this._down({ id, x, y, on, stickCentre }))
+    },
+
+    _down({ id, x, y, on, stickCentre }) {
       if (on === 'stick') {
         if (stick || !stickCentre) return []
         stick = { id, cx: stickCentre.x, cy: stickCentre.y }

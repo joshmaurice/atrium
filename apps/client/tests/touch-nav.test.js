@@ -184,3 +184,21 @@ test('T2 releaseStick — lets the stick go and leaves a look or pinch in progre
   assert.deepEqual(t.move({ id: 2, x: 315, y: 400 }), [{ type: 'look', dx: 5, dy: 0 }], 'the look goes on')
   assert.deepEqual(t.releaseStick(), [], 'nothing to release twice')
 })
+
+test('T2 primary — a primary press drops a finger whose release was lost, and stops a stuck stick', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C, primary: true })
+  t.move({ id: 1, x: C.x, y: C.y - 48 })
+  t.down({ id: 2, x: 100, y: 400, on: 'view' })            // not primary: a second finger
+  // ...both releases are lost; the next touch is primary again
+  const fx = t.down({ id: 3, x: 200, y: 400, on: 'view', primary: true })
+  assert.deepEqual(one(fx, 'move'), { type: 'move', x: 0, z: 0 }, 'the stuck stick stops')
+  assert.deepEqual(t.move({ id: 3, x: 220, y: 400 }), [{ type: 'look', dx: 20, dy: 0 }], 'the new finger looks, not pinches')
+  assert.deepEqual(t.move({ id: 2, x: 0, y: 0 }), [], 'the stale finger is forgotten')
+})
+
+test('T2 primary — a primary press with nothing tracked changes nothing', () => {
+  const t = createTouchNav()
+  assert.deepEqual(t.down({ id: 1, x: 200, y: 400, on: 'view', primary: true }), [])
+  assert.deepEqual(t.move({ id: 1, x: 210, y: 400 }), [{ type: 'look', dx: 10, dy: 0 }])
+})
