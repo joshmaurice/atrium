@@ -128,7 +128,7 @@ At commit 7: the same, except app 1,823 pass, 1 skip, and server 1,069. All
 
 ## 6. Next
 1. The outside code review: `devtasks/OUTSIDE-CODE-REVIEW-PROMPT-grouping.md`,
-   pinned to `e9886572` (commit 7). Its findings are reproduced before they
+   pinned to `98f916c6` (commit 8). Its findings are reproduced before they
    are taken.
 2. The operator's go, then the release path (§6 of the pre-brief): DEV
    acceptance steps 1–8; the release note says a stale tab is **refused at

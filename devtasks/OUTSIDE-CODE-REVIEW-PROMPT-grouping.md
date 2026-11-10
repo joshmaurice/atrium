@@ -23,11 +23,11 @@ deployed site.
 
 Repository: https://github.com/joshmaurice/atrium (public)
 Branch: claude/grouping
-Review commit: e9886572d173af5960af4898c77df35b73722b3e
+Review commit: 98f916c64550ccda3a99d163aa227c33e37ed190
 Contract: devtasks/PREBRIEF-grouping.md (FINAL Rev 2.0, every decision taken by
 the operator, GR-L1 to GR-L12). Its line numbers refer to 172b816d (main, the
 released code). The line numbers below refer to the review commit.
-The implementation: commits de33cf8..e988657 (seven; `git log de33cf8..e988657`).
+The implementation: commits de33cf8..98f916c (eight; `git log de33cf8..98f916c`).
 devtasks/HANDOFF-grouping.md is the implementer's record: the commits, the
 harness checks, the proofs, the suites. Read it, but test its claims rather
 than trusting them.
@@ -37,6 +37,9 @@ than trusting them.
   reproduction scripts are in devtasks/spike-grouping/code-check/. Commit 7
   (e988657) took findings 1–5 (the handoff's §7). Don't redo those findings:
   test the fixes, and whether they introduced anything new.
+- **Commit 8 (98f916c)**, with the operator's go: the Model form's Save now
+  waits while an edit is in flight. It is the one change outside the
+  contract's file list (`apps/client/src/model-form.js`).
 - **The design's earlier probes** are in devtasks/spike-grouping/{fresh,review,review2}/.
 
 **Please put the reviewed 40-character SHA in the FIRST LINE of your review,
@@ -44,10 +47,10 @@ and say which model you are.**
 
 STEP 1 — GET THE CODE
   git clone https://github.com/joshmaurice/atrium && cd atrium
-  git fetch origin claude/grouping && git checkout e9886572d173af5960af4898c77df35b73722b3e
+  git fetch origin claude/grouping && git checkout 98f916c64550ccda3a99d163aa227c33e37ed190
 Say whether the clone worked. If it didn't, quote the error and read the files
 at the pinned commit through
-  https://raw.githubusercontent.com/joshmaurice/atrium/e9886572d173af5960af4898c77df35b73722b3e/<path>
+  https://raw.githubusercontent.com/joshmaurice/atrium/98f916c64550ccda3a99d163aa227c33e37ed190/<path>
 A source-only review is still valuable; label it as one.
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
@@ -57,8 +60,8 @@ STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
   (cd packages/server && timeout 180 node --test test/grouping.test.js)
   (cd packages/server && timeout 180 node --test test/grouping-counts.test.js)
   node --test packages/client/tests/grouping-move.test.js
-  (cd apps/client && node --test tests/grouping-edit-group.test.js tests/grouping-undo.test.js tests/grouping-wiring.test.js)
-  python3 devtasks/harness/checks/grouping/proofs.py      # breaks 28 mechanisms one at a time; each should turn its test red (restores every file)
+  (cd apps/client && node --test tests/grouping-edit-group.test.js tests/grouping-undo.test.js tests/grouping-wiring.test.js tests/model-form.test.js)
+  python3 devtasks/harness/checks/grouping/proofs.py      # breaks 30 mechanisms one at a time; each should turn its test red (restores every file)
 
 **Run server test files one at a time, under `timeout 180`.** Never compare two
 glTF-Transform objects with assert.equal (AGENTS.md says why).
@@ -73,9 +76,9 @@ with a real document from tests/fixtures/space.gltf:
 
 devtasks/harness/ (see its README) runs the real page and a world server
 locally for Playwright. devtasks/harness/checks/grouping/ holds smoke.py and
-c1.py–c5.py: real mouse, two tabs, the DEV acceptance steps.
+c1.py–c6.py: real mouse, two tabs, the DEV acceptance steps.
 
-THE FILES THAT MATTER (line numbers at e9886572)
+THE FILES THAT MATTER (line numbers at 98f916c6)
   packages/som/src/SOMDocument.js      reparentNode L421, reparentProblem L440
   packages/server/src/send-policy.js   checkParentValue L2616; treeCounts L2670, moveCounts L2693,
                                        treeBoundsProblem L2715, descriptorCounts L2730;
@@ -94,8 +97,10 @@ THE FILES THAT MATTER (line numbers at e9886572)
                                        moveTo L1014, group L1040, ungroup L1105, startCompositeEntry L1165,
                                        checkEntry L1291
   apps/client/src/app.js               som:desync L1145; the engine's structural dep L1962;
-                                       AFTER_DIALOG_MS L3360, Delete L3361; the GR8 block L3402ff
-                                       (refreshGroupActions L3633, som:reparent L3661)
+                                       refreshEditActions L3097; AFTER_DIALOG_MS L3362, Delete L3363;
+                                       the GR8 block L3404ff (refreshGroupActions L3635, som:reparent L3663);
+                                       the Model form's dispatchAllowed L4717
+  apps/client/src/model-form.js        canSave L216 (commit 8)
   apps/client/src/edit-structure.js    reparentSeen L122
   tools/som-inspector/src/app.js       its som:reparent L315
 
