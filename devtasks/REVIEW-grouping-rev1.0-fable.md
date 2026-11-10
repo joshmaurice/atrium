@@ -1,3 +1,9 @@
+> **Transcription note (Claude, 2026-11-09):** this copy was transcribed from
+> the review session's transcript, not the delivered file. The reviewer's
+> second review says it differs from the delivered file in r6's quoted output
+> ranges (another run's numbers) and in one line of r1, which Claude missed
+> from a late edit. Neither changes a result.
+
 34917de8fbaa1d027834619dc95d0a2ebace763c — outside review of `devtasks/PREBRIEF-grouping.md` (DRAFT Rev 1.0)
 
 **Verdict: CHANGES REQUESTED.**
