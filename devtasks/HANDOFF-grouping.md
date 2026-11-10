@@ -142,7 +142,7 @@ proofs.
 ## 6. Next
 **The release package is `devtasks/RELEASE-grouping.md`:** the commands, the
 acceptance checklist and the release notes, with the stale-tab line
-corrected. The next round's pre-brief (multi-select) starts in a new session
+corrected. The next round (not decided: multi-select, materials or the texture limit) is chosen in a new session
 from `devtasks/NOTE-2026-11-10-grouping-unreleased-next-round.md`, on its own
 branch.
 1. The operator's go, then the release path (§6 of the pre-brief): DEV
