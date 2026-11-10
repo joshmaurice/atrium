@@ -1,12 +1,14 @@
 # Pre-brief: grouping and ungrouping (`grouping`)
 
-Status: **DRAFT, Revision 1.3 (2026-11-09).** Rev 1.2 plus **a second
+Status: **DRAFT, Revision 1.4 (2026-11-09). Every decision is taken.**
+Rev 1.4 records GR-L12 (a), refuse a stale tab's hello (the operator, by
+voice, 23:59 PT). Earlier: **Revision 1.3**, Rev 1.2 plus **a second
 outside review**, of `95d7a096` (§7), by the same Claude Fable 5.2 session per
 its first lines. Its verdict was CHANGES REQUESTED, with 2 must-fix, 5
 should-fix and 6 nits. Claude reproduced every finding (`review2/r7`–`r9`,
 `r9` in the browser) or checked it at the cited lines before taking it.
-**GR-L12 is open again:** the second review's M2 showed the decided (a)
-protects only the stale tabs connected at one moment.
+That review's M2 reopened GR-L12: the decided (a) protected only the stale
+tabs connected at one moment.
 
 Earlier: Rev 1.0 plus the outside review of `34917de8`, by Claude Fable 5.2
 per its own first lines. Its verdict was CHANGES REQUESTED, with 2 must-fix,
@@ -17,6 +19,11 @@ The operator's decisions (2026-11-09):
   after asking why (a));
 - GR-L2, GR-L4 to GR-L7 and GR-L9 as recommended ("no preference");
   GR-L12 (a) too, until the second review reopened it;
+- **GR-L12 (a), Rev 1.3's: refuse the hello of a judged stale session**
+  (23:59 PT). The operator agreed by voice ("Sure"). He said it hardly
+  matters, because the account log shows no users yet, so the easiest real
+  fix should win. A hello refusal is one check, with nothing to keep track
+  of, and was tried on the released page (g5);
 - **GR-L8 and GR-L11: (c), keep empty groups** (22:31 PT). The operator asked
   whether someone might want to empty a group for a while and refill it
   later, which rules out deleting a group because it is empty. Empty groups
@@ -25,8 +32,8 @@ The operator's decisions (2026-11-09):
   (`checks/grouping/g4.py`, 10 checks, all PASS; Rev 1.2 said 9, second
   review N6) showed the panel already holds a bare node as its selection.
 
-§4 is written for the recommendations. **Next: GR-L12, then the operator's
-approval as FINAL.**
+§4 is the contract for every decision. **Next: the operator's approval as
+FINAL.**
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -508,7 +515,8 @@ mid-composite, so no path needs its own rule and Delete is unchanged.
   panel surface, but it covers the disconnect too.
 
 **GR-L12. Unreloaded tabs that lose objects** (review S1; new in Rev 1.1;
-**reopened in Rev 1.3** by the second review's M2). An Ungroup elsewhere
+**reopened in Rev 1.3** by the second review's M2). **Decided (operator,
+2026-11-09, 23:59 PT, by voice): (a), refuse the hello.** An Ungroup elsewhere
 removes the parts from an unreloaded tab's view (§2.3, r2).
 - **What the second review found in Rev 1.2's (a)** ("close every judged
   stale session when the server *first* broadcasts a `parent` change"):
@@ -1051,6 +1059,8 @@ specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.4** (2026-11-09, 23:59 PT): GR-L12 (a) decided (status line). Claude
+  reran r7, r8, r9 and g5 at Rev 1.3 before recording it.
 - **Rev 1.3** (2026-11-09): **the second outside review, of `95d7a096`**, by
   the same Claude Fable 5.2 session per its first lines. **CHANGES
   REQUESTED.** It was pinned to the branch head, with the round-1 prompt
