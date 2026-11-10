@@ -9,9 +9,10 @@ The operator's decisions (2026-11-09):
 - GR-L2 and GR-L4 to GR-L9 as recommended ("no preference");
 - **GR-L10 (a)** (20:24 PT, "go with recs", after asking why (a)).
 
-**Two new decisions from the review are open:** GR-L11 (groups left empty
-by other paths) and GR-L12 (unreloaded tabs lose objects). §4 is written
-for their recommendations. Next: those two, then FINAL.
+**GR-L12 (a)** is decided ("no preference"). **GR-L11 is open:** the
+operator asked whether someone might want to empty a group for a while and
+refill it later. That question bears on GR-L8 (a) too. §4 is written for
+the recommendations. Next: GR-L11 (and GR-L8 with it), then FINAL.
 - **The round.** The operator chose it on 2026-11-08 (after 21:20 PT), from
   `Atrium-Passdown-2026-11-08-selection-parts-shipped.md` §5 item 1: grouping
   and ungrouping in the Edit panel, and moving a part into another group (a
@@ -467,7 +468,8 @@ Each leaves a node nothing can click, whose name stays taken.
 
 **GR-L12. Unreloaded tabs that lose objects** (review S1; new in Rev 1.1).
 An Ungroup elsewhere removes the parts from an unreloaded tab's view (§2.3,
-r2), and so does a Move to that empties a group (GR-L8).
+r2), and so does a Move to that empties a group (GR-L8). **Decided
+(operator, 2026-11-09, 21:50 PT, "no preference"): (a), as recommended.**
 - **(a) Recommended: the server ends every judged stale session in a world
   when it first broadcasts a `parent` change there.** It knows each
   session's level from its hello. The page shows "disconnected", and a reload
@@ -879,6 +881,7 @@ specifics:
 - **Never push to `main` between the release merge and PROD `COMPLETE`.**
 
 ## 7. Review log
+- **Rev 1.1, same day:** GR-L12 (a) decided; GR-L11 questioned (status line).
 - **Rev 1.1** (2026-11-09): **the outside review of `34917de8`**, by Claude
   Fable 5.2, per its first lines. It ran on a clone with code: 121 + 30 + 30
   tests passing, the four design probes, the harness, and six probes of its
