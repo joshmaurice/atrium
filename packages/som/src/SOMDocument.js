@@ -395,6 +395,67 @@ export class SOMDocument extends SOMObject {
     return { ok: true, code: null, message: null }
   }
 
+  // ---------------------------------------------------------------------------
+  // grouping GR1 — one way to move a node to another parent
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Move `node` under `parent` (`null`: the top level, the scene) with the
+   * local placement `place`. Atomic, like `renameNode`: every check runs
+   * first, and on failure nothing changes.
+   *
+   * The vectors are set on the glTF-Transform node, not through the SOMNode
+   * setters, so no SOM `mutation` event fires (four would: three transforms
+   * and the parent's childList). The callers apply it inside their own apply
+   * (the client's `applyLocally`); a reparent is not an edit to send.
+   *
+   * glTF-Transform's `addChild` detaches the node from its old parent node or
+   * scene first, but does NOT refuse a cycle (PREBRIEF-grouping §2.2), so the
+   * cycle is refused here.
+   *
+   * @param {SOMNode} node — a live node of this document
+   * @param {SOMNode|null} parent — a live node of this document, or null
+   * @param {{translation: number[], rotation: number[], scale: number[]}} place
+   * @returns {{ok: boolean, code: string|null, message: string|null}}
+   */
+  reparentNode(node, parent, { translation, rotation, scale } = {}) {
+    const problem = this.reparentProblem(node, parent)
+    if (problem) return problem
+    const scene = this._root.listScenes()[0]
+    if (!parent && !scene) return { ok: false, code: 'INVALID_VALUE', message: 'the world has no scene' }
+    const n = node._node
+    n.setTranslation([...translation])
+    n.setRotation([...rotation])
+    n.setScale([...scale])
+    if (parent) parent._node.addChild(n)
+    else scene.addChild(n)
+    return { ok: true, code: null, message: null }
+  }
+
+  /**
+   * GR1's checks alone, without applying: the server runs them before its
+   * counts (GR3 step 4, so the bounds never walk a tree with a cycle).
+   * @returns {null|{ok: false, code: string, message: string}}
+   */
+  reparentProblem(node, parent) {
+    if (!node || this._nodeMap.get(node._node) !== node) {
+      return { ok: false, code: 'NODE_NOT_FOUND', message: 'the node is not in this world' }
+    }
+    if (parent !== null && (!parent || this._nodeMap.get(parent._node) !== parent)) {
+      return { ok: false, code: 'NODE_NOT_FOUND', message: 'the parent is not in this world' }
+    }
+    if (parent) {
+      for (let p = parent._node; p; p = p.getParentNode()) {
+        if (p === node._node) return { ok: false, code: 'INVALID_VALUE', message: 'a node can’t go inside itself' }
+      }
+    }
+    const current = node._node.getParentNode() ?? null
+    if ((parent?._node ?? null) === current) {
+      return { ok: false, code: 'INVALID_VALUE', message: 'already there' }
+    }
+    return null
+  }
+
   /**
    * K5(b) — when the addressable node for `name` is removed or renamed, the
    * next node in document order that still holds that name (and has a SOM
