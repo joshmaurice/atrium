@@ -55,6 +55,7 @@ A source-only review is still valuable; label it as one.
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
   pnpm install --frozen-lockfile --ignore-scripts
+  # then build better-sqlite3 as AGENTS.md says, or auth.test.js fails (the second review's N-11)
   node --test packages/client/tests/navigation-touch.test.js packages/client/tests/navigation-controller.test.js
   (cd apps/client && node --test tests/touch-nav.test.js tests/import-guard.test.js)
   (cd apps/client && node --test tests/*.test.js)     # the whole client app suite (1,860 pass)

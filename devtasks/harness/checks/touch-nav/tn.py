@@ -190,7 +190,7 @@ with sync_playwright() as pw:
           f"dragging during {was}, after {p.ev('__ep().gizmo?.dragging')}")
     deselect(); y0 = p.ev(NAV)['yaw']       # no handles in the way of the look
     t.drag(16, (60, 300), (110, 300)); time.sleep(0.4)
-    check('t13b ... and a look drag turns the view afterwards', abs(p.ev(NAV)['yaw'] - y0 + 0.25) < 0.03, f"Δyaw {p.ev(NAV)['yaw'] - y0:.3f} (0.000 at 5dba62f)")
+    check('t13b ... and a look drag turns the view afterwards', abs(p.ev(NAV)['yaw'] - y0 + 0.25) < 0.03, f"Δyaw {p.ev(NAV)['yaw'] - y0:.3f}")
     p.ev(f"stage.nav.yaw = {y0}"); time.sleep(0.4)
 
     # t15 — S-8: with the stick held, a cancelled finger, or one held 0.7 s, makes no click

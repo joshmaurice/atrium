@@ -1,11 +1,11 @@
 # Handoff: `touch-nav`, implemented on `claude/touch-nav`
 
-**IMPLEMENTED; the fresh-agent code check (§5) and the outside code review
-(§6, source-only) taken; a second, running review pass is still owed; released only after `grouping` is `COMPLETE` on PROD**
+**IMPLEMENTED; the fresh-agent code check (§5), the outside code review
+(§6, source-only) and its second, running pass (§7) taken; released only after `grouping` is `COMPLETE` on PROD**
 (TN-L0 (a)). This file is also the working note: if a session loses its
 context, start here, then `git log` on the branch.
 
-**Contract:** `devtasks/PREBRIEF-touch-nav.md` Rev 1.3. Every decision was
+**Contract:** `devtasks/PREBRIEF-touch-nav.md` Rev 1.4. Every decision was
 taken by the operator on 2026-11-10 (voice, about 14:10 PT, then text at
 14:15 PT, "Okay go ahead with that please"): build now, Android Chrome, and
 every other TN-L as recommended. **Not a FINAL pre-brief reviewed before
@@ -65,14 +65,22 @@ HARNESS_ROOT=/tmp/atrium-harness python3 devtasks/harness/checks/touch-nav/tn.py
    Android Chrome: the feel of the stick and look speed, a pad walked onto,
    Edit taps and a handle drag, two thumbs; then MAIN and PROD).
 3. Tuning on the phone may change `touchSensitivity` (0.005),
-   `TOUCH_LOOK_SLOP_PX` (10), `STICK_RADIUS_PX` (48) and `STICK_DEAD_ZONE`
-   (0.12): constants, no design change.
+   `TOUCH_LOOK_SLOP_PX` (10), `TAP_MAX_MS` (500), `STICK_RADIUS_PX` (48) and
+   `STICK_DEAD_ZONE` (0.12): constants, no design change. For the feel:
+   the first look sends the whole 10 px at once, a 2.9° step (N-12).
 4. At the phone acceptance, besides the feel (the review's list): 20 quick
    thumb taps on an object, counting the misses (S-1); a tap on an object and
    on First person with the stick held (S-2); a second finger during a
    handle drag (S-3); tap the World field, close the keyboard, get the view
    back (N-3); the button with a tall Edit panel open (N-4); a thumb on the
-   ring's left rim, where Android's edge swipe-back begins.
+   ring's left rim, where Android's edge swipe-back begins. From the second
+   review: the stick held, then a tap and a drag on a move handle with the
+   other hand (S-5); a handle drag interrupted by a system gesture, then a
+   look and a tap (S-6); First person tapped while a world is still loading
+   models (S-7); a thumb resting on the view while walking, then lifted
+   (S-8); `visualViewport.scale` (N-8); and **whether Chrome really sends no
+   click for a second finger's tap** (the made-up tap rests on it; no
+   harness can show it).
 
 ## 5. The fresh-agent code check (at `4391460`)
 A fresh Claude agent (general-purpose, no context from the building session)
@@ -137,3 +145,46 @@ the navigation tests 33, the harness `tn.py` 23/23.
 1,860 pass; `packages/client` 770 pass; the T2 tests 23, the T1 tests 10;
 selection-parts `c1` (29), `c3` (30), `c5` (10) and grouping's `smoke.py` (7)
 all pass.
+
+## 7. The outside code review, second pass (Fable 5.2, ran the code, at `5dba62f4`)
+- **The review:** `devtasks/REVIEW-touch-nav-code-fable-2.md` (copied from
+  its chat); its probes p1–p4 in `spike-touch-nav/fable-2-probes/` (p5–p9
+  were not in the chat). Verdict **CHANGES REQUESTED**: no must-fix, four
+  should-fix (two of them, S-5 and S-6, introduced by §6's S-3 fix), six
+  nits. It confirmed §6's other fixes, the suites (1,860; 770) and the
+  regressions; `tn.py` passed 35/35, then 33/35 twice in a slower
+  environment (S-7).
+- Each finding reproduced at `5dba62f` before it was taken (Fable's own
+  probes, rerun here, and `probe8.py`), fixed in `6f7f7de` (checks in `7e56f24`), and a `tn.py` check added that **fails at `5dba62f`** (run there:
+  35/42, the failures t12a, t12c, t13a, t14a, t15, plus S-7's t3b and t8).
+
+| # | Finding | Reproduced at `5dba62f` | Fix | Check |
+|---|---|---|---|---|
+| S-5 | with the stick held first, a handle press by another finger was measured by the stick thumb (a 2 px tap moved the object and sent; a 40 px drag moved nothing), and the next stick-held tap was eaten | Fable's p3: moved 0.0239 and sent; the 40 px drag 0.000 | the handle press is **the pointer that pressed**: a touch pressed while a handle drags is not a new press (`gizmo.dragging` is set at the press, before 4 px); only the pressing pointer's moves count; every new press clears the old verdict | t12a (0.0000), t12c (moves 0.46), t12b. p3 after: 0.0000, 0.0000, 0.4774 |
+| S-6 | a cancelled handle-drag finger left `dragging` set, and the S-3 filter then kept every touch from the canvas: Edit dead for touch until Edit off | Fable's p4: dragging stays true through three taps; a look Δyaw 0.000 | a `pointercancel` of the handle finger ends the drag (`endHandleDrag`, its final send); so does a primary touch while a drag is under way (no other finger can be down), blur and a hidden page | t13a. p4 after: dragging false, a look −0.500 |
+| S-7 | the 500 ms windows (the click swallow, the First person button) were timed from the handlers, so one slow frame defeated them; `tn.py` flaked | `probe8.py`: a 650 ms task after the release: one tap toggled First person twice | **flags, not clocks**: armed at the release, consumed by the click, cleared by the next press of any kind | t14a (a forced slow frame); `tn.py` 42/42 twice |
+| S-8 | with the stick held, a cancelled finger, or one held seconds, made a click | Fable's p2: a cancel selected (1 click); a 2 s hold selected | no tap for a `pointercancel`, or for a finger down longer than `TAP_MAX_MS` (500 ms, the events' `timeStamp`s) | t15; unit tests. p2 after: 0 clicks each |
+| N-7 | a touch tap on First person left focus on the button | read | both paths give focus back to the canvas | — |
+| N-8 | the look slop is in CSS px; zoomed out it shrinks on screen | read | the page passes `slop` as `10 / visualViewport.scale` | unit test |
+| N-9 | limits not written down | — | recorded in the pre-brief §4 (limits) | — |
+| N-10 | checks blind to the code | Fable's mutations A1, A2 | t12 catches A1; t2a now timed in the page with a ceiling (1.40 m/s); unit tests for the long press, the cancel, the stick let go first, the zoom, ratio 1, and both pinch fingers swallowing; the dead store removed | — |
+| N-11 | records | read | comments; the prompt's STEP 2 names the better-sqlite3 build | — |
+| N-12 | the first look is a 2.9° step | — | the feel list (§4) | — |
+
+**Harness notes added:**
+- **Use real fingers for any handle press** (`Touch.end_all()` lifts them
+  all at once, which CDP delivers). After a synthetic finger has grabbed a
+  handle, a later synthetic press misses it while a real press at the same
+  point grabs (`dbg13`; the same at `5dba62f`, so not this round's).
+- A synthetic tap is one evaluate (`synth_tap`): separate round trips on a
+  slow page could make it longer than `TAP_MAX_MS`.
+- Earlier drags push the cube right, under the Edit panel: `aim()` turns
+  until it is on open canvas.
+- Speeds are read inside an animation frame (a slow frame made a plain
+  sample read 1.12 m/s for 1.40).
+- The harness server needs a long background timeout (`7200000`): the
+  default 30 min stopped it mid-run once.
+
+**After the fixes:** `tn.py` 42/42 (twice); the client app suite 1,866
+pass; `packages/client` 770; the T2 tests 28; selection-parts `c1`, `c3`,
+`c5` and grouping's `smoke.py` all pass (at `7e56f24`'s code).

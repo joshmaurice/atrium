@@ -1,6 +1,6 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **Revision 1.3 (2026-11-10), decisions taken; built (HANDOFF-touch-nav.md).** The
+Status: **Revision 1.4 (2026-11-10), decisions taken; built (HANDOFF-touch-nav.md).** The
 operator, by voice (about 14:10 PT): "I'm using Android and Chrome browser.
 And uh, we can build this now, I'm thinking, and go with your
 recommendations otherwise"; then in text, 14:15 PT: "Okay go ahead with that
@@ -248,9 +248,25 @@ events of `pointerType` `touch` and returning effects:
   `mouseup` and `click` at that point (a real click that follows is
   dropped). The First person button acts on a touch `pointerup`. **Limit:**
   Edit panel buttons need the stick let go.
-- **One finger drives a handle** (Rev 1.3, S-3): while a handle drags, the
-  canvas hears only the touch pointer that last pressed it before the drag
-  began; the handle press ignores non-primary touches.
+- **One finger drives a handle** (Rev 1.3, S-3; Rev 1.4, S-5 and S-6):
+  while a handle drags, the canvas hears only the touch pointer that last
+  pressed it before the drag began. The handle press (T17) is the pointer
+  that pressed: a touch pressed while a handle drags is not a new press,
+  and only the pressing pointer's moves count. A `pointercancel` of the
+  handle finger, a primary touch during a drag, blur and a hidden page end
+  the drag.
+- **No clocks** (Rev 1.4, S-7): the click swallow and the First person
+  button's "ignore the click after a touch" are flags, armed at the release
+  and cleared by the click or the next press.
+- **A made-up tap** (Rev 1.4, S-8) needs a release, not a `pointercancel`,
+  and a finger down at most `TAP_MAX_MS` (500 ms).
+- **The slop on screen** (Rev 1.4, N-8): the page passes `slop` as
+  `TOUCH_LOOK_SLOP_PX / visualViewport.scale`.
+- **Limits** (Rev 1.4, N-9): with the stick held, Edit panel buttons need
+  the stick let go; a tap on a move handle does nothing (it is a handle
+  press, and Chrome sends no click); a double-tap can't go into a group
+  (the made-up click is a single click). Without the stick, a tap while
+  another finger is looking makes a pinch, not a tap.
 - `releaseStick()`: lets the stick go and leaves a look or pinch in progress
   alone (the page calls it when the stick hides, e.g. on entering ORBIT
   mid-pinch); `reset()` drops everything.
@@ -291,7 +307,7 @@ events of `pointerType` `touch` and returning effects:
 pass these on (`AtriumClient` L2004, L2205); nothing animates from them, so
 no peer change and no schema change (`velocity` is already a number).
 
-## 5. Tests and checks (at `31b538a`)
+## 5. Tests and checks (Rev 1.4: the handoff's §7 has the latest counts; below, as at `31b538a`)
 - **Unit:** `packages/client/tests/navigation-touch.test.js` (T1, 10) and
   `apps/client/tests/touch-nav.test.js` (T2, 23). The client app suite:
   1,860 pass, 0 fail; `packages/client`: 770 pass.
@@ -321,6 +337,7 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 1.4 (2026-11-10): the second outside review's fixes (HANDOFF §7): the handle press is the pointer that pressed; a cancelled handle drag ends; flags, not clocks; no made-up tap after a cancel or a long press; the slop on screen; the limits written down.
 - Rev 1.3 (2026-11-10): the outside review's fixes (HANDOFF §6): a 10 px look slop; a tap with the stick held; one finger drives a handle; the stick in a static world, First person only connected.
 - Rev 1.2 (2026-11-10): the fresh-agent check's fixes (HANDOFF §5): the swallow only eats a canvas click and is disarmed by the next press; `primary`; the hint as T4 words it.
 - Rev 1.1 (2026-11-10): swallow the click after a look; `releaseStick`; §5's results.
