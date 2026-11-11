@@ -1,11 +1,12 @@
 # Handoff: `touch-nav`, implemented on `claude/touch-nav`
 
-**IMPLEMENTED; the fresh-agent code check (§5), the outside code review
-(§6, source-only) and its second, running pass (§7) taken; released only after `grouping` is `COMPLETE` on PROD**
+**IMPLEMENTED; the fresh-agent code check (§5) and three outside code
+reviews (§6 source-only, §7 and §8 running the code; the third APPROVE WITH
+NITS) taken; released only after `grouping` is `COMPLETE` on PROD**
 (TN-L0 (a)). This file is also the working note: if a session loses its
 context, start here, then `git log` on the branch.
 
-**Contract:** `devtasks/PREBRIEF-touch-nav.md` Rev 1.4. Every decision was
+**Contract:** `devtasks/PREBRIEF-touch-nav.md` Rev 1.5. Every decision was
 taken by the operator on 2026-11-10 (voice, about 14:10 PT, then text at
 14:15 PT, "Okay go ahead with that please"): build now, Android Chrome, and
 every other TN-L as recommended. **Not a FINAL pre-brief reviewed before
@@ -188,3 +189,54 @@ all pass.
 **After the fixes:** `tn.py` 42/42 (twice); the client app suite 1,866
 pass; `packages/client` 770; the T2 tests 28; selection-parts `c1`, `c3`,
 `c5` and grouping's `smoke.py` all pass (at `7e56f24`'s code).
+
+## 8. The outside code review, third pass (Fable 5.2, ran the code, at `c28064a5`)
+- **The review:** `devtasks/REVIEW-touch-nav-code-fable-3.md` (copied from
+  its chat; its probes were in a zip, not in the chat). Verdict **APPROVE
+  WITH NITS**: no must-fix, no defect against the contract; the second
+  review's fixes hold; `tn.py` 42/42 twice; the suites and the earlier
+  rounds' checks pass. Two should-fix, both the operator's call, and three
+  nits.
+- **The operator's phone report** (2026-11-11, 11:30 PT, PROD before this
+  round): in portrait the Edit panel covers most of the view, a new object
+  included; in landscape the saved-worlds list leaves no view and nothing
+  scrolls; in "desktop site" mode a touch on the view hides the top bar.
+  Reproduced in emulation with `probe9.py` (the Edit panel 250 × 556 over
+  the new cube; eight saved worlds at 800 × 330: the view 0 px tall,
+  `body { overflow: hidden }`), except the desktop-site one. **The operator:
+  "whichever way you think will take the least time overall"** (11:34 PT):
+  so the small fixes here, and **a phone layout as the next round**.
+
+| # | Finding | Fix (`7a5e59f`, `39c5a2c`) | Check |
+|---|---|---|---|
+| S-9 | a 6 px thumb-roll tap on a move handle moved the object 0.072 and sent it (T17's mouse 4 px) | a touch handle press gets the touch slop (`handlePress.down({ slop })`, 10 px on screen); the mouse keeps 4 px | t16a (0.0000), t16b (a 14 px drag moves 0.152); unit test |
+| S-10 | only the top bar could pan the page; at 390 px Edit, Connect and the mode switcher were off the right edge, and panned that far the stick was off the screen | `.toolbar` and `#subbar` scroll sideways inside themselves: the page is never wider than the screen | t22a (the page 390 wide; 795 at `c28064a`), t22b (a drag on the bar scrolls the bar; the page stays put) |
+| landscape | the operator's report | `#world-browser` capped at 40vh, scrolling inside; under 500 px high, the list inside doesn't scroll separately (the fresh check's N-a) | t23 (the view keeps ≥ 100 px with eight worlds; 0 at the base) |
+| N-13 | with the stick held, First person pressed and slid off still toggled | only a release still on the button toggles; the "ignore the next click" flag only when it toggles (N-b) | t21 |
+| N-14 | `tn.py` was green with five behaviours removed | checks lifted from Fable's probes: the swallow disarmed by a new press (t17), blur and a hidden page end a handle drag (t18), no look while a handle drags (t19), a lost stick release stopped by a primary touch (t20) | t17–t20 |
+| N-15 | unit gaps | a vertical pinch, a diagonal push past the rim, a part push sideways, a primary press with only a stale stick or only a stale view finger, the length clamp with x not 0 | unit tests |
+
+- **A fresh-agent check of the fix diff** (`c28064a..7a5e59f`): **OK**. It
+  checked per-press slop leakage (none), the drag after 10 px (it catches
+  up in one step, as the mouse's after 4), the release check's coordinates,
+  and the CSS at desktop sizes (no visible change at 1920, 1280 and 1024
+  wide; nothing clipped; no stray scrollbar). Its nits N-a and N-b were
+  taken (`39c5a2c`); N-c, a pen gets the mouse's 4 px, is as intended.
+
+**After the fixes** (`39c5a2c`): the client app suite 1,870 pass;
+`packages/client` 770; `tn.py` **53/53** (at `7a5e59f` and again at
+`39c5a2c`); selection-parts `c1`, `c3` and grouping's `smoke.py` pass.
+**Selection-parts `c5` changed on purpose:** it asserted a 6 px touch drag
+on a handle is a move (that round's S-1, at the mouse's 4 px); with S-9 a
+6 px touch press is a tap, so `c5` now asserts it moves nothing, and still
+that 10 px is one move. With that, `c5` passes.
+
+## 9. Next: a phone layout (its own round)
+From the operator's report (§8) and the reviews' N-3/N-4/S-10, for a
+pre-brief: the Edit panel on a phone (a collapsible bottom sheet, or
+narrower, so the selected object stays in view); landscape (the bars and
+the world browser take less height); "desktop site" mode (a touch on the
+view hides the top bar: needs the operator's screenshots, not reproduced in
+emulation); whether the top bar should wrap or collapse into a menu rather
+than scroll. Start with screenshots from the operator's phone and a probe
+like `spike-touch-nav/probe9.py`.
