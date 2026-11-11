@@ -23,12 +23,12 @@ deployed site.
 
 Repository: https://github.com/joshmaurice/atrium (public)
 Branch: claude/touch-nav
-Review commit: 5dba62f453da4067e05b5788c51a6086c4ea7712
-Contract: devtasks/PREBRIEF-touch-nav.md (Rev 1.3, §4 T1–T5; every decision
+Review commit: c28064a54e6a25296df6d0304c941941cccc268a
+Contract: devtasks/PREBRIEF-touch-nav.md (Rev 1.4, §4 T1–T5; every decision
 taken by the operator; built before an outside review, by the operator's
 choice).
 Base: b37c482 (the tip of claude/grouping, an unreleased round; review only
-the touch-nav diff: `git diff b37c482 5dba62f453da4067e05b5788c51a6086c4ea7712 -- apps packages`).
+the touch-nav diff: `git diff b37c482 c28064a54e6a25296df6d0304c941941cccc268a -- apps packages`).
 devtasks/HANDOFF-touch-nav.md is the implementer's record. Read it, but test
 its claims rather than trusting them.
 
@@ -37,6 +37,8 @@ its claims rather than trusting them.
 - **A first outside review** (Claude Fable 5.2, `devtasks/REVIEW-touch-nav-code-fable.md`)
   read the code at cba7f8b5 but **was not allowed to run it**. Its four
   should-fix and six nits were reproduced and taken (the handoff's §6).
+  A **second pass** (`REVIEW-touch-nav-code-fable-2.md`) ran the code at
+  5dba62f4: four more should-fix, reproduced and taken (the handoff's §7).
   **This pass should RUN the code:** STEP 2's tests and, if you can, the
   harness's `tn.py`. Test the fixes (a 10 px look slop, the made-up click
   for a tap with the stick held, one finger driving a handle, the reset
@@ -47,10 +49,10 @@ and say which model you are.**
 
 STEP 1 — GET THE CODE
   git clone https://github.com/joshmaurice/atrium && cd atrium
-  git fetch origin claude/touch-nav && git checkout 5dba62f453da4067e05b5788c51a6086c4ea7712
+  git fetch origin claude/touch-nav && git checkout c28064a54e6a25296df6d0304c941941cccc268a
 Say whether the clone worked. If it didn't, read the files at the pinned
 commit through
-  https://raw.githubusercontent.com/joshmaurice/atrium/5dba62f453da4067e05b5788c51a6086c4ea7712/<path>
+  https://raw.githubusercontent.com/joshmaurice/atrium/c28064a54e6a25296df6d0304c941941cccc268a/<path>
 A source-only review is still valuable; label it as one.
 
 STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
@@ -58,10 +60,10 @@ STEP 2 — IF YOU HAVE A CLONE (Node 22, pnpm 10)
   # then build better-sqlite3 as AGENTS.md says, or auth.test.js fails (the second review's N-11)
   node --test packages/client/tests/navigation-touch.test.js packages/client/tests/navigation-controller.test.js
   (cd apps/client && node --test tests/touch-nav.test.js tests/import-guard.test.js)
-  (cd apps/client && node --test tests/*.test.js)     # the whole client app suite (1,860 pass)
+  (cd apps/client && node --test tests/*.test.js)     # the whole client app suite (1,866 pass)
   HARNESS_ROOT=/tmp/atrium-harness devtasks/harness/setup.sh $(git rev-parse HEAD)
   HARNESS_ROOT=/tmp/atrium-harness node /tmp/atrium-harness/harness/server.mjs &   # then:
-  HARNESS_ROOT=/tmp/atrium-harness python3 devtasks/harness/checks/touch-nav/tn.py   # 35 checks; exit 1 on a FAIL
+  HARNESS_ROOT=/tmp/atrium-harness python3 devtasks/harness/checks/touch-nav/tn.py   # 42 checks; exit 1 on a FAIL
 devtasks/harness/ (see its README) runs the real page and a world server
 locally for Playwright. devtasks/harness/checks/touch-nav/tn.py is this
 round's browser check: Chromium at 390 × 844 with real CDP touch events
