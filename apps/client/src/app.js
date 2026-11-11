@@ -4166,7 +4166,7 @@ function touchHint() {
   const walk = avatar.localNode ? 'Drag to look · Stick to walk' : 'Drag to look'
   if (modes.edit)    return `Edit mode · Tap to select · Double-tap goes into a group · ${walk}`
   if (modes.inspect) return `Inspect mode · Tap to select · Double-tap goes into a group · ${walk}`
-  return avatar.localNode ? `${walk} · 👤 first person` : walk
+  return avatar.localNode && client.connected ? `${walk} · 👤 first person` : walk   // N-1: the button is a connected avatar's
 }
 
 /** TN-L3 (a), TN-L7 (a), TN-L8 (a) — the stick shows after a touch, with an avatar, outside ORBIT. */

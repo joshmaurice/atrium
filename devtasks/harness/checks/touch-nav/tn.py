@@ -122,18 +122,21 @@ with sync_playwright() as pw:
     pos1 = p.ev(f"atriumClient.som.getNodeByName({json.dumps(cube)}).translation.slice()")
     moved = math.dist(pos0, pos1); dyaw = abs(p.ev(NAV)['yaw'] - y0)
     check('t6 a touch drag on the handle moves the cube and does not turn the view', moved > 0.05 and dyaw < 1e-6, f'moved {moved:.3f}, Δyaw {dyaw:.4f}')
-    # t6b — S-3: a second finger during the handle drag doesn't steer it or end it
+    # t6b — S-3: a second finger during a handle drag doesn't steer it or end it. The first
+    # finger settles before each reading (its moves arrive a frame late); the second is
+    # synthetic (tn_lib.synth) and lands on the canvas, left of the Edit panel.
     scr = p.ev(PROJ); obj = lambda: p.ev(f"stage.scene.getObjectByName({json.dumps(cube)}).position.toArray()")
     t.down(6, scr[0], scr[1])
-    for s in range(1, 6): t.move(6, scr[0] + 4 * s, scr[1]); time.sleep(0.03)
-    o1 = obj()
-    synth(p, 'pointerdown', 913, cx + 100, cy + 200)
-    for j in range(1, 8): synth(p, 'pointermove', 913, cx + 100 - 10 * j, cy + 200 - 10 * j); time.sleep(0.03)
-    o2 = obj(); synth(p, 'pointerup', 913, cx + 30, cy + 130); time.sleep(0.3)
-    for s in range(6, 9): t.move(6, scr[0] + 4 * s, scr[1]); time.sleep(0.03)
-    o3 = obj(); t.up(6); time.sleep(1.0)
-    check('t6b S-3: a second (synthetic) finger moving during a handle drag leaves the cube still, and the first finger drags on after it lifts',
-          math.dist(o1, o2) < 1e-6 and math.dist(o2, o3) > 0.05, f'jump {math.dist(o1, o2):.4f}, after the lift {math.dist(o2, o3):.3f}')
+    for s_ in range(1, 6): t.move(6, scr[0] + 4 * s_, scr[1]); time.sleep(0.03)
+    time.sleep(0.8); o1 = obj()
+    on = synth(p, 'pointerdown', 913, 40, 300)
+    for j in range(1, 8): synth(p, 'pointermove', 913, 40 + 6 * j, 300 + 12 * j); time.sleep(0.03)
+    time.sleep(0.6); o2 = obj(); synth(p, 'pointerup', 913, 82, 384); time.sleep(0.4)
+    for s_ in range(6, 9): t.move(6, scr[0] + 4 * s_, scr[1]); time.sleep(0.03)
+    time.sleep(0.6); o3 = obj(); t.up(6); time.sleep(1.0)
+    check('t6b S-3: a second finger moving on the view during a handle drag leaves the cube still, and the first finger drags on after it lifts',
+          on == 'CANVAS' and math.dist(o1, o2) < 1e-6 and math.dist(o2, o3) > 0.05,
+          f'second finger on {on}, jump {math.dist(o1, o2):.4f} (1.90 at cba7f8b), after the lift {math.dist(o2, o3):.3f}')
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)
 
     # t4 — ORBIT: the stick hides; a drag orbits; a pinch out zooms in
@@ -160,7 +163,9 @@ with sync_playwright() as pw:
     p.page.touchscreen.tap(bfp[0], bfp[1]); time.sleep(0.6)
     check('t8 a touch tap on the button goes first person, a second one back', fp_on and p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0)
 
-    # t2-pad — a teleporter pad 3 m ahead fires when the stick walks onto it
+    # t2-pad — a teleporter pad 3 m ahead fires when the stick walks onto it. Away from
+    # the spawn point first: a pad near spawn stays disarmed until you have left it.
+    p.ev("stage.nav._avatar.localNode.translation = [0, 0.7, 6]; stage.nav.yaw = 0"); time.sleep(0.6)
     k2 = k + 'b'
     dest = f'wss://127.0.0.1:8443/w/{k2}'
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)

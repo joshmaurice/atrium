@@ -70,11 +70,17 @@ def synth(p, kind, pid, x, y, primary=False):
     (x, y), or the canvas when it holds the capture. Chromium's CDP touch emulation on
     this page often withholds one finger's release until every finger lifts (probe
     dbg10: two fingers on the canvas, Edit on or off), which left touches stuck; the
-    checks of a SECOND finger use this instead, with the first finger real."""
+    checks of a SECOND finger use this instead, with the first finger real. A move has
+    `button` -1, as a real one does: TransformControls ignores a move with any other."""
+    # Synthetic ids are 900+, and no real pointer has them, so pointer capture by them
+    # (TransformControls captures every canvas press) would throw: a test-only shim.
+    p.ev("""(() => { if (window.__synthShim) return; window.__synthShim = true;
+        for (const m of ['setPointerCapture', 'releasePointerCapture']) { const f = Element.prototype[m];
+          Element.prototype[m] = function (id) { if (id >= 900) return; return f.call(this, id) } } })()""")
     return p.ev(f"""(() => {{ const el = document.elementFromPoint({x}, {y});
         const target = window.__synthTarget?.[{pid}] ?? el;
         if ('{kind}' === 'pointerdown') (window.__synthTarget ??= {{}})[{pid}] = target;
         if ('{kind}' === 'pointerup' || '{kind}' === 'pointercancel') delete window.__synthTarget[{pid}];
         target.dispatchEvent(new PointerEvent('{kind}', {{ pointerId: {pid}, pointerType: 'touch', isPrimary: {str(primary).lower()},
-          bubbles: true, cancelable: true, composed: true, clientX: {x}, clientY: {y}, button: 0, buttons: '{kind}' === 'pointerup' ? 0 : 1 }}));
+          bubbles: true, cancelable: true, composed: true, clientX: {x}, clientY: {y}, button: '{kind}' === 'pointermove' ? -1 : 0, buttons: '{kind}' === 'pointerup' ? 0 : 1 }}));
         return target.id || target.tagName }})()""")
