@@ -260,7 +260,7 @@ describe('T13 and SP-L10: the click', () => {
     // the verdict is cleared at every new press (capture-phase pointerdown, before the handles)
     // touch-nav (the outside reviews' S-3, S-5): a touch pressed while a handle
     // drags is not a new press; the press is the pointer that pressed
-    assert.match(code, /viewportEl\.addEventListener\('pointerdown', \(e\) => \{\s*if \(e\.pointerType === 'touch' && gizmo\?\.dragging\) return\s*pressPointerId = e\.pointerId\s*handleClick = null\s*handlePress\.down\(\{ x: e\.clientX, y: e\.clientY \}\)\s*\}, true\)/)
+    assert.match(code, /viewportEl\.addEventListener\('pointerdown', \(e\) => \{\s*if \(e\.pointerType === 'touch' && gizmo\?\.dragging\) return\s*pressPointerId = e\.pointerId\s*handleClick = null\s*(?:\/\/[^\n]*\n\s*)*handlePress\.down\(\{ x: e\.clientX, y: e\.clientY, slop: e\.pointerType === 'touch' \? touchSlopPx\(\) : undefined \}\)\s*\}, true\)/)
   })
   test('the press, its moves and its click count are recorded in the capture phase', () => {
     assert.match(code, /viewportEl\.addEventListener\('pointermove', \(e\) => \{\s*if \(e\.pointerId !== pressPointerId\) return\s*handlePress\.move\(\{ x: e\.clientX, y: e\.clientY \}\)\s*\}, true\)/)

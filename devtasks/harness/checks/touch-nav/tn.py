@@ -204,6 +204,56 @@ with sync_playwright() as pw:
     check('t15 S-8: stick held: a cancelled finger and a 0.7 s press select nothing and make no click', a1 == (None, 0) and a2 == (None, 0),
           f'cancel: {a1}, long press: {a2}')
 
+    # t16 — the third review's S-9: a thumb-roll tap on a move handle (6 px) is a click; 14 px drags
+    sel(); time.sleep(0.8); scr = aim(); s0 = som()
+    t.down(21, scr[0], scr[1]); t.move(21, scr[0] + 3, scr[1]); t.move(21, scr[0] + 6, scr[1]); t.up(21); time.sleep(1.2)
+    check('t16a S-9: a 6 px rolling tap on the handle moves nothing and sends nothing', math.dist(s0, som()) < 1e-9,
+          f'SOM moved {math.dist(s0, som()):.4f} (0.072 at c28064a)')
+    sel(); time.sleep(0.8); scr = aim(); s0 = som()
+    t.down(21, scr[0], scr[1])
+    for j in range(1, 8): t.move(21, scr[0] + 2 * j, scr[1]); time.sleep(0.03)
+    t.up(21); time.sleep(1.2)
+    check('t16b ... and a 14 px drag on it moves the cube', math.dist(s0, som()) > 0.05, f'SOM moved {math.dist(s0, som()):.3f}')
+
+    # t17 — N-14: a tap straight after a look selects (the next press disarms the click swallow)
+    deselect(); scr = aim()
+    t.down(22, 60, 250)
+    for j in range(1, 7): t.move(22, 60 + 10 * j, 250)
+    t.up(22); scr = p.ev(PROJ)
+    p.page.touchscreen.tap(scr[0], scr[1]); time.sleep(0.8)
+    check('t17 N-14: a 60 px look, then at once a tap on the cube: it is selected', p.ev(SEL) == cube, f'selected {p.ev(SEL)}')
+
+    # t18 — N-14: blur, then a hidden page, during a real handle drag end it
+    for label, js in (('blur', "window.dispatchEvent(new Event('blur'))"),
+                      ('hidden', "Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); delete document.hidden")):
+        sel(); time.sleep(0.8); scr = aim()
+        t.down(23, scr[0], scr[1])
+        for j in range(1, 8): t.move(23, scr[0] + 4 * j, scr[1]); time.sleep(0.03)
+        time.sleep(0.5); was = p.ev("__ep().gizmo?.dragging")
+        p.ev(js); time.sleep(0.5); after = p.ev("__ep().gizmo?.dragging")
+        t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []}); t.pts.clear(); time.sleep(0.6)
+        check(f't18 N-14: {label} during a handle drag ends it', was is True and after is False, f'dragging {was} → {after}')
+
+    # t19 — N-14: a view finger moving while another finger drags a handle does not look
+    sel(); time.sleep(0.8); scr = aim(); y0 = p.ev(NAV)['yaw']
+    t.down(24, 60, 250); time.sleep(0.15)
+    t.down(25, scr[0], scr[1])
+    for j in range(1, 9): t.move(25, scr[0] + 4 * j, scr[1]); time.sleep(0.03)
+    time.sleep(0.4); d = p.ev("__ep().gizmo?.dragging")
+    for j in range(1, 7): t.move(24, 60 + 10 * j, 250); time.sleep(0.03)
+    time.sleep(0.5); y1 = p.ev(NAV)['yaw']; t.end_all(); time.sleep(1.0)
+    check('t19 N-14: a view finger moving 60 px during another finger\'s handle drag turns nothing', d is True and abs(y1 - y0) < 1e-9,
+          f'dragging {d}, Δyaw {y1 - y0:.3f}')
+
+    # t20 — N-14: a stick whose release was lost (synthetic, never lifted) stops at the next primary touch
+    deselect(); sx, sy = stick_centre(p)
+    synth(p, 'pointerdown', 990, sx, sy, primary=True); synth(p, 'pointermove', 990, sx, sy - 60, primary=True); time.sleep(0.3)
+    i0 = p.ev(NAV)['input']
+    t.down(26, 60, 250); t.up(26); time.sleep(0.4)
+    check('t20 N-14: a stick that lost its release stops at the next primary touch', i0 == [0, -1] and p.ev(NAV)['input'] == [0, 0],
+          f"input {i0} → {p.ev(NAV)['input']}")
+    p.ev("delete window.__synthTarget[990]; stage.nav._avatar.localNode.translation = [0, 0.7, 0]; stage.nav.yaw = 0"); time.sleep(0.4)
+
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)
 
     # t4 — ORBIT: the stick hides; a drag orbits; a pinch out zooms in
@@ -241,6 +291,14 @@ with sync_playwright() as pw:
     check('t14a S-7: after a slow frame a tap on First person toggles once (and the next one back)',
           cam1 == 1.6 and p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0, f'camera y {cam0} → {cam1} (toggled twice at 5dba62f)')
     p.ev("window.__slowOn = false")
+
+    # t21 — N-13: with the stick held, a second (real) finger presses First person, slides off; both lift
+    sx, sy = stick_centre(p); cam0 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
+    t.down(27, sx, sy); time.sleep(0.15); t.down(28, bfp[0], bfp[1])
+    for j in range(1, 13): t.move(28, bfp[0], bfp[1] - 10 * j); time.sleep(0.02)
+    time.sleep(0.3); t.end_all(); time.sleep(0.7)
+    check('t21 N-13: First person pressed and slid off (stick held) does not toggle', p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0,
+          f'camera y {cam0} → {p.ev("stage.nav._avatar.cameraNode.translation[1]")} (1.6 at c28064a)')
 
     # t2-pad — a teleporter pad 3 m ahead fires when the stick walks onto it. Away from
     # the spawn point first: a pad near spawn stays disarmed until you have left it.
@@ -299,6 +357,29 @@ with sync_playwright() as pw:
 
     p.page.screenshot(path=f'{SHOTS}/touch-nav-phone.png')
     errs = list(p.errors); p.ctx.close()
+
+    # t22 — S-10: at 390 px the page is no wider than the screen; the bars scroll inside themselves
+    q = phone(br); connect(q, k + 'w')
+    w = q.ev("[document.scrollingElement.scrollWidth, innerWidth, visualViewport.width]")
+    bar = q.ev("(() => { const b = document.querySelector('.toolbar'); return [b.scrollWidth, b.clientWidth, getComputedStyle(b).overflowX] })()")
+    check('t22a S-10: the page is no wider than the screen; the top bar scrolls inside itself',
+          w[0] <= w[2] + 1 and w[1] <= w[2] + 1 and bar[2] == 'auto', f'page {w}, bar {bar} (page 795 wide at c28064a)')
+    tq = Touch(q.page); y0 = q.ev(NAV)['yaw']; sl0 = q.ev("document.querySelector('.toolbar').scrollLeft")
+    tq.drag(1, (300, 20), (60, 20), steps=12); time.sleep(0.8)
+    check('t22b a leftward drag on the top bar scrolls the bar, not the page, and the stick stays on screen',
+          q.ev("document.querySelector('.toolbar').scrollLeft") > sl0 and q.ev("[visualViewport.pageLeft, visualViewport.pageTop]") == [0, 0],
+          f"bar scrollLeft {sl0} → {q.ev('document.querySelector(\'.toolbar\').scrollLeft')}, page {q.ev('[visualViewport.pageLeft, visualViewport.pageTop]')}")
+    q.ctx.close()
+    # t23 — the operator's landscape report: a long list of saved worlds leaves the view room
+    ctx = br.new_context(ignore_https_errors=True, viewport={'width': 800, 'height': 330}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    lp = ctx.new_page(); lp.goto(A + '/apps/client/local.html'); lp.wait_for_function('window.atriumClient && window.stage', timeout=30000)
+    lp.evaluate("""(() => { const wb = document.getElementById('world-browser'); wb.style.display = '';
+      wb.innerHTML = '<div class=wb-header>Your worlds</div>' + Array.from({length: 8}, (_, i) => `<div style="padding:6px 0">World ${i + 1}</div>`).join('') })()""")
+    time.sleep(0.4)
+    vh = lp.evaluate("[Math.round(document.getElementById('viewport').getBoundingClientRect().height), Math.round(document.getElementById('world-browser').getBoundingClientRect().height), getComputedStyle(document.getElementById('world-browser')).overflowY]")
+    check('t23 landscape (800 × 330) with eight saved worlds: the view keeps room; the list scrolls inside itself', vh[0] >= 100 and vh[2] == 'auto',
+          f'view {vh[0]} px, list {vh[1]} px, {vh[2]} (the view 0 px at c28064a)')
+    ctx.close()
 
     # t7 — a mouse page: no stick ever, the mouse drag turns at 0.002 rad / px as before
     m = Page(br); m.connect(f'wss://127.0.0.1:8443/w/{k}')

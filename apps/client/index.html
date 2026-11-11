@@ -26,6 +26,11 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    /* touch-nav (the third review's S-10) — wider than a phone, the bar scrolls
+       sideways inside itself, so the page is never wider than the screen:
+       the view, the stick and the bars all stay on it. */
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .toolbar h1 {
@@ -156,6 +161,8 @@
     gap: 8px;
     flex-shrink: 0;
     font-size: 12px;
+    overflow-x: auto;          /* S-10, as .toolbar */
+    scrollbar-width: thin;
   }
   #subbar-worlds {
     display: flex;
@@ -197,6 +204,11 @@
     padding: 8px 12px;
     flex-shrink: 0;
     font-size: 12px;
+    /* touch-nav (the operator's landscape report, 2026-11-11) — the list of
+       saved worlds took the whole height of a phone on its side, and the page
+       doesn't scroll: it scrolls inside itself past 40 % of the height. */
+    max-height: 40vh;
+    overflow-y: auto;
   }
   #world-browser:empty { display: none; }
 

@@ -92,6 +92,8 @@ test('touch-nav T1 — the stick follows the yaw: facing right, forward walks al
 
 test('touch-nav T1 — a vector longer than 1 is clamped to 1', () => {
   const { nav, avatar } = makeWiredAvatar()
+  nav.setMoveInput(3, -4)                // N-15: x not 0
+  assert.ok(close(nav.moveInput[0], 0.6) && close(nav.moveInput[1], -0.8), String(nav.moveInput))
   nav.setMoveInput(0, -5)
   assert.deepEqual(nav.moveInput, [0, -1])
   nav.tick(1.0)

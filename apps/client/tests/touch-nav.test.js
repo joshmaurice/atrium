@@ -270,3 +270,34 @@ test('T2 pinch — an unchanged distance sends nothing; both pinch fingers swall
   assert.deepEqual(t.up({ id: 1 }), [{ type: 'swallow-click' }])
   assert.deepEqual(t.up({ id: 2 }), [{ type: 'swallow-click' }])
 })
+
+test('T2 pinch, N-15 — a vertical pinch counts its y distance', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: 200, y: 300, on: 'view' })
+  t.down({ id: 2, x: 200, y: 400, on: 'view' })     // 100 apart, vertically
+  assert.deepEqual(t.move({ id: 2, x: 200, y: 500 }), [{ type: 'pinch', ratio: 2 }])
+})
+
+test('T2 stick, N-15 — a diagonal push past the rim is clamped on both axes; a part push sideways scales x', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  const fx = t.move({ id: 1, x: C.x + 300, y: C.y - 400 })      // 3-4-5, far past the rim
+  const m = one(fx, 'move'), k = one(fx, 'knob')
+  assert.ok(close(m.x, 0.6) && close(m.z, -0.8), JSON.stringify(m))
+  assert.ok(close(k.dx, 48 * 0.6) && close(k.dy, -48 * 0.8), JSON.stringify(k))
+  const half = one(t.move({ id: 1, x: C.x + 24, y: C.y }), 'move')   // 0.5 to the right
+  assert.ok(close(half.x, (0.5 - 0.12) / 0.88) && close(half.z, 0), JSON.stringify(half))
+})
+
+test('T2 primary, N-15 — a primary press drops a stale stick alone, and a stale view finger alone', () => {
+  let t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C, primary: true })
+  t.move({ id: 1, x: C.x, y: C.y - 48 })
+  const fx = t.down({ id: 2, x: 200, y: 400, on: 'view', primary: true })
+  assert.deepEqual(one(fx, 'move'), { type: 'move', x: 0, z: 0 }, 'the stale stick stops')
+  assert.deepEqual(t.move({ id: 1, x: C.x + 48, y: C.y }), [], 'and is forgotten')
+  t = createTouchNav()
+  t.down({ id: 3, x: 100, y: 400, on: 'view', primary: true })
+  assert.deepEqual(t.down({ id: 4, x: 200, y: 400, on: 'view', primary: true }), [], 'nothing to stop')
+  assert.deepEqual(t.move({ id: 4, x: 220, y: 400 }), [{ type: 'look', dx: 20, dy: 0 }], 'the new finger looks; the stale one would have made it a pinch')
+})

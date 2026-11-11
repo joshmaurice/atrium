@@ -27,15 +27,20 @@ import { CLICK_SLOP_PX } from './edit-selection.js'
  * @param {{ slop?: number }} [opts]
  */
 export function createHandlePress({ slop = CLICK_SLOP_PX } = {}) {
-  /** @type {null | { x: number, y: number, detail: number, grabbed: boolean, begun: boolean }} */
+  /** @type {null | { x: number, y: number, slop: number, detail: number, grabbed: boolean, begun: boolean }} */
   let press = null
   /** the pointer's last position during the press */
   let at = null
 
   return {
-    /** A press on the viewport (capture-phase `pointerdown`): a new press. */
-    down({ x, y }) {
-      press = { x, y, detail: 1, grabbed: false, begun: false }
+    /**
+     * A press on the viewport (capture-phase `pointerdown`): a new press.
+     * `slop` overrides the default for this press (touch-nav, the third
+     * review's S-9: a touch press gets the touch look slop, 10 px on screen,
+     * as a thumb rolls more than the mouse's 4 px).
+     */
+    down({ x, y, slop: pressSlop }) {
+      press = { x, y, slop: Number.isFinite(pressSlop) ? pressSlop : slop, detail: 1, grabbed: false, begun: false }
       at = { x, y }
     },
     /** The press grabbed a handle (`dragging-changed(true)`). */
@@ -67,7 +72,7 @@ export function createHandlePress({ slop = CLICK_SLOP_PX } = {}) {
       if (press.begun) return 'drag'
       if (press.detail >= 2) return 'put-back'
       const travel = Math.hypot(at.x - press.x, at.y - press.y)
-      return travel < slop ? 'put-back' : 'begin'
+      return travel < press.slop ? 'put-back' : 'begin'
     },
     /** The app began the gesture. */
     begin() {

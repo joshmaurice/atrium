@@ -89,7 +89,8 @@ const touchKnobEl   = document.getElementById('touch-stick-knob')
 const touchFpBtn    = document.getElementById('touch-fp')
 // N-8 (the second review) — the look slop is in screen px: at a page zoom
 // other than 1, CSS px are scaled by visualViewport.scale.
-const touchNav      = createTouchNav({ slop: () => TOUCH_LOOK_SLOP_PX / (window.visualViewport?.scale || 1) })
+const touchSlopPx   = () => TOUCH_LOOK_SLOP_PX / (window.visualViewport?.scale || 1)
+const touchNav      = createTouchNav({ slop: touchSlopPx })
 /** TN-L7 (a) — set by the first touch `pointerdown` on the page; never cleared. */
 let touchSeen = false
 // scripting-4c AC6 — the transient notice for a refused click, beside the HUD hint.
@@ -2364,7 +2365,9 @@ viewportEl.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch' && gizmo?.dragging) return
   pressPointerId = e.pointerId
   handleClick = null
-  handlePress.down({ x: e.clientX, y: e.clientY })
+  // S-9 (the third review) — a touch press on a handle gets the touch slop: a
+  // thumb-roll tap of 6 px moved the object and sent the edit.
+  handlePress.down({ x: e.clientX, y: e.clientY, slop: e.pointerType === 'touch' ? touchSlopPx() : undefined })
 }, true)
 viewportEl.addEventListener('pointermove', (e) => {
   if (e.pointerId !== pressPointerId) return
@@ -4322,6 +4325,10 @@ function firstPersonFromButton() {
 touchFpBtn.addEventListener('pointerup', (e) => {
   if (e.pointerType !== 'touch') return
   fpTouched = true
+  // N-13 (the third review) — a touch stays captured by the button it pressed:
+  // only a release still on the button counts, as a click would.
+  const r = touchFpBtn.getBoundingClientRect()
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
   firstPersonFromButton()
 })
 touchFpBtn.addEventListener('click', () => {
