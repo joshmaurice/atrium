@@ -36,13 +36,18 @@ with sync_playwright() as pw:
     sx, sy = stick_centre(p)
     a = p.ev(NAV)
     t.down(2, sx, sy); t.move(2, sx, sy - 30); t.move(2, sx, sy - 60)   # past the rim: full push
-    t0 = time.time(); time.sleep(1.5)
+    time.sleep(0.5)
+    # the speed timed in the page (N-10: a floor and a ceiling), between two samples while held
+    # Read inside an animation frame (after the page's tick, registered earlier in the frame),
+    # so a slow frame can't make the reading stale.
+    S = "new Promise(r => requestAnimationFrame(() => r([stage.nav._avatar.localNode.translation[2], performance.now()])))"
+    z1, t1 = p.ev(S); time.sleep(2.0); z2, t2 = p.ev(S)
+    speed = (z1 - z2) / ((t2 - t1) / 1000)
     mid = p.ev(NAV)
-    t.up(2); el = time.time() - t0; time.sleep(0.5)
+    t.up(2); time.sleep(0.5)
     b = p.ev(NAV)
-    walked = a['pos'][2] - b['pos'][2]
-    check('t2a a full push walks forward (−Z) at about the world speed', walked > 0.8 * 1.4 * 1.5 * 0.8 and abs(b['pos'][0] - a['pos'][0]) < 0.05,
-          f'walked {walked:.2f} m in {el:.2f} s, input during {mid["input"]}')
+    check('t2a a full push walks forward (−Z) at the world speed, 1.4 m/s ± 15 %', 1.19 < speed < 1.61 and abs(b['pos'][0] - a['pos'][0]) < 0.05,
+          f'{speed:.2f} m/s, input during {mid["input"]}')
     check('t2b release stops: input (0, 0), the knob home', b['input'] == [0, 0] and p.ev("document.getElementById('touch-stick-knob').style.transform") in ('translate(0px, 0px)', ''),
           str(p.ev("document.getElementById('touch-stick-knob').style.transform")))
     time.sleep(1.5)
@@ -103,16 +108,16 @@ with sync_playwright() as pw:
     # S-2 — the stick held by a real finger; the tapping finger synthetic (tn_lib.synth says why)
     deselect(); sx, sy = stick_centre(p); c0 = clk()
     t.down(11, sx, sy); t.move(11, sx, sy - 2)          # a thumb resting on the stick
-    synth(p, 'pointerdown', 901, scr[0], scr[1]); synth(p, 'pointerup', 901, scr[0], scr[1]); time.sleep(0.8)
+    synth_tap(p, 901, scr[0], scr[1]); time.sleep(0.8)
     c1 = clk()
     check('t3e S-2: with a thumb on the stick, a tap on the cube selects it (the page makes the click)',
           p.ev(SEL) == cube and c1[0] - c0[0] == 1, f"selected {p.ev(SEL)}, clicks {c1[0] - c0[0]}")
     bfp = p.ev("(() => { const r = document.getElementById('touch-fp').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
     cam0 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
-    synth(p, 'pointerdown', 902, bfp[0], bfp[1]); synth(p, 'pointerup', 902, bfp[0], bfp[1]); time.sleep(0.6)
+    synth_tap(p, 902, bfp[0], bfp[1]); time.sleep(0.6)
     cam1 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
     check('t3f S-2: with a thumb on the stick, a tap on First person works, once', cam0 != cam1 and cam1 == 1.6, f'camera y {cam0} → {cam1}')
-    synth(p, 'pointerdown', 903, bfp[0], bfp[1]); synth(p, 'pointerup', 903, bfp[0], bfp[1]); time.sleep(0.6)
+    synth_tap(p, 903, bfp[0], bfp[1]); time.sleep(0.6)
     t.up(11); time.sleep(0.4)
     check('t3g ... and a second tap goes back to third person', p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0)
     # t6 — a drag that starts on the handle's centre moves the cube, not the view (B3)
@@ -137,6 +142,68 @@ with sync_playwright() as pw:
     check('t6b S-3: a second finger moving on the view during a handle drag leaves the cube still, and the first finger drags on after it lifts',
           on == 'CANVAS' and math.dist(o1, o2) < 1e-6 and math.dist(o2, o3) > 0.05,
           f'second finger on {on}, jump {math.dist(o1, o2):.4f} (1.90 at cba7f8b), after the lift {math.dist(o2, o3):.3f}')
+    # t12 — the second review's S-5: the stick held FIRST, then a handle press by another
+    # finger. Both fingers real; both lifted together (Touch.end_all).
+    sel = lambda: p.ev(f"__ep().selectForEdit(atriumClient.som.getNodeByName({json.dumps(cube)}))")
+    som = lambda: p.ev(f"atriumClient.som.getNodeByName({json.dumps(cube)}).translation.slice()")
+    obj3 = lambda: p.ev(f"stage.scene.getObjectByName({json.dumps(cube)}).position.toArray()")
+    def aim():
+        """Earlier drags push the cube right, under the Edit panel: turn until it is on open canvas."""
+        for _ in range(60):
+            s_ = p.ev(PROJ)
+            if 20 < s_[0] < 100 and p.ev(f"document.elementFromPoint({s_[0]}, {s_[1]}) === document.querySelector('#viewport canvas')"): break
+            p.ev("stage.nav.yaw -= 0.03" if s_[0] >= 100 else "stage.nav.yaw += 0.03"); time.sleep(0.1)
+        time.sleep(0.3); s_ = p.ev(PROJ)
+        assert p.ev(f"document.elementFromPoint({s_[0]}, {s_[1]}) === document.querySelector('#viewport canvas')"), f'cube not on canvas at {s_}'
+        return s_
+    sel(); time.sleep(0.8); s0 = som(); scr = aim()
+    sx, sy = stick_centre(p); t.down(14, sx, sy); t.move(14, sx, sy - 3); t.move(14, sx, sy - 5); time.sleep(0.3)
+    t.down(15, scr[0], scr[1]); t.move(15, scr[0] + 1, scr[1]); t.move(15, scr[0] + 2, scr[1]); time.sleep(0.5)
+    o_mid = obj3(); t.end_all(); time.sleep(1.0)
+    check('t12a S-5: stick held (thumb moved 5 px), a 2 px press on the handle is still a click: nothing moves or is sent',
+          math.dist(s0, som()) < 1e-9, f'SOM moved {math.dist(s0, som()):.4f} (0.024 at 5dba62f)')
+    sel(); time.sleep(0.8); s0 = som(); scr = aim()
+    t.down(14, sx, sy); time.sleep(0.3)
+    t.down(15, scr[0], scr[1])
+    for j in range(1, 11): t.move(15, scr[0] + 4 * j, scr[1]); time.sleep(0.04)
+    time.sleep(0.6); o_mid = obj3(); t.end_all(); time.sleep(1.2)
+    check('t12c S-5: stick held (thumb still), a 40 px drag on the handle by another finger moves the cube',
+          math.dist(s0, som()) > 0.2, f'SOM moved {math.dist(s0, som()):.3f} (0.000 at 5dba62f)')
+    # p8's symptom: after a stick-held handle press, the next stick-held tap elsewhere selects
+    sel(); time.sleep(0.8); scr = aim()
+    t.down(14, sx, sy); time.sleep(0.2)
+    t.down(15, scr[0], scr[1]); t.move(15, scr[0] + 1, scr[1]); time.sleep(0.4)
+    t.end_all(); time.sleep(0.8)
+    t.down(14, sx, sy); time.sleep(0.2)
+    synth_tap(p, 941, 40, 300); time.sleep(0.8)
+    t.end_all(); time.sleep(0.4)
+    check('t12b ... and the next stick-held tap elsewhere selects (the handle press left no verdict behind)',
+          p.ev(SEL) not in (None, cube), f'selected {p.ev(SEL)}')
+
+    # t13 — S-6: a handle drag whose (real) finger is cancelled: the drag ends, and touch works after
+    sel(); time.sleep(0.8); scr = aim()
+    t.down(15, scr[0], scr[1])
+    for j in range(1, 8): t.move(15, scr[0] + 4 * j, scr[1]); time.sleep(0.03)
+    time.sleep(0.5); was = p.ev("__ep().gizmo?.dragging")
+    t.cdp.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []}); t.pts.clear(); time.sleep(0.6)
+    check('t13a S-6: a cancelled handle drag ends', was is True and p.ev("__ep().gizmo?.dragging") is False,
+          f"dragging during {was}, after {p.ev('__ep().gizmo?.dragging')}")
+    deselect(); y0 = p.ev(NAV)['yaw']       # no handles in the way of the look
+    t.drag(16, (60, 300), (110, 300)); time.sleep(0.4)
+    check('t13b ... and a look drag turns the view afterwards', abs(p.ev(NAV)['yaw'] - y0 + 0.25) < 0.03, f"Δyaw {p.ev(NAV)['yaw'] - y0:.3f} (0.000 at 5dba62f)")
+    p.ev(f"stage.nav.yaw = {y0}"); time.sleep(0.4)
+
+    # t15 — S-8: with the stick held, a cancelled finger, or one held 0.7 s, makes no click
+    deselect(); sx, sy = stick_centre(p); scr = aim(); c0 = clk()
+    t.down(17, sx, sy); time.sleep(0.2)
+    synth(p, 'pointerdown', 950, scr[0], scr[1]); time.sleep(0.2); synth(p, 'pointercancel', 950, scr[0], scr[1]); time.sleep(0.6)
+    a1 = (p.ev(SEL), clk()[0] - c0[0])
+    synth(p, 'pointerdown', 951, scr[0], scr[1]); time.sleep(0.7); synth(p, 'pointerup', 951, scr[0], scr[1]); time.sleep(0.6)
+    a2 = (p.ev(SEL), clk()[0] - c0[0])
+    t.up(17); time.sleep(0.4)
+    check('t15 S-8: stick held: a cancelled finger and a 0.7 s press select nothing and make no click', a1 == (None, 0) and a2 == (None, 0),
+          f'cancel: {a1}, long press: {a2}')
+
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)
 
     # t4 — ORBIT: the stick hides; a drag orbits; a pinch out zooms in
@@ -162,6 +229,18 @@ with sync_playwright() as pw:
     fp_on = p.ev("stage.nav._avatar.cameraNode.translation[1]") == 1.6 and 'Third' in p.ev("document.getElementById('touch-fp').textContent")
     p.page.touchscreen.tap(bfp[0], bfp[1]); time.sleep(0.6)
     check('t8 a touch tap on the button goes first person, a second one back', fp_on and p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0)
+
+    # t14 — the second review's S-7: one slow frame (a 650 ms task after the release) between
+    # a touch release and its click. Timed windows lost the click's pairing; flags don't.
+    p.ev("""(() => { window.__slowOn = true; document.addEventListener('pointerup', () => {
+        if (!window.__slowOn) return; const t = performance.now(); while (performance.now() - t < 650) {} }) })()""")
+    cam0 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
+    t.down(18, bfp[0], bfp[1]); t.up(18); time.sleep(1.5)
+    cam1 = p.ev("stage.nav._avatar.cameraNode.translation[1]")
+    t.down(18, bfp[0], bfp[1]); t.up(18); time.sleep(1.5)
+    check('t14a S-7: after a slow frame a tap on First person toggles once (and the next one back)',
+          cam1 == 1.6 and p.ev("stage.nav._avatar.cameraNode.translation[1]") == cam0, f'camera y {cam0} → {cam1} (toggled twice at 5dba62f)')
+    p.ev("window.__slowOn = false")
 
     # t2-pad — a teleporter pad 3 m ahead fires when the stick walks onto it. Away from
     # the spawn point first: a pad near spawn stays disarmed until you have left it.

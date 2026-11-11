@@ -29,6 +29,10 @@ class Touch:
     def up(self, i):
         del self.pts[i]
         self._send('touchMove' if self.pts else 'touchEnd')
+    def end_all(self):
+        """Lift every finger at once (a touchEnd): the way to release two real fingers,
+        since CDP may withhold one finger's release while another stays down."""
+        self.pts.clear(); self._send('touchEnd')
     def drag(self, i, frm, to, steps=10, hold=0.02):
         self.down(i, *frm)
         for s in range(1, steps + 1):
@@ -65,6 +69,13 @@ def stick_centre(p):
     return p.ev("(() => { const r = document.getElementById('touch-stick').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
 
 
+def shim(p):
+    """Synthetic ids are 900+, and no real pointer has them, so pointer capture by them
+    (TransformControls captures every canvas press) would throw: a test-only shim."""
+    p.ev("""(() => { if (window.__synthShim) return; window.__synthShim = true;
+        for (const m of ['setPointerCapture', 'releasePointerCapture']) { const f = Element.prototype[m];
+          Element.prototype[m] = function (id) { if (id >= 900) return; return f.call(this, id) } } })()""")
+
 def synth(p, kind, pid, x, y, primary=False):
     """A second finger as in-page PointerEvents (pointerType touch) at the element under
     (x, y), or the canvas when it holds the capture. Chromium's CDP touch emulation on
@@ -72,11 +83,7 @@ def synth(p, kind, pid, x, y, primary=False):
     dbg10: two fingers on the canvas, Edit on or off), which left touches stuck; the
     checks of a SECOND finger use this instead, with the first finger real. A move has
     `button` -1, as a real one does: TransformControls ignores a move with any other."""
-    # Synthetic ids are 900+, and no real pointer has them, so pointer capture by them
-    # (TransformControls captures every canvas press) would throw: a test-only shim.
-    p.ev("""(() => { if (window.__synthShim) return; window.__synthShim = true;
-        for (const m of ['setPointerCapture', 'releasePointerCapture']) { const f = Element.prototype[m];
-          Element.prototype[m] = function (id) { if (id >= 900) return; return f.call(this, id) } } })()""")
+    shim(p)
     return p.ev(f"""(() => {{ const el = document.elementFromPoint({x}, {y});
         const target = window.__synthTarget?.[{pid}] ?? el;
         if ('{kind}' === 'pointerdown') (window.__synthTarget ??= {{}})[{pid}] = target;
@@ -84,3 +91,14 @@ def synth(p, kind, pid, x, y, primary=False):
         target.dispatchEvent(new PointerEvent('{kind}', {{ pointerId: {pid}, pointerType: 'touch', isPrimary: {str(primary).lower()},
           bubbles: true, cancelable: true, composed: true, clientX: {x}, clientY: {y}, button: '{kind}' === 'pointermove' ? -1 : 0, buttons: '{kind}' === 'pointerup' ? 0 : 1 }}));
         return target.id || target.tagName }})()""")
+
+
+def synth_tap(p, pid, x, y):
+    """A synthetic second-finger tap, down and up in ONE evaluate: as separate round trips
+    on a slow page they can be far apart, and a made-up tap must be shorter than
+    TAP_MAX_MS (500 ms, the second review's S-8)."""
+    shim(p)
+    return p.ev(f"""(() => {{ const target = document.elementFromPoint({x}, {y});
+        const ev = (type) => target.dispatchEvent(new PointerEvent(type, {{ pointerId: {pid}, pointerType: 'touch', isPrimary: false,
+          bubbles: true, cancelable: true, composed: true, clientX: {x}, clientY: {y}, button: 0, buttons: type === 'pointerdown' ? 1 : 0 }}));
+        ev('pointerdown'); ev('pointerup'); return target.id || target.tagName }})()""")
