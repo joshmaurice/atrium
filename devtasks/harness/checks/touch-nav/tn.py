@@ -381,6 +381,16 @@ with sync_playwright() as pw:
           f'view {vh[0]} px, list {vh[1]} px, {vh[2]} (the view 0 px at c28064a)')
     ctx.close()
 
+    # t24 — the operator's desktop-site screenshots: a tap on the view must not scroll the bars away.
+    # Emulation has no address bar; the gap 100vh leaves under it is made by a taller body.
+    q = phone(br); connect(q, k + 'v')
+    q.ev("document.body.style.height = (innerHeight + 120) + 'px'"); time.sleep(0.3)
+    q.page.touchscreen.tap(60, 500); time.sleep(0.8)
+    check('t24 a tap on the view (the canvas takes focus) leaves the page unscrolled: the bars stay on screen',
+          q.ev('scrollY') == 0 and q.ev("Math.round(document.querySelector('.toolbar').getBoundingClientRect().top)") == 0 and q.ev("document.activeElement.tagName") == 'CANVAS',
+          f"scrollY {q.ev('scrollY')} (120 at b41bda6), focused {q.ev('document.activeElement.tagName')}")
+    q.ctx.close()
+
     # t7 — a mouse page: no stick ever, the mouse drag turns at 0.002 rad / px as before
     m = Page(br); m.connect(f'wss://127.0.0.1:8443/w/{k}')
     mc = m.ev("(() => { const r = document.querySelector('#viewport canvas').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")

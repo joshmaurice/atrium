@@ -12,6 +12,10 @@
     background: #111;
     color: #e2e8f0;
     height: 100vh;
+    /* touch-nav (the operator's 'desktop site' screenshots, 2026-11-11): on a
+       phone 100vh is the height with the address bar hidden, so the page ran
+       past the screen; the visible height (dvh) where the browser has it. */
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;

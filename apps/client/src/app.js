@@ -4291,6 +4291,14 @@ function letGoOfTouch() {
   if (handlePointerId !== null && gizmo?.dragging) { handlePointerId = null; endHandleDrag() }
 }
 window.addEventListener('blur', letGoOfTouch)
+/**
+ * The page never scrolls (body is `overflow: hidden`, so a user can't scroll
+ * it back), but the browser still scrolls it to show a focused element in
+ * full: a tap on the canvas (tabindex 0, for the keys) scrolled the bars off
+ * the top on a phone, with no way back (the operator's screenshots,
+ * 2026-11-11; probe10). Put it back at once.
+ */
+window.addEventListener('scroll', () => { if (window.scrollX || window.scrollY) window.scrollTo(0, 0) })
 document.addEventListener('visibilitychange', () => { if (document.hidden) letGoOfTouch() })
 
 /**
