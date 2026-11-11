@@ -1,6 +1,6 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **Revision 1.2 (2026-11-10), decisions taken; built (HANDOFF-touch-nav.md).** The
+Status: **Revision 1.3 (2026-11-10), decisions taken; built (HANDOFF-touch-nav.md).** The
 operator, by voice (about 14:10 PT): "I'm using Android and Chrome browser.
 And uh, we can build this now, I'm thinking, and go with your
 recommendations otherwise"; then in text, 14:15 PT: "Okay go ahead with that
@@ -205,7 +205,9 @@ Chromium only; Safari's touch is checked on the real phone at DEV.
 - Nothing else changes: keys, mouse and wheel paths are as they were.
 
 **T2 `apps/client/src/touch-nav.js`** (new, pure, no DOM): `createTouchNav(
-{ slop = CLICK_SLOP_PX, stickRadius = 48, deadZone = 0.12 })`, fed pointer
+{ slop = TOUCH_LOOK_SLOP_PX (10), stickRadius = 48, deadZone = 0.12 })`
+(Rev 1.3: 10 px, not the mouse's 4, above Chrome on Android's tap slop;
+the outside review's S-1), fed pointer
 events of `pointerType` `touch` and returning effects:
 - `down({ id, x, y, on, stickCentre })`, `on` is `'stick'`, `'view'`,
   `'handle'` (a press TransformControls took: B3) or `'other'`;
@@ -239,6 +241,16 @@ events of `pointerType` `touch` and returning effects:
 - `down({ primary })` (Rev 1.2): a primary touch means no other finger is
   down, so anything still tracked lost its release; it is dropped and the
   stick stops.
+- **A tap with the stick held** (Rev 1.3, the outside review's S-2): Chrome
+  sends no click for a tap while another finger is down, so a `'view'`
+  finger that never looked, lifted while the stick was held, returns
+  `{ type: 'tap', x, y }`, and the page makes the compatibility `mousedown`,
+  `mouseup` and `click` at that point (a real click that follows is
+  dropped). The First person button acts on a touch `pointerup`. **Limit:**
+  Edit panel buttons need the stick let go.
+- **One finger drives a handle** (Rev 1.3, S-3): while a handle drags, the
+  canvas hears only the touch pointer that last pressed it before the drag
+  began; the handle press ignores non-primary touches.
 - `releaseStick()`: lets the stick go and leaves a look or pinch in progress
   alone (the page calls it when the stick hides, e.g. on entering ORBIT
   mid-pinch); `reset()` drops everything.
@@ -261,8 +273,10 @@ events of `pointerType` `touch` and returning effects:
   unless a handle is dragging; `move` → `nav.setMoveInput`; `pinch` →
   `nav.onPinch`; `knob` → the knob's transform.
 - **Shown** (TN-L7 (a)): from the first touch `pointerdown` on the page,
-  `#touch-stick` and `#touch-fp` show while there is an avatar and the mode
-  is not ORBIT (TN-L3 (a)); in Edit and Inspect too (TN-L8 (a)).
+  `#touch-stick` shows while there is an avatar (a static world's camera
+  too: Rev 1.3, the review's N-1) and the mode is not ORBIT (TN-L3 (a)); in
+  Edit and Inspect too (TN-L8 (a)). `#touch-fp` and its hint only while
+  connected.
 - The touch state resets (stick released) on a mode change, on disconnect,
   on `blur` and when the page is hidden.
 - `#touch-fp` does what V does: V's body moves into one function
@@ -277,29 +291,20 @@ events of `pointerType` `touch` and returning effects:
 pass these on (`AtriumClient` L2004, L2205); nothing animates from them, so
 no peer change and no schema change (`velocity` is already a number).
 
-## 5. Tests and checks (at `50af5c2` plus the check files)
-- **Unit:** `packages/client/tests/navigation-touch.test.js` (T1, 10 tests)
-  and `apps/client/tests/touch-nav.test.js` (T2, 18 tests): every effect
-  asserted, including touch's event order. The whole client app suite: 1,853
-  pass, 0 fail (`node --test apps/client/tests/*.test.js`, 2026-11-10),
-  the import guard included.
+## 5. Tests and checks (at `31b538a`)
+- **Unit:** `packages/client/tests/navigation-touch.test.js` (T1, 10) and
+  `apps/client/tests/touch-nav.test.js` (T2, 23). The client app suite:
+  1,860 pass, 0 fail; `packages/client`: 770 pass.
 - **Harness:** `devtasks/harness/checks/touch-nav/tn.py` (helpers in
-  `tn_lib.py`), Chromium at 390 × 844, mobile, real CDP touch events,
-  **23/23 PASS**:
-  t0 nothing before a touch, the stick after the first; t1 a 100 px drag
-  turns 0.5 rad, an 80 px one pitches 0.4, neither walks; t2 a full push
-  walks 4.4 m in 3.1 s (1.4 m/s), release stops, a peer sees the avatar
-  there, and **walking onto a teleporter pad teleports**; t3 in Edit the
-  stick shows, a 6 px drag on the cube looks and selects nothing (the
-  swallowed click), a tap selects; t4 ORBIT hides the stick, a spread from
-  80 to 200 px zooms in 2.5×, a drag orbits, WALK shows it again; t5 two
-  thumbs, stick and look at once; t6 a touch drag on the move handle moves
-  the cube (0.54) and doesn't turn the view; t7 a mouse page: 100 px turns
-  0.2 rad as before, no stick ever; t8 the first-person button; t9 no page
-  errors.
+  `tn_lib.py`), Chromium at 390 × 844, mobile, CDP touch events, **35/35
+  PASS**, exit status 1 on any FAIL. Besides Rev 1.1's t0–t9: t3b–t3g taps
+  (S-1, S-2), t6b a second finger during a handle drag (S-3), t10–t10e the
+  stick lets go on every route (S-4, with a proof), t11 a static world
+  (N-1). The handoff's §6 lists them.
 - **No regression:** selection-parts `c1` (29), `c3` (30), `c5` (10) and
-  grouping's `smoke.py` all pass on this code.
-- **Harness gotcha:** at 390 px the top bar is 795 px wide, and focusing a
+  grouping's `smoke.py` (7) all pass at `31b538a`.
+- **On the phone (DEV acceptance, Android Chrome):** the handoff's §4.
+**Harness gotcha:** at 390 px the top bar is 795 px wide, and focusing a
   field there pans the visual viewport sideways (`visualViewport.pageLeft`
   211), which puts every CDP touch about 210 px off. The checks set fields
   from script and assert the page isn't panned (`home()`). At 390 px the
@@ -316,6 +321,7 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 1.3 (2026-11-10): the outside review's fixes (HANDOFF §6): a 10 px look slop; a tap with the stick held; one finger drives a handle; the stick in a static world, First person only connected.
 - Rev 1.2 (2026-11-10): the fresh-agent check's fixes (HANDOFF §5): the swallow only eats a canvas click and is disarmed by the next press; `primary`; the hint as T4 words it.
 - Rev 1.1 (2026-11-10): swallow the click after a look; `releaseStick`; §5's results.
 - Rev 1.0 (2026-11-10): the decisions (Status), the full contract (§4).
