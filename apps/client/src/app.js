@@ -4324,11 +4324,12 @@ function firstPersonFromButton() {
 }
 touchFpBtn.addEventListener('pointerup', (e) => {
   if (e.pointerType !== 'touch') return
-  fpTouched = true
   // N-13 (the third review) — a touch stays captured by the button it pressed:
-  // only a release still on the button counts, as a click would.
+  // only a release still on the button counts, as a click would. A slide-off
+  // makes no click either, so the flag is set only when it toggles (N-b).
   const r = touchFpBtn.getBoundingClientRect()
   if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
+  fpTouched = true
   firstPersonFromButton()
 })
 touchFpBtn.addEventListener('click', () => {

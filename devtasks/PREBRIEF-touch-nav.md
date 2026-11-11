@@ -1,6 +1,6 @@
 # Pre-brief: walking and looking on a phone (`touch-nav`)
 
-Status: **Revision 1.4 (2026-11-10), decisions taken; built (HANDOFF-touch-nav.md).** The
+Status: **Revision 1.5 (2026-11-11), decisions taken; built (HANDOFF-touch-nav.md).** The
 operator, by voice (about 14:10 PT): "I'm using Android and Chrome browser.
 And uh, we can build this now, I'm thinking, and go with your
 recommendations otherwise"; then in text, 14:15 PT: "Okay go ahead with that
@@ -156,6 +156,18 @@ in other sections, so a rebase is expected to be mechanical.
   dead zone in the middle.
 - (b) Digital, like the keys: any push walks at full speed.
 
+**TN-L5, revisited (Rev 1.5, 2026-11-11).** The operator's report from his
+phone, on PROD before this round: in portrait the Edit panel covers most of
+the view, a new object included; in landscape the saved-worlds list leaves
+no view and nothing scrolls; in "desktop site" mode a touch on the view hides
+the top bar with no way back. Reproduced in emulation (`probe9.py`), except
+the last. The third review's S-10 adds that, with `touch-action: none` on
+the canvas, only the top bar can pan the page. The operator asked for
+whichever way is quickest overall (11:34 PT): **in this round, the bars
+scroll sideways inside themselves (the page is never wider than the
+screen) and the saved-worlds list is capped at 40 % of the height; a real
+phone layout (the Edit panel, landscape, desktop site) is the next round.**
+
 **TN-L5. The page at phone width.** The top bar is twice a phone's width
 in emulation (§2.2), but the operator reports everything but navigation
 works on his phone, Edit mode included.
@@ -260,6 +272,13 @@ events of `pointerType` `touch` and returning effects:
   and cleared by the click or the next press.
 - **A made-up tap** (Rev 1.4, S-8) needs a release, not a `pointercancel`,
   and a finger down at most `TAP_MAX_MS` (500 ms).
+- **A touch handle press** (Rev 1.5, the third review's S-9) gets the touch
+  slop too (`handlePress.down({ slop })`), so a 6 px thumb roll on a
+  selected object's handle is a click, not a 7 cm move. The mouse keeps 4 px.
+- **First person** (Rev 1.5, N-13) acts on a touch release only if it is
+  still on the button.
+- **The bars** (Rev 1.5, S-10): `.toolbar` and `#subbar` scroll sideways
+  inside themselves; `#world-browser` is capped at 40vh and scrolls.
 - **The slop on screen** (Rev 1.4, N-8): the page passes `slop` as
   `TOUCH_LOOK_SLOP_PX / visualViewport.scale`.
 - **Limits** (Rev 1.4, N-9): with the stick held, Edit panel buttons need
@@ -337,6 +356,7 @@ decisions; FINAL. Probes in `devtasks/spike-touch-nav/`.
 
 ## 7. Review log
 - Rev 0.1 (2026-11-10): first draft, probes 1 and 2.
+- Rev 1.5 (2026-11-11): the third outside review's fixes (HANDOFF §8): a touch handle press gets the 10 px slop; the bars scroll inside themselves and the saved-worlds list is capped (TN-L5 revisited); First person only on a release on it.
 - Rev 1.4 (2026-11-10): the second outside review's fixes (HANDOFF §7): the handle press is the pointer that pressed; a cancelled handle drag ends; flags, not clocks; no made-up tap after a cancel or a long press; the slop on screen; the limits written down.
 - Rev 1.3 (2026-11-10): the outside review's fixes (HANDOFF §6): a 10 px look slop; a tap with the stick held; one finger drives a handle; the stick in a static world, First person only connected.
 - Rev 1.2 (2026-11-10): the fresh-agent check's fixes (HANDOFF §5): the swallow only eats a canvas click and is disarmed by the next press; `primary`; the hint as T4 words it.

@@ -210,6 +210,11 @@
     max-height: 40vh;
     overflow-y: auto;
   }
+  /* ...and where 40vh is less than the list's own 200 px, the list doesn't
+     scroll separately inside it (the fresh check's N-a: two nested scrolls). */
+  @media (max-height: 500px) {
+    #world-browser .wb-list { max-height: none; }
+  }
   #world-browser:empty { display: none; }
 
   .wb-header {
