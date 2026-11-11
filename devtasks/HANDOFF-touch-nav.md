@@ -231,12 +231,26 @@ on a handle is a move (that round's S-1, at the mouse's 4 px); with S-9 a
 6 px touch press is a tap, so `c5` now asserts it moves nothing, and still
 that 10 px is one move. With that, `c5` passes.
 
+**The desktop-site report, explained and fixed** (`2eb6ea1`):
+the operator's screenshots (2026-11-11 12:36, Android Chrome, desktop site)
+show a touch on the view scrolling the bars and the saved-worlds list off
+the top. Cause: the canvas has `tabindex` 0 (for the keys), so a tap
+focuses it, and the browser scrolls a focused element fully into view;
+`body` was `100vh`, which on a phone is the height with the address bar
+hidden, so the canvas ran past the screen; and `body { overflow: hidden }`
+leaves the user no way to scroll back. Reproduced with `probe10.py` (a
+120 px gap made by a taller body: the tap scrolled 120 px). Fixed: `body`
+is `100dvh` (the visible height) where the browser has it, and the page is
+put back at once if anything scrolls it. `probe10` after: scrollY 0; check
+t24. At `2eb6ea1`: `tn.py` **54/54**; selection-parts `c1`, `c3`, `c5` and
+grouping's `smoke.py` pass; the client app suite 1,870.
+
 ## 9. Next: a phone layout (its own round)
 From the operator's report (§8) and the reviews' N-3/N-4/S-10, for a
 pre-brief: the Edit panel on a phone (a collapsible bottom sheet, or
 narrower, so the selected object stays in view); landscape (the bars and
-the world browser take less height); "desktop site" mode (a touch on the
-view hides the top bar: needs the operator's screenshots, not reproduced in
-emulation); whether the top bar should wrap or collapse into a menu rather
+the world browser take less height); "desktop site" mode (the scroll-away
+is fixed here, §8; the rest of it, at 980 px zoomed out, is the layout's);
+whether the top bar should wrap or collapse into a menu rather
 than scroll. Start with screenshots from the operator's phone and a probe
 like `spike-touch-nav/probe9.py`.
