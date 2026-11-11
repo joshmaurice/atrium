@@ -4,15 +4,16 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createTouchNav, TOUCH_LOOK_SLOP_PX, STICK_RADIUS_PX, STICK_DEAD_ZONE } from '../src/touch-nav.js'
+import { createTouchNav, TOUCH_LOOK_SLOP_PX, TAP_MAX_MS, STICK_RADIUS_PX, STICK_DEAD_ZONE } from '../src/touch-nav.js'
 
 const C = { x: 70, y: 700 }                       // the stick's centre
 const byType = (fx, t) => fx.filter(e => e.type === t)
 const one = (fx, t) => { const l = byType(fx, t); assert.equal(l.length, 1, `one ${t} in ${JSON.stringify(fx)}`); return l[0] }
 const close = (a, b, eps = 1e-9) => Math.abs(a - b) < eps
 
-test('T2 — the defaults: look slop 10 px (S-1), radius 48, dead zone 0.12', () => {
+test('T2 — the defaults: look slop 10 px (S-1), a made-up tap at most 500 ms (S-8), radius 48, dead zone 0.12', () => {
   assert.equal(TOUCH_LOOK_SLOP_PX, 10)
+  assert.equal(TAP_MAX_MS, 500)
   assert.equal(STICK_RADIUS_PX, 48)
   assert.equal(STICK_DEAD_ZONE, 0.12)
 })
@@ -223,4 +224,49 @@ test('T2 tap — without the stick a lifted finger that never looked returns not
   const t = createTouchNav()
   t.down({ id: 2, x: 200, y: 400, on: 'view' })
   assert.deepEqual(t.up({ id: 2 }), [])
+})
+
+test('T2 tap, S-8 — a cancelled finger is never a tap, with the stick held or not', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C, t: 0 })
+  t.down({ id: 2, x: 200, y: 400, on: 'view', t: 100 })
+  assert.deepEqual(t.up({ id: 2, cancelled: true, t: 200 }), [])
+})
+
+test('T2 tap, S-8 — a finger held longer than TAP_MAX_MS is no tap; at the limit it is', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C, t: 0 })
+  t.down({ id: 2, x: 200, y: 400, on: 'view', t: 1000 })
+  assert.deepEqual(t.up({ id: 2, t: 1000 + TAP_MAX_MS + 1 }), [], 'a long press')
+  t.down({ id: 3, x: 200, y: 400, on: 'view', t: 3000 })
+  assert.deepEqual(t.up({ id: 3, t: 3000 + TAP_MAX_MS }), [{ type: 'tap', x: 200, y: 400 }], 'at the limit')
+})
+
+test('T2 tap — the stick let go before the finger lifts: still a tap (Chrome dropped the tap once a second finger was down)', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  t.down({ id: 2, x: 200, y: 400, on: 'view' })
+  t.up({ id: 1 })
+  assert.deepEqual(t.up({ id: 2 }), [{ type: 'tap', x: 200, y: 400 }])
+})
+
+test('T2 slop — may be a function (the page scales it by the page zoom, N-8)', () => {
+  let scale = 1
+  const t = createTouchNav({ slop: () => 10 / scale })
+  t.down({ id: 1, x: 200, y: 400, on: 'view' })
+  assert.deepEqual(t.move({ id: 1, x: 212, y: 400 }), [{ type: 'look', dx: 12, dy: 0 }], 'zoom 1: 12 px looks')
+  t.up({ id: 1 })
+  scale = 0.5                                   // zoomed out: 20 CSS px = 10 screen px
+  t.down({ id: 2, x: 200, y: 400, on: 'view' })
+  assert.deepEqual(t.move({ id: 2, x: 212, y: 400 }), [], 'zoom 0.5: 12 px is still a tap')
+  assert.deepEqual(t.move({ id: 2, x: 221, y: 400 }), [{ type: 'look', dx: 21, dy: 0 }])
+})
+
+test('T2 pinch — an unchanged distance sends nothing; both pinch fingers swallow their click even if one never moved', () => {
+  const t = createTouchNav()
+  t.down({ id: 1, x: 100, y: 400, on: 'view' })
+  t.down({ id: 2, x: 200, y: 400, on: 'view' })
+  assert.deepEqual(t.move({ id: 2, x: 200, y: 400 }), [], 'ratio 1')
+  assert.deepEqual(t.up({ id: 1 }), [{ type: 'swallow-click' }])
+  assert.deepEqual(t.up({ id: 2 }), [{ type: 'swallow-click' }])
 })

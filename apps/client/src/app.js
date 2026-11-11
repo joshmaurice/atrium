@@ -18,7 +18,7 @@ import { createEditModes } from './edit-modes.js'
 import { createEditTracker, createBehaviorHold, handleUpdate, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject, selectionPath, breadcrumbItems, escapeTarget, DUPLICATE_NAME_MESSAGE } from './edit-selection.js'
 import { createHandlePress } from './edit-press.js'   // selection-parts T17
-import { createTouchNav } from './touch-nav.js'       // touch-nav T2
+import { createTouchNav, TOUCH_LOOK_SLOP_PX } from './touch-nav.js'       // touch-nav T2
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
 import { createGraphImportPanel } from './graph-import-panel.js'
@@ -87,7 +87,9 @@ const hudHintEl     = document.getElementById('hud-hint')
 const touchStickEl  = document.getElementById('touch-stick')
 const touchKnobEl   = document.getElementById('touch-stick-knob')
 const touchFpBtn    = document.getElementById('touch-fp')
-const touchNav      = createTouchNav()
+// N-8 (the second review) — the look slop is in screen px: at a page zoom
+// other than 1, CSS px are scaled by visualViewport.scale.
+const touchNav      = createTouchNav({ slop: () => TOUCH_LOOK_SLOP_PX / (window.visualViewport?.scale || 1) })
 /** TN-L7 (a) — set by the first touch `pointerdown` on the page; never cleared. */
 let touchSeen = false
 // scripting-4c AC6 — the transient notice for a refused click, beside the HUD hint.
@@ -2352,16 +2354,20 @@ const handlePress = createHandlePress()
 let handleClick = null
 // Capture phase on the viewport: before the handles' own listeners on the
 // canvas, so the press and every move are known before the object moves.
-// touch-nav (the outside review's S-3) — a second finger is not a new press: it
-// would replace a handle press still inside its slop, and the first finger's
-// next 1 px move would then begin a gesture.
+// touch-nav (the outside reviews' S-3, then S-5) — the press is the pointer that
+// pressed: a touch pressed while a handle drags (TransformControls sets
+// `dragging` at its press, before 4 px) is not a new press, and only the
+// pressing pointer's moves count. Keyed on `isPrimary` instead, a stick held
+// first would own the press and measure a handle press by the thumb.
+let pressPointerId = null
 viewportEl.addEventListener('pointerdown', (e) => {
-  if (e.pointerType === 'touch' && !e.isPrimary) return
+  if (e.pointerType === 'touch' && gizmo?.dragging) return
+  pressPointerId = e.pointerId
   handleClick = null
   handlePress.down({ x: e.clientX, y: e.clientY })
 }, true)
 viewportEl.addEventListener('pointermove', (e) => {
-  if (e.pointerType === 'touch' && !e.isPrimary) return
+  if (e.pointerId !== pressPointerId) return
   handlePress.move({ x: e.clientX, y: e.clientY })
 }, true)
 
@@ -4187,7 +4193,7 @@ function applyTouch(effects) {
     else if (fx.type === 'knob') touchKnobEl.style.transform = `translate(${fx.dx}px, ${fx.dy}px)`
     else if (fx.type === 'look') { if (!gizmo?.dragging) nav.onTouchLook(fx.dx, fx.dy) }
     else if (fx.type === 'pinch') nav.onPinch(fx.ratio)
-    else if (fx.type === 'swallow-click') swallowClickUntil = performance.now() + SWALLOW_CLICK_MS
+    else if (fx.type === 'swallow-click') swallowNextClick = true
     else if (fx.type === 'tap') touchTap(fx.x, fx.y)
   }
 }
@@ -4202,27 +4208,25 @@ function touchTap(x, y) {
   const init = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, detail: 1, view: window }
   canvas.dispatchEvent(new MouseEvent('mousedown', init))
   canvas.dispatchEvent(new MouseEvent('mouseup', init))
-  swallowClickUntil = 0
+  swallowNextClick = false
   canvas.dispatchEvent(new MouseEvent('click', init))
-  swallowClickUntil = performance.now() + SWALLOW_CLICK_MS
+  swallowNextClick = true      // a real click, if Chrome sends one after all
 }
 
 /**
  * A view finger that looked or pinched: the click Chrome may still send for a
- * drag inside its own tap slop (wider than our 4 px) must not select or
- * activate. Capture phase on the viewport runs before every click listener there.
- * Only a click on the canvas is dropped (the drag's own click lands there; a
- * button or a panel is never eaten), and the next touch press disarms it:
- * Chrome sends a drag's click right after its `pointerup`, before any new
- * press (the fresh-agent check's F1: a look with no click of its own left the
- * window armed, and the next tap on the First person button was lost).
+ * drag inside its own tap slop must not select or activate. Capture phase on
+ * the viewport runs before every click listener there. Only a click on the
+ * canvas is dropped (the drag's own click lands there; a button or a panel is
+ * never eaten), and the next press of any kind disarms it: Chrome sends a
+ * drag's click right after its `pointerup`, before any new press (the
+ * fresh-agent check's F1). A flag, not a clock (the second review's S-7: one
+ * slow frame between the release and its click defeated a 500 ms window).
  */
-const SWALLOW_CLICK_MS = 500
-let swallowClickUntil = 0
+let swallowNextClick = false
 viewportEl.addEventListener('click', (e) => {
-  if (performance.now() > swallowClickUntil) return
-  if (e.target !== canvas) return
-  swallowClickUntil = 0
+  if (!swallowNextClick || e.target !== canvas) return
+  swallowNextClick = false
   e.stopImmediatePropagation()
   e.preventDefault()
 }, true)
@@ -4232,8 +4236,12 @@ function resetTouch() { applyTouch(touchNav.reset()) }
 
 // Seen anywhere on the page (capture), so a first tap on a panel counts too.
 document.addEventListener('pointerdown', (e) => {
-  swallowClickUntil = 0      // F1, N-5 — a new press (any kind): the last drag's click has come or never will
+  swallowNextClick = false   // F1, N-5 — a new press (any kind): the last drag's click has come or never will
+  fpTouched = false          // S-7 — likewise the First person button's
   if (e.pointerType !== 'touch') return
+  // S-6 (the second review) — a primary touch means no other finger is down,
+  // so a handle drag still under way lost its release: end it (its final send).
+  if (e.isPrimary && gizmo?.dragging) endHandleDrag()
   if (touchSeen) return
   touchSeen = true
   updateHintText()
@@ -4253,7 +4261,7 @@ viewportEl.addEventListener('pointerdown', (e) => {
   } else if (e.target === canvas) {
     on = gizmo?.dragging ? 'handle' : 'view'
   }
-  applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre, primary: e.isPrimary }))
+  applyTouch(touchNav.down({ id: e.pointerId, x: e.clientX, y: e.clientY, on, stickCentre, primary: e.isPrimary, t: e.timeStamp }))
 })
 // Capture phase on the document: before the viewport's handle-drag filter
 // (below), so a tracked finger's move and release always arrive.
@@ -4264,16 +4272,28 @@ document.addEventListener('pointermove', (e) => {
 for (const type of ['pointerup', 'pointercancel']) {
   document.addEventListener(type, (e) => {
     if (e.pointerType !== 'touch') return
-    applyTouch(touchNav.up({ id: e.pointerId }))
+    // S-6 — TransformControls hears no pointercancel: a cancelled handle finger
+    // would leave `dragging` set, and the filter below would then keep every
+    // other touch from the canvas. End the drag here.
+    if (e.pointerId === handlePointerId) {
+      handlePointerId = null
+      if (type === 'pointercancel' && gizmo?.dragging) endHandleDrag()
+    }
+    applyTouch(touchNav.up({ id: e.pointerId, cancelled: type === 'pointercancel', t: e.timeStamp }))
   }, true)
 }
-window.addEventListener('blur', resetTouch)
-document.addEventListener('visibilitychange', () => { if (document.hidden) resetTouch() })
+/** Blur or a hidden page: the stick lets go, and a touch handle drag ends (S-6). */
+function letGoOfTouch() {
+  resetTouch()
+  if (handlePointerId !== null && gizmo?.dragging) { handlePointerId = null; endHandleDrag() }
+}
+window.addEventListener('blur', letGoOfTouch)
+document.addEventListener('visibilitychange', () => { if (document.hidden) letGoOfTouch() })
 
 /**
  * The outside review's S-3 — TransformControls reads every pointer on the
  * canvas and checks no `pointerId`, so a second finger during a handle drag
- * steered the object (probe 7: it jumped 0.05). While a handle drags, the
+ * steered the object (dbg11: it jumped 1.90 at cba7f8b). While a handle drags, the
  * canvas hears only the finger that last pressed it before the drag began:
  * a handle press only becomes a drag after 4 px (T17), so the grabbing finger
  * is known by its press, not by `dragging` at that moment.
@@ -4291,18 +4311,22 @@ for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'])
 /**
  * The First person button. The outside review's S-2: with a thumb on the
  * stick Chrome sends no `click` for a tap (probe 7), so a touch acts on its
- * `pointerup`, and the click that may follow is ignored.
+ * `pointerup`, and the click that may follow is ignored: a flag the next
+ * press clears, not a clock (S-7).
  */
-let fpTouchAt = -Infinity
+let fpTouched = false
+function firstPersonFromButton() {
+  toggleFirstPerson()
+  canvas.focus?.({ preventScroll: true })   // a touch laptop's keys go back to the view (N-7)
+}
 touchFpBtn.addEventListener('pointerup', (e) => {
   if (e.pointerType !== 'touch') return
-  fpTouchAt = performance.now()
-  toggleFirstPerson()
+  fpTouched = true
+  firstPersonFromButton()
 })
 touchFpBtn.addEventListener('click', () => {
-  if (performance.now() - fpTouchAt < SWALLOW_CLICK_MS) return
-  toggleFirstPerson()
-  canvas.focus?.({ preventScroll: true })   // a touch laptop's keys go back to the view
+  if (fpTouched) { fpTouched = false; return }
+  firstPersonFromButton()
 })
 
 // ---------------------------------------------------------------------------

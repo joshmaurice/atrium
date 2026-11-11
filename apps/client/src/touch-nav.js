@@ -37,10 +37,17 @@
  * 10 px is above that slop: a drag that looks was never going to be a click.
  */
 export const TOUCH_LOOK_SLOP_PX = 10
+/**
+ * The longest a finger may be down and still be a made-up tap (the second
+ * review's S-8): Chrome makes no click after a long press either.
+ */
+export const TAP_MAX_MS = 500
 export const STICK_RADIUS_PX = 48
 export const STICK_DEAD_ZONE = 0.12
 
 export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_RADIUS_PX, deadZone = STICK_DEAD_ZONE } = {}) {
+  /** The slop may be a number or a function (the page scales it by the page zoom: N-8). */
+  const slopPx = () => (typeof slop === 'function' ? slop() : slop)
   /** @type {{ id: number, cx: number, cy: number } | null} */
   let stick = null
   /** The 'view' pointers, in press order (at most two). */
@@ -71,26 +78,27 @@ export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_
     return [{ type: 'move', x: 0, z: 0 }, { type: 'knob', dx: 0, dy: 0 }]
   }
 
+  function press({ id, x, y, on, stickCentre, t }) {
+    if (on === 'stick') {
+      if (stick || !stickCentre) return []
+      stick = { id, cx: stickCentre.x, cy: stickCentre.y }
+      for (const v of views) v.withStick = true
+      return stickEffects(x, y)
+    }
+    if (on !== 'view') return []
+    if (views.length >= 2) return []
+    views.push({ id, x0: x, y0: y, x, y, t0: t, live: false, used: false, withStick: !!stick })
+    if (views.length === 2) { pinchDist = dist(); for (const p of views) p.used = true }
+    return []
+  }
+
   return {
-    down({ id, x, y, on, stickCentre, primary = false }) {
+    /** `t` is the event's `timeStamp` (ms), for a made-up tap's length (S-8). */
+    down({ id, x, y, on, stickCentre, primary = false, t = 0 }) {
       // A primary touch means no other finger is down: anything still tracked
       // lost its release (the fresh check's note). Drop it, stopping the stick.
       const stale = primary && (stick || views.length) ? this.reset() : []
-      return stale.concat(this._down({ id, x, y, on, stickCentre }))
-    },
-
-    _down({ id, x, y, on, stickCentre }) {
-      if (on === 'stick') {
-        if (stick || !stickCentre) return []
-        stick = { id, cx: stickCentre.x, cy: stickCentre.y }
-        for (const v of views) v.withStick = true
-        return stickEffects(x, y)
-      }
-      if (on !== 'view') return []
-      if (views.length >= 2) return []
-      views.push({ id, x0: x, y0: y, x, y, live: false, used: false, withStick: !!stick })
-      if (views.length === 2) { pinchDist = dist(); for (const p of views) p.used = true }
-      return []
+      return stale.concat(press({ id, x, y, on, stickCentre, t }))
     },
 
     move({ id, x, y }) {
@@ -106,7 +114,7 @@ export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_
         return ratio === 1 ? [] : [{ type: 'pinch', ratio }]
       }
       if (!v.live) {
-        if (Math.hypot(x - v.x0, y - v.y0) < slop) return []
+        if (Math.hypot(x - v.x0, y - v.y0) < slopPx()) return []
         v.live = true
         v.used = true
         return [{ type: 'look', dx: x - v.x0, dy: y - v.y0 }]
@@ -114,21 +122,18 @@ export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_
       return [{ type: 'look', dx: x - px, dy: y - py }]
     },
 
-    /** A release or a `pointercancel`. */
-    up({ id }) {
+    /** A release, or a `pointercancel` (`cancelled`: never a tap, S-8). */
+    up({ id, cancelled = false, t = 0 }) {
       if (stick && stick.id === id) return releaseStick()
       const i = views.findIndex(p => p.id === id)
       if (i < 0) return []
       const [gone] = views.splice(i, 1)
-      // The finger left after a pinch goes on looking from where it is: no jump.
-      if (views.length === 1) {
-        const v = views[0]
-        v.live = true
-        v.x0 = v.x; v.y0 = v.y
-      }
+      // The finger left after a pinch goes on looking from where it is: no jump
+      // (live, so each move sends its own delta).
+      if (views.length === 1) views[0].live = true
       pinchDist = 0
       if (gone.used) return [{ type: 'swallow-click' }]
-      if (gone.withStick) return [{ type: 'tap', x: gone.x, y: gone.y }]
+      if (gone.withStick && !cancelled && t - gone.t0 <= TAP_MAX_MS) return [{ type: 'tap', x: gone.x, y: gone.y }]
       return []
     },
 
