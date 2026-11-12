@@ -1,9 +1,9 @@
 # Handoff: `grouping`, implemented on `claude/grouping`
 
-**IMPLEMENTED; the fresh-agent code check (§7) and the outside code review
-(§8) taken; awaiting the operator's go for the release** (this file is also the
-working note: if a session loses its context, start here, then `git log` on
-the branch).
+**SHIPPED to PROD 2026-11-11 (`b37c4823`, §9),** after the fresh-agent code
+check (§7) and the outside code review (§8). This file is also the working
+note: if a session loses its context, start here, then `git log` on the
+branch.
 
 **Contract:** `devtasks/PREBRIEF-grouping.md` FINAL Rev 2.0 (operator,
 2026-11-10, 00:05 PT, "Go ahead, please"; approved by voice before it).
@@ -226,3 +226,22 @@ pending edit").
 
 **Not run by the reviewer, and run here:** the harness checks smoke and
 c1–c6, and the full suites (§5).
+
+## 9. Release (2026-11-11)
+- **DEV:** the operator ran `atrium-deploy-gate "dev b37c4823…"`, about
+  12:15 PT. `release_status` then showed:
+  - DEV actual and recorded `b37c4823`, healthy, serving `app.js`
+    `a51495848ce6`;
+  - the release merge merged nothing (`main`, `172b816d`, was already in the
+    branch);
+  - nothing outside `devtasks/` changed since the reviewed code (`8d4ff38`).
+- **DEV acceptance:** `RELEASE-grouping.md` §2, steps 1–7, done in the
+  commons with `crate-01` and the lamp. The operator, 12:32 PT: "all ok".
+  Step 7 used a tab opened before the deploy.
+- **MAIN and PROD:** `atrium-main-approve … && atrium-deploy-gate "main …"`,
+  then `atrium-prod-approve … && atrium-deploy-gate "prod …"`.
+  - MAIN fast-forwarded `172b816..b37c482`.
+  - **Step 8 on PROD passed** (12:42 PT).
+- **`release_status` at 12:43:** `COMPLETE`; DEV, MAIN and PROD at
+  `b37c48230baa9423a49c38251331a1c2905cf6d8`; PROD serves `a51495848ce6`, as
+  DEV does.
