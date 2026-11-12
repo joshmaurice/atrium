@@ -1,9 +1,11 @@
 # Handoff: `touch-nav`, implemented on `claude/touch-nav`
 
-**IMPLEMENTED; the fresh-agent code check (§5) and three outside code
-reviews (§6 source-only, §7 and §8 running the code; the third APPROVE WITH
-NITS) taken; released only after `grouping` is `COMPLETE` on PROD**
-(TN-L0 (a)). This file is also the working note: if a session loses its
+**READY TO RELEASE (2026-11-12):** `grouping` is `COMPLETE` on PROD at
+`b37c4823`, this branch's base, so no rebase; `main`'s later `devtasks/`
+are merged (`b7b9741`). The commands, the DEV acceptance on the phone and
+the release notes: **`devtasks/RELEASE-touch-nav.md`**. Before that: the
+fresh-agent code check (§5) and three outside code reviews (§6 source-only,
+§7 and §8 running the code; the third APPROVE WITH NITS), all taken. This file is also the working note: if a session loses its
 context, start here, then `git log` on the branch.
 
 **Contract:** `devtasks/PREBRIEF-touch-nav.md` Rev 1.5. Every decision was
