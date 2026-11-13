@@ -106,6 +106,22 @@ In the order Claude suggests. The operator hasn't chosen yet.
      `h5.py` (counting rebuilds in 2 s) is the pattern. The sky list's
      flicker (fixed in undo-hold r3) had a different cause: a rebuild on
      every `som:set`.
+   - **A custom graph (`2-rotation.gltf`) couldn't be applied to a group**
+     (the operator, 2026-11-13, after this passdown was first written). Not
+     yet investigated beyond a first look at the code, which found no rule
+     that refuses it:
+     - the import panel's target picker lists every non-avatar node,
+       groups included (`graph-import-panel.js` `candidatesFor`);
+     - Save gives a node without an id one first (F9);
+     - GR-L10 only refuses *moves* that change which behaviours may write
+       an object.
+
+     So the failure is somewhere else. Ask the operator what he saw: the
+     group missing from the picker, an error (its text), or saved but not
+     turning. Ask him to attach `2-rotation.gltf`, since it isn't in the
+     repo, then reproduce in the harness. Separate from multi-select:
+     applying one behaviour to several selected objects would be a
+     multi-select feature, but this case is about one group node.
 2. **A phone layout** (HANDOFF §9). The aim the operator stated: not polish,
    since these panels may be superseded, but keep normal phone mode fairly
    usable:
