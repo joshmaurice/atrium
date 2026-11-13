@@ -272,6 +272,10 @@ The operator, on his Android phone: "looks mostly good", and:
    fail at `8ddd85e`, pass after; check t4e). **What ORBIT orbits, and
    whether it should move the avatar at all, is left for a later round.**
 
+At `6b249cf`: `tn.py` **58/58**; selection-parts `c1`, `c3`, `c5` and
+grouping's `smoke.py` pass; the client app suite 1,870 (T2 32);
+`packages/client` navigation tests 35.
+
 ## 9. Next: a phone layout (its own round)
 From the operator's report (§8) and the reviews' N-3/N-4/S-10, for a
 pre-brief: the Edit panel on a phone (a collapsible bottom sheet, or

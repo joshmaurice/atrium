@@ -7,6 +7,9 @@
   commit is `6b249cf` (after the first DEV acceptance pass: handoff §8a);
   everything after it is `devtasks/`.
 - **Status:**
+  - **after the first DEV pass** (handoff §8a): fixes in `8ddd85e` and
+    `6b249cf`; `tn.py` 58/58, the earlier rounds' checks and the suites
+    pass at `6b249cf`. Those two fixes had no outside review;
   - a fresh-agent code check and three outside code reviews (Fable 5.2; the
     third, which ran the code, APPROVE WITH NITS at `c28064a`); every finding
     taken or written down (`HANDOFF-touch-nav.md` §5–§8);
