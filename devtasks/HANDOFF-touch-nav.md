@@ -310,6 +310,10 @@ grouping's `smoke.py` pass; the client app suite 1,871; `stage.test.js` 21.
 **ORBIT doing nothing on switching (on desktop too)** is left for its own
 round, as the operator chose (§9).
 
+**DEV at `33df9ef6`: accepted** (2026-11-13, 11:46 PT): "yep looks good".
+(The acceptance step named the teleporter pads as animated things: they
+aren't; Claude's error, corrected in the release package.)
+
 ## 9. Next: a phone layout (its own round)
 From the operator's report (§8) and the reviews' N-3/N-4/S-10, for a
 pre-brief: the Edit panel on a phone (a collapsible bottom sheet, or
@@ -326,3 +330,23 @@ position, circling the world's origin, and moves the avatar's node itself
 (§8a.3). For a pre-brief: what it should orbit (the selection, the point
 looked at, the avatar), where the camera starts, and whether the avatar
 should stay put while the camera orbits.
+
+**Two more from the operator at the second DEV pass (2026-11-13), for later
+rounds:**
+1. **"Move to" flickers while a behaviour turns the selected object** (the
+   `2-rotation.gltf` graph). The same kind of flicker as the sky list's,
+   fixed in undo-hold r3 (`2f28f030`). Not yet reproduced. Likely cause, from
+   the code: the Move to select's `disabled` follows `structuralBlock()`,
+   whose `sending: editTracker.pendingCount > 0` flips on and off with every
+   rotation the behaviour sends from the owner's tab, and
+   `refreshEditActions` runs on each `som:set`. Group and Ungroup may flicker
+   the same way. A fix would ignore a behaviour's own sends there, or
+   update the controls only when the reason changes; reproduce first (a
+   check like undo-hold's `h5.py`, counting changes in 2 s).
+2. **The sign-in state not always followed by the page:** signing in again
+   can leave the page in Inspect (not Edit) until the world is disconnected
+   and reconnected. signin-sync (`PREBRIEF-signin-sync.md`) made other tabs
+   follow a change of user; this case (the same tab, the same user signing
+   in again, perhaps after the session lapsed) needs a reproduction: what the
+   tab showed before, how the sign-in was done, and whether the socket
+   reconnected.

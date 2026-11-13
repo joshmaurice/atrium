@@ -7,6 +7,7 @@
   commit is `4f24180` (after the second DEV acceptance pass: handoff §8b);
   everything after it is `devtasks/`.
 - **Status:**
+  - **DEV acceptance passed at `33df9ef6`** (2026-11-13, 11:46 PT);
   - **after the second DEV pass** (handoff §8b): the desktop-site drawing
     buffer fix in `4f24180`; `tn.py`, the earlier rounds' checks and the
     suites pass there. No outside review;
@@ -77,8 +78,8 @@ the owner, in a world with a teleporter pad (Home has them).
       they are.
    3. **Still in desktop-site mode** (the second pass's fix, handoff §8b):
       looking and walking are as smooth as in normal mode; in Edit, a tap on
-      the middle of an object selects it; animated things (the teleporter
-      pads, any animated model) move smoothly. Then portrait and landscape
+      the middle of an object selects it; animated things (an animated
+      model, or an object turned by a behaviour) move smoothly. Then portrait and landscape
       both.
 10. **On a laptop (mouse):** drag to look, WASD, the wheel in ORBIT, Edit and
     a handle drag all work as before, and no stick appears.
