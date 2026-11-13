@@ -4,8 +4,8 @@
   now PROD and `main`). Code in 9 files (`git diff --stat b37c482 <tip> --
   . ':!devtasks'`): `NavigationController.js`, `touch-nav.js` (new),
   `app.js`, `index.html`, `edit-press.js`, and their tests. The last code
-  commit is `2eb6ea1`; everything after it is `devtasks/` (and the merge of
-  `main`'s `devtasks/`, `b7b9741`).
+  commit is `6b249cf` (after the first DEV acceptance pass: handoff §8a);
+  everything after it is `devtasks/`.
 - **Status:**
   - a fresh-agent code check and three outside code reviews (Fable 5.2; the
     third, which ran the code, APPROVE WITH NITS at `c28064a`); every finding
@@ -28,8 +28,8 @@
 
 ## 1. The DEV deploy
 Ask Claude for the DEV command. Claude checks the branch tip, and that
-nothing outside `devtasks/` changed since `2eb6ea1`
-(`git diff 2eb6ea1 <tip> -- . ':!devtasks'` is empty), then gives:
+nothing outside `devtasks/` changed since the last code commit
+(`git diff <last code commit> <tip> -- . ':!devtasks'` is empty), then gives:
 ```bash
 atrium-deploy-gate "dev <the 40-character tip SHA>"
 ```
@@ -83,7 +83,7 @@ much of the view in portrait: that is the next round (handoff §9).
 
 ## 3. MAIN and PROD (after the acceptance)
 Claude gives these with the deployed SHA filled in, after checking
-`git diff 2eb6ea1 <DEV SHA> -- . ':!devtasks'` is empty:
+`git diff 6b249cf <DEV SHA> -- . ':!devtasks'` is empty:
 ```bash
 atrium-main-approve <SHA> && atrium-deploy-gate "main <SHA>"
 ```
@@ -102,6 +102,9 @@ atrium-prod-approve <SHA> && atrium-deploy-gate "prod <SHA>"
 - **Zoom:** pinch in ORBIT mode.
 - **First person:** a button beside the stick (the V key's toggle), while
   connected.
+- The stick and button are the same size on screen at any page zoom
+  (Chrome's "desktop site" mode included), and the look turns by screen
+  distance.
 - The stick and button appear after the first touch, so mouse users never
   see them. They show in Edit and Inspect too, and hide in ORBIT.
 - **Taps stay taps:** a tap selects, inspects or triggers a behaviour as
@@ -118,11 +121,16 @@ atrium-prod-approve <SHA> && atrium-deploy-gate "prod <SHA>"
 - The saved-worlds list takes at most 40 % of the height, and scrolls inside.
 - A tap on the view no longer scrolls the bars off the top of the screen.
 
+**Fixed along the way:** leaving ORBIT puts the avatar back where it stood
+(it used to stay at the height the orbit left it, floating in WALK).
+
 **Stated limits:**
 - With the stick held: Edit panel buttons need the stick let go; a tap on a
   move handle does nothing; a double-tap can't go into a group.
 - Without the stick, a tap while another finger is looking makes a pinch,
   not a tap.
 - In portrait the Edit panel covers much of the view (the next round).
+- ORBIT starts where you stand, circling the world's origin, so switching
+  to it shows no change until a drag (unchanged; a later round).
 
 **Rollback:** to `b37c4823`. No stored data or protocol changed.

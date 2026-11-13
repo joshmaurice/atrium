@@ -247,6 +247,31 @@ put back at once if anything scrolls it. `probe10` after: scrollY 0; check
 t24. At `2eb6ea1`: `tn.py` **54/54**; selection-parts `c1`, `c3`, `c5` and
 grouping's `smoke.py` pass; the client app suite 1,870.
 
+## 8a. DEV acceptance, first pass (2026-11-12, DEV at `5555da73`)
+The operator, on his Android phone: "looks mostly good", and:
+1. **Desktop-site mode, portrait: the look too fast.** The page is laid out
+   980 px wide and zoomed out (`visualViewport.scale` 0.40), so a finger's
+   drag covered 2.5 × the CSS px. Reproduced with `probe12.py` (the page
+   served without its meta viewport, as Chrome's desktop site does: a 100
+   screen-px drag turned 1.256 rad, 0.612 in landscape at zoom 0.82). Fixed
+   (`8ddd85e`): the look turns by screen px.
+2. **There, the stick small and right at the left edge** (hard to push left).
+   Measured: 38 screen px across, 8 from the edge. Fixed (`8ddd85e`): the
+   stick and the button are sized and placed in screen px (scaled by
+   1 / zoom; the stick's radius for the gesture likewise), and the stick is
+   32 px from the edge in every mode (was 20), clear of Android's edge swipe.
+   `probe12` after: 96 px across, 32 from the edge, 0.500 rad, portrait and
+   landscape. Check t25.
+3. **ORBIT "doesn't change anything sometimes"** (on desktop too), and **the
+   avatar floating after orbit → walk.** Both predate this round (its diff
+   to `NavigationController` doesn't touch mode switching). ORBIT starts at
+   the avatar's own position around the world origin, so nothing moves
+   until a drag; it moves the avatar's node itself, and WALK keeps any
+   height (`max(0.7, y)`). Fixed the floating (`6b249cf`): entering ORBIT
+   remembers where the avatar stood, leaving it puts it back (unit tests
+   fail at `8ddd85e`, pass after; check t4e). **What ORBIT orbits, and
+   whether it should move the avatar at all, is left for a later round.**
+
 ## 9. Next: a phone layout (its own round)
 From the operator's report (§8) and the reviews' N-3/N-4/S-10, for a
 pre-brief: the Edit panel on a phone (a collapsible bottom sheet, or
@@ -254,5 +279,6 @@ narrower, so the selected object stays in view); landscape (the bars and
 the world browser take less height); "desktop site" mode (the scroll-away
 is fixed here, §8; the rest of it, at 980 px zoomed out, is the layout's);
 whether the top bar should wrap or collapse into a menu rather
-than scroll. Start with screenshots from the operator's phone and a probe
-like `spike-touch-nav/probe9.py`.
+than scroll. Start with screenshots from the operator's phone and probes like
+`spike-touch-nav/probe9.py` and `probe12.py` (desktop site emulated). Also
+for a later round: what ORBIT orbits (§8a.3).
