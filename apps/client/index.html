@@ -352,7 +352,7 @@
   /* ── touch-nav T3 — the on-screen stick and the first-person button ── */
   #touch-stick {
     position: absolute;
-    left: 20px;
+    left: 32px;               /* STICK_LEFT_PX: clear of Android's edge swipe */
     bottom: 60px;
     width: 96px;              /* 2 × STICK_RADIUS_PX */
     height: 96px;
@@ -375,7 +375,7 @@
   }
   #touch-fp {
     position: absolute;
-    left: 130px;
+    left: 142px;              /* FP_LEFT_PX */
     bottom: 60px;
     height: 36px;
     padding: 0 12px;

@@ -301,3 +301,15 @@ test('T2 primary, N-15 — a primary press drops a stale stick alone, and a stal
   assert.deepEqual(t.down({ id: 4, x: 200, y: 400, on: 'view', primary: true }), [], 'nothing to stop')
   assert.deepEqual(t.move({ id: 4, x: 220, y: 400 }), [{ type: 'look', dx: 20, dy: 0 }], 'the new finger looks; the stale one would have made it a pinch')
 })
+
+test('T2 stick — the radius may be a function (the page scales it by the page zoom: desktop site)', () => {
+  let scale = 1
+  const t = createTouchNav({ stickRadius: () => 48 / scale })
+  scale = 0.4                                   // 120 CSS px = 48 screen px
+  t.down({ id: 1, x: C.x, y: C.y, on: 'stick', stickCentre: C })
+  const fx = t.move({ id: 1, x: C.x - 120, y: C.y })
+  assert.ok(close(one(fx, 'move').x, -1), 'a full push at 120 CSS px')
+  assert.ok(close(one(fx, 'knob').dx, -120))
+  const half = one(t.move({ id: 1, x: C.x - 60, y: C.y }), 'move')
+  assert.ok(close(half.x, -(0.5 - 0.12) / 0.88), JSON.stringify(half))
+})

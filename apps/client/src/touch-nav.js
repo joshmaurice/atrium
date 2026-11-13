@@ -46,8 +46,9 @@ export const STICK_RADIUS_PX = 48
 export const STICK_DEAD_ZONE = 0.12
 
 export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_RADIUS_PX, deadZone = STICK_DEAD_ZONE } = {}) {
-  /** The slop may be a number or a function (the page scales it by the page zoom: N-8). */
+  /** The slop and the stick's radius may be numbers or functions (the page scales them by the page zoom: N-8, desktop site). */
   const slopPx = () => (typeof slop === 'function' ? slop() : slop)
+  const radiusPx = () => (typeof stickRadius === 'function' ? stickRadius() : stickRadius)
   /** @type {{ id: number, cx: number, cy: number } | null} */
   let stick = null
   /** The 'view' pointers, in press order (at most two). */
@@ -59,6 +60,7 @@ export function createTouchNav({ slop = TOUCH_LOOK_SLOP_PX, stickRadius = STICK_
   const dist = () => Math.hypot(views[0].x - views[1].x, views[0].y - views[1].y)
 
   function stickEffects(x, y) {
+    const stickRadius = radiusPx()
     let dx = x - stick.cx
     let dy = y - stick.cy
     const len = Math.hypot(dx, dy)

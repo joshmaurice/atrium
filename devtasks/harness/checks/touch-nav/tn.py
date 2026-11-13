@@ -391,6 +391,33 @@ with sync_playwright() as pw:
           f"scrollY {q.ev('scrollY')} (120 at b41bda6), focused {q.ev('document.activeElement.tagName')}")
     q.ctx.close()
 
+    # t25 — the operator at DEV (2026-11-12): in Chrome's "desktop site" mode, in portrait, the look
+    # was 2.5 x too fast and the stick small and 8 px from the edge. Emulated as probe12 does: the page
+    # without its meta viewport (laid out 980 px, zoomed out), in a Chromium without the local-network
+    # check (a rewritten page loses that permission). Everything measured in SCREEN px.
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'spike-touch-nav'))
+    from probe12 import desktop_site
+    br2 = pw.chromium.launch(args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+                                   '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults'])
+    q = desktop_site(br2); connect(q, k + 'z'); tq = Touch(q.page)
+    tq.down(0, 200, 600); tq.up(0); time.sleep(0.5)
+    sc = q.ev('visualViewport.scale')
+    st = q.ev("(() => { const r = document.getElementById('touch-stick').getBoundingClientRect(); return [r.left - visualViewport.offsetLeft, r.width, r.left + r.width / 2, r.top + r.height / 2] })()")
+    check('t25a desktop site, portrait (zoom %.2f): the stick is 96 screen px across and 32 from the left edge' % sc,
+          sc < 0.5 and abs(st[1] * sc - 96) < 2 and abs(st[0] * sc - 32) < 2, f'{st[1] * sc:.0f} px across, {st[0] * sc:.0f} px from the edge (38 and 8 at 5555da7)')
+    y0 = q.ev(NAV)['yaw']; d = 100 / sc
+    synth(q, 'pointerdown', 996, 200, 600, primary=True)
+    for j in range(1, 11): synth(q, 'pointermove', 996, 200 + d * j / 10, 600, primary=True)
+    synth(q, 'pointerup', 996, 200 + d, 600, primary=True); time.sleep(0.4)
+    dyaw = q.ev(NAV)['yaw'] - y0
+    check('t25b ... a 100 screen-px look-drag turns 0.5 rad, as at zoom 1', abs(dyaw + 0.5) < 0.02, f'Δyaw {dyaw:.3f} (−1.256 at 5555da7)')
+    synth(q, 'pointerdown', 997, st[2], st[3], primary=True); synth(q, 'pointermove', 997, st[2] - 48 / sc, st[3], primary=True); time.sleep(0.2)
+    inp = q.ev(NAV)['input']; knob = q.ev("document.getElementById('touch-stick-knob').style.transform")
+    synth(q, 'pointerup', 997, st[2] - 48 / sc, st[3], primary=True); time.sleep(0.2)
+    check('t25c ... the stick pushed 48 screen px left is a full push left, the knob at the rim', abs(inp[0] + 1) < 1e-6 and abs(inp[1]) < 1e-6 and knob.startswith('translate(-48'),
+          f'input {inp}, knob {knob}')
+    q.ctx.close(); br2.close()
+
     # t7 — a mouse page: no stick ever, the mouse drag turns at 0.002 rad / px as before
     m = Page(br); m.connect(f'wss://127.0.0.1:8443/w/{k}')
     mc = m.ev("(() => { const r = document.querySelector('#viewport canvas').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")

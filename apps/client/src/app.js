@@ -18,7 +18,7 @@ import { createEditModes } from './edit-modes.js'
 import { createEditTracker, createBehaviorHold, handleUpdate, TRANSFORM_FIELDS, REMOVED_MESSAGE } from './edit-gesture.js'
 import { pickEditSelection, isSelectClick, nodeForHitObject, findNodeObject, selectionPath, breadcrumbItems, escapeTarget, DUPLICATE_NAME_MESSAGE } from './edit-selection.js'
 import { createHandlePress } from './edit-press.js'   // selection-parts T17
-import { createTouchNav, TOUCH_LOOK_SLOP_PX } from './touch-nav.js'       // touch-nav T2
+import { createTouchNav, TOUCH_LOOK_SLOP_PX, STICK_RADIUS_PX } from './touch-nav.js'       // touch-nav T2
 import { createBehaviorForm, behaviorRowAction, NONE_LABEL, CUSTOM_LABEL } from './behavior-form.js'
 // scripting-4d-1 (G6) — the importer's panel, beside the template list.
 import { createGraphImportPanel } from './graph-import-panel.js'
@@ -89,8 +89,16 @@ const touchKnobEl   = document.getElementById('touch-stick-knob')
 const touchFpBtn    = document.getElementById('touch-fp')
 // N-8 (the second review) — the look slop is in screen px: at a page zoom
 // other than 1, CSS px are scaled by visualViewport.scale.
-const touchSlopPx   = () => TOUCH_LOOK_SLOP_PX / (window.visualViewport?.scale || 1)
-const touchNav      = createTouchNav({ slop: touchSlopPx })
+/**
+ * The page zoom. 1 on a phone's normal page; about 0.4 in Chrome's "desktop
+ * site" mode in portrait (the page laid out 980 px wide and zoomed out). The
+ * touch controls are sized and placed, and the look turns, by SCREEN px: the
+ * operator at DEV (2026-11-12) found the look 2.5 × too fast and the stick
+ * small and 8 px from the edge there (probe12).
+ */
+const pageScale     = () => window.visualViewport?.scale || 1
+const touchSlopPx   = () => TOUCH_LOOK_SLOP_PX / pageScale()
+const touchNav      = createTouchNav({ slop: touchSlopPx, stickRadius: () => STICK_RADIUS_PX / pageScale() })
 /** TN-L7 (a) — set by the first touch `pointerdown` on the page; never cleared. */
 let touchSeen = false
 // scripting-4c AC6 — the transient notice for a refused click, beside the HUD hint.
@@ -4187,14 +4195,37 @@ function updateTouchUI() {
   // N-1 — a static world walks by the stick too, but V's first person is a
   // connected avatar's: the button shows only while connected.
   touchFpBtn.hidden   = !show || !client.connected
+  layoutTouchControls()
   touchFpBtn.textContent = firstPerson ? '👤 Third person' : '👤 First person'
 }
+
+/**
+ * The stick and the button, in screen px whatever the page zoom: the stick
+ * 32 px from the screen's left edge (clear of Android's edge swipe), 60 px up,
+ * 96 px across; the button beside it. At zoom 1 these are the CSS values.
+ */
+const STICK_LEFT_PX = 32, TOUCH_BOTTOM_PX = 60, FP_LEFT_PX = 142
+function layoutTouchControls() {
+  const s = pageScale()
+  for (const [el, left] of [[touchStickEl, STICK_LEFT_PX], [touchFpBtn, FP_LEFT_PX]]) {
+    el.style.left = `${left / s}px`
+    el.style.bottom = `${TOUCH_BOTTOM_PX / s}px`
+    el.style.transformOrigin = 'left bottom'
+    el.style.transform = s === 1 ? '' : `scale(${1 / s})`
+  }
+}
+window.visualViewport?.addEventListener('resize', () => { if (touchSeen) layoutTouchControls() })
 
 function applyTouch(effects) {
   for (const fx of effects) {
     if (fx.type === 'move') nav.setMoveInput(fx.x, fx.z)
-    else if (fx.type === 'knob') touchKnobEl.style.transform = `translate(${fx.dx}px, ${fx.dy}px)`
-    else if (fx.type === 'look') { if (!gizmo?.dragging) nav.onTouchLook(fx.dx, fx.dy) }
+    // the knob moves inside the stick, which is scaled by 1 / pageScale(): its px are the stick's
+    else if (fx.type === 'knob') touchKnobEl.style.transform = `translate(${fx.dx * pageScale()}px, ${fx.dy * pageScale()}px)`
+    else if (fx.type === 'look') {
+      // by screen px (pageScale): in desktop-site portrait a drag was 2.5 × too fast
+      const s = pageScale()
+      if (!gizmo?.dragging) nav.onTouchLook(fx.dx * s, fx.dy * s)
+    }
     else if (fx.type === 'pinch') nav.onPinch(fx.ratio)
     else if (fx.type === 'swallow-click') swallowNextClick = true
     else if (fx.type === 'tap') touchTap(fx.x, fx.y)
