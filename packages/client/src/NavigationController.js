@@ -113,7 +113,18 @@ export class NavigationController {
   setMode(mode) {
     if (!this._allowedModes.includes(mode)) return
     if (mode === this._mode) return
-    if (mode === 'ORBIT') this._initOrbitFromCurrentPosition()
+    if (mode === 'ORBIT') {
+      // ORBIT moves the avatar's own node around the target; WALK keeps any
+      // height it finds. Remember where it stood, so leaving ORBIT puts it
+      // back (the operator at DEV, 2026-11-12: after orbiting, the avatar
+      // walked on "a few feet in the air").
+      const t = this._avatar.localNode?.translation
+      this._standing = t ? [...t] : null
+      this._initOrbitFromCurrentPosition()
+    } else if (this._mode === 'ORBIT' && this._standing && this._avatar.localNode) {
+      this._avatar.localNode.translation = [...this._standing]
+      this._standing = null
+    }
     this._mode = mode
   }
 

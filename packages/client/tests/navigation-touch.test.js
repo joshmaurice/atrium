@@ -173,3 +173,28 @@ test('touch-nav T1 — onPinch zooms ORBIT: spread (ratio > 1) comes closer; cla
     assert.equal(nav.orbitRadius, 10, `ratio ${bad} does nothing`)
   }
 })
+
+test('ORBIT then WALK puts the avatar back where it stood (the operator at DEV: floating after an orbit)', () => {
+  const { nav, avatar } = makeWiredAvatar()
+  nav.setMoveInput(0, -1); nav.tick(1.0); nav.setMoveInput(0, 0)     // walk a little first
+  const stood = [...avatar.localNode.translation]
+  nav.setMode('ORBIT')
+  nav.onMouseMove(0, 400)                                            // orbit up: the node rises
+  nav.tick(0.016)
+  assert.ok(avatar.localNode.translation[1] > stood[1] + 0.3, `orbiting lifted it: ${avatar.localNode.translation}`)
+  nav.setMode('WALK')
+  nav.tick(0.016)
+  const now = avatar.localNode.translation
+  assert.ok(close(now[0], stood[0]) && close(now[1], stood[1]) && close(now[2], stood[2]), `back where it stood: ${now} vs ${stood}`)
+})
+
+test('ORBIT then FLY puts it back too; WALK to FLY does not move it', () => {
+  const { nav, avatar } = makeWiredAvatar()
+  const stood = [...avatar.localNode.translation]
+  nav.setMode('ORBIT'); nav.onMouseMove(0, 400); nav.tick(0.016)
+  nav.setMode('FLY'); nav.tick(0.016)
+  assert.ok(close(avatar.localNode.translation[1], stood[1]), String(avatar.localNode.translation))
+  avatar.localNode.translation = [1, 2, 3]
+  nav.setMode('WALK')
+  assert.deepEqual(avatar.localNode.translation, [1, 2, 3])
+})

@@ -271,6 +271,9 @@ with sync_playwright() as pw:
     check('t4c a one-finger drag orbits', abs(p.ev("stage.nav._orbitAzimuth") - az0 + 0.5) < 0.03)
     p.ev("(() => { const s = document.getElementById('mode-switcher'); s.value = 'WALK'; s.dispatchEvent(new Event('change')) })()"); time.sleep(0.5)
     check('t4d back in WALK the stick shows again', p.ev(UI)['stick'])
+    back = p.ev(NAV)['pos']
+    check('t4e ... and the avatar is back where it stood before ORBIT (the operator at DEV: it floated after an orbit)',
+          math.dist(back, n0_pos) < 1e-6, f'{back} vs {n0_pos}')
 
     # t8 — the First person button by a real touch tap (N-2), and back
     bfp = p.ev("(() => { const r = document.getElementById('touch-fp').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()")
