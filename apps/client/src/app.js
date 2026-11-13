@@ -639,10 +639,23 @@ function rebuildPads() {
   }))
 }
 
+/**
+ * The view's size, and its drawing buffer at the screen's real resolution:
+ * device px per CSS px times the page zoom (touch-nav, the operator at DEV
+ * 2026-11-13: in Chrome's "desktop site" mode, zoom ≈ 0.4, the buffer was
+ * 6–10 × the screen's pixels, so the page lagged, and past the GPU's limit
+ * the picture no longer lined up with taps). Never above the device ratio.
+ * Called on a window resize, a page-zoom change, and any change in the view's
+ * size (100dvh follows the phone's address bar without a window resize).
+ */
 function onResize() {
-  stage.resize(viewportEl.clientWidth, viewportEl.clientHeight)
+  const zoom = window.visualViewport?.scale || 1
+  const pixelRatio = (globalThis.devicePixelRatio || 1) * Math.min(1, zoom)
+  stage.resize(viewportEl.clientWidth, viewportEl.clientHeight, { pixelRatio })
 }
 window.addEventListener('resize', onResize)
+window.visualViewport?.addEventListener('resize', onResize)
+if (typeof ResizeObserver === 'function') new ResizeObserver(() => onResize()).observe(viewportEl)
 onResize()
 
 // ---------------------------------------------------------------------------

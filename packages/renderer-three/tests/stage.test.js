@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert   from 'node:assert/strict'
 import * as THREE from 'three'
-import { Stage } from '../src/Stage.js'
+import { Stage, clampPixelRatio } from '../src/Stage.js'
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -520,4 +520,38 @@ test('Stage: WALK bind then unbind — third-person rig restored after setActive
   assert.ok(Math.abs(stage.camera.position.z - 4.0) < 0.01, 'after unbind: camera Z = offsetZ')
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(stage.camera.quaternion)
   assert.ok(fwd.z < 0, 'after unbind: forward.z < 0 (third-person look-at-avatar restored)')
+})
+
+// ---------------------------------------------------------------------------
+// touch-nav — the drawing buffer at the screen's resolution, within the GPU's limits
+// ---------------------------------------------------------------------------
+
+function glWith(maxRB, maxVP) {
+  return { MAX_RENDERBUFFER_SIZE: 1, MAX_VIEWPORT_DIMS: 2, getParameter: (k) => (k === 1 ? maxRB : maxVP) }
+}
+
+test('touch-nav: resize() with a pixelRatio sets it before the size; without one, leaves it', () => {
+  const r = makeRenderer(); const calls = []
+  r.setPixelRatio = (pr) => calls.push(['pr', pr]); r.setSize = (w, h) => calls.push(['size', w, h])
+  const stage = new Stage(makeContainer(), { _renderer: r })
+  calls.length = 0
+  stage.resize(390, 724, { pixelRatio: 2.625 })
+  assert.deepEqual(calls, [['pr', 2.625], ['size', 390, 724]])
+  calls.length = 0
+  stage.resize(390, 724)
+  assert.deepEqual(calls, [['size', 390, 724]], 'no pixelRatio: unchanged')
+  stage.resize(390, 724, { pixelRatio: NaN })
+  assert.equal(calls.filter(c => c[0] === 'pr').length, 0, 'a bad ratio is ignored')
+})
+
+test('touch-nav: clampPixelRatio keeps the buffer within MAX_RENDERBUFFER_SIZE and MAX_VIEWPORT_DIMS', () => {
+  // desktop site, portrait, as on the operator's phone: 980 x 1817 CSS px at ratio 2.625 = 2573 x 4770
+  const r = { getContext: () => glWith(4096, [4096, 4096]) }
+  const pr = clampPixelRatio(2.625, 980, 1817, r)
+  assert.ok(Math.abs(pr - 4096 / 1817) < 1e-9, `clamped by the height: ${pr}`)
+  assert.ok(1817 * pr <= 4096 && 980 * pr <= 4096)
+  assert.equal(clampPixelRatio(2.625, 390, 724, r), 2.625, 'a phone page fits: unchanged')
+  assert.equal(clampPixelRatio(2, 980, 1817, { getContext: () => glWith(16384, [8192, 3000]) }), 3000 / 1817, 'the viewport dims count too')
+  assert.equal(clampPixelRatio(2, 980, 1817, {}), 2, 'no context (a test renderer): unchanged')
+  assert.equal(clampPixelRatio(2, 0, 0, r), 2, 'no size yet: unchanged')
 })

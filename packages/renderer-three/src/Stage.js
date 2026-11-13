@@ -70,7 +70,9 @@ export class Stage {
     const canvas = this._renderer.domElement
     canvas.setAttribute?.('tabindex', '0')
     if (canvas.style) canvas.style.outline = 'none'
-    canvas.addEventListener?.('pointerdown', () => canvas.focus?.())
+    // preventScroll: the focus must not scroll the page to show the canvas in
+    // full (on a phone it scrolled the bars off the screen: touch-nav, probe10)
+    canvas.addEventListener?.('pointerdown', () => canvas.focus?.({ preventScroll: true }))
 
     // ── Scene ────────────────────────────────────────────────────────────────
     this._scene = new THREE.Scene()
@@ -316,11 +318,22 @@ export class Stage {
    * Update renderer and camera to match a new viewport size.
    * Call from the app's ResizeObserver or window.resize handler.
    *
+   * `pixelRatio` (optional) sets the drawing buffer's pixels per CSS px. It is
+   * clamped so the buffer fits the GPU's limits (MAX_RENDERBUFFER_SIZE,
+   * MAX_VIEWPORT_DIMS): past them WebGL silently gives a smaller buffer while
+   * three.js still draws the full viewport, so the picture is cropped and
+   * stretched and no longer lines up with picking (touch-nav: Chrome's
+   * "desktop site" on a phone asked for about 2570 × 4770).
+   *
    * @param {number} width
    * @param {number} height
+   * @param {{ pixelRatio?: number }} [opts]
    */
-  resize(width, height) {
+  resize(width, height, { pixelRatio } = {}) {
     this._viewportAspect = width / height
+    if (Number.isFinite(pixelRatio) && pixelRatio > 0) {
+      this._renderer.setPixelRatio?.(clampPixelRatio(pixelRatio, width, height, this._renderer))
+    }
     this._renderer.setSize(width, height)
     this._camera.aspect = width / height
     this._camera.updateProjectionMatrix()
@@ -401,4 +414,23 @@ export class Stage {
       this._camera.quaternion.copy(parentQuat.invert()).multiply(worldQuat)
     }
   }
+}
+
+/**
+ * The largest pixel ratio, up to `wanted`, whose drawing buffer for a
+ * `width` × `height` CSS px view fits the GPU's limits. Exported for tests.
+ *
+ * @param {number} wanted
+ * @param {number} width
+ * @param {number} height
+ * @param {{ getContext?: () => any }} renderer
+ */
+export function clampPixelRatio(wanted, width, height, renderer) {
+  const gl = renderer?.getContext?.()
+  if (!gl?.getParameter || !(width > 0) || !(height > 0)) return wanted
+  const rb = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)
+  const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS)
+  const maxW = Math.min(rb || Infinity, vp?.[0] || Infinity)
+  const maxH = Math.min(rb || Infinity, vp?.[1] || Infinity)
+  return Math.max(Math.min(wanted, maxW / width, maxH / height), 0.25)
 }

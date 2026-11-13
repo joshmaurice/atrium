@@ -9,9 +9,9 @@ import os, sys, time, re
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'harness', 'checks', 'touch-nav'))
 from tn_lib import *
 
-def desktop_site(br, w=390, h=760):
+def desktop_site(br, w=390, h=760, dsf=2):
     p = Page.__new__(Page)
-    p.ctx = br.new_context(ignore_https_errors=True, viewport={'width': w, 'height': h}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    p.ctx = br.new_context(ignore_https_errors=True, viewport={'width': w, 'height': h}, device_scale_factor=dsf, is_mobile=True, has_touch=True)
     def strip(route):
         r = route.fetch(); body = re.sub(r'<meta name="viewport"[^>]*>', '', r.text())
         route.fulfill(response=r, body=body)
