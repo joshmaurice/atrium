@@ -257,6 +257,7 @@ with sync_playwright() as pw:
     p.ev("document.getElementById('edit-toggle-btn').click()"); time.sleep(0.5)
 
     # t4 — ORBIT: the stick hides; a drag orbits; a pinch out zooms in
+    n0_pos = p.ev(NAV)['pos']        # where the avatar stands before ORBIT (t4e)
     p.ev("(() => { const s = document.getElementById('mode-switcher'); s.value = 'ORBIT'; s.dispatchEvent(new Event('change')) })()"); time.sleep(0.5)
     p.ev("stage.nav.orbitRadius = 10"); time.sleep(0.2)       # away from the 0.5 clamp (the avatar is at the spawn point)
     ui = p.ev(UI); n0 = p.ev(NAV)
