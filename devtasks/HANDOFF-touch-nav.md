@@ -321,7 +321,12 @@ narrower, so the selected object stays in view); landscape (the bars and
 the world browser take less height); "desktop site" mode (the scroll-away
 is fixed here, §8; the rest of it, at 980 px zoomed out, is the layout's);
 whether the top bar should wrap or collapse into a menu rather
-than scroll. Start with screenshots from the operator's phone and probes like
+than scroll. **And the saved-worlds list** (the operator, 2026-11-13): make it
+a much slimmer drop-down (or similar), since it takes a lot of the screen
+with a few worlds or more, on a phone most of all. The aim stated: these
+panels may be superseded later, so not polish, but keep the site fairly
+usable on a phone in normal mode (desktop-site mode is the workaround
+meanwhile). Start with screenshots from the operator's phone and probes like
 `spike-touch-nav/probe9.py` and `probe12.py` (desktop site emulated). 
 
 **ORBIT: its own round** (the operator's choice at §8b). Switching to ORBIT
@@ -345,8 +350,15 @@ rounds:**
    check like undo-hold's `h5.py`, counting changes in 2 s).
 2. **The sign-in state not always followed by the page:** signing in again
    can leave the page in Inspect (not Edit) until the world is disconnected
-   and reconnected. signin-sync (`PREBRIEF-signin-sync.md`) made other tabs
-   follow a change of user; this case (the same tab, the same user signing
-   in again, perhaps after the session lapsed) needs a reproduction: what the
-   tab showed before, how the sign-in was done, and whether the socket
-   reconnected.
+   and reconnected. **Likely cause, from the code:** this tab's own login
+   (`app.js`, the auth form's submit) sets the top bar and calls
+   `autoConnectToHomeWorld`, which returns at once when `client.connected`.
+   So a tab already connected to a world (signed out, or with a lapsed
+   session) keeps its old socket, which the server still treats as
+   anonymous: no edit rights, Inspect only. signin-sync's `applyChange`
+   (another tab's change, or a `SIGNED_OUT`) does disconnect and reconnect;
+   the tab's own login doesn't. **The operator's suggestion** (2026-11-13):
+   reconnect on login. To decide: reconnect to the **same** world as the
+   signed-in user (likely friendlier) or go to the home world, as
+   `applyChange` does now. Reproduce first (a harness check: connect
+   signed out, sign in, the Edit toggle available without a reconnect).
