@@ -1,12 +1,15 @@
 # Release package: `touch-nav`
 
 - **What:** the round on `claude/touch-nav`, based on `b37c482` (grouping,
-  now PROD and `main`). Code in 9 files (`git diff --stat b37c482 <tip> --
+  now PROD and `main`). Code in 11 files (`git diff --stat b37c482 <tip> --
   . ':!devtasks'`): `NavigationController.js`, `touch-nav.js` (new),
-  `app.js`, `index.html`, `edit-press.js`, and their tests. The last code
-  commit is `6b249cf` (after the first DEV acceptance pass: handoff §8a);
+  `app.js`, `index.html`, `edit-press.js`, `Stage.js`, and their tests. The last code
+  commit is `4f24180` (after the second DEV acceptance pass: handoff §8b);
   everything after it is `devtasks/`.
 - **Status:**
+  - **after the second DEV pass** (handoff §8b): the desktop-site drawing
+    buffer fix in `4f24180`; `tn.py`, the earlier rounds' checks and the
+    suites pass there. No outside review;
   - **after the first DEV pass** (handoff §8a): fixes in `8ddd85e` and
     `6b249cf`; `tn.py` 58/58, the earlier rounds' checks and the suites
     pass at `6b249cf`. Those two fixes had no outside review;
@@ -72,6 +75,11 @@ the owner, in a world with a teleporter pad (Home has them).
       the height, and the view stays visible.
    2. In Chrome's "desktop site" mode, tap the view: the bars stay where
       they are.
+   3. **Still in desktop-site mode** (the second pass's fix, handoff §8b):
+      looking and walking are as smooth as in normal mode; in Edit, a tap on
+      the middle of an object selects it; animated things (the teleporter
+      pads, any animated model) move smoothly. Then portrait and landscape
+      both.
 10. **On a laptop (mouse):** drag to look, WASD, the wheel in ORBIT, Edit and
     a handle drag all work as before, and no stick appears.
 
@@ -86,7 +94,7 @@ much of the view in portrait: that is the next round (handoff §9).
 
 ## 3. MAIN and PROD (after the acceptance)
 Claude gives these with the deployed SHA filled in, after checking
-`git diff 6b249cf <DEV SHA> -- . ':!devtasks'` is empty:
+`git diff 4f24180 <DEV SHA> -- . ':!devtasks'` is empty:
 ```bash
 atrium-main-approve <SHA> && atrium-deploy-gate "main <SHA>"
 ```
@@ -124,7 +132,12 @@ atrium-prod-approve <SHA> && atrium-deploy-gate "prod <SHA>"
 - The saved-worlds list takes at most 40 % of the height, and scrolls inside.
 - A tap on the view no longer scrolls the bars off the top of the screen.
 
-**Fixed along the way:** leaving ORBIT puts the avatar back where it stood
+**Fixed along the way:**
+- In Chrome's "desktop site" mode on a phone, the 3D view is drawn at the
+  screen's resolution, not 2.5 × it: no more lag, taps select what they
+  touch, animations run smoothly. (On any device the view is drawn within
+  the GPU's size limit.)
+- Leaving ORBIT puts the avatar back where it stood
 (it used to stay at the height the orbit left it, floating in WALK).
 
 **Stated limits:**
@@ -134,6 +147,6 @@ atrium-prod-approve <SHA> && atrium-deploy-gate "prod <SHA>"
   not a tap.
 - In portrait the Edit panel covers much of the view (the next round).
 - ORBIT starts where you stand, circling the world's origin, so switching
-  to it shows no change until a drag (unchanged; a later round).
+  to it shows no change until a drag (unchanged; its own round next).
 
 **Rollback:** to `b37c4823`. No stored data or protocol changed.

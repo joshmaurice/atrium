@@ -276,6 +276,40 @@ At `6b249cf`: `tn.py` **58/58**; selection-parts `c1`, `c3`, `c5` and
 grouping's `smoke.py` pass; the client app suite 1,870 (T2 32);
 `packages/client` navigation tests 35.
 
+## 8b. DEV acceptance, second pass (2026-11-13, DEV at `5db2d6d8`)
+The operator: the look speed now normal; but **in desktop-site mode only**,
+the whole page laggy, a tap in Edit selects only at the bottom of an object
+or below it, and the animations not playing.
+
+Cause, measured with `probe13.py` (desktop site emulated, device ratio 2):
+the canvas is 980 CSS px wide there, so `devicePixelRatio` × CSS size made a
+drawing buffer of **1960×3654**, against 780×1448 in normal mode (6 × the
+pixels for the same screen). On the phone (ratio about 2.6) that is about
+2550×4750, past most phone GPUs' 4096 limit: the browser clamps the buffer,
+so the picture is cropped and stretched (objects drawn above where the pick
+finds them: the taps landing low), and each frame costs several times more
+(the lag). The animations follow the server clock, so at a few frames a
+second they look frozen. Not this round's doing, but desktop-site mode was
+only usable for the first time this round.
+
+Fix (`4f24180`): the drawing buffer is at the screen's resolution, not the
+layout's: pixel ratio = device ratio × min(1, page zoom), and never past the
+GPU's `MAX_RENDERBUFFER_SIZE` / `MAX_VIEWPORT_DIMS` (`clampPixelRatio` in
+`Stage.js`; `Stage.resize(w, h, { pixelRatio })`). It is recomputed on a
+zoom change (`visualViewport` resize) and on any change in the view's size
+(a `ResizeObserver`; the bars wrapping no longer leave a stale size). The
+canvas focus uses `preventScroll`. Two `stage.test.js` tests.
+`probe13` after: desktop site **779×1446** (normal 780×1448), the camera's
+aspect matching the view's, a tap at the cube's centre selects it, as
+loaded and after the view shrinks by 200 px without a window resize. (The
+harness's frame rate is software rendering, about 3 in both modes; the
+phone needs the check.)
+
+At `4f24180`: `tn.py` all pass; selection-parts `c1`, `c3`, `c5` and
+grouping's `smoke.py` pass; the client app suite 1,871; `stage.test.js` 21.
+**ORBIT doing nothing on switching (on desktop too)** is left for its own
+round, as the operator chose (§9).
+
 ## 9. Next: a phone layout (its own round)
 From the operator's report (§8) and the reviews' N-3/N-4/S-10, for a
 pre-brief: the Edit panel on a phone (a collapsible bottom sheet, or
@@ -284,5 +318,11 @@ the world browser take less height); "desktop site" mode (the scroll-away
 is fixed here, §8; the rest of it, at 980 px zoomed out, is the layout's);
 whether the top bar should wrap or collapse into a menu rather
 than scroll. Start with screenshots from the operator's phone and probes like
-`spike-touch-nav/probe9.py` and `probe12.py` (desktop site emulated). Also
-for a later round: what ORBIT orbits (§8a.3).
+`spike-touch-nav/probe9.py` and `probe12.py` (desktop site emulated). 
+
+**ORBIT: its own round** (the operator's choice at §8b). Switching to ORBIT
+shows no change, on desktop and phone: it starts at the avatar's own
+position, circling the world's origin, and moves the avatar's node itself
+(§8a.3). For a pre-brief: what it should orbit (the selection, the point
+looked at, the avatar), where the camera starts, and whether the avatar
+should stay put while the camera orbits.
