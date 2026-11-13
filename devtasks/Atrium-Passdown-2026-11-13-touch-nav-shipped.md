@@ -139,7 +139,9 @@ In the order Claude suggests. The operator hasn't chosen yet.
    usable:
    - the Edit panel covers much of the view in portrait;
    - **the saved-worlds list becomes a much slimmer drop-down** (it takes a
-     lot of the screen with a few worlds or more);
+     lot of the screen with a few worlds or more). **On desktop too, not
+     just phones** (the operator, 2026-11-13): it is a change for every
+     screen size, not a phone-only layout rule;
    - landscape;
    - the top bar wraps or collapses instead of scrolling.
 
