@@ -106,22 +106,34 @@ In the order Claude suggests. The operator hasn't chosen yet.
      `h5.py` (counting rebuilds in 2 s) is the pattern. The sky list's
      flicker (fixed in undo-hold r3) had a different cause: a rebuild on
      every `som:set`.
-   - **A custom graph (`2-rotation.gltf`) couldn't be applied to a group**
-     (the operator, 2026-11-13, after this passdown was first written). Not
-     yet investigated beyond a first look at the code, which found no rule
-     that refuses it:
-     - the import panel's target picker lists every non-avatar node,
-       groups included (`graph-import-panel.js` `candidatesFor`);
-     - Save gives a node without an id one first (F9);
-     - GR-L10 only refuses *moves* that change which behaviours may write
-       an object.
-
-     So the failure is somewhere else. Ask the operator what he saw: the
-     group missing from the picker, an error (its text), or saved but not
-     turning. Ask him to attach `2-rotation.gltf`, since it isn't in the
-     repo, then reproduce in the harness. Separate from multi-select:
-     applying one behaviour to several selected objects would be a
-     multi-select feature, but this case is about one group node.
+   - **An imported graph can't target an object that has no id yet**
+     (the operator, 2026-11-13, with `2-rotation.gltf`: one `onTick` →
+     `quatMul` → `pointer/set` on `/nodes/0/rotation`, 0.05 rad a tick about
+     Y; it is the file attached in that session, from an earlier Claude).
+     **Reproduced in node.** A group made by Group has no `objectId` until
+     something gives it one. The import panel's target picker lists such a
+     node by name (`name:<name>`, `graph-import-panel.js` `pickerValue`),
+     and `mapping.nodes` passes that string straight into `convertGraph`'s
+     `nodeMap`. The conversion is refused before Save with "the conversion
+     produces a value the rule refuses: nodeMap or targets is malformed".
+     The node in node.js: own without an id, targeting itself → that
+     refusal; with an id → ok; targeting a model that has an id → ok.
+     **Why it then "started working":** the operator retargeted to a model,
+     and Save's stage 1 gave the group its id. After that, the group could
+     target itself. **The template form doesn't have the bug:**
+     `behavior-form.js` gives a `name:` target its id before sending (its
+     stage for `snapshot.targetName`); the import panel only does that for
+     its own node. **Fix:**
+     - a target that is the own node maps to `mapping.own`;
+     - another id-less target gets its id in a stage, as the form does;
+     - the stand-in id is used for the preview until then;
+     - a test: a group with no id, targeting itself and another id-less node.
+   - **The group turned about one object's axis.** As designed: Group puts
+     the new group's origin at the grouped object's position (GR-L1 (a),
+     `edit-group.js`; that object goes in at translation 0), so a spin turns
+     everything about that object's origin. A later round could offer
+     "centre the group's origin on its parts" (a pivot), keeping every
+     part's world placement.
 2. **A phone layout** (HANDOFF §9). The aim the operator stated: not polish,
    since these panels may be superseded, but keep normal phone mode fairly
    usable:
