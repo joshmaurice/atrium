@@ -150,3 +150,37 @@ window, older than this round) are recorded, not changed.
 check failed on a rerun (SwiftShader; it needs the README's
 `ATRIUM_AUTOSAVE_DEBOUNCE_MS=3000` server too); grouping 248/248;
 selection-parts 135/135; touch-nav `tn.py` 58/58.
+
+## 6. The outside code review (Claude Fable 5.2, at `163c127`, ran the code)
+Verdict: CHANGES REQUESTED, one must-fix, two should-fix, five nits. Its
+file (`REVIEW-small-fixes-code-fable.md`) and probes are in that session,
+not in the repo. Everything but N-2 and N-4 is fixed in `1d5aa16`, each
+with a unit test in `small-fixes.test.js`:
+- **M-1 (a regression from §5's fix 1):** after Edit off → on, the same
+  object's Behaviour fields stayed hidden. The closed render hid the
+  container without touching the parameter cache, and a cache hit skipped
+  the show. Now a hit shows the container, and the closed render clears
+  the key. `checks/small-fixes/m1.py` checks it in the page (PASS).
+- **S-1:** the preview's "It can change:" line named an id-less target by
+  its stand-in id. It now names the object.
+- **S-2:** an own node given its id elsewhere while the panel was open got
+  a second `setObjectId` (refused, "objectId is already set"). R10 now holds
+  for the own node too, in the preview and at Save.
+- **N-1:** the file, graph and target pickers are held while a Save runs
+  (a new file mid-Save used to be what went out).
+- **N-3:** a sign-out during the Public switch's request no longer throws.
+- **N-5:** the failed-model colour is written as `rgb(…)`, the form the DOM
+  stores, so the change-only comparison matches.
+- **Not changed:** N-2 (two id-less nodes with one name are one choice; the
+  server resolves by name the same way, so the two agree) and **N-4, the
+  operator's decision**: while connected to one of your worlds, a list
+  refresh (Create) puts the drop-down back on the connected world, R13 read
+  literally. The switch has no confirmation, so a choice that moved by
+  itself could make the wrong world public.
+
+**After the fixes (at `1d5aa16`):** app suite 1,906 pass; `m1`, `r1`,
+`r2`, `r3`, `w1` PASS; signin-sync `c.py` 22/22; undo-hold `h5` PASS;
+scripting-4b-2 `f1`, `f1b`, `f2`, `f3`, `r7` identical to `b639d81` with
+ids and numbers masked (the reviewer's comparison; those checks need
+`tests/fixtures/*.bin` copied into the harness root); grouping `c1`, `c2`
+PASS; touch-nav `tn.py` 58/58.
