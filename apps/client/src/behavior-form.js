@@ -918,6 +918,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
         ? pickable().map((node) => [pickerValue(node), node.name]) : null,
     ])
     if (container._paramsKey === paramsKey) {
+      // the review's M-1 — the closed render hides the container without
+      // coming here, so a cache hit after a re-open must show it again
+      show(container, Boolean(state.open && !state.custom && state.template !== NONE_LABEL))
       renderHint(elements.hintText)
       if (elements.noLights) show(elements.noLights, state.template === 'select-light' && pickable().length === 0)
       return
@@ -1094,6 +1097,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     show(elements.log, open)
     if (!open) {
       show(elements.params, false)
+      if (elements.params) elements.params._paramsKey = null   // M-1 — redraw on the next open
       show(elements.actions, false)
       text(elements.status, '')
       renderList(elements.lines, [])

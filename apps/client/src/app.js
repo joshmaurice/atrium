@@ -482,7 +482,8 @@ function renderWorldList(worlds) {
       wbError.textContent = "Couldn't change visibility"
     } finally {
       select.disabled = false
-      toggle.disabled = chosenWorld().isCommons === true
+      // the review's N-3 — a sign-out mid-request empties the list
+      toggle.disabled = chosenWorld()?.isCommons === true
       wbSyncChoice?.()   // a connect that landed meanwhile is shown now
     }
   })
@@ -4913,7 +4914,8 @@ function refreshModelRow() {
   if (epModelStatus) {
     const status = modelStatuses.get(selected)
     setIfChanged(epModelStatus, 'textContent', statusText(status))
-    setIfChanged(epModelStatus, 'style.color', status?.status === MODEL_STATUS.failed ? '#f87171' : '')
+    // the review's N-5 — rgb(), the form the DOM stores, so the comparison matches
+    setIfChanged(epModelStatus, 'style.color', status?.status === MODEL_STATUS.failed ? 'rgb(248, 113, 113)' : '')
   }
   // Z7 — the clip controls live in this row, so this one place re-renders them.
   animationControls?.refresh()

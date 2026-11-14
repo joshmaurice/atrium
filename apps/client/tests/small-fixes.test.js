@@ -482,3 +482,81 @@ describe('SF-2 R5 the Behaviour form: an idle render writes nothing (the code ch
     assert.deepEqual(idle({ kind: 'graph', origin: 'local', enabled: true, graph: { declarations: [], nodes: [] }, nodeMap: [], targets: [], animations: [] }), {})
   })
 })
+
+describe('the outside review (Fable, 163c127)', () => {
+  test('M-1: a template object re-opened after a close shows its fields again', () => {
+    const OWN_ID = '11111111-1111-4111-8111-111111111111'
+    const TGT_ID = '22222222-2222-4222-8222-222222222222'
+    const target = { name: 'target', extras: { atrium: { objectId: TGT_ID } } }
+    const own = { name: 'crate', extras: { atrium: { objectId: OWN_ID } } }
+    const elements = elementsFor()
+    const form = createBehaviorForm({ elements, deps: {
+      selected: () => own, nodes: () => [own, target], status: () => ({}),
+      write: { setObjectId: () => 1, sendField: () => 2 }, newObjectId: () => '9',
+      createElement: (t) => el(t), showError() {}, clearError() {},
+      logLines: () => [], clipStatus: () => ({ known: false, clips: [] }),
+    } })
+    form.open(own)
+    form.onTemplateChange('select-visibility')
+    form.render()
+    assert.notEqual(elements.params.style.display, 'none')
+    const fields = elements.params.children.length
+    assert.ok(fields > 0)
+    form.close()                 // Edit off
+    assert.equal(elements.params.style.display, 'none')
+    form.open(own)               // Edit on, the same object
+    form.onTemplateChange('select-visibility')
+    form.render()
+    assert.notEqual(elements.params.style.display, 'none', 'the fields are shown again')
+    assert.equal(elements.params.children.length, fields)
+  })
+
+  test('S-1: the preview names an id-less target, not its stand-in', () => {
+    const own = node('Spinner', OTHER)
+    const { panel, elements } = setup({ nodes: [own, node('group-02')], selected: own })
+    panel.open()
+    panel.chooseSource(bytesOf(source(1)), 'one.gltf')
+    panel.setTarget('node', 0, 'name:group-02')
+    assert.match(elements.grants.textContent, /group-02/)
+    assert.doesNotMatch(elements.grants.textContent, STAND_IN_RE)
+    assert.doesNotMatch(elements.grants.textContent, /00000000-0000-4000-8000-/)
+  })
+
+  test('S-2: the own node given an id elsewhere while the panel is open gets no second one', () => {
+    const group = node('group-01')
+    const { panel, calls } = setup({ nodes: [group], selected: group })
+    panel.open()
+    panel.chooseSource(bytesOf(source(1)), 'one.gltf')
+    panel.setTarget('node', 0, 'name:group-01')
+    group.extras.atrium.objectId = IDS[3]   // another owner tab's Save
+    panel.convert()
+    assert.equal(panel.state.conversion?.value?.nodeMap?.[0], IDS[3], 'the preview maps it to the real id')
+    panel.save()
+    assert.equal(calls.setObjectId.length, 0, 'no second id asked for')
+    assert.equal(calls.sendField.length, 1)
+    assert.equal(behaviorCheck(calls.sendField[0].value, { ownId: IDS[3] }).problem, null)
+  })
+
+  test('N-1: while a Save runs, the file, graph and target pickers are held', () => {
+    const own = node('Spinner', OTHER)
+    const nodes = [own, node('group-02'), node('group-03')]
+    const { panel, elements, calls, accept } = setup({ nodes, selected: own })
+    panel.open()
+    panel.chooseSource(bytesOf(source(1)), 'one.gltf')
+    panel.setTarget('node', 0, 'name:group-02')
+    const s1 = panel.save()
+    assert.equal(elements.file.disabled, true)
+    assert.equal(elements.graphs.disabled, true)
+    assert.ok(pickers(elements).every((p) => p.disabled === true))
+    assert.equal(panel.chooseSource(bytesOf(source(2)), 'two.gltf'), null, 'a new file is not taken mid-Save')
+    panel.setTarget('node', 0, 'name:group-03')
+    assert.equal(panel.state.mapping['node:0'], 'name:group-02', 'the row is not changed mid-Save')
+    accept(s1)
+    assert.equal(calls.sendField.length, 1)
+    assert.deepEqual(calls.sendField[0].value.targets, [IDS[0]])
+    assert.equal(elements.file.disabled, true, 'still saving: the leaf is unanswered')
+    accept(calls.sendField[0].seq)
+    assert.equal(elements.file.disabled, false)
+    assert.ok(pickers(elements).every((p) => p.disabled === false))
+  })
+})

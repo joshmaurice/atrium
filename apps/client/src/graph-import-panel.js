@@ -98,6 +98,9 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
 
   /** R16 — an object's name through `nameOf`, or its id when it has none. */
   function grantName(id) {
+    // the review's S-1 — a preview's stand-in is named as the object it stands for
+    const standing = state.standInNames?.get(id)
+    if (standing) return standing
     if (!nameOf) return id
     try {
       const name = nameOf(id)
@@ -193,6 +196,8 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   }
 
   function chooseSource(bytes, name = '') {
+    // the review's N-1 — nothing the Save is built from changes while it runs
+    if (state.saving) return null
     const parsed = parseGraphSource(bytes, { name })
     state.problem = parsed.problem ?? null
     state.fileName = String(name ?? '')
@@ -217,6 +222,7 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   }
 
   function chooseGraph(index) {
+    if (state.saving) return   // N-1
     const graphs = state.parsed?.graphs ?? []
     const next = Number(index)
     if (!Number.isInteger(next) || next < 0 || next >= graphs.length) return
@@ -228,6 +234,7 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   }
 
   function setTarget(kind, fileIndex, value) {
+    if (state.saving) return   // N-1
     if (!value) delete state.mapping[`${kind}:${fileIndex}`]
     else state.mapping[`${kind}:${fileIndex}`] = value
     state.conversion = null
@@ -238,6 +245,7 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   }
 
   function setAnimationTarget(fileIndex, value) {
+    if (state.saving) return   // N-1
     const entry = state.animations.find((animation) => animation.index === Number(fileIndex))
     if (!entry) return
     entry.object = value ?? ''
@@ -340,8 +348,10 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     // R7 — the two namespaces are separate: a node row keys `mapping.nodes` by
     // its FILE index, a light row keys `mapping.lights` by its LIGHT index, so
     // `/nodes/0` and `/lights/0` can never land in one slot.
-    const mapping = { own: state.ownId ?? OWN_STAND_IN, nodes: {}, lights: {}, subtree: [] }
+    // the review's S-2 — an own node given its id elsewhere maps to that id
+    const mapping = { own: state.ownId ?? idOf(state.node) ?? OWN_STAND_IN, nodes: {}, lights: {}, subtree: [] }
     const standIns = new Map()
+    state.standInNames = new Map()   // S-1 — so the preview names them
     /** A held value's id; a stand-in for the preview; or `{gone}` / `{missingId}`. */
     const resolve = (held) => {
       // the code check's N-6 — a node that is no longer there (a stale
@@ -351,7 +361,10 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
       if (id != null) return id
       if (forSend) return { missingId: true }
       const node = heldNode(held)
-      if (!standIns.has(node)) standIns.set(node, targetStandIn(standIns.size))
+      if (!standIns.has(node)) {
+        standIns.set(node, targetStandIn(standIns.size))
+        state.standInNames.set(standIns.get(node), node.name)
+      }
       return standIns.get(node)
     }
     for (const row of mappingRows()) {
@@ -430,6 +443,8 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     if (!nodes.includes(node)) return cancelSave(TARGET_GONE)
     if (heldValues().some((held) => typeof held === 'string' && held !== '' && !heldNode(held))) return cancelSave(TARGET_GONE)
 
+    // S-2 (R10 for the own node) — an id it got elsewhere is used, not asked again
+    if (!state.ownId) state.ownId = idOf(node)
     // Stage 1 — F9's rule: the node gets an `objectId` before anything names it.
     if (!state.ownId) {
       const id = deps.newObjectId?.()
@@ -539,6 +554,7 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
 
       const picker = create('select')
       picker.setAttribute('aria-label', `${file} (${row.kind}) target`)
+      picker.disabled = Boolean(state.saving)   // N-1 — held while a Save runs
       const options = candidatesFor(importTargetKind(row))
       const held = row.kind === 'animation'
         ? state.animations.find((animation) => animation.index === row.fileIndex)?.object ?? ''
@@ -612,6 +628,10 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
       : NO_GRAPH_YET)))
     if (elements.save) elements.save.disabled = !state.conversion || state.saving
     if (elements.close) elements.close.disabled = state.saving
+    // N-1 — the file and graph pickers are held while a Save runs, as the
+    // Behaviour form holds its fields (W8)
+    if (elements.file) elements.file.disabled = Boolean(state.saving)
+    if (elements.graphs) elements.graphs.disabled = Boolean(state.saving)
     text(elements.fileName, state.fileName)
   }
 
