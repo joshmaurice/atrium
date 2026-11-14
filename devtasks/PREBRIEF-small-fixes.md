@@ -154,6 +154,9 @@ offer "centre the group's origin on its parts".
   and disconnect. **Choosing a world in it opens that world.** The switch
   and Delete act on the world the tab is in, and are off while it is in
   none of these (or still connecting). A refresh changes none of this.
+  After a Delete of the world the tab is in, the tab goes to the home world,
+  or disconnects when the home world itself was deleted (the operator,
+  2026-11-14, on the follow-up review's S-3).
 - **R14.** Opening (the old Load), the switch and Delete keep today's code
   (moved, not rewritten): the same requests, the same generation checks,
   the same messages. An empty list still reads "No worlds saved yet."

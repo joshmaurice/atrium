@@ -195,3 +195,23 @@ button. The pre-brief is Rev 1.1 (R12–R14, SF-L5).
 - `signin-sync.test.js`'s connect site 1 is the drop-down's `change`
   handler; `signin-sync/c.py` opens a world by choosing it; `w1.py` checks
   the new rules.
+
+## 8. The follow-up review (Fable, at `aa73f48`, ran the code)
+Verdict: CHANGES REQUESTED for one small item. All six fixes of §6 held
+(its probes `b1`, `b2`, `p3`, `b6` and a new one for N-3). Its report,
+`REVIEW-small-fixes-code-fable-2.md`, and probes are in that session. All
+fixed in `3255ba6`:
+- **M-2:** during a teleport out of one of your worlds the row still showed
+  the old world with the switch and Delete live. `connecting` now syncs the
+  row (`currentWorldUrl` is null by then, so it shows no world).
+- **N-6:** Delete is held while the switch's request runs.
+- **S-3 (the operator: go to the home world):** after deleting the world the
+  tab is in, it stayed inside it, still editing (the server never closes a
+  deleted world's sessions). `leaveDeletedWorld` now goes home through
+  `reconnectSignedIn`, or disconnects when home itself was deleted.
+- **S-4:** with the drop-down focused after a pick, a held key or the arrow
+  keys went on opening worlds. The handler blurs it.
+- **N-7:** a successful open clears an older "Load failed: …".
+
+**After the fixes (at `3255ba6`):** app suite 1,909 pass; `w1` 12/12 (with
+the go-home check), `c.py` 22/22, `r1`, `r2`, `r3`, `m1` PASS.
