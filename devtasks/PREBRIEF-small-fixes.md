@@ -1,7 +1,7 @@
 # Pre-brief: three bugs and a slimmer saved-worlds list (`small-fixes`)
 
-Status: **Revision 1.0 (2026-11-13), decisions taken; to be built on this
-branch.** The operator, 20:11 PT: "ok the small bug round with the sign-in
+Status: **Revision 1.1 (2026-11-14): SF-L5 changes SF-4's row (§3 R12–R14,
+§6).** Revision 1.0 (2026-11-13) took the first decisions. The operator, 20:11 PT: "ok the small bug round with the sign-in
 taking you to the same world you were in plz". That answers the last
 session's two questions: this round (passdown 2026-11-13 §4 item 1) and
 SF-L1 (a), the same world. The slimmer saved-worlds drop-down (§4 item 2's
@@ -29,8 +29,9 @@ on `33df9ef6` (touch-nav), state `COMPLETE`; `b639d81` adds only
 3. **SF-3, an imported graph can target an object that has no id yet,**
    including the object it is imported onto (a group made by Group).
 4. **SF-4, the saved-worlds list is one slim row:** a drop-down of the
-   worlds, with the Public switch, Load and Delete for the chosen one. On
-   every screen size.
+   worlds, then the Public switch and Delete. Choosing a world in the
+   drop-down opens it (SF-L5), so the switch and Delete act on the world
+   you are in. On every screen size.
 
 **Not in this round:** the group's pivot (§2.5); another tab's sign-in
 change (SF-L2); the rest of the phone layout; ORBIT.
@@ -145,15 +146,17 @@ offer "centre the group's origin on its parts".
 
 ### SF-4
 - **R12.** `#wb-list` holds one row: a `<select>` (`#wb-select`), one
-  option per world, labelled "name (slug · time)"; then the Public switch,
-  Load and Delete, acting on the chosen world. The note line stays,
-  above it.
-- **R13.** The chosen world: the one this tab is connected to when it is in
-  the list; else the one chosen before, if it is still there; else the
-  first. A refresh keeps the choice by id.
-- **R14.** Load, the switch and Delete keep today's code (moved, not
-  rewritten): the same requests, the same generation checks, the same
-  messages. An empty list still reads "No worlds saved yet."
+  option per world, labelled "name (slug · time)", after a placeholder
+  ("Open a saved world…"); then the Public switch and Delete. The note line
+  stays, above it. (Rev 1.1: there is no Load button.)
+- **R13 (Rev 1.1, SF-L5).** The drop-down shows the world this tab is in
+  when it is in the list, else the placeholder; it follows every connect
+  and disconnect. **Choosing a world in it opens that world.** The switch
+  and Delete act on the world the tab is in, and are off while it is in
+  none of these (or still connecting). A refresh changes none of this.
+- **R14.** Opening (the old Load), the switch and Delete keep today's code
+  (moved, not rewritten): the same requests, the same generation checks,
+  the same messages. An empty list still reads "No worlds saved yet."
 - **R15.** On every screen size (the operator, 2026-11-13).
 
 ## 4. Files
@@ -195,6 +198,13 @@ offer "centre the group's origin on its parts".
   step is a screen recording of it.
 - **SF-L4 (a): one row, with the note kept above it.** The least work; the
   note was copy-objects K9's rule.
+- **SF-L5 (b): choosing a world opens it** (the operator, 2026-11-14,
+  "let's go with the second for now"). The outside review's N-4 found that
+  with a choice apart from the world you are in, a list refresh moved the
+  choice back to the connected world, and the switch (which has no
+  confirmation) could then act on a world you weren't looking at. Option
+  (a), keeping the choice through a refresh, was not taken. The cost: a
+  world must be opened to change its visibility or delete it.
 
 ## 7. Release notes (draft)
 - Signing in while you're in a world as a guest now reconnects you to the
@@ -203,7 +213,7 @@ offer "centre the group's origin on its parts".
   behaviour moves an object.
 - A graph imported from a file can now target an object that hasn't been
   given an id yet, including the group it's imported onto.
-- Your saved worlds are now one compact drop-down row, with Public, Load and
-  Delete beside it.
+- Your saved worlds are now one compact drop-down. Choosing a world opens
+  it; Public and Delete beside it act on the world you're in.
 - Still the same: signing in or out in another tab still takes this tab to
   your home world.

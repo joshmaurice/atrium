@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Tony Parisi / Metatron Studio. See LICENSE in repo root.
 #
-# small-fixes SF-4 (R12-R15): the saved worlds as one drop-down row.
+# small-fixes SF-4 (R12-R15, SF-L5): the saved worlds as one drop-down row;
+# choosing a world in it opens it, and the switch and Delete act on the world
+# the tab is in.
 # On checks/signin-sync/authserver.mjs (the real server). Screenshots go to
 # $HARNESS_ROOT/shots/sf4-*.png: phone 390 x 844, desktop-site mode (the page
 # laid out 980 px wide and zoomed out, as Chrome's "desktop site"), 1280 x 900.
@@ -11,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripting-4c')
 from common import *   # noqa
 ROOT = os.environ.get('HARNESS_ROOT', '/tmp/atrium-harness')
 OPTS = "() => [...document.querySelectorAll('#wb-select option')].map(o => o.textContent)"
+VIS = "async (slug) => (await (await fetch('/api/worlds')).json()).find(w => w.slug === slug)?.visibility"
 ROW = """() => { const s = document.getElementById('wb-select'), l = document.getElementById('wb-list'), b = document.getElementById('world-browser')
   const t = l.querySelector('.wb-vis-toggle input')
   return { rows: l.querySelectorAll('.wb-item').length, options: s ? s.options.length : 0, chosen: s ? s.options[s.selectedIndex]?.textContent : null,
@@ -37,37 +40,45 @@ with sync_playwright() as pw:
     a.page.reload(); a.page.wait_for_function('window.atriumClient && window.stage'); a.wait_world(); a.page.wait_for_timeout(1200)
     r = a.ev(ROW); print('row:', r)
     n = a.ev("async () => (await (await fetch('/api/worlds')).json()).length")   # earlier runs may have left worlds
-    check(f'R12 one row, a drop-down with every world ({n}), then Public, Load, Delete', r['rows'] == 1 and r['options'] == n >= 4 and r['buttons'] == ['Load', 'Delete'] and r['label'] in ('Public', 'Private'), r)
-    check('R13 the chosen world is the one this tab is in (home)', slug_of(r['chosen']) == 'home', r['chosen'])
+    check(f'R12 one row: a drop-down of every world ({n}) and its placeholder, then Public and Delete (no Load)',
+          r['rows'] == 1 and r['options'] == n + 1 >= 5 and r['buttons'] == ['Delete'] and r['label'] in ('Public', 'Private'), r)
+    check('R13 the drop-down shows the world this tab is in (home)', slug_of(r['chosen']) == 'home', r['chosen'])
     shot(a, 'desktop-1280')
 
-    # choose another world, Load it: connected there, and the row still shows it
-    opts = a.ev(OPTS); park = next(o for o in opts if slug_of(o) == f'park-{tag}')
-    a.page.select_option('#wb-select', label=park); a.page.wait_for_timeout(200)
-    check('the switch follows the choice (a new world is private)', a.ev(ROW)['pub'] is False, a.ev(ROW))
-    a.page.click('#wb-list button:has-text("Load")')
+    # SF-L5: choosing a world opens it; the switch then shows that world
+    park = next(o for o in a.ev(OPTS) if slug_of(o) == f'park-{tag}')
+    a.page.select_option('#wb-select', label=park)
     ok = a.wait_world(f'/worlds/alice/park-{tag}'); a.page.wait_for_timeout(800)
-    check('R14 Load connects to the chosen world', ok, a.ev('atriumClient._wsUrl'))
-    check('R13 after Load the row shows that world', slug_of(a.ev(ROW)['chosen']) == f'park-{tag}', a.ev(ROW)['chosen'])
+    check('SF-L5 choosing a world in the drop-down opens it', ok, a.ev('atriumClient._wsUrl'))
+    r = a.ev(ROW)
+    check('SF-L5 the row shows that world, and its switch (a new world is private)', slug_of(r['chosen']) == f'park-{tag}' and r['pub'] is False, r)
 
-    # the switch: make park public; the server agrees; the choice stays
+    # the switch acts on the world you are in
     a.page.click('#wb-list .wb-vis-toggle input'); a.page.wait_for_timeout(800)
-    vis = a.ev("async (slug) => (await (await fetch('/api/worlds')).json()).find(w => w.slug === slug)?.visibility", f'park-{tag}')
-    check('R14 the switch makes the chosen world public (server agrees)', vis == 'public' and a.ev(ROW)['pub'] is True, (vis, a.ev(ROW)))
+    vis = a.ev(VIS, f'park-{tag}')
+    check('R14 the switch makes the world you are in public (server agrees)', vis == 'public' and a.ev(ROW)['pub'] is True, (vis, a.ev(ROW)))
 
-    # a refresh (Create) keeps the choice by id; the new world is listed
-    gallery = next(o for o in a.ev(OPTS) if slug_of(o) == f'gallery-{tag}')
-    a.page.select_option('#wb-select', label=gallery); a.page.wait_for_timeout(100)
-    a.page.click('#connectBtn'); a.wait('!atriumClient.connected', timeout=8000)   # not connected: the earlier choice rules
+    # a refresh (Create) keeps showing the world you are in
     a.page.fill('#wb-slug', f'pond-{tag}'); a.page.fill('#wb-name', 'pond'); a.page.click('#wb-create-btn'); a.page.wait_for_timeout(1500)
     r = a.ev(ROW)
-    check('R13 a refresh keeps the choice by id (gallery), and lists the new world', slug_of(r['chosen']) == f'gallery-{tag}' and r['options'] == n + 1 and any(slug_of(o) == f'pond-{tag}' for o in a.ev(OPTS)), r)
+    check('SF-L5 after a refresh the row still shows the world you are in, and lists the new world',
+          slug_of(r['chosen']) == f'park-{tag}' and r['options'] == n + 2 and any(slug_of(o) == f'pond-{tag}' for o in a.ev(OPTS)), r)
 
-    # Delete the chosen world (gallery), confirmed
+    # disconnected: the placeholder, and no world for the switch or Delete
+    a.page.click('#connectBtn'); a.wait('!atriumClient.connected', timeout=8000); a.page.wait_for_timeout(300)
+    r = a.ev(ROW); dis = a.ev("() => [document.querySelector('#wb-list .wb-vis-toggle input').disabled, document.querySelector('#wb-list button.danger').disabled]")
+    check('SF-L5 disconnected: the placeholder, the switch and Delete off', r['chosen'] == 'Open a saved world…' and dis == [True, True], (r, dis))
+
+    # open gallery from the drop-down, then Delete it (confirmed)
+    gallery = next(o for o in a.ev(OPTS) if slug_of(o) == f'gallery-{tag}')
+    a.page.select_option('#wb-select', label=gallery)
+    ok = a.wait_world(f'/worlds/alice/gallery-{tag}'); a.page.wait_for_timeout(600)
+    check('SF-L5 from disconnected, choosing a world opens it', ok and slug_of(a.ev(ROW)['chosen']) == f'gallery-{tag}', a.ev(ROW))
     a.page.once('dialog', lambda d: d.accept())
-    a.page.click('#wb-list button:has-text("Delete")'); a.page.wait_for_timeout(1500)
-    names = [slug_of(o) for o in a.ev(OPTS)]
-    check('R14 Delete removes the chosen world', f'gallery-{tag}' not in names and len(names) == n, names)
+    a.page.click('#wb-list button:has-text("Delete")'); a.page.wait_for_timeout(1800)
+    names = [slug_of(o) for o in a.ev(OPTS) if not o.startswith('Open a saved')]
+    check('R14 Delete removes the world you are in', f'gallery-{tag}' not in names and len(names) == n + 1, names)
+    print('   after Delete:', a.ev(ROW), '| connected:', a.ev('atriumClient.connected'))
     a.connect(HOME); a.page.wait_for_timeout(500)
 
     # screenshots on a phone, and in desktop-site mode

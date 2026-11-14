@@ -184,3 +184,14 @@ scripting-4b-2 `f1`, `f1b`, `f2`, `f3`, `r7` identical to `b639d81` with
 ids and numbers masked (the reviewer's comparison; those checks need
 `tests/fixtures/*.bin` copied into the harness root); grouping `c1`, `c2`
 PASS; touch-nav `tn.py` 58/58.
+
+## 7. SF-L5: choosing a world opens it (the operator, 2026-11-14)
+The operator's answer to N-4 was option 2: no separate choice, no Load
+button. The pre-brief is Rev 1.1 (R12–R14, SF-L5).
+- `renderWorldList`: a placeholder option ("Open a saved world…"), then the
+  worlds; a `change` runs the old Load code; the switch and Delete act on
+  the connected world only, and are off when there is none.
+- `wbSyncChoice` runs at `session:ready` and now at `disconnected` too.
+- `signin-sync.test.js`'s connect site 1 is the drop-down's `change`
+  handler; `signin-sync/c.py` opens a world by choosing it; `w1.py` checks
+  the new rules.

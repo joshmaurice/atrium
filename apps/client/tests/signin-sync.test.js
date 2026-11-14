@@ -238,8 +238,8 @@ describe('§6.4 the six connect sites', () => {
       return clean.slice(at, at + chars)
     }
 
-    test('1. the world-list Load', () => {
-      assert.match(near("itemLoadBtn.addEventListener('click'"), /const outcome = await trackConnect\(wsUrl/)
+    test('1. the world-list Load (small-fixes SF-L5: choosing a world in the drop-down)', () => {
+      assert.match(near("select.addEventListener('change', async () => {"), /const outcome = await trackConnect\(wsUrl/)
     })
     test('2. the teleport trigger', () => {
       assert.match(near('onTrigger:'), /trackConnect\(worldUrl/)

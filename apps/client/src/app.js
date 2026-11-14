@@ -333,12 +333,15 @@ async function refreshWorldList() {
   }
 }
 
-// small-fixes R12–R15 — the saved worlds are ONE row: a drop-down of the
-// worlds, then the Public switch, Load and Delete for the chosen one. The three
-// controls' code is the per-world row's, moved (R14): the same requests, the
-// same generation checks and the same messages; `w` is read at click time.
+// small-fixes R12–R15, SF-L5 — the saved worlds are ONE row: a drop-down of
+// the worlds, then the Public switch and Delete. Choosing a world in the
+// drop-down OPENS it (there is no Load button), so the drop-down always shows
+// the world this tab is in, and the switch and Delete act on that world only
+// (the operator, 2026-11-14: a choice apart from the world you are in let the
+// switch act on a world you were not looking at). The requests, generation
+// checks and messages are the per-world row's, moved (R14).
 // `var`: renderAuthState (above) clears them on sign-out, and can run first.
-var wbChosenId = null      // R13 — the chosen world, kept by id across refreshes
+var wbChosenId = null      // the world this tab is in, when it is in the list
 var wbWorlds = []          // the list the row was drawn from
 var wbSyncChoice = null    // set while a row exists: follows the connected world
 
@@ -358,16 +361,18 @@ function connectedWorldId(worlds) {
   return null
 }
 
+/** SF-L5 — the placeholder shown while this tab is in none of these worlds. */
+const WB_PLACEHOLDER = 'Open a saved world…'
+
 function renderWorldList(worlds) {
   wbList.innerHTML = ''
   wbWorlds = Array.isArray(worlds) ? worlds : []
   wbSyncChoice = null
   if (wbWorlds.length === 0) return
 
-  // R13 — connected, else the earlier choice if it is still there, else the first
-  const ids = new Set(wbWorlds.map((w) => w.id))
-  wbChosenId = connectedWorldId(wbWorlds) ?? (ids.has(wbChosenId) ? wbChosenId : wbWorlds[0].id)
-  const chosenWorld = () => wbWorlds.find((w) => w.id === wbChosenId) ?? wbWorlds[0]
+  // R13 (SF-L5) — the row shows the world this tab is in, and nothing else
+  wbChosenId = connectedWorldId(wbWorlds)
+  const chosenWorld = () => wbWorlds.find((w) => w.id === wbChosenId) ?? null
 
   const item = document.createElement('div')
   item.className = 'wb-item wb-row'
@@ -375,14 +380,19 @@ function renderWorldList(worlds) {
   const select = document.createElement('select')
   select.id = 'wb-select'
   select.setAttribute('aria-label', 'Saved worlds')
-  select.title = 'Choose a saved world'
+  select.title = 'Choose a saved world to open it'
+  const placeholder = document.createElement('option')
+  placeholder.value = ''
+  placeholder.textContent = WB_PLACEHOLDER
+  placeholder.disabled = true
+  select.appendChild(placeholder)
   for (const w of wbWorlds) {
     const option = document.createElement('option')
     option.value = w.id
     option.textContent = worldOptionLabel(w)   // text, never HTML
     select.appendChild(option)
   }
-  select.value = wbChosenId
+  select.value = wbChosenId ?? ''
   item.appendChild(select)
 
   // V6: visibility toggle switch
@@ -395,15 +405,20 @@ function renderWorldList(worlds) {
   toggleLabel.appendChild(toggle)
   toggleLabel.appendChild(toggleText)
 
-  /** The switch shows the chosen world (and the commons can't be private). */
+  const delBtn = document.createElement('button')
+
+  /** The switch and Delete show the world this tab is in; none: both off. */
   const showChoice = () => {
     const w = chosenWorld()
-    const isPublic = w.visibility === 'public'
-    const isCommons = w.isCommons === true
+    const isPublic = w?.visibility === 'public'
+    const isCommons = w?.isCommons === true
     toggle.checked = isPublic
     toggleText.textContent = ' ' + (isPublic ? 'Public' : 'Private')
-    toggle.disabled = isCommons
-    if (isCommons) {
+    toggle.disabled = !w || isCommons
+    delBtn.disabled = !w
+    if (!w) {
+      toggleLabel.title = 'Open one of your worlds to change who can see it'
+    } else if (isCommons) {
       toggleLabel.title = 'The commons is always public'
     } else {
       // copy-objects K9 — C2's note, beside the toggle (and above the list).
@@ -411,19 +426,80 @@ function renderWorldList(worlds) {
     }
   }
   showChoice()
-  select.addEventListener('change', () => { wbChosenId = select.value; showChoice() })
-  // R13 — a connect to one of these worlds (Load, a teleport, a sign-in's
-  // reconnect) makes it the chosen one
+
+  // SF-L5 — the row follows the connection: a connect to one of these worlds
+  // (choosing it here, a teleport, a sign-in's reconnect), a disconnect.
   wbSyncChoice = () => {
     // the code check's finding 4 — not while the switch's request is in flight
     // (the select is held then): its answer is for the world it was sent for
     if (select.disabled) return
     const id = connectedWorldId(wbWorlds)
-    if (id && id !== wbChosenId) { wbChosenId = id; select.value = id; showChoice() }
+    if (id !== wbChosenId || select.value !== (id ?? '')) {
+      wbChosenId = id
+      select.value = id ?? ''
+      showChoice()
+    }
   }
 
+  // SF-L5 — choosing a world opens it (the old row's Load, moved)
+  select.addEventListener('change', async () => {
+    const w = wbWorlds.find((x) => x.id === select.value)
+    if (!w) { wbSyncChoice?.(); return }
+    // until the connect lands, the switch and Delete act on no world
+    wbChosenId = null
+    showChoice()
+    try {
+      // Hide failure panel at start of user-initiated Load
+      hideTeleportFailurePanel()
+      // Perform a real WS connect via buildWorldWsUrl (pre-brief #1/#3, F1 fix)
+      if (!currentUser) {
+        wbError.textContent = 'Not logged in'
+        refreshWorldList()
+        return
+      }
+      const wsUrl = buildWorldWsUrl(
+        accountWsBase || computeWsUrl(window.location),
+        currentUser.username,
+        w.slug
+      )
+      if (!wsUrl) {
+        wbError.textContent = 'Invalid world identifier or missing username'
+        refreshWorldList()
+        return
+      }
+      showOverlay('Connecting to world…')
+      try {
+        const outcome = await trackConnect(wsUrl, {
+          avatar: buildAvatarDescriptor(),
+          displayName: currentUser.displayName || currentUser.username,
+        }, {
+          onError: (msg, err) => {
+            // V8: use code-specific wording when available
+            const loadCode = err?.code || null
+            const reason = codeToReason(loadCode)
+            wbError.textContent = 'Load failed: ' + (reason || msg)
+          },
+        })
+        if (outcome.status === 'superseded') {
+          // Superseded — a newer connect took over; do nothing
+          return
+        }
+      } catch {
+        refreshWorldList()
+        showOverlay('')
+        return
+      }
+      showOverlay('')
+    } catch (err) {
+      wbError.textContent = 'Load failed: ' + err.message
+    } finally {
+      // the drop-down shows where the tab is now (the old world, if this failed)
+      wbSyncChoice?.()
+    }
+  })
   toggle.addEventListener('change', async () => {
     const w = chosenWorld()
+    if (!w) return
     toggle.disabled = true
     select.disabled = true
     // signin-sync Rev 1, M2 — the auth generation this request starts under,
@@ -483,77 +559,18 @@ function renderWorldList(worlds) {
     } finally {
       select.disabled = false
       // the review's N-3 — a sign-out mid-request empties the list
-      toggle.disabled = chosenWorld()?.isCommons === true
+      toggle.disabled = !chosenWorld() || chosenWorld()?.isCommons === true
       wbSyncChoice?.()   // a connect that landed meanwhile is shown now
     }
   })
   item.appendChild(toggleLabel)
 
-  const itemLoadBtn = document.createElement('button')
-  itemLoadBtn.textContent = 'Load'
-  // Load works whether or not connected (pre-brief decision)
-  itemLoadBtn.disabled = false
-  itemLoadBtn.title = 'Load the chosen world'
-  itemLoadBtn.addEventListener('click', async () => {
-    const w = chosenWorld()
-    itemLoadBtn.disabled = true
-    try {
-      // Hide failure panel at start of user-initiated Load
-      hideTeleportFailurePanel()
-      // Perform a real WS connect via buildWorldWsUrl (pre-brief #1/#3, F1 fix)
-      if (!currentUser) {
-        wbError.textContent = 'Not logged in'
-        refreshWorldList()
-        return
-      }
-      const wsUrl = buildWorldWsUrl(
-        accountWsBase || computeWsUrl(window.location),
-        currentUser.username,
-        w.slug
-      )
-      if (!wsUrl) {
-        wbError.textContent = 'Invalid world identifier or missing username'
-        refreshWorldList()
-        return
-      }
-      showOverlay('Connecting to world…')
-      try {
-        const outcome = await trackConnect(wsUrl, {
-          avatar: buildAvatarDescriptor(),
-          displayName: currentUser.displayName || currentUser.username,
-        }, {
-          onError: (msg, err) => {
-            // V8: use code-specific wording when available
-            const loadCode = err?.code || null
-            const reason = codeToReason(loadCode)
-            wbError.textContent = 'Load failed: ' + (reason || msg)
-          },
-        })
-        if (outcome.status === 'superseded') {
-          // Superseded — a newer connect took over; do nothing
-          return
-        }
-      } catch {
-        refreshWorldList()
-        showOverlay('')
-        itemLoadBtn.disabled = false
-        return
-      }
-      showOverlay('')
-    } catch (err) {
-      wbError.textContent = 'Load failed: ' + err.message
-    } finally {
-      itemLoadBtn.disabled = false
-    }
-  })
-  item.appendChild(itemLoadBtn)
-
-  const delBtn = document.createElement('button')
   delBtn.textContent = 'Delete'
   delBtn.className = 'danger'
-  delBtn.title = 'Delete the chosen world'
+  delBtn.title = 'Delete the world you are in'
   delBtn.addEventListener('click', async () => {
     const w = chosenWorld()
+    if (!w) return
     if (!confirm(`Delete "${w.name || w.slug}"?`)) return
     delBtn.disabled = true
     try {
@@ -566,7 +583,7 @@ function renderWorldList(worlds) {
     } catch (err) {
       wbError.textContent = 'Delete failed: ' + err.message
     } finally {
-      delBtn.disabled = false
+      delBtn.disabled = !chosenWorld()
     }
   })
   item.appendChild(delBtn)
@@ -1080,6 +1097,7 @@ client.on('connecting', () => {
 })
 
 client.on('disconnected', () => {
+  wbSyncChoice?.()   // small-fixes SF-L5 — the switch and Delete act on no world now
   endEditSession()
   teardownWorld()
   setConnectionState('disconnected')
