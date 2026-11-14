@@ -6,8 +6,9 @@
 # /nodes/0/rotation, 0.05 rad a tick about Y), imported onto a cube through the
 # panel, as h5.py does. With the cube selected in Edit, this counts in 2 s:
 # changes of Move to / Group / Ungroup's `disabled` and `title`, and rebuilds of
-# Move to's options; with the spinner off, then on. Then a real mouse choice
-# from Move to while it spins.
+# Move to's options, and EVERY write the panel makes outside the transform
+# fields; with the spinner off, then on. Before the fix the values never change
+# but every control is rewritten about 35 times a second (PREBRIEF §2.2).
 # Server: checks/signin-sync/authserver.mjs with HOOKS=1.
 #   HARNESS_ROOT=/tmp/atrium-harness python3 devtasks/spike-small-fixes/r2_flicker.py [--expect-fixed]
 import os, sys
@@ -30,6 +31,14 @@ WATCH = """() => { const ids = ['ep-move-to', 'ep-group', 'ep-ungroup']; window.
       else if (m.attributeName === 'disabled' && el.disabled !== last.d) { c.disabled++; if (c.log.length < 6) c.log.push((el.disabled ? 'off ' : 'on ') + el.title); last.d = el.disabled }
       else if (m.attributeName === 'title' && el.title !== last.t) { c.title++; last.t = el.title } } })
       .observe(el, { attributes: true, childList: true }) } }"""
+# Every write the panel makes outside the transform fields (which do change:
+# the object turns), counted by element and kind, in 2 s.
+PANEL = """() => { window.__pw = {}; const panel = document.getElementById('edit-panel')
+  new MutationObserver((l) => { for (const m of l) { const t = m.target.nodeType === 1 ? m.target : m.target.parentElement
+     if (!t || t.closest('#ep-fields')) continue
+     const id = (t.id || t.closest('[id]')?.id || '?'); const k = id + ':' + (m.attributeName || m.type); window.__pw[k] = (window.__pw[k] || 0) + 1 } })
+   .observe(panel, { attributes: true, childList: true, subtree: true, characterData: true }) }"""
+PCOUNT = "() => { const r = window.__pw; window.__pw = {}; return r }"
 COUNT = "() => JSON.parse(JSON.stringify(window.__flk))"
 RESET = "() => { for (const c of Object.values(window.__flk)) { c.disabled = 0; c.title = 0; c.options = 0; c.log = [] } }"
 STATE = "() => ({ pending: __ep().gate?.pendingCount ?? null, dis: document.getElementById('ep-move-to').disabled, title: document.getElementById('ep-move-to').title })"
@@ -51,12 +60,15 @@ with sync_playwright() as pw:
     imp = import_graph(a, x, gltf_doc(G, ['Spinner']), '2-rotation.gltf', {'Spinner (node)': x})
     print('import status:', imp.get('after', {}).get('status'))
     a.edit_on(); select_node(a, x); a.page.wait_for_timeout(500)
-    a.ev(WATCH)
-    idle = counts(a); print('spinner off: in 2 s', {k: {kk: v[kk] for kk in ('disabled', 'title', 'options')} for k, v in idle.items()})
+    a.ev(WATCH); a.ev(PANEL)
+    idle = counts(a); a.ev(PCOUNT); print('spinner off: in 2 s', {k: {kk: v[kk] for kk in ('disabled', 'title', 'options')} for k, v in idle.items()})
     set_enabled(a, x, True); a.edit_on(); select_node(a, x); a.page.wait_for_timeout(800)
     r0 = rot(a, x); a.page.wait_for_timeout(500); r1 = rot(a, x)
     print('spinning:', r0 != r1, '| state', a.ev(STATE))
+    a.ev(PCOUNT)
     busy = counts(a); print('spinner on: in 2 s', {k: {kk: v[kk] for kk in ('disabled', 'title', 'options')} for k, v in busy.items()})
+    writes = a.ev(PCOUNT); print('   panel writes in 2 s (outside the transform fields):', writes)
+    total = sum(writes.values())
     print('   Move to log:', busy['ep-move-to']['log'])
     check('the spinner runs (the rotation changes)', r0 != r1, (r0, r1))
     check('spinner off: Move to, Group, Ungroup steady', all(v['disabled'] == 0 and v['options'] == 0 for v in idle.values()), idle)
@@ -64,8 +76,9 @@ with sync_playwright() as pw:
     if FIXED:
         check('spinner on: Move to, Group and Ungroup do not flicker', all(n == 0 for n in flick.values()), flick)
         check('spinner on: Move to options not rebuilt', busy['ep-move-to']['options'] == 0, busy['ep-move-to'])
+        check('spinner on: the panel writes nothing outside the transform fields', total == 0, writes)
     else:
-        check('(bug) spinner on: Move to flickers', flick['ep-move-to'] > 0, flick)
+        check('(bug) spinner on: the panel is rewritten on every tick', total > 40, writes)
         print('   Group / Ungroup changes:', flick['ep-group'], flick['ep-ungroup'])
     br.close()
 print('\nFAILS:', fails or 'none'); sys.exit(1 if fails else 0)

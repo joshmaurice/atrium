@@ -38,7 +38,12 @@ def case(t, label, own, target):
     leaf_ = leaf(t, own)
     if saved:
         set_enabled(t, own, True); t.page.wait_for_timeout(600)
-    return saved, m, leaf_, (spins(t, target) if saved else False)
+    sp = spins(t, target) if saved else False
+    # close the panel (it stays open after Save, and after a refusal), so the next case can open it
+    t.edit_on(); select_node(t, own)
+    if t.ev("getComputedStyle(document.getElementById('ep-import-panel')).display !== 'none'"):
+        t.page.click('#ep-import-close'); t.page.wait_for_timeout(200)
+    return saved, m, leaf_, sp
 
 with sync_playwright() as pw:
     br = new_browser(pw); print('register', register(br))
