@@ -25,12 +25,12 @@ deployed site.
 
 Repository: https://github.com/joshmaurice/atrium (public)
 Branch: claude/small-fixes
-Review commit: REVIEW_SHA
+Review commit: 163c12743c8f779dea845cf2c97f0ba36c130cfd
 Contract: devtasks/PREBRIEF-small-fixes.md (Rev 1.0, §3 R1–R15; the
 operator's decisions in §6; built before an outside review, by the
 operator's way of working).
 Base: b639d81 (main; PROD runs 33df9ef6, which differs only in devtasks/).
-Review the diff: `git diff b639d81 REVIEW_SHA -- apps packages`.
+Review the diff: `git diff b639d81 163c12743c8f779dea845cf2c97f0ba36c130cfd -- apps packages`.
 devtasks/HANDOFF-small-fixes.md is the implementer's record. Read it, but
 test its claims rather than trusting them.
 
@@ -39,10 +39,10 @@ and say which model you are.**
 
 STEP 1 — GET THE CODE
   git clone https://github.com/joshmaurice/atrium && cd atrium
-  git fetch origin claude/small-fixes && git checkout REVIEW_SHA
+  git fetch origin claude/small-fixes && git checkout 163c12743c8f779dea845cf2c97f0ba36c130cfd
 Say whether the clone worked. If it didn't, read the files at the pinned
 commit through
-  https://raw.githubusercontent.com/joshmaurice/atrium/REVIEW_SHA/<path>
+  https://raw.githubusercontent.com/joshmaurice/atrium/163c12743c8f779dea845cf2c97f0ba36c130cfd/<path>
 A source-only review is still valuable; label it as one.
 
 STEP 2 — RUN IT (Node 22, pnpm 10)
