@@ -364,6 +364,21 @@ function connectedWorldId(worlds) {
 /** SF-L5 — the placeholder shown while this tab is in none of these worlds. */
 const WB_PLACEHOLDER = 'Open a saved world…'
 
+/**
+ * The follow-up review's S-3 (the operator, 2026-11-14: "Go to your home
+ * world") — after a Delete of the world this tab is in, the tab leaves it:
+ * to the home world, or, when the home world itself was deleted, off.
+ * The server keeps a deleted world's sessions open, so staying would leave
+ * the tab editing a world that no longer exists.
+ */
+function leaveDeletedWorld(w) {
+  if (!currentUser || connectedWorldId([w]) !== w.id) return
+  if (w.slug === 'home') { client.disconnect(); return }
+  const homeUrl = buildWorldWsUrl(accountWsBase || computeWsUrl(window.location), currentUser.username, 'home')
+  if (homeUrl) reconnectSignedIn(homeUrl, currentUser)
+  else client.disconnect()
+}
+
 function renderWorldList(worlds) {
   wbList.innerHTML = ''
   wbWorlds = Array.isArray(worlds) ? worlds : []
@@ -443,6 +458,9 @@ function renderWorldList(worlds) {
 
   // SF-L5 — choosing a world opens it (the old row's Load, moved)
   select.addEventListener('change', async () => {
+    // the follow-up review's S-4 — off the drop-down after a pick, so a held
+    // key or an arrow key doesn't go on opening worlds
+    select.blur()
     const w = wbWorlds.find((x) => x.id === select.value)
     if (!w) { wbSyncChoice?.(); return }
     // until the connect lands, the switch and Delete act on no world
@@ -489,6 +507,7 @@ function renderWorldList(worlds) {
         showOverlay('')
         return
       }
+      if (outcome.status === 'ready') wbError.textContent = ''   // N-7 — an older failure is not left up
       showOverlay('')
     } catch (err) {
       wbError.textContent = 'Load failed: ' + err.message
@@ -502,6 +521,7 @@ function renderWorldList(worlds) {
     if (!w) return
     toggle.disabled = true
     select.disabled = true
+    delBtn.disabled = true   // the follow-up review's N-6 — not while the switch's request runs
     // signin-sync Rev 1, M2 — the auth generation this request starts under,
     // and the toggle's state before the click.
     const gen = authSync.currentGeneration()
@@ -560,6 +580,7 @@ function renderWorldList(worlds) {
       select.disabled = false
       // the review's N-3 — a sign-out mid-request empties the list
       toggle.disabled = !chosenWorld() || chosenWorld()?.isCommons === true
+      delBtn.disabled = !chosenWorld()
       wbSyncChoice?.()   // a connect that landed meanwhile is shown now
     }
   })
@@ -578,6 +599,8 @@ function renderWorldList(worlds) {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         wbError.textContent = data.error || 'Delete failed'
+      } else {
+        leaveDeletedWorld(w)
       }
       refreshWorldList()
     } catch (err) {
@@ -1066,6 +1089,7 @@ client.on('connecting', () => {
   avatarReady = false
   readySessionId = null // V8: clear ready session on new connect
   currentWorldUrl = null
+  wbSyncChoice?.()   // small-fixes, the follow-up review's M-2 — mid-connect, the row acts on no world
   trigger.setReady(false)
   trigger.reset()
   // A9 — a new world generation: abort every model request and parse, drop the

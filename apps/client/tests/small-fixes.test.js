@@ -560,3 +560,25 @@ describe('the outside review (Fable, 163c127)', () => {
     assert.ok(pickers(elements).every((p) => p.disabled === false))
   })
 })
+
+describe('the follow-up review (Fable, aa73f48)', () => {
+  const src = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8')
+  const fn = (name) => { const at = src.indexOf(name); assert.ok(at >= 0, name); return src.slice(at, src.indexOf('\n}\n', at)) }
+  test('S-3: leaving a deleted world goes home, or off when home itself was deleted', () => {
+    const body = fn('function leaveDeletedWorld(w)')
+    assert.match(body, /connectedWorldId\(\[w\]\) !== w\.id\) return/, 'only when the tab is in that world')
+    assert.match(body, /if \(w\.slug === 'home'\) \{ client\.disconnect\(\); return \}/)
+    assert.match(body, /reconnectSignedIn\(homeUrl, currentUser\)/, 'through the one connect path')
+    assert.match(fn('function renderWorldList(worlds)'), /\} else \{\s*leaveDeletedWorld\(w\)\s*\}/, 'only after a Delete the server accepted')
+  })
+  test('M-2: a connect starting syncs the row (no world until it lands)', () => {
+    const at = src.indexOf("client.on('connecting', () => {\n  endEditSession()")
+    const body = src.slice(at, at + 700)
+    assert.ok(body.indexOf('currentWorldUrl = null') < body.indexOf('wbSyncChoice?.()'))
+  })
+  test('S-4 and N-6: the drop-down lets go after a pick; Delete is held during the switch\'s request', () => {
+    const row = fn('function renderWorldList(worlds)')
+    assert.match(row, /select\.addEventListener\('change', async \(\) => \{[\s\S]{0,200}select\.blur\(\)/)
+    assert.match(row, /select\.disabled = true\s*delBtn\.disabled = true/)
+  })
+})

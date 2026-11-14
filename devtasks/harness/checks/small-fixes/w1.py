@@ -78,8 +78,11 @@ with sync_playwright() as pw:
     a.page.click('#wb-list button:has-text("Delete")'); a.page.wait_for_timeout(1800)
     names = [slug_of(o) for o in a.ev(OPTS) if not o.startswith('Open a saved')]
     check('R14 Delete removes the world you are in (one created, one deleted: n again)', f'gallery-{tag}' not in names and len(names) == n, names)
-    print('   after Delete:', a.ev(ROW), '| connected:', a.ev('atriumClient.connected'))
-    a.connect(HOME); a.page.wait_for_timeout(500)
+    # the follow-up review's S-3 (the operator: go to the home world)
+    home_ok = a.wait_world('/worlds/alice/home'); a.page.wait_for_timeout(600)
+    r = a.ev(ROW); print('   after Delete:', r, '| at', a.ev('atriumClient._wsUrl'))
+    check('S-3 after deleting the world you are in, the tab is in your home world, and the row shows it', home_ok and slug_of(r['chosen']) == 'home', (a.ev('atriumClient._wsUrl'), r))
+    a.page.wait_for_timeout(300)
 
     # screenshots on a phone, and in desktop-site mode
     ph = br.new_context(ignore_https_errors=True, viewport={'width': 390, 'height': 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
