@@ -15,7 +15,8 @@ import { ownLoginPlan } from '../src/auth-sync.js'
 import { setIfChanged } from '../src/dom-write.js'
 import { createGraphImportPanel, TARGET_GONE, SAVED, CHOOSE_TARGET } from '../src/graph-import-panel.js'
 import { behaviorCheck } from '@atrium/behaviors/behavior-spec'
-import { el } from './strict-element.mjs'
+import { el, elementsFor } from './strict-element.mjs'
+import { createBehaviorForm } from '../src/behavior-form.js'
 
 // ===========================================================================
 // SF-1 — R1
@@ -357,5 +358,127 @@ describe('SF-3 the import panel and id-less targets', () => {
     const picker = pickers(elements)[0]
     assert.equal(picker.children.find((o) => o.selected)?.textContent, 'group-02')
     assert.notEqual(picker.children[0].textContent, CHOOSE_TARGET)
+  })
+})
+
+describe('SF-3 after the fresh-agent code check', () => {
+  test('finding 2: the own node removed mid-sequence cancels; nothing is sent for it', () => {
+    const group = node('group-01')
+    const other = node('group-02')
+    const nodes = [group, other]
+    const { panel, elements, calls } = setup({ nodes, selected: group })
+    panel.open()
+    panel.chooseSource(bytesOf(source(2)), 'two.gltf')
+    panel.setTarget('node', 0, 'name:group-01')
+    panel.setTarget('node', 1, 'name:group-02')
+    const s1 = panel.save()
+    nodes.splice(nodes.indexOf(group), 1)
+    panel.onAnswer('edit:accepted', { seq: s1 })
+    assert.equal(calls.setObjectId.length, 1)
+    assert.equal(calls.sendField.length, 0)
+    assert.equal(elements.status.textContent, TARGET_GONE)
+  })
+
+  test('finding 2: a target held by its id, removed while another stage is in flight, cancels', () => {
+    const own = node('Spinner', OTHER)
+    const cube = node('Cube', IDS[3])
+    const g = node('group-02')
+    const nodes = [own, cube, g]
+    const { panel, elements, calls, accept } = setup({ nodes, selected: own })
+    panel.open()
+    panel.chooseSource(bytesOf(source(2)), 'two.gltf')
+    panel.setTarget('node', 0, IDS[3])
+    panel.setTarget('node', 1, 'name:group-02')
+    const s1 = panel.save()
+    nodes.splice(nodes.indexOf(cube), 1)
+    accept(s1)
+    assert.equal(calls.sendField.length, 0)
+    assert.equal(elements.status.textContent, TARGET_GONE)
+  })
+
+  test('N-6: a target gone before Save says so, not "malformed"', () => {
+    const own = node('Spinner', OTHER)
+    const nodes = [own, node('group-02')]
+    const { panel, elements, calls } = setup({ nodes, selected: own })
+    panel.open()
+    panel.chooseSource(bytesOf(source(1)), 'one.gltf')
+    panel.setTarget('node', 0, 'name:group-02')
+    nodes.pop()
+    panel.convert(); panel.render()
+    assert.equal(elements.status.textContent, TARGET_GONE)
+    assert.equal(panel.save(), null)
+    assert.equal(calls.setObjectId.length + calls.sendField.length, 0)
+  })
+
+  test('finding 3: an animation row on a model with no id converts, and Save gives the model its id', () => {
+    const src = {
+      asset: { version: '2.0' }, animations: [{ name: 'Walk', channels: [], samplers: [] }], nodes: [{ name: 'Fox' }],
+      extensions: { KHR_interactivity: { graphs: [{
+        types: [{ signature: 'bool' }, { signature: 'int' }, { signature: 'float' }, { signature: 'float3' }, { signature: 'float4' }, { signature: 'ref' }],
+        declarations: [{ op: 'event/onStart' }, { op: 'animation/start' }],
+        nodes: [{ declaration: 0, flows: { out: { node: 1, socket: 'in' } } },
+          { declaration: 1, values: { animation: lit(T.ref, '/animations/0'), startTime: lit(T.float, 0), endTime: lit(T.float, 1), speed: lit(T.float, 1) } }],
+      }] } },
+    }
+    const own = node('Spinner', OTHER)
+    const fox = { name: 'fox-01', extras: { atrium: { model: { url: 'https://example.com/fox.glb' } } } }
+    const { panel, calls, accept } = setup({ nodes: [own, fox], selected: own })
+    panel.open()
+    panel.chooseSource(bytesOf(src), 'anim.gltf')
+    panel.setAnimationTarget(0, 'name:fox-01')
+    assert.ok(panel.state.conversion, `it converts (was: ${panel.state.problem})`)
+    const s1 = panel.save()
+    assert.deepEqual(calls.setObjectId.map((c) => c.name), ['fox-01'])
+    accept(s1)
+    assert.equal(calls.sendField.length, 1)
+    const leaf = calls.sendField[0].value
+    assert.ok(!JSON.stringify(leaf).match(/00000000-0000-4000-8000-/), 'no stand-in on the wire')
+    assert.ok(JSON.stringify(leaf).includes(IDS[0]), 'the model is named by the id it got')
+    assert.equal(panel.state.animations[0].object, IDS[0], 'the row holds the id now')
+  })
+})
+
+describe('SF-2 R5 the Behaviour form: an idle render writes nothing (the code check\'s finding 1)', () => {
+  const OWN_ID = '11111111-1111-4111-8111-111111111111'
+  const TGT_ID = '22222222-2222-4222-8222-222222222222'
+  /** Count every append, remove, textContent and value write on the form's elements. */
+  function counting(elements) {
+    const ops = {}
+    const bump = (k) => { ops[k] = (ops[k] ?? 0) + 1 }
+    for (const [k, e] of Object.entries(elements)) {
+      if (!e || typeof e !== 'object' || typeof e.appendChild !== 'function') continue
+      const a = e.appendChild, r = e.removeChild
+      e.appendChild = (c) => { bump(`${k}:append`); return a(c) }
+      e.removeChild = (c) => { bump(`${k}:remove`); return r(c) }
+      const d = Object.getOwnPropertyDescriptor(e, 'textContent')
+      if (d?.set) Object.defineProperty(e, 'textContent', { get: d.get, set: (v) => { bump(`${k}:text`); d.set(v) }, configurable: true })
+      let val = e.value
+      Object.defineProperty(e, 'value', { get: () => val, set: (v) => { bump(`${k}:value`); val = v }, configurable: true })
+    }
+    return ops
+  }
+  function idle(behavior) {
+    const target = { name: 'target', extras: { atrium: { objectId: TGT_ID } } }
+    const own = { name: 'crate', extras: { atrium: { objectId: OWN_ID, ...(behavior ? { behavior } : {}) } } }
+    const elements = elementsFor()
+    const deps = {
+      selected: () => own, nodes: () => [own, target], status: () => ({}),
+      write: { setObjectId: () => 1, sendField: () => 2 }, newObjectId: () => '9',
+      createElement: (t) => el(t), showError() {}, clearError() {},
+      logLines: () => ['[t] tick 1', '[t] tick 2'], clipStatus: () => ({ known: false, clips: [] }),
+    }
+    const form = createBehaviorForm({ elements, deps })
+    form.open(own)
+    if (!behavior) form.onTemplateChange('select-visibility')
+    form.render()
+    const ops = counting(elements)
+    for (let i = 0; i < 10; i += 1) form.render()   // ten som:set ticks, nothing changed
+    return ops
+  }
+  test('a template (its target picker is not rebuilt)', () => {
+    assert.deepEqual(idle(null), {})
+  })
+  test('a custom graph (the log lines are not rebuilt)', () => {
+    assert.deepEqual(idle({ kind: 'graph', origin: 'local', enabled: true, graph: { declarations: [], nodes: [] }, nodeMap: [], targets: [], animations: [] }), {})
   })
 })

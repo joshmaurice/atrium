@@ -31,11 +31,13 @@ WATCH = """() => { const ids = ['ep-move-to', 'ep-group', 'ep-ungroup']; window.
       else if (m.attributeName === 'disabled' && el.disabled !== last.d) { c.disabled++; if (c.log.length < 6) c.log.push((el.disabled ? 'off ' : 'on ') + el.title); last.d = el.disabled }
       else if (m.attributeName === 'title' && el.title !== last.t) { c.title++; last.t = el.title } } })
       .observe(el, { attributes: true, childList: true }) } }"""
-# Every write the panel makes outside the transform fields (which do change:
-# the object turns), counted by element and kind, in 2 s.
+# Every write the panel makes, counted by element and kind, in 2 s, except the
+# rotation fields (they do change: the object turns). The first version skipped
+# all of #ep-fields, which hid the name field's and the Behaviour section's
+# rewrites (the fresh-agent code check's finding 1).
 PANEL = """() => { window.__pw = {}; const panel = document.getElementById('edit-panel')
   new MutationObserver((l) => { for (const m of l) { const t = m.target.nodeType === 1 ? m.target : m.target.parentElement
-     if (!t || t.closest('#ep-fields')) continue
+     if (!t || (t.tagName === 'INPUT' && t.dataset.field === 'rotation')) continue
      const id = (t.id || t.closest('[id]')?.id || '?'); const k = id + ':' + (m.attributeName || m.type); window.__pw[k] = (window.__pw[k] || 0) + 1 } })
    .observe(panel, { attributes: true, childList: true, subtree: true, characterData: true }) }"""
 PCOUNT = "() => { const r = window.__pw; window.__pw = {}; return r }"
@@ -67,7 +69,7 @@ with sync_playwright() as pw:
     print('spinning:', r0 != r1, '| state', a.ev(STATE))
     a.ev(PCOUNT)
     busy = counts(a); print('spinner on: in 2 s', {k: {kk: v[kk] for kk in ('disabled', 'title', 'options')} for k, v in busy.items()})
-    writes = a.ev(PCOUNT); print('   panel writes in 2 s (outside the transform fields):', writes)
+    writes = a.ev(PCOUNT); print('   panel writes in 2 s (all but the rotation fields):', writes)
     total = sum(writes.values())
     print('   Move to log:', busy['ep-move-to']['log'])
     check('the spinner runs (the rotation changes)', r0 != r1, (r0, r1))
@@ -76,7 +78,7 @@ with sync_playwright() as pw:
     if FIXED:
         check('spinner on: Move to, Group and Ungroup do not flicker', all(n == 0 for n in flick.values()), flick)
         check('spinner on: Move to options not rebuilt', busy['ep-move-to']['options'] == 0, busy['ep-move-to'])
-        check('spinner on: the panel writes nothing outside the transform fields', total == 0, writes)
+        check('spinner on: the panel writes nothing but the rotation fields', total == 0, writes)
     else:
         check('(bug) spinner on: the panel is rewritten on every tick', total > 40, writes)
         print('   Group / Ungroup changes:', flick['ep-group'], flick['ep-ungroup'])

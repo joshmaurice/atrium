@@ -224,7 +224,8 @@ describe('K4 — the Inspect click and panel', () => {
   test('post-review: the Edit panel shows the selected object\'s credit, as claimed, by textContent', () => {
     const row = flatten(body('refreshCreditRow'))
     assert.match(row, /const lines = selected \? creditLines\(selected\.extras\?\.atrium\) : \[\]/)
-    assert.match(row, /epCreditRow\.style\.display = lines\.length > 0 \? '' : 'none' epCredit\.textContent = lines\.join\('\\n'\)/)
+    // small-fixes R4 — the same writes, change-only
+    assert.match(row, /setIfChanged\(epCreditRow, 'style\.display', lines\.length > 0 \? '' : 'none'\) setIfChanged\(epCredit, 'textContent', lines\.join\('\\n'\)\)/)
     assert.ok(!/innerHTML/.test(row))
     assert.match(flatten(body('refreshEditPanel')), /refreshNameField\(\) refreshCreditRow\(\)/, 'refreshed with the selection')
     for (const id of ['ep-credit-row', 'ep-credit']) {

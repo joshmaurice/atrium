@@ -89,7 +89,8 @@ Code commit `659dfff`; checks commit `229993e`.
 - **Regressions:** signin-sync `c.py` all PASS, `c4b.py` PASS; undo-hold
   `h5.py`, `h6.py` PASS; scripting-4d `c1.py` 33/34 (check 4, §2 item 3),
   `c2.py`, `c5.py` PASS; grouping `smoke`, `c1`–`c6` PASS (248), `g4` 9/10
-  (§2 item 3); touch-nav `tn.py` 58/58.
+  (§2 item 3); selection-parts `c1`–`c6` PASS (135); touch-nav `tn.py`
+  58/58.
 - **Harness notes:** scripting-4d `c1.py` needs the auth server started
   with `ATRIUM_AUTOSAVE_DEBOUNCE_MS=3000` (its README says so), and it
   leaves its own restarted server running: stop it before starting another.

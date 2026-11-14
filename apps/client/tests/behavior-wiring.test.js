@@ -49,7 +49,7 @@ describe('scripting-4b-2 — the Behaviour section is wired', () => {
 
   test('W2/W3 — refreshBehaviorRow re-opens on a closed form and re-reads on som:set', () => {
     assert.match(source, /function refreshBehaviorRow\(\{ reread = false \} = \{\}\)/)
-    assert.match(source, /refreshEditPanel\(\)[\s\S]{0,400}?refreshBehaviorRow\(\)/)
+    assert.match(source, /refreshEditPanel\(\)[\s\S]{0,600}?refreshBehaviorRow\(\)/)
     assert.match(source, /path === 'extras\.atrium\.behavior'[\s\S]{0,200}?refreshBehaviorRow\(\{ reread: true \}\)/)
     // W2 — the Edit-off path clears the cached node beside the close.
     assert.match(source, /behaviorForm\?\.close\(\)[\s\S]{0,300}?lastBehaviorNode = null/)

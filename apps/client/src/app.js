@@ -415,20 +415,25 @@ function renderWorldList(worlds) {
   // R13 — a connect to one of these worlds (Load, a teleport, a sign-in's
   // reconnect) makes it the chosen one
   wbSyncChoice = () => {
+    // the code check's finding 4 — not while the switch's request is in flight
+    // (the select is held then): its answer is for the world it was sent for
+    if (select.disabled) return
     const id = connectedWorldId(wbWorlds)
     if (id && id !== wbChosenId) { wbChosenId = id; select.value = id; showChoice() }
   }
 
   toggle.addEventListener('change', async () => {
     const w = chosenWorld()
-    const isCommons = w.isCommons === true
     toggle.disabled = true
     select.disabled = true
     // signin-sync Rev 1, M2 — the auth generation this request starts under,
     // and the toggle's state before the click.
     const gen = authSync.currentGeneration()
     const wasChecked = !toggle.checked
+    // The switch shows the chosen world: an answer changes it only while
+    // that is still `w` (the code check's finding 4).
     const restore = () => {
+      if (chosenWorld() !== w) return
       toggle.checked = wasChecked
       toggleText.textContent = ' ' + (wasChecked ? 'Public' : 'Private')
     }
@@ -456,8 +461,7 @@ function renderWorldList(worlds) {
         w.visibility = data.visibility
         if (data.updated_at) w.updated_at = data.updated_at
         if (data.slug) w.slug = data.slug
-        toggle.checked = data.visibility === 'public'
-        toggleText.textContent = ' ' + (data.visibility === 'public' ? 'Public' : 'Private')
+        if (chosenWorld() === w) showChoice()
         const option = [...select.options].find((o) => o.value === w.id)
         if (option) option.textContent = worldOptionLabel(w)
         wbError.textContent = ''
@@ -477,8 +481,9 @@ function renderWorldList(worlds) {
       restore()
       wbError.textContent = "Couldn't change visibility"
     } finally {
-      toggle.disabled = isCommons
       select.disabled = false
+      toggle.disabled = chosenWorld().isCommons === true
+      wbSyncChoice?.()   // a connect that landed meanwhile is shown now
     }
   })
   item.appendChild(toggleLabel)
@@ -2915,14 +2920,15 @@ function fmt(v) {
 
 function refreshEditPanel() {
   renderPath(epPath, selected)
+  // small-fixes R4: runs on every som:set of the selection; change-only
   if (!selected) {
-    epEmpty.style.display = ''
-    epFields.style.display = 'none'
+    setIfChanged(epEmpty, 'style.display', '')
+    setIfChanged(epFields, 'style.display', 'none')
     refreshEditActions()
     return
   }
-  epEmpty.style.display = 'none'
-  epFields.style.display = ''
+  setIfChanged(epEmpty, 'style.display', 'none')
+  setIfChanged(epFields, 'style.display', '')
   refreshEditVectors()
   refreshNameField()
   refreshCreditRow()
@@ -2937,8 +2943,8 @@ function refreshEditPanel() {
 function refreshCreditRow() {
   if (!epCreditRow || !epCredit) return
   const lines = selected ? creditLines(selected.extras?.atrium) : []
-  epCreditRow.style.display = lines.length > 0 ? '' : 'none'
-  epCredit.textContent = lines.join('\n')
+  setIfChanged(epCreditRow, 'style.display', lines.length > 0 ? '' : 'none')
+  setIfChanged(epCredit, 'textContent', lines.join('\n'))
 }
 
 // Position, rotation (degrees) and scale. A field being typed in is left alone.
@@ -2951,12 +2957,13 @@ function refreshEditVectors() {
   }
   for (const input of epVectorInputs) {
     if (document.activeElement === input) continue
-    input.value = fmt(values[input.dataset.field][Number(input.dataset.i)])
-    input.dataset.shown = input.value
+    // small-fixes R4 — only a value that changed is written
+    setIfChanged(input, 'value', fmt(values[input.dataset.field][Number(input.dataset.i)]))
+    setIfChanged(input.dataset, 'shown', input.value)
   }
   // F6 — the Visible checkbox reads the SOM's own value, through the one
   // visibility path (`extras.__atrium_visible`, SOMNode.visible).
-  if (epVisible) epVisible.checked = selected.visible !== false
+  if (epVisible) setIfChanged(epVisible, 'checked', selected.visible !== false)
 }
 
 // Why the selected node's name can't be edited, or '' — the same rules the
@@ -2982,15 +2989,16 @@ function refreshNameField() {
   // true would name the node by a stale name or write a hidden offset.
   const locked = fieldsDisabled({ renaming, blocked: editDispatchBlocked() })
   syncGizmoEnabled()
-  for (const input of epVectorInputs) input.disabled = locked
-  if (epVisible) epVisible.disabled = locked       // F6 — disabled in flight
-  epName.disabled = locked || !!reason
-  epName.title = reason
+  // small-fixes R4 — change-only (this runs on every som:set of the selection)
+  for (const input of epVectorInputs) setIfChanged(input, 'disabled', !!locked)
+  if (epVisible) setIfChanged(epVisible, 'disabled', !!locked)       // F6 — disabled in flight
+  setIfChanged(epName, 'disabled', !!(locked || reason))
+  setIfChanged(epName, 'title', reason)
   if (document.activeElement !== epName) {
-    epName.value = selected.name
-    epName.dataset.shown = selected.name
+    setIfChanged(epName, 'value', selected.name)
+    setIfChanged(epName.dataset, 'shown', selected.name)
   }
-  epNameStatus.textContent = renaming ? 'Renaming…' : ''
+  setIfChanged(epNameStatus, 'textContent', renaming ? 'Renaming…' : '')
   refreshEditActions()
 }
 
@@ -3796,7 +3804,7 @@ function refreshGroupActions() {
   // the Empty groups list is rescanned only when its key was cleared (a
   // structural event, a bareness set) — never on every som:set (the outside
   // review's S-2); a hidden row is scanned again when it shows
-  if (!allowed) { epMoveNote.style.display = 'none'; refreshEmptyGroups(); emptyKey = null; return }
+  if (!allowed) { setIfChanged(epMoveNote, 'style.display', 'none'); refreshEmptyGroups(); emptyKey = null; return }
   const g = groupHint(selected)
   setIfChanged(epGroup, 'disabled', !!g)
   setIfChanged(epGroup, 'title', g ?? 'Put the selected object in a new group')
@@ -4887,24 +4895,25 @@ const statusText = (status) => {
  */
 function refreshModelRow() {
   if (!epModelRow) return
+  // small-fixes R4 — this runs on every som:set (Edit on or off): change-only
   const spec = selected?.extras?.atrium?.model
   if (!selected || !spec) {
-    epModelRow.style.display = 'none'
-    if (epModelStatus) epModelStatus.textContent = ''
+    setIfChanged(epModelRow, 'style.display', 'none')
+    if (epModelStatus) setIfChanged(epModelStatus, 'textContent', '')
     // Z7 — no selection (or a node that is not a model): no clip controls either.
     animationControls?.refresh()
     return
   }
-  epModelRow.style.display = ''
+  setIfChanged(epModelRow, 'style.display', '')
   if (epModelUrl) {
-    epModelUrl.textContent = middleTruncate(spec.url)
-    epModelUrl.title = spec.url
+    setIfChanged(epModelUrl, 'textContent', middleTruncate(spec.url))
+    setIfChanged(epModelUrl, 'title', spec.url)
   }
-  if (epModelPinned) epModelPinned.textContent = spec.sha256 ? 'pinned' : 'follows the URL'
+  if (epModelPinned) setIfChanged(epModelPinned, 'textContent', spec.sha256 ? 'pinned' : 'follows the URL')
   if (epModelStatus) {
     const status = modelStatuses.get(selected)
-    epModelStatus.textContent = statusText(status)
-    epModelStatus.style.color = status?.status === MODEL_STATUS.failed ? '#f87171' : ''
+    setIfChanged(epModelStatus, 'textContent', statusText(status))
+    setIfChanged(epModelStatus, 'style.color', status?.status === MODEL_STATUS.failed ? '#f87171' : '')
   }
   // Z7 — the clip controls live in this row, so this one place re-renders them.
   animationControls?.refresh()

@@ -908,6 +908,21 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   function renderParams() {
     const container = elements.params
     if (!container) return
+    // small-fixes R5 — the fields are rebuilt only when what they show changes
+    // (the template, the held values, the picker's nodes, the clips, saving).
+    // A rebuild on every som:set replaced an open target drop-down under the
+    // finger while a behaviour ran.
+    const paramsKey = JSON.stringify([
+      state.open, state.custom, state.template, Boolean(state.saving), state.targetId, state.params,
+      state.clip, (state.open && !state.custom && state.template !== NONE_LABEL)
+        ? pickable().map((node) => [pickerValue(node), node.name]) : null,
+    ])
+    if (container._paramsKey === paramsKey) {
+      renderHint(elements.hintText)
+      if (elements.noLights) show(elements.noLights, state.template === 'select-light' && pickable().length === 0)
+      return
+    }
+    container._paramsKey = paramsKey
     while (container.firstChild) container.removeChild(container.firstChild)
     if (!state.open || state.custom || state.template === NONE_LABEL) {
       show(container, false)
@@ -1097,7 +1112,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     state.clip = clipInfoFor(targetNode())
 
     if (elements.select) {
-      elements.select.value = state.custom ? CUSTOM_LABEL : state.template
+      setIfChanged(elements.select, 'value', state.custom ? CUSTOM_LABEL : state.template)
       setIfChanged(elements.select, 'disabled', Boolean(state.saving))
     }
     // R1 — `elements.hintText` is the hint's source, as before; only its value
@@ -1138,6 +1153,11 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     renderList(elements.notes, [...(Array.isArray(record) ? record : []), ...(Array.isArray(reported.notes) ? reported.notes : [])])
     if (elements.logLines) {
       const lines = deps.logLines?.(state.node?.name) ?? []
+      // small-fixes R5 — rebuilt only when its lines change
+      const logKey = JSON.stringify(lines.map((line) => String(line)))
+      const count = (elements.logLines.childNodes ?? elements.logLines.children)?.length
+      if (elements.logLines._renderedLines === logKey && count === lines.length) return
+      elements.logLines._renderedLines = logKey
       while (elements.logLines.firstChild) elements.logLines.removeChild(elements.logLines.firstChild)
       for (const line of lines) {
         const row = create('div'); if (!row) break

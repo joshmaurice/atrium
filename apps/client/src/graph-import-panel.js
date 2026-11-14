@@ -139,6 +139,11 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
       const id = idOf(heldNode(held))
       if (id) state.mapping[key] = id
     }
+    for (const animation of state.animations) {
+      if (typeof animation.object !== 'string' || !animation.object.startsWith('name:')) continue
+      const id = idOf(heldNode(animation.object))
+      if (id) animation.object = id
+    }
   }
 
   /** G6 — the candidates a reference's target picker offers, filtered by kind. */
@@ -303,11 +308,20 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   }
 
   /** R9 — the other id-less targets, in row order, each once (SOM node objects). */
-  function idlessTargets() {
-    const out = []
+  function heldValues() {
+    const held = []
     for (const row of mappingRows()) {
       if (row.kind === 'animation') continue
-      const held = state.mapping[`${row.kind}:${row.fileIndex}`]
+      held.push(state.mapping[`${row.kind}:${row.fileIndex}`])
+    }
+    // the animation rows' models too (the code check's finding 3)
+    for (const animation of state.animations) if (animation.object) held.push(animation.object)
+    return held
+  }
+
+  function idlessTargets() {
+    const out = []
+    for (const held of heldValues()) {
       if (typeof held !== 'string' || !held.startsWith('name:')) continue
       const node = heldNode(held)
       if (!node || node === state.node || idOf(node) || state.given.has(node)) continue
@@ -328,25 +342,40 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     // `/nodes/0` and `/lights/0` can never land in one slot.
     const mapping = { own: state.ownId ?? OWN_STAND_IN, nodes: {}, lights: {}, subtree: [] }
     const standIns = new Map()
+    /** A held value's id; a stand-in for the preview; or `{gone}` / `{missingId}`. */
+    const resolve = (held) => {
+      // the code check's N-6 — a node that is no longer there (a stale
+      // preview) says so, rather than "nodeMap or targets is malformed"
+      if (held.startsWith('name:') && !heldNode(held)) return { gone: true }
+      const id = idForHeld(held)
+      if (id != null) return id
+      if (forSend) return { missingId: true }
+      const node = heldNode(held)
+      if (!standIns.has(node)) standIns.set(node, targetStandIn(standIns.size))
+      return standIns.get(node)
+    }
     for (const row of mappingRows()) {
       if (row.kind === 'animation') continue
       const held = state.mapping[`${row.kind}:${row.fileIndex}`]
       if (!held) return null
-      let id = idForHeld(held)
-      if (id == null) {
-        if (forSend) return { missingId: true }
-        const node = heldNode(held)
-        if (!standIns.has(node)) standIns.set(node, targetStandIn(standIns.size))
-        id = standIns.get(node)
-      }
+      const id = resolve(held)
+      if (typeof id !== 'string') return id
       if (row.kind === 'light') mapping.lights[row.fileIndex] = id
       else mapping.nodes[row.fileIndex] = id
     }
     // The own node is not a "reference"; the mapping still names it, so a graph
     // that points at the object it was imported onto converts.
-    mapping.animations = state.animations.map((animation) => ({
-      index: animation.index, object: animation.object, clip: animation.clip, loop: animation.loop === true,
-    }))
+    mapping.animations = []
+    for (const animation of state.animations) {
+      // small-fixes (the code check's finding 3) — a model with no id yet is
+      // held as `name:<name>`, as a node row's target is: the same rules.
+      let object = animation.object
+      if (typeof object === 'string' && object !== '') {
+        object = resolve(object)
+        if (typeof object !== 'string') return object
+      }
+      mapping.animations.push({ index: animation.index, object, clip: animation.clip, loop: animation.loop === true })
+    }
     return mapping
   }
 
@@ -355,9 +384,9 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     if (!graph || !state.node) return null
     const mapping = mappingFor({ forSend })
     if (!mapping) { state.conversion = null; return null }
-    if (mapping.missingId) {
+    if (mapping.missingId || mapping.gone) {
       state.conversion = null
-      state.problem = TARGET_WITHOUT_ID
+      state.problem = mapping.gone ? TARGET_GONE : TARGET_WITHOUT_ID
       return null
     }
     const result = convertGraph(graph, mapping)
@@ -396,6 +425,10 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     // object. One that got an id elsewhere meanwhile is used with that id.
     const nodes = deps.nodes?.() ?? []
     if (state.targetsAtSave.some((target) => !nodes.includes(target))) return cancelSave(TARGET_GONE)
+    // The code check's finding 2 — the own node, and every target held by its
+    // id, are still there too.
+    if (!nodes.includes(node)) return cancelSave(TARGET_GONE)
+    if (heldValues().some((held) => typeof held === 'string' && held !== '' && !heldNode(held))) return cancelSave(TARGET_GONE)
 
     // Stage 1 — F9's rule: the node gets an `objectId` before anything names it.
     if (!state.ownId) {
