@@ -36,6 +36,10 @@ export const CHOOSE_GRAPH = 'Choose a graph…'
 export const NO_GRAPH_YET = 'Choose a graph file to begin'
 export const MAPPED = 'Every reference is mapped.'
 export const SAVED = 'Saved. Edit the graph from the Behaviour section.'
+/** small-fixes R10 — a target the Save named was removed before its stage. */
+export const TARGET_GONE = 'A target is gone: choose it again.'
+/** small-fixes R8 — the leaf would name a target that still has no id (never sent). */
+export const TARGET_WITHOUT_ID = 'A target has no id yet: save again.'
 
 /** G6 — what a pointer family's target picker offers. */
 export function importTargetKind(reference) {
@@ -81,7 +85,11 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     problem: null,
     status: '',
     saving: false,
-    pending: null,         // { seq, stage }
+    pending: null,         // { seq, stage, node? }
+    // small-fixes R9/R10 — the other id-less targets Save gives an id to, held
+    // as SOM node OBJECTS from the click, and the ids this panel gave them.
+    targetsAtSave: [],
+    given: new Map(),
   }
 
   const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
@@ -102,7 +110,36 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
   // -------------------------------------------------------------------------
 
   const pickerValue = (node) => (node ? (node.extras?.atrium?.objectId ?? `name:${node.name}`) : null)
-  const nodeByValue = (value) => (deps.nodes?.() ?? []).find((node) => pickerValue(node) === value) ?? null
+  const idOf = (node) => node?.extras?.atrium?.objectId ?? null
+
+  /**
+   * small-fixes — the node a held picker value names: an id, or `name:<name>`
+   * for a node that had no id when it was chosen (found by name, so a node
+   * that has been given an id since is still found).
+   */
+  function heldNode(held) {
+    if (typeof held !== 'string' || held === '') return null
+    const nodes = deps.nodes?.() ?? []
+    if (held.startsWith('name:')) {
+      const name = held.slice(5)
+      return nodes.find((node) => node?.name === name) ?? null
+    }
+    return nodes.find((node) => idOf(node) === held) ?? null
+  }
+
+  /**
+   * R11 (and X6's rule in the form) — a held `name:<name>` whose node has an
+   * id now holds that id, so its picker keeps the choice.
+   */
+  function normaliseHeld() {
+    for (const [key, held] of Object.entries(state.mapping)) {
+      if (typeof held !== 'string' || !held.startsWith('name:')) continue
+      // Only an id the node HAS: one this panel asked for may still be
+      // refused, and a row must never hold an id the server didn't give.
+      const id = idOf(heldNode(held))
+      if (id) state.mapping[key] = id
+    }
+  }
 
   /** G6 — the candidates a reference's target picker offers, filtered by kind. */
   function candidatesFor(kind) {
@@ -245,18 +282,65 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
    */
   const OWN_STAND_IN = '00000000-0000-4000-8000-000000000001'
 
-  /** The `mapping` `convertGraph` takes, or null while a row is unmapped. */
-  function mappingFor() {
+  /**
+   * small-fixes R8 — the stand-in for the k-th other id-less target: distinct
+   * from each other and from OWN_STAND_IN, in OBJECT_ID_RE's form, and never
+   * sent (`sendLeaf` refuses a mapping that still needs one).
+   */
+  const targetStandIn = (k) => `00000000-0000-4000-8000-${(0x100 + k).toString(16).padStart(12, '0')}`
+
+  /**
+   * small-fixes R7/R8 — the id a held value maps to, or null when it needs a
+   * stand-in. The own node (by id or `name:`) is `mapping.own`; another node
+   * is its own id, or the one this panel's Save gave it.
+   */
+  function idForHeld(held) {
+    const node = heldNode(held)
+    if (node && node === state.node) return state.ownId ?? idOf(node) ?? OWN_STAND_IN
+    if (!held.startsWith('name:')) return held
+    if (!node) return held   // gone: the conversion refuses it, as before
+    return idOf(node) ?? state.given.get(node) ?? null
+  }
+
+  /** R9 — the other id-less targets, in row order, each once (SOM node objects). */
+  function idlessTargets() {
+    const out = []
+    for (const row of mappingRows()) {
+      if (row.kind === 'animation') continue
+      const held = state.mapping[`${row.kind}:${row.fileIndex}`]
+      if (typeof held !== 'string' || !held.startsWith('name:')) continue
+      const node = heldNode(held)
+      if (!node || node === state.node || idOf(node) || state.given.has(node)) continue
+      if (!out.includes(node)) out.push(node)
+    }
+    return out
+  }
+
+  /**
+   * The `mapping` `convertGraph` takes, or null while a row is unmapped.
+   * `forSend` — Save's leaf: a target still without an id is a problem, never
+   * a stand-in on the wire.
+   */
+  function mappingFor({ forSend = false } = {}) {
+    normaliseHeld()
     // R7 — the two namespaces are separate: a node row keys `mapping.nodes` by
     // its FILE index, a light row keys `mapping.lights` by its LIGHT index, so
     // `/nodes/0` and `/lights/0` can never land in one slot.
     const mapping = { own: state.ownId ?? OWN_STAND_IN, nodes: {}, lights: {}, subtree: [] }
+    const standIns = new Map()
     for (const row of mappingRows()) {
       if (row.kind === 'animation') continue
       const held = state.mapping[`${row.kind}:${row.fileIndex}`]
       if (!held) return null
-      if (row.kind === 'light') mapping.lights[row.fileIndex] = held
-      else mapping.nodes[row.fileIndex] = held
+      let id = idForHeld(held)
+      if (id == null) {
+        if (forSend) return { missingId: true }
+        const node = heldNode(held)
+        if (!standIns.has(node)) standIns.set(node, targetStandIn(standIns.size))
+        id = standIns.get(node)
+      }
+      if (row.kind === 'light') mapping.lights[row.fileIndex] = id
+      else mapping.nodes[row.fileIndex] = id
     }
     // The own node is not a "reference"; the mapping still names it, so a graph
     // that points at the object it was imported onto converts.
@@ -266,11 +350,16 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     return mapping
   }
 
-  function convert() {
+  function convert({ forSend = false } = {}) {
     const graph = state.parsed?.graphs?.[state.graphIndex]
     if (!graph || !state.node) return null
-    const mapping = mappingFor()
+    const mapping = mappingFor({ forSend })
     if (!mapping) { state.conversion = null; return null }
+    if (mapping.missingId) {
+      state.conversion = null
+      state.problem = TARGET_WITHOUT_ID
+      return null
+    }
     const result = convertGraph(graph, mapping)
     if (result.problem) { state.conversion = null; state.problem = result.problem; return null }
     state.conversion = result
@@ -286,7 +375,27 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     if (state.saving || !state.node) return null
     if (!state.conversion) { render(); return null }
     state.status = ''
+    // R9/R10 — the other id-less targets, as node objects, from this click.
+    state.targetsAtSave = idlessTargets()
+    return nextStage()
+  }
+
+  /** R10 — cancel the Save: a target the click named is gone. */
+  function cancelSave(problem) {
+    state.saving = false
+    state.pending = null
+    state.problem = problem
+    deps.showError?.(problem)
+    render()
+    return null
+  }
+
+  function nextStage() {
     const node = state.node
+    // R10 — every target the click named is still in the world, the same
+    // object. One that got an id elsewhere meanwhile is used with that id.
+    const nodes = deps.nodes?.() ?? []
+    if (state.targetsAtSave.some((target) => !nodes.includes(target))) return cancelSave(TARGET_GONE)
 
     // Stage 1 — F9's rule: the node gets an `objectId` before anything names it.
     if (!state.ownId) {
@@ -304,12 +413,28 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
       return seq
     }
 
+    // R9 — then each other id-less target, in row order, gets its own id.
+    const target = state.targetsAtSave.find((t) => !idOf(t) && !state.given.has(t))
+    if (target) {
+      const id = deps.newObjectId?.()
+      let seq
+      try { seq = deps.write?.setObjectId?.(target.name, id) } catch (error) {
+        return cancelSave(error?.message ?? String(error))
+      }
+      state.given.set(target, id ?? null)
+      state.pending = { seq, stage: 'target', node: target }
+      state.saving = true
+      render()
+      return seq
+    }
+
     return sendLeaf()
   }
 
   function sendLeaf() {
-    // The leaf is rebuilt here, from the ids the node actually has.
-    const result = convert()
+    // The leaf is rebuilt here, from the ids the nodes actually have; a target
+    // that still has none is refused, never sent with a stand-in (R8).
+    const result = convert({ forSend: true })
     if (!result) { state.saving = false; render(); return null }
     let seq
     try { seq = deps.write?.sendField?.(state.node.name, 'extras.atrium.behavior', result.value) } catch (error) {
@@ -330,13 +455,19 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     if (!pending || pending.seq !== message.seq) return false
     state.pending = null
     if (kind !== 'edit:accepted') {
+      // small-fixes — a refused id is not the node's: forget it, so a second
+      // Save asks again instead of naming an id the server never gave.
+      if (pending.stage === 'target') state.given.delete(pending.node)
+      if (pending.stage === 1) state.ownId = idOf(state.node)
       state.problem = message.message || message.reason || 'the server refused the imported graph'
       state.saving = false
       deps.showError?.(state.problem)
       render()
       return true
     }
-    if (pending.stage === 1) { sendLeaf(); return true }
+    // R11 — once a node has its id, its rows hold the id (normaliseHeld), so
+    // the pickers keep their choice; then the next stage.
+    if (pending.stage === 1 || pending.stage === 'target') { normaliseHeld(); nextStage(); return true }
     state.saving = false
     state.status = SAVED
     deps.clearError?.()
@@ -356,6 +487,7 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     const parsed = state.parsed
     if (!parsed) { show(container, false); return }
     show(container, true)
+    normaliseHeld()
 
     for (const row of mappingRows()) {
       const line = create('div')
@@ -464,6 +596,8 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     state.status = ''
     state.saving = false
     state.pending = null
+    state.targetsAtSave = []
+    state.given = new Map()
     if (state.parsed) convert()
     render()
   }

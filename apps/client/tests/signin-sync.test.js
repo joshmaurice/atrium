@@ -207,7 +207,9 @@ describe('§6.4 the six connect sites', () => {
     assert.equal(rawConnects, 1, 'the only raw client.connect() is inside connectNow()')
 
     const wrappers = (stripped.match(/trackConnect\(/g) ?? []).length
-    assert.equal(wrappers, 6, 'the six call sites (the path itself is in auth-sync.js)')
+    // small-fixes R2 adds the seventh: this tab's own sign-in reconnecting to
+    // the same world (`reconnectSignedIn`).
+    assert.equal(wrappers, 7, 'the seven call sites (the path itself is in auth-sync.js)')
 
     // r2 J1/J2 — the path itself moved into auth-sync.js so it can be driven
     // in a test against the real guard; app.js binds its transport and page
@@ -253,6 +255,9 @@ describe('§6.4 the six connect sites', () => {
     })
     test('6. the Connect button', () => {
       assert.match(near('function handleConnect'), /trackConnect\(wsUrl, connectOpts/)
+    })
+    test('7. the own sign-in\'s reconnect to the same world (small-fixes R2)', () => {
+      assert.match(near('function reconnectSignedIn'), /return trackConnect\(wsUrl, \{/)
     })
   })
 })

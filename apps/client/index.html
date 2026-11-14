@@ -289,6 +289,24 @@
     font-size: 11px;
     padding: 3px 8px;
   }
+  /* small-fixes R12/R15 — the saved worlds are one row on every screen: the
+     drop-down takes the room left, and the row wraps rather than overflowing. */
+  .wb-item.wb-row {
+    flex-wrap: wrap;
+    border-bottom: none;
+  }
+  #wb-select {
+    flex: 1 1 180px;
+    min-width: 0;
+    max-width: 480px;
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #e2e8f0;
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+  #wb-select:focus { outline: none; border-color: #a78bfa; }
 
   .wb-vis-toggle {
     display: inline-flex;

@@ -61,7 +61,8 @@ class Tab:
             you: document.getElementById('hud-you').textContent,
             connected: !!c.connected,
             url: c.connected ? c._wsUrl : null,
-            worlds: [...document.querySelectorAll('#wb-list .wb-meta')].map(e => e.textContent.split(' ')[0]),
+            // small-fixes R12 — the list is one drop-down now: "name (slug · time)"
+            worlds: [...document.querySelectorAll('#wb-select option')].map(e => e.textContent.split('(').pop().split(' ·')[0]),
             button: document.getElementById('connectBtn').textContent + (document.getElementById('connectBtn').disabled ? ' (disabled)' : ''),
           }
         }""")
@@ -167,7 +168,7 @@ with sync_playwright() as p:
     check('3a Load of an alice world makes no connect as alice', not any('/worlds/alice/' in u for u in new), new)
     check('3a notice names bob, top bar bob', s['top'] == 'bob' and 'bob' in s['notice'], s)
     check('3a the Connect button is usable afterwards (not stuck on Connecting)', 'disabled' not in s['button'], s['button'])
-    check("3a the list is bob's", s['worlds'] and all(w for w in s['worlds']) and ta.wait("[...document.querySelectorAll('#wb-list .wb-meta')].length > 0", 3000), s['worlds'])
+    check("3a the list is bob's", s['worlds'] and all(w for w in s['worlds']) and ta.wait("[...document.querySelectorAll('#wb-select option')].length > 0", 3000), s['worlds'])
     # a stale tab again (A believes bob, the cookie is alice's), then Connect.
     # A is reloaded first so a stuck Connect button from 3a can't mask 3b
     # (its init scripts, blocking broadcast and visibility, stay in force).

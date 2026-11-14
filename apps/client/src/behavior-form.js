@@ -26,6 +26,8 @@ import {
 // G6 / Q3 — turning Enabled ON for a custom graph that writes and starts on
 // load or runs every frame asks first, and the text is the importer's.
 import { shouldPromptEnable, enablePromptText } from './graph-import.js'
+// small-fixes R5 — the form re-renders on every som:set; it writes only changes.
+import { setIfChanged } from './dom-write.js'
 
 export const NONE_LABEL = 'None'
 export const CUSTOM_LABEL = 'Custom graph'
@@ -234,8 +236,9 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
     baseline: { template: NONE_LABEL, custom: false, params: {} },
   }
 
-  const show = (element, visible) => { if (element) element.style.display = visible ? '' : 'none' }
-  const text = (element, value) => { if (element) element.textContent = value ?? '' }
+  // small-fixes R5 — change-only: a render with the same answer writes nothing.
+  const show = (element, visible) => { setIfChanged(element, 'style.display', visible ? '' : 'none') }
+  const text = (element, value) => { setIfChanged(element, 'textContent', value ?? '') }
 
   /**
    * V1 — a form field's `data-field`, written as a PROPERTY of the live
@@ -1051,8 +1054,16 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
   /** Render a list of strings, one `div` each, through `textContent` (G6). */
   function renderList(element, values) {
     if (!element) return
-    while (element.firstChild) element.removeChild(element.firstChild)
     const list = Array.isArray(values) ? values : []
+    // small-fixes R5 — the list is rebuilt only when its lines change (it was
+    // removed and rebuilt on every som:set while a behaviour ran).
+    const key = JSON.stringify(list.map((value) => String(value)))
+    if (element._renderedLines === key && (element.childNodes ?? element.children)?.length === list.length) {
+      show(element, list.length > 0)
+      return
+    }
+    element._renderedLines = key
+    while (element.firstChild) element.removeChild(element.firstChild)
     for (const value of list) {
       const row = create('div')
       if (!row) break
@@ -1087,7 +1098,7 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
 
     if (elements.select) {
       elements.select.value = state.custom ? CUSTOM_LABEL : state.template
-      elements.select.disabled = Boolean(state.saving)
+      setIfChanged(elements.select, 'disabled', Boolean(state.saving))
     }
     // R1 — `elements.hintText` is the hint's source, as before; only its value
     // now follows the template. `renderParams` renders it, unchanged.
@@ -1100,18 +1111,18 @@ export function createBehaviorForm({ elements = {}, deps = {}, gate = null, name
       // while ITS OWN write is in flight (the enabled sequence), and the label
       // IS the state.
       const enabledWrite = state.pending?.stage === 'enabled'
-      elements.enabled.disabled = isNone || Boolean(state.saving) || enabledWrite
-      elements.enabled.textContent = state.enabled ? 'Enabled' : 'Disabled'
+      setIfChanged(elements.enabled, 'disabled', Boolean(isNone || state.saving || enabledWrite))
+      setIfChanged(elements.enabled, 'textContent', state.enabled ? 'Enabled' : 'Disabled')
     }
     if (elements.save) {
       // V11 — a template with no usable target can't be saved either. X3 —
       // and neither can one with a field the check refuses.
-      elements.save.disabled = state.custom || isNone || !state.targetId
-        || Boolean(fieldProblem()) || Boolean(state.saving)
-      elements.save.textContent = state.saving ? 'Saving…' : 'Save'
+      setIfChanged(elements.save, 'disabled', Boolean(state.custom || isNone || !state.targetId
+        || fieldProblem() || state.saving))
+      setIfChanged(elements.save, 'textContent', state.saving ? 'Saving…' : 'Save')
     }
     // "Custom graph" shows Enabled and Remove only.
-    if (elements.remove) elements.remove.disabled = isNone || Boolean(state.saving)
+    if (elements.remove) setIfChanged(elements.remove, 'disabled', Boolean(isNone || state.saving))
 
     // X3 — the status line's precedence lives in `statusLine`.
     text(elements.status, statusLine())

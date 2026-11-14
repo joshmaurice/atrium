@@ -63,7 +63,8 @@ import { withNewObjectId } from './object-identity.js'   // scripting-4b-1 E7
 // page's pre-check, the notice texts, and the transient notice element.
 import { behaviorAim, activateNoticeText, activateClickTarget, performActivateClick, createActivateNotice } from './activate-click.js'
 import { hostStatusText } from './host-status.js'        // scripting-4b-1 E8
-import { createAuthSync, createConnectPath, NOTICE } from './auth-sync.js'   // signin-sync I2–I4, r2 J1/J2
+import { setIfChanged } from './dom-write.js'   // small-fixes R4
+import { createAuthSync, createConnectPath, NOTICE, ownLoginPlan } from './auth-sync.js'   // signin-sync I2–I4, r2 J1/J2; small-fixes R1
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -162,6 +163,8 @@ function renderAuthState(user) {
     worldBrowser.style.display = 'none'
     subbarWorlds.style.display = 'none'
     wbList.innerHTML = ''
+    wbSyncChoice = null   // small-fixes R13 — no row, nothing to follow
+    wbWorlds = []
   }
 }
 
@@ -247,10 +250,21 @@ async function handleAuthSubmit() {
     // The honeypot branch returned above, so it posts nothing.
     authSync.postAuthChanged()
 
-    // Auto-connect to home world after successful auth.
-    if (result && result.id) {
-      autoConnectToHomeWorld(result)
-    }
+    // small-fixes R1/R2 — the connection follows this tab's own sign-in. Not
+    // connected: the home world, as before. Connected to a same-origin world
+    // as anyone but this user (a guest, or unknown): reconnect to the SAME
+    // world, signed in. It used to keep the guest socket, so the world still
+    // treated the tab as anonymous (no Edit) until a reconnect.
+    const plan = ownLoginPlan({
+      user: result,
+      connected: client.connected === true,
+      sameOrigin: sameOriginAsAccount(currentWorldUrl || '', accountWsBase),
+      admittedUserId: client.signedIn === true ? (client.userId ?? null)
+        : (client.signedIn === false ? null : undefined),
+      worldUrl: currentWorldUrl,
+    })
+    if (plan.action === 'home') autoConnectToHomeWorld(result)
+    else if (plan.action === 'reconnect') reconnectSignedIn(plan.url, result)
 
     // Surface home_world_creation_failed warning if present
     if (result && result.warning === 'home_world_creation_failed') {
@@ -261,6 +275,28 @@ async function handleAuthSubmit() {
   } finally {
     authSubmitBtn.disabled = false
   }
+}
+
+/**
+ * small-fixes R2 — reconnect to the world this tab is in, as the user who just
+ * signed in. Through the one connect path (its guard included), with what the
+ * world list's Load sends; a failure reads as Load's does.
+ */
+function reconnectSignedIn(wsUrl, user) {
+  hideTeleportFailurePanel()
+  showOverlay('Connecting to world…')
+  return trackConnect(wsUrl, {
+    avatar: buildAvatarDescriptor(),
+    displayName: user.displayName || user.username,
+  }, {
+    onError: (msg, err) => {
+      const reason = codeToReason(err?.code || null)
+      wbError.textContent = 'Load failed: ' + (reason || msg)
+    },
+  }).then((outcome) => {
+    if (outcome?.status === 'superseded') return
+    showOverlay('')
+  }).catch(() => { showOverlay('') })
 }
 
 function toggleAuthMode() {
@@ -297,180 +333,239 @@ async function refreshWorldList() {
   }
 }
 
-function renderWorldList(worlds) {
-  if (worlds.length === 0) {
-    wbList.innerHTML = ''
-    return
-  }
-  wbList.innerHTML = ''
+// small-fixes R12–R15 — the saved worlds are ONE row: a drop-down of the
+// worlds, then the Public switch, Load and Delete for the chosen one. The three
+// controls' code is the per-world row's, moved (R14): the same requests, the
+// same generation checks and the same messages; `w` is read at click time.
+// `var`: renderAuthState (above) clears them on sign-out, and can run first.
+var wbChosenId = null      // R13 — the chosen world, kept by id across refreshes
+var wbWorlds = []          // the list the row was drawn from
+var wbSyncChoice = null    // set while a row exists: follows the connected world
+
+/** R12 — an option's label: "name (slug · time)". */
+function worldOptionLabel(w) {
+  return `${w.name || w.slug} (${w.slug} · ${formatTime(w.updated_at)})`
+}
+
+/** R13 — the world this tab is connected to, when it is one of these. */
+function connectedWorldId(worlds) {
+  if (!client.connected || !currentUser || !currentWorldUrl) return null
+  const here = String(currentWorldUrl).replace(/\/+$/, '')
   for (const w of worlds) {
-    const item = document.createElement('div')
-    item.className = 'wb-item'
+    const url = buildWorldWsUrl(accountWsBase || computeWsUrl(window.location), currentUser.username, w.slug)
+    if (url && String(url).replace(/\/+$/, '') === here) return w.id
+  }
+  return null
+}
 
-    const info = document.createElement('div')
-    info.className = 'wb-info'
-    info.innerHTML = `<div class="wb-name">${escHtml(w.name || w.slug)}</div>` +
-      `<div class="wb-meta">${escHtml(w.slug)} · ${formatTime(w.updated_at)}</div>`
-    item.appendChild(info)
+function renderWorldList(worlds) {
+  wbList.innerHTML = ''
+  wbWorlds = Array.isArray(worlds) ? worlds : []
+  wbSyncChoice = null
+  if (wbWorlds.length === 0) return
 
-    // V6: visibility toggle switch
+  // R13 — connected, else the earlier choice if it is still there, else the first
+  const ids = new Set(wbWorlds.map((w) => w.id))
+  wbChosenId = connectedWorldId(wbWorlds) ?? (ids.has(wbChosenId) ? wbChosenId : wbWorlds[0].id)
+  const chosenWorld = () => wbWorlds.find((w) => w.id === wbChosenId) ?? wbWorlds[0]
+
+  const item = document.createElement('div')
+  item.className = 'wb-item wb-row'
+
+  const select = document.createElement('select')
+  select.id = 'wb-select'
+  select.setAttribute('aria-label', 'Saved worlds')
+  select.title = 'Choose a saved world'
+  for (const w of wbWorlds) {
+    const option = document.createElement('option')
+    option.value = w.id
+    option.textContent = worldOptionLabel(w)   // text, never HTML
+    select.appendChild(option)
+  }
+  select.value = wbChosenId
+  item.appendChild(select)
+
+  // V6: visibility toggle switch
+  const toggleLabel = document.createElement('label')
+  toggleLabel.className = 'wb-vis-toggle'
+  const toggle = document.createElement('input')
+  toggle.type = 'checkbox'
+  toggle.setAttribute('role', 'switch')
+  const toggleText = document.createTextNode('')
+  toggleLabel.appendChild(toggle)
+  toggleLabel.appendChild(toggleText)
+
+  /** The switch shows the chosen world (and the commons can't be private). */
+  const showChoice = () => {
+    const w = chosenWorld()
     const isPublic = w.visibility === 'public'
     const isCommons = w.isCommons === true
-    const toggleLabel = document.createElement('label')
-    toggleLabel.className = 'wb-vis-toggle'
-    const toggle = document.createElement('input')
-    toggle.type = 'checkbox'
-    toggle.setAttribute('role', 'switch')
     toggle.checked = isPublic
-    const toggleText = document.createTextNode(' ' + (isPublic ? 'Public' : 'Private'))
-    toggleLabel.appendChild(toggle)
-    toggleLabel.appendChild(toggleText)
+    toggleText.textContent = ' ' + (isPublic ? 'Public' : 'Private')
+    toggle.disabled = isCommons
     if (isCommons) {
-      toggle.disabled = true
       toggleLabel.title = 'The commons is always public'
     } else {
       // copy-objects K9 — C2's note, beside the toggle (and above the list).
       toggleLabel.title = VISIBILITY_NOTE
     }
-    toggle.addEventListener('change', async () => {
-      toggle.disabled = true
-      // signin-sync Rev 1, M2 — the auth generation this request starts under,
-      // and the toggle's state before the click.
-      const gen = authSync.currentGeneration()
-      const wasChecked = !toggle.checked
-      const restore = () => {
-        toggle.checked = wasChecked
-        toggleText.textContent = ' ' + (wasChecked ? 'Public' : 'Private')
+  }
+  showChoice()
+  select.addEventListener('change', () => { wbChosenId = select.value; showChoice() })
+  // R13 — a connect to one of these worlds (Load, a teleport, a sign-in's
+  // reconnect) makes it the chosen one
+  wbSyncChoice = () => {
+    const id = connectedWorldId(wbWorlds)
+    if (id && id !== wbChosenId) { wbChosenId = id; select.value = id; showChoice() }
+  }
+
+  toggle.addEventListener('change', async () => {
+    const w = chosenWorld()
+    const isCommons = w.isCommons === true
+    toggle.disabled = true
+    select.disabled = true
+    // signin-sync Rev 1, M2 — the auth generation this request starts under,
+    // and the toggle's state before the click.
+    const gen = authSync.currentGeneration()
+    const wasChecked = !toggle.checked
+    const restore = () => {
+      toggle.checked = wasChecked
+      toggleText.textContent = ' ' + (wasChecked ? 'Public' : 'Private')
+    }
+    const newVis = toggle.checked ? 'public' : 'private'
+    try {
+      const res = await fetch(`/api/worlds/${w.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility: newVis }),
+      })
+      // A response that started under an earlier sign-in is ignored, a 401
+      // included, and the toggle returns to its state before the click.
+      if (authSync.currentGeneration() !== gen) {
+        restore()
+        return
       }
-      const newVis = toggle.checked ? 'public' : 'private'
-      try {
-        const res = await fetch(`/api/worlds/${w.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ visibility: newVis }),
-        })
-        // A response that started under an earlier sign-in is ignored, a 401
-        // included, and the toggle returns to its state before the click.
+      if (res.ok) {
+        const data = await res.json()
         if (authSync.currentGeneration() !== gen) {
           restore()
           return
         }
-        if (res.ok) {
-          const data = await res.json()
-          if (authSync.currentGeneration() !== gen) {
-            restore()
-            return
-          }
-          // Update in-place instead of refreshWorldList()
-          toggle.checked = data.visibility === 'public'
-          toggleText.textContent = ' ' + (data.visibility === 'public' ? 'Public' : 'Private')
-          const metaEl = info.querySelector('.wb-meta')
-          if (metaEl) {
-            metaEl.textContent = `${data.slug || w.slug} · ${formatTime(data.updated_at || w.updated_at)}`
-          }
-          wbError.textContent = ''
-          return
-        }
-        // Failure: restore, then let the one re-check decide who we are
-        restore()
-        const data = await res.json().catch(() => ({}))
-        if (res.status === 401) {
-          // Rev 1, M2 — every 401 goes through syncAuth(). This path never
-          // signs the page out itself.
-          authSync.syncAuth()
-          return
-        }
-        wbError.textContent = data.error || "Couldn't change visibility"
-      } catch {
-        restore()
-        wbError.textContent = "Couldn't change visibility"
-      } finally {
-        toggle.disabled = isCommons
+        // Update in-place instead of refreshWorldList(): the world's entry and
+        // its option's label (it used to be the row's meta line)
+        w.visibility = data.visibility
+        if (data.updated_at) w.updated_at = data.updated_at
+        if (data.slug) w.slug = data.slug
+        toggle.checked = data.visibility === 'public'
+        toggleText.textContent = ' ' + (data.visibility === 'public' ? 'Public' : 'Private')
+        const option = [...select.options].find((o) => o.value === w.id)
+        if (option) option.textContent = worldOptionLabel(w)
+        wbError.textContent = ''
+        return
       }
-    })
-    item.appendChild(toggleLabel)
-
-    const itemLoadBtn = document.createElement('button')
-    itemLoadBtn.textContent = 'Load'
-    // Load works whether or not connected (pre-brief decision)
-    itemLoadBtn.disabled = false
-    itemLoadBtn.title = 'Load this world'
-    itemLoadBtn.addEventListener('click', async () => {
-      itemLoadBtn.disabled = true
-      try {
-        // Hide failure panel at start of user-initiated Load
-        hideTeleportFailurePanel()
-        // Perform a real WS connect via buildWorldWsUrl (pre-brief #1/#3, F1 fix)
-        if (!currentUser) {
-          wbError.textContent = 'Not logged in'
-          refreshWorldList()
-          return
-        }
-        const wsUrl = buildWorldWsUrl(
-          accountWsBase || computeWsUrl(window.location),
-          currentUser.username,
-          w.slug
-        )
-        if (!wsUrl) {
-          wbError.textContent = 'Invalid world identifier or missing username'
-          refreshWorldList()
-          return
-        }
-        showOverlay('Connecting to world…')
-        try {
-          const outcome = await trackConnect(wsUrl, {
-            avatar: buildAvatarDescriptor(),
-            displayName: currentUser.displayName || currentUser.username,
-          }, {
-            onError: (msg, err) => {
-              // V8: use code-specific wording when available
-              const loadCode = err?.code || null
-              const reason = codeToReason(loadCode)
-              wbError.textContent = 'Load failed: ' + (reason || msg)
-            },
-          })
-          if (outcome.status === 'superseded') {
-            // Superseded — a newer connect took over; do nothing
-            return
-          }
-        } catch {
-          refreshWorldList()
-          showOverlay('')
-          itemLoadBtn.disabled = false
-          return
-        }
-        showOverlay('')
-      } catch (err) {
-        wbError.textContent = 'Load failed: ' + err.message
-      } finally {
-        itemLoadBtn.disabled = false
+      // Failure: restore, then let the one re-check decide who we are
+      restore()
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 401) {
+        // Rev 1, M2 — every 401 goes through syncAuth(). This path never
+        // signs the page out itself.
+        authSync.syncAuth()
+        return
       }
-    })
-    item.appendChild(itemLoadBtn)
+      wbError.textContent = data.error || "Couldn't change visibility"
+    } catch {
+      restore()
+      wbError.textContent = "Couldn't change visibility"
+    } finally {
+      toggle.disabled = isCommons
+      select.disabled = false
+    }
+  })
+  item.appendChild(toggleLabel)
 
-    const delBtn = document.createElement('button')
-    delBtn.textContent = 'Delete'
-    delBtn.className = 'danger'
-    delBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete "${w.name || w.slug}"?`)) return
-      delBtn.disabled = true
-      try {
-        const res = await fetch(`/api/worlds/${w.id}`, { method: 'DELETE' })
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}))
-          wbError.textContent = data.error || 'Delete failed'
-        }
+  const itemLoadBtn = document.createElement('button')
+  itemLoadBtn.textContent = 'Load'
+  // Load works whether or not connected (pre-brief decision)
+  itemLoadBtn.disabled = false
+  itemLoadBtn.title = 'Load the chosen world'
+  itemLoadBtn.addEventListener('click', async () => {
+    const w = chosenWorld()
+    itemLoadBtn.disabled = true
+    try {
+      // Hide failure panel at start of user-initiated Load
+      hideTeleportFailurePanel()
+      // Perform a real WS connect via buildWorldWsUrl (pre-brief #1/#3, F1 fix)
+      if (!currentUser) {
+        wbError.textContent = 'Not logged in'
         refreshWorldList()
-      } catch (err) {
-        wbError.textContent = 'Delete failed: ' + err.message
-      } finally {
-        delBtn.disabled = false
+        return
       }
-    })
-    item.appendChild(delBtn)
+      const wsUrl = buildWorldWsUrl(
+        accountWsBase || computeWsUrl(window.location),
+        currentUser.username,
+        w.slug
+      )
+      if (!wsUrl) {
+        wbError.textContent = 'Invalid world identifier or missing username'
+        refreshWorldList()
+        return
+      }
+      showOverlay('Connecting to world…')
+      try {
+        const outcome = await trackConnect(wsUrl, {
+          avatar: buildAvatarDescriptor(),
+          displayName: currentUser.displayName || currentUser.username,
+        }, {
+          onError: (msg, err) => {
+            // V8: use code-specific wording when available
+            const loadCode = err?.code || null
+            const reason = codeToReason(loadCode)
+            wbError.textContent = 'Load failed: ' + (reason || msg)
+          },
+        })
+        if (outcome.status === 'superseded') {
+          // Superseded — a newer connect took over; do nothing
+          return
+        }
+      } catch {
+        refreshWorldList()
+        showOverlay('')
+        itemLoadBtn.disabled = false
+        return
+      }
+      showOverlay('')
+    } catch (err) {
+      wbError.textContent = 'Load failed: ' + err.message
+    } finally {
+      itemLoadBtn.disabled = false
+    }
+  })
+  item.appendChild(itemLoadBtn)
 
-    wbList.appendChild(item)
-  }
+  const delBtn = document.createElement('button')
+  delBtn.textContent = 'Delete'
+  delBtn.className = 'danger'
+  delBtn.title = 'Delete the chosen world'
+  delBtn.addEventListener('click', async () => {
+    const w = chosenWorld()
+    if (!confirm(`Delete "${w.name || w.slug}"?`)) return
+    delBtn.disabled = true
+    try {
+      const res = await fetch(`/api/worlds/${w.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        wbError.textContent = data.error || 'Delete failed'
+      }
+      refreshWorldList()
+    } catch (err) {
+      wbError.textContent = 'Delete failed: ' + err.message
+    } finally {
+      delBtn.disabled = false
+    }
+  })
+  item.appendChild(delBtn)
+
+  wbList.appendChild(item)
 }
 
 function escHtml(str) {
@@ -903,6 +998,8 @@ client.on('session:ready', ({ sessionId, displayName, url: connectUrl, signedIn,
   }
   // Capture current world URL for teleporter resolution (T4)
   currentWorldUrl = connectUrl || wsUrlInput.value
+  // small-fixes R13 — the saved-worlds row shows the world this tab is in
+  wbSyncChoice?.()
   // Rebuild pads on session ready (world loaded before session:ready)
   rebuildPads()
 
@@ -3160,17 +3257,17 @@ function refreshEditActions() {
     renaming: !!pendingRename && pendingRename.node === selected,
     blocked,
   })
-  for (const input of epVectorInputs) input.disabled = locked
-  if (epVisible) epVisible.disabled = locked
+  for (const input of epVectorInputs) setIfChanged(input, 'disabled', !!(locked))
+  if (epVisible) setIfChanged(epVisible, 'disabled', !!(locked))
   const nameProblem = nameFieldProblem(selected)
-  epName.disabled = locked || !!nameProblem
-  epName.title = nameProblem
+  setIfChanged(epName, 'disabled', !!(locked || !!nameProblem))
+  setIfChanged(epName, 'title', nameProblem)
   // Z3/Z7/Z2 — the Teleporter, Model and Library buttons join the palette's
   // enable rule. They are not palette buttons (no data-kind), so they are added
   // here. The Library button is HIDDEN when the catalog has no models (Z1).
   const hasLibraryModels = (libraryCatalog.models?.length ?? 0) > 0
-  if (epLibrary) epLibrary.style.display = hasLibraryModels ? '' : 'none'
-  for (const b of [...epPaletteBtns, epTeleporter, epModel, epLibrary]) b.disabled = blocked || !modes.edit
+  if (epLibrary) setIfChanged(epLibrary, 'style.display', hasLibraryModels ? '' : 'none')
+  for (const b of [...epPaletteBtns, epTeleporter, epModel, epLibrary]) setIfChanged(b, 'disabled', !!(blocked || !modes.edit))
   // Z2 — the grid re-reads the tile rule wherever the palette refreshes its
   // buttons: a tile is enabled only while !blocked && modes.edit AND no library
   // add is in flight.
@@ -3178,31 +3275,31 @@ function refreshEditActions() {
   // Z4 — the Sky picker's enable rule (the select and its Retry button).
   skyPicker?.refresh()
   const block = structuralBlock()
-  epDelete.disabled = !!block
-  epDelete.title = block ?? 'Delete the selected object'
+  setIfChanged(epDelete, 'disabled', !!block)
+  setIfChanged(epDelete, 'title', block ?? 'Delete the selected object')
   let dupReason = block
   if (!dupReason) dupReason = duplicateHint(selected)
-  epDuplicate.disabled = !!dupReason
-  epDuplicate.title = dupReason ?? 'Duplicate the selected object'
+  setIfChanged(epDuplicate, 'disabled', !!dupReason)
+  setIfChanged(epDuplicate, 'title', dupReason ?? 'Duplicate the selected object')
   // copy-objects K5/K6 — Copy follows the selection (Duplicate's rule, the
   // credit skipped); Paste needs Edit mode, a clipboard and nothing blocking.
   if (epCopy) {
     const copyReason = copyHint(selected)
-    epCopy.disabled = !!copyReason
-    epCopy.title = copyReason ?? 'Copy the selected object'
+    setIfChanged(epCopy, 'disabled', !!copyReason)
+    setIfChanged(epCopy, 'title', copyReason ?? 'Copy the selected object')
   }
   if (epPaste) {
-    epPaste.disabled = blocked || !modes.edit || !clipboard
-    epPaste.title = clipboard ? `Paste “${clipboard.descriptor.name}” in front of you` : 'Nothing has been copied'
+    setIfChanged(epPaste, 'disabled', !!(blocked || !modes.edit || !clipboard))
+    setIfChanged(epPaste, 'title', clipboard ? `Paste “${clipboard.descriptor.name}” in front of you` : 'Nothing has been copied')
   }
   // Y5 — Undo and Redo, beside Duplicate and Delete. The tooltip is the Y1
   // label, or the Y4 reason (`Nothing to undo`, `Waiting for the server…`).
   const undoReason = undo.reason('undo')
-  epUndo.disabled = !!undoReason
-  epUndo.title = undoReason ?? undo.label('undo')
+  setIfChanged(epUndo, 'disabled', !!undoReason)
+  setIfChanged(epUndo, 'title', undoReason ?? undo.label('undo'))
   const redoReason = undo.reason('redo')
-  epRedo.disabled = !!redoReason
-  epRedo.title = redoReason ?? undo.label('redo')
+  setIfChanged(epRedo, 'disabled', !!redoReason)
+  setIfChanged(epRedo, 'title', redoReason ?? undo.label('redo'))
   // grouping GR8 — the composite's hold is released by its own answer (the
   // tracker's idle never fires for a move), and the Group row follows
   if (compositeHold && !undo.inFlight()) { compositeHold = false; hold.clear() }
@@ -3694,22 +3791,22 @@ epEmptyGroups?.addEventListener('change', () => {
 function refreshGroupActions() {
   if (!epGroupActions) return
   const allowed = groupingAllowed() && modes.edit
-  epGroupActions.style.display = allowed ? '' : 'none'
-  epMoveRow.style.display = allowed ? '' : 'none'
+  setIfChanged(epGroupActions, 'style.display', allowed ? '' : 'none')
+  setIfChanged(epMoveRow, 'style.display', allowed ? '' : 'none')
   // the Empty groups list is rescanned only when its key was cleared (a
   // structural event, a bareness set) — never on every som:set (the outside
   // review's S-2); a hidden row is scanned again when it shows
   if (!allowed) { epMoveNote.style.display = 'none'; refreshEmptyGroups(); emptyKey = null; return }
   const g = groupHint(selected)
-  epGroup.disabled = !!g
-  epGroup.title = g ?? 'Put the selected object in a new group'
+  setIfChanged(epGroup, 'disabled', !!g)
+  setIfChanged(epGroup, 'title', g ?? 'Put the selected object in a new group')
   const u = ungroupHint(selected)
-  epUngroup.disabled = !!u
-  epUngroup.title = u ?? 'Take the selected group apart, keeping every part where it is'
+  setIfChanged(epUngroup, 'disabled', !!u)
+  setIfChanged(epUngroup, 'title', u ?? 'Take the selected group apart, keeping every part where it is')
   const m = structuralBlock() ?? movableProblem(selected)
-  epMoveTo.disabled = !!m
-  epMoveTo.title = m ?? 'Move the selected object into a group'
-  if (m) epMoveNote.style.display = 'none'
+  setIfChanged(epMoveTo, 'disabled', !!m)
+  setIfChanged(epMoveTo, 'title', m ?? 'Move the selected object into a group')
+  if (m) setIfChanged(epMoveNote, 'style.display', 'none')
   // A select that keeps the focus after a choice gets no new focus or
   // mousedown before the keyboard's next choice: rebuild it here when its key
   // has changed (harness c1, a stale list after a move).

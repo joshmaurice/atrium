@@ -31,6 +31,35 @@ export const NOTICE = {
   LOGOUT_FAILED: "Couldn't sign out. Try again.",
 }
 
+/**
+ * small-fixes R1 — what this tab's OWN login or register does about the world
+ * connection. Pure, so its cases are tested without a page.
+ *
+ * Before this, a tab connected as a guest kept that socket after signing in:
+ * the top bar said the user, and the world still treated the tab as anonymous
+ * (no Edit) until a reconnect. Now a same-origin connection that was not
+ * admitted as this user reconnects to the SAME world (SF-L1 (a)).
+ *
+ * @param {object} args
+ * @param {object|null} args.user          the login's answer
+ * @param {boolean} args.connected         is a world socket open?
+ * @param {boolean} args.sameOrigin        is it on the account's origin?
+ * @param {string|null|undefined} args.admittedUserId
+ *   who the server admitted: the user's id, null for anonymous, undefined
+ *   when the hello did not say (unknown counts as "not this user")
+ * @param {string|null} args.worldUrl      the world this tab is in
+ * @returns {{action: 'none'|'home'|'reconnect', url?: string}}
+ */
+export function ownLoginPlan({ user, connected, sameOrigin, admittedUserId, worldUrl } = {}) {
+  if (!user || !user.id) return { action: 'none' }
+  if (!connected) return { action: 'home' }
+  // A cross-origin connection is anonymous anyway, and I4 leaves it alone too.
+  if (!sameOrigin) return { action: 'none' }
+  if (admittedUserId === user.id) return { action: 'none' }
+  if (typeof worldUrl === 'string' && worldUrl !== '') return { action: 'reconnect', url: worldUrl }
+  return { action: 'home' }
+}
+
 /** I3's two sides: the user's name, or 'anonymous'. */
 function nameOf(user) {
   if (!user) return 'anonymous'

@@ -449,7 +449,7 @@ describe('app.js wiring (read as a file)', () => {
   })
 
   test('the Library button is hidden while the catalog has no models', () => {
-    assert.match(source, /epLibrary\.style\.display = hasLibraryModels \? '' : 'none'/)
+    assert.match(source, /setIfChanged\(epLibrary, 'style\.display', hasLibraryModels \? '' : 'none'\)/)
     assert.match(source, /libraryCatalog = EMPTY_CATALOG/)
   })
 

@@ -16,6 +16,7 @@ import * as group from '../src/edit-group.js'
 import { ownNodeProblem, isReferenced } from '../src/edit-duplicate.js'
 import { treeBoundsProblem } from '../../../packages/client/src/add-spec.js'
 import { createEditTracker } from '../src/edit-gesture.js'
+import { setIfChanged } from '../src/dom-write.js'
 
 const { NodeIO } = await import('../../../packages/som/node_modules/@gltf-transform/core/dist/index.modern.js')
 const { SOMDocument } = await import('../../../packages/som/src/index.js')
@@ -97,6 +98,7 @@ function page(som, { block = null, serverAddFields = 4 } = {}) {
     ANIMATED_REASON: 'an animation moves it in local values',
     AFTER_DIALOG_MS: 50,
     clearSelectionErrors: () => {},
+    setIfChanged,   // small-fixes R4 — the glue writes through it
   }
   const api = new Function('env', `with (env) { ${NAMES.map(functionText).join('\n')}\n return { ${NAMES.join(', ')} } }`)(env)
   Object.assign(env, api)

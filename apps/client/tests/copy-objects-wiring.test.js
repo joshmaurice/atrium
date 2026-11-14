@@ -293,7 +293,7 @@ describe('K6 — app.js\'s paste branch', () => {
 
   test('Paste is offered in Edit mode only; Copy in both', () => {
     const actions = flatten(body('refreshEditActions'))
-    assert.match(actions, /epPaste\.disabled = blocked \|\| !modes\.edit \|\| !clipboard/)
+    assert.match(actions, /setIfChanged\(epPaste, 'disabled', !!\(blocked \|\| !modes\.edit \|\| !clipboard\)\)/)
     const copy = flatten(clickHandler('epCopy'))
     assert.match(copy, /if \(!modes\.edit \|\| !selected\) return/)
     assert.match(flatten(clickHandler('ipCopy')), /if \(!modes\.inspect \|\| !inspected\) return/)
