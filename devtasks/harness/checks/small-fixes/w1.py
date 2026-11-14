@@ -77,7 +77,7 @@ with sync_playwright() as pw:
     a.page.once('dialog', lambda d: d.accept())
     a.page.click('#wb-list button:has-text("Delete")'); a.page.wait_for_timeout(1800)
     names = [slug_of(o) for o in a.ev(OPTS) if not o.startswith('Open a saved')]
-    check('R14 Delete removes the world you are in', f'gallery-{tag}' not in names and len(names) == n + 1, names)
+    check('R14 Delete removes the world you are in (one created, one deleted: n again)', f'gallery-{tag}' not in names and len(names) == n, names)
     print('   after Delete:', a.ev(ROW), '| connected:', a.ev('atriumClient.connected'))
     a.connect(HOME); a.page.wait_for_timeout(500)
 
