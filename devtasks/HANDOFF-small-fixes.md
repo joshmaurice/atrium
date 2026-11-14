@@ -98,9 +98,10 @@ Code commit `659dfff`; checks commit `229993e`.
   `probe12.py`), or it never connects.
 
 ## 4. Next
-1. The fresh-agent code check (§5, when it lands).
+1. ~~The fresh-agent code check~~ (done, §5).
 2. The outside code review that runs the code
-   (`OUTSIDE-CODE-REVIEW-PROMPT-small-fixes.md`).
+   (`OUTSIDE-CODE-REVIEW-PROMPT-small-fixes.md`, pinned to the commit
+   after §5's fixes).
 3. The release package and the operator's DEV acceptance. What to look at:
    - **SF-1:** signed out, open a public world, sign in in that tab: Edit
      at once in your own world, without a reconnect; in someone else's
@@ -112,3 +113,40 @@ Code commit `659dfff`; checks commit `229993e`.
      targeting the group itself: Save works and it spins.
    - **SF-4:** the saved worlds as one row, on the phone, in desktop-site
      mode and on desktop.
+
+## 5. The fresh-agent code check (at `229993e`)
+A fresh Claude agent, given only the contract and the diff, ran the app
+suite (1,896 pass) and its own node probes. Verdict: CHANGES REQUESTED, no
+must-fix, four should-fix. All four were reproduced or confirmed by reading,
+and fixed in `5769f92`, each with a unit test in `small-fixes.test.js`:
+1. **SF-2 was half done.** `refreshEditPanel` runs on every `som:set` of the
+   selection and still rewrote the name field, the vector fields' `disabled`,
+   the credit row and the model row; the Behaviour form rebuilt its
+   parameter fields (the target drop-down included), its log lines and its
+   template select's value each time. **`r2_flicker.py` skipped all of
+   `#ep-fields`, so it couldn't see this:** a fault in my check. Now every
+   one of those writes is change-only, and `r2` watches the whole panel but
+   the rotation fields: 0 writes in 2 s with the spinner on. The checker's
+   form probe (10 idle renders) went from 10–20 writes per element to none.
+2. **R10 checked only the id-less targets.** The own node, and targets held
+   by their id, are checked before each stage too (a removed one cancels
+   with "A target is gone").
+3. **The animation rows kept the SF-3 bug** (an id-less model was refused
+   as "animations is malformed"). They now go through the same mapping and
+   stages.
+4. **The Public switch could show another world's state** if a connect
+   moved the choice while its request was in flight (inferred). The row no
+   longer follows a connect mid-request, and the answer redraws only while
+   its world is still the chosen one.
+The nits: N-6 (a target gone before Save now says so) and N-7 (the hidden
+row's note) are fixed. N-5 (`ownLoginPlan`'s no-URL case can't arise in
+the page; kept as a defensive case) and N-8 (an auth re-check already in
+flight at login can send the tab home instead of the same world; a narrow
+window, older than this round) are recorded, not changed.
+
+**After the fixes (at `5769f92`):** app suite 1,902 pass; `r1`, `r2`
+(whole panel), `r3`, `w1` all PASS; signin-sync `c.py` 22/22; undo-hold
+`h5` PASS; scripting-4d `c2.py` PASS in full once, then one frame-timing
+check failed on a rerun (SwiftShader; it needs the README's
+`ATRIUM_AUTOSAVE_DEBOUNCE_MS=3000` server too); grouping 248/248;
+selection-parts 135/135; touch-nav `tn.py` 58/58.
