@@ -215,3 +215,25 @@ fixed in `3255ba6`:
 
 **After the fixes (at `3255ba6`):** app suite 1,909 pass; `w1` 12/12 (with
 the go-home check), `c.py` 22/22, `r1`, `r2`, `r3`, `m1` PASS.
+
+## 9. The DEV acceptance at `fb333b8` (the operator, 2026-11-15)
+Everything passed except three things, fixed in `3456ec9`:
+1. **Every open from the saved-worlds drop-down showed "Load failed:
+   outcome is not defined"** (the open itself worked). `3255ba6`'s N-7 line
+   used the inner `try`'s `const outcome` outside that block, so it threw
+   on every open and the outer `catch` showed the error. It was one of the
+   ~20 lines after the second review, which had no outside review, and no
+   check read the error line. Moved inside the block; `w1` now checks the
+   error line is empty after an open.
+2. **"It can change:" with nothing after it,** for a graph that changes only
+   the object it is imported onto (no grants). The reviewer had noted it
+   (§6, under S-1) and I missed it. It now reads "It can change: only
+   <name> (the object it is imported onto)".
+3. **"Move to" was blank until clicked** (older than this round): the select
+   had no option in the page until its first build, on focus or a change of
+   its list. The "Move to…" option is in `index.html` from the start.
+
+**At `3456ec9`:** app suite 1,912 pass; `w1` 13/13, `r1`, `r2`, `r3`, `m1`,
+`c.py` 22/22 PASS; grouping `smoke`, `c1`–`c6` 248/248. In the page:
+"Move to…" shows before any click; a new group targeting itself reads "It
+can change: only group-01 (the object it is imported onto)".

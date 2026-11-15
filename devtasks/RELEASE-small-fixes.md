@@ -5,8 +5,13 @@
   `apps/client` (`git diff --stat b639d81 <tip> -- . ':!devtasks'`):
   `app.js`, `auth-sync.js`, `behavior-form.js`, `graph-import-panel.js`,
   `dom-write.js` (new), `index.html`, and their tests. The last code commit is
-  `3255ba6`; everything after it is `devtasks/`.
+  `3456ec9` (the DEV acceptance's three fixes, handoff §9); everything
+  after it is `devtasks/`.
 - **Status:**
+  - **the first DEV acceptance at `fb333b8`** (2026-11-15): all passed but
+    three things, fixed in `3456ec9` (handoff §9), with no outside review:
+    the "Load failed: outcome is not defined" line after every open, the
+    empty "It can change:" line, and the blank "Move to" (older);
   - a fresh-agent code check (§5 of the handoff), then two outside code
     reviews by Claude Fable 5.2 that ran the code (§6 at `163c127`, §8 at
     `aa73f48`); every finding fixed or decided by the operator (SF-L5,
@@ -24,7 +29,7 @@
 
 ## 1. The DEV deploy
 Ask Claude for the DEV command. Claude checks the branch tip, and that
-nothing outside `devtasks/` changed since `3255ba6`, then gives:
+nothing outside `devtasks/` changed since `3456ec9`, then gives:
 ```bash
 atrium-deploy-gate "dev <the 40-character tip SHA>"
 ```
@@ -34,6 +39,9 @@ before the acceptance counts.
 ## 2. DEV acceptance
 The DEV site, hard-reloaded. Phone (Android Chrome) and laptop both, where a
 step says so.
+
+**Second pass (after `3456ec9`):** steps 4 and 5.2, and "Move to…" shows
+in the drop-down before you click it. The rest passed at `fb333b8`.
 
 1. **Sign-in follows you (SF-1).**
    1. Signed out, open a public world of yours (make one public first, from
@@ -53,14 +61,15 @@ step says so.
    on, select it again. Target and Action show.
 4. **Import onto a new group (SF-3).** Group a cube. With the group
    selected, import `2-rotation.gltf` and choose the group itself as the
-   target. The "It can change" line names the group (not a long id). Save:
-   it saves, enable it, and the group spins.
+   target. The "It can change" line reads "only <the group> (the object it
+   is imported onto)". Save: it saves, enable it, and the group spins.
+   (Targeting another new group instead names that group.)
 5. **The saved-worlds row (SF-4, SF-L5), on the phone, in desktop-site mode,
    and on the laptop.**
    1. One slim row: a drop-down showing the world you're in, then Public and
       Delete. No Load button.
-   2. Choose another world in the drop-down: it opens at once, and the row
-      shows it.
+   2. Choose another world in the drop-down: it opens at once, the row
+      shows it, and no "Load failed" line appears above it.
    3. Public acts on the world you're in.
    4. Create a world: the drop-down stays on the world you're in.
    5. Delete a spare world while you're in it (confirm): you land in your
@@ -78,7 +87,7 @@ disconnects you.
 
 ## 3. MAIN and PROD (after the acceptance)
 Claude gives these with the deployed SHA filled in, after checking
-`git diff 3255ba6 <DEV SHA> -- . ':!devtasks'` is empty:
+`git diff 3456ec9 <DEV SHA> -- . ':!devtasks'` is empty:
 ```bash
 atrium-main-approve <SHA> && atrium-deploy-gate "main <SHA>"
 ```
