@@ -619,8 +619,12 @@ export function createGraphImportPanel({ elements = {}, deps = {} } = {}) {
     text(elements.report, lines.join('\n'))
     // R16 (F4) — the grant line names the objects, through the same `nameOf`
     // the Q3 confirmation uses; an object with no name shows its id.
+    // DEV acceptance (2026-11-15) — a graph that changes only the object it is
+    // imported onto has no grants; the line said "It can change:" and nothing.
     text(elements.grants, state.conversion
-      ? `It can change: ${report.grants.map((id) => grantName(id)).join(', ')}`
+      ? (report.grants.length > 0
+        ? `It can change: ${report.grants.map((id) => grantName(id)).join(', ')}`
+        : `It can change: only ${state.node?.name ?? 'this object'} (the object it is imported onto)`)
       : '')
     text(elements.notes, state.saving ? '' : importNotes(report).join('\n'))
     text(elements.status, state.problem ?? (state.status || (state.parsed

@@ -502,12 +502,15 @@ function renderWorldList(worlds) {
           // Superseded — a newer connect took over; do nothing
           return
         }
+        // N-7 — an older failure is not left up. (Inside this block: `outcome`
+        // is its const. Outside it, DEV acceptance found it threw on every
+        // open, and the outer catch showed "Load failed: outcome is not defined".)
+        if (outcome.status === 'ready') wbError.textContent = ''
       } catch {
         refreshWorldList()
         showOverlay('')
         return
       }
-      if (outcome.status === 'ready') wbError.textContent = ''   // N-7 — an older failure is not left up
       showOverlay('')
     } catch (err) {
       wbError.textContent = 'Load failed: ' + err.message

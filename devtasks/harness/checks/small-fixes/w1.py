@@ -50,6 +50,10 @@ with sync_playwright() as pw:
     a.page.select_option('#wb-select', label=park)
     ok = a.wait_world(f'/worlds/alice/park-{tag}'); a.page.wait_for_timeout(800)
     check('SF-L5 choosing a world in the drop-down opens it', ok, a.ev('atriumClient._wsUrl'))
+    # DEV acceptance (2026-11-15): every open showed "Load failed: outcome is not defined"
+    a.page.wait_for_timeout(300)
+    err = a.ev("document.getElementById('wb-error').textContent")
+    check('no error line after a successful open', err == '', err)
     r = a.ev(ROW)
     check('SF-L5 the row shows that world, and its switch (a new world is private)', slug_of(r['chosen']) == f'park-{tag}' and r['pub'] is False, r)
 

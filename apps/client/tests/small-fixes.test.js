@@ -582,3 +582,27 @@ describe('the follow-up review (Fable, aa73f48)', () => {
     assert.match(row, /select\.disabled = true\s*delBtn\.disabled = true/)
   })
 })
+
+describe('DEV acceptance (2026-11-15)', () => {
+  test('a graph that changes only its own object says so on the grants line', () => {
+    const group = node('group-01')
+    const { panel, elements } = setup({ nodes: [group], selected: group })
+    panel.open()
+    panel.chooseSource(bytesOf(source(1)), '2-rotation.gltf')
+    panel.setTarget('node', 0, 'name:group-01')
+    assert.equal(elements.grants.textContent, 'It can change: only group-01 (the object it is imported onto)')
+  })
+  test('the open handler clears an older failure inside the block where `outcome` exists', () => {
+    const src = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8')
+    const at = src.indexOf("select.addEventListener('change', async () => {")
+    const body = src.slice(at, src.indexOf('\n  })\n', at))
+    const decl = body.indexOf('const outcome = await trackConnect')
+    const use = body.indexOf("if (outcome.status === 'ready') wbError.textContent = ''")
+    const close = body.indexOf('} catch {', decl)
+    assert.ok(decl > 0 && use > decl && use < close, 'the use is in the same try block as the const')
+  })
+  test('the Move to drop-down has its label before it is ever built', () => {
+    const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    assert.match(html, /<select id="ep-move-to"[^>]*><option value="">Move to…<\/option><\/select>/)
+  })
+})
